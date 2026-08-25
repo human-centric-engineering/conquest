@@ -1,5 +1,5 @@
 /**
- * The interview plan, as an admin reads it back — Adaptive Scope (P17).
+ * The interview plan, as an admin reads it back — Conditional Topics (P17).
  *
  * "Why did this respondent get those topics" is the question an adaptive instrument generates, and
  * it is almost always asked months later, by someone holding a report a client has challenged. The

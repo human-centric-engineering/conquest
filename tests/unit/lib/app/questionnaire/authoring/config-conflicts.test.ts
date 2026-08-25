@@ -38,9 +38,9 @@ function input(over: Partial<ConfigConflictInput> = {}): ConfigConflictInput {
     openingExamples: [],
     houseRulesEnabled: false,
     houseRules: [],
-    // Adaptive Scope off is the default and the pre-P17 behaviour: every topic runs, so the
+    // Conditional Topics off is the default and the pre-P17 behaviour: every topic runs, so the
     // opening decides nothing beyond itself and checks 18–20 have nothing to say.
-    adaptiveScopeEnabled: false,
+    conditionalTopicsEnabled: false,
     limitOpeningProbes: false,
     maxOpeningProbes: 1,
     ...over,
@@ -524,7 +524,7 @@ describe('detectConfigConflicts — house rules', () => {
 });
 
 /**
- * Adaptive Scope × the interviewer — the only checks that cross a tab boundary.
+ * Conditional Topics × the interviewer — the only checks that cross a tab boundary.
  *
  * They exist because the two features meet at exactly one point neither surface shows: the Scope
  * Planner decides the whole interview from the opening answers, and the questioning approach
@@ -532,16 +532,16 @@ describe('detectConfigConflicts — house rules', () => {
  * `planScope` never throws, it falls back — so the instrument quietly asks less than its author
  * believes it asks.
  */
-describe('detectConfigConflicts — adaptive scope meets the interviewer', () => {
+describe('detectConfigConflicts — conditional topics meets the interviewer', () => {
   const ids = (over: Partial<ConfigConflictInput>) =>
     detectConfigConflicts(input(over)).map((c) => c.id);
 
-  it('says nothing at all when adaptive scope is off', () => {
+  it('says nothing at all when conditional topics is off', () => {
     // The gate on every one of these. With scope off, a targeted approach and a zero probe
     // allowance are both perfectly ordinary settings.
     expect(
       ids({
-        adaptiveScopeEnabled: false,
+        conditionalTopicsEnabled: false,
         interviewerStrategyEnabled: true,
         interviewerApproach: 'targeted',
         limitOpeningProbes: true,
@@ -549,51 +549,55 @@ describe('detectConfigConflicts — adaptive scope meets the interviewer', () =>
         openingMode: 'examples',
         openingExamples: ['Tell me about your year'],
       })
-    ).not.toContain('adaptive-scope-targeted-opening');
+    ).not.toContain('conditional-topics-targeted-opening');
   });
 
   it('warns when a targeted approach leaves the planner nothing to read', () => {
     expect(
       ids({
-        adaptiveScopeEnabled: true,
+        conditionalTopicsEnabled: true,
         interviewerStrategyEnabled: true,
         interviewerApproach: 'targeted',
       })
-    ).toContain('adaptive-scope-targeted-opening');
+    ).toContain('conditional-topics-targeted-opening');
   });
 
   it('stays quiet under funnel and open, which do have a broad opening', () => {
     for (const interviewerApproach of ['funnel', 'open'] as const) {
       expect(
-        ids({ adaptiveScopeEnabled: true, interviewerStrategyEnabled: true, interviewerApproach })
-      ).not.toContain('adaptive-scope-targeted-opening');
+        ids({
+          conditionalTopicsEnabled: true,
+          interviewerStrategyEnabled: true,
+          interviewerApproach,
+        })
+      ).not.toContain('conditional-topics-targeted-opening');
     }
   });
 
   it('warns when the opening allowance is zero, so a vague answer can’t be clarified', () => {
     expect(
-      ids({ adaptiveScopeEnabled: true, limitOpeningProbes: true, maxOpeningProbes: 0 })
-    ).toContain('adaptive-scope-no-probes');
+      ids({ conditionalTopicsEnabled: true, limitOpeningProbes: true, maxOpeningProbes: 0 })
+    ).toContain('conditional-topics-no-probes');
   });
 
   it('does not warn when follow-ups are allowed, capped or not', () => {
     expect(
-      ids({ adaptiveScopeEnabled: true, limitOpeningProbes: true, maxOpeningProbes: 1 })
-    ).not.toContain('adaptive-scope-no-probes');
+      ids({ conditionalTopicsEnabled: true, limitOpeningProbes: true, maxOpeningProbes: 1 })
+    ).not.toContain('conditional-topics-no-probes');
     expect(
-      ids({ adaptiveScopeEnabled: true, limitOpeningProbes: false, maxOpeningProbes: 0 })
-    ).not.toContain('adaptive-scope-no-probes');
+      ids({ conditionalTopicsEnabled: true, limitOpeningProbes: false, maxOpeningProbes: 0 })
+    ).not.toContain('conditional-topics-no-probes');
   });
 
   it('notes that written example openings steer the routing', () => {
     expect(
       ids({
-        adaptiveScopeEnabled: true,
+        conditionalTopicsEnabled: true,
         interviewerStrategyEnabled: true,
         openingMode: 'examples',
         openingExamples: ['Tell me about your year'],
       })
-    ).toContain('adaptive-scope-guided-openings');
+    ).toContain('conditional-topics-guided-openings');
   });
 
   it('does not note it when there is nothing written to steer with', () => {
@@ -601,12 +605,12 @@ describe('detectConfigConflicts — adaptive scope meets the interviewer', () =>
     // be describing an effect that is not happening.
     expect(
       ids({
-        adaptiveScopeEnabled: true,
+        conditionalTopicsEnabled: true,
         interviewerStrategyEnabled: true,
         openingMode: 'examples',
         openingExamples: ['   '],
       })
-    ).not.toContain('adaptive-scope-guided-openings');
+    ).not.toContain('conditional-topics-guided-openings');
   });
 
   it('never raises an error for any of them', () => {
@@ -614,13 +618,13 @@ describe('detectConfigConflicts — adaptive scope meets the interviewer', () =>
     // not look like a blocking mistake.
     const found = detectConfigConflicts(
       input({
-        adaptiveScopeEnabled: true,
+        conditionalTopicsEnabled: true,
         interviewerStrategyEnabled: true,
         interviewerApproach: 'targeted',
         limitOpeningProbes: true,
         maxOpeningProbes: 0,
       })
-    ).filter((c) => c.id.startsWith('adaptive-scope-'));
+    ).filter((c) => c.id.startsWith('conditional-topics-'));
     expect(found.length).toBeGreaterThan(0);
     expect(found.every((c) => c.severity !== 'error')).toBe(true);
     expect(found.every((c) => c.sectionId === 'interviewer-strategy')).toBe(true);
@@ -664,11 +668,11 @@ describe('configConflictInputFromConfig', () => {
     ).toBe(true);
   });
 
-  it('carries the adaptive-scope fields the cross-boundary checks need', () => {
+  it('carries the conditional-topics fields the cross-boundary checks need', () => {
     const input = configConflictInputFromConfig(
       view({
-        adaptiveScope: {
-          ...DEFAULT_QUESTIONNAIRE_CONFIG.adaptiveScope,
+        conditionalTopics: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.conditionalTopics,
           enabled: true,
           limitOpeningProbes: true,
           maxOpeningProbes: 0,
@@ -676,8 +680,8 @@ describe('configConflictInputFromConfig', () => {
       }),
       10
     );
-    expect(input.adaptiveScopeEnabled).toBe(true);
-    expect(detectConfigConflicts(input).map((c) => c.id)).toContain('adaptive-scope-no-probes');
+    expect(input.conditionalTopicsEnabled).toBe(true);
+    expect(detectConfigConflicts(input).map((c) => c.id)).toContain('conditional-topics-no-probes');
   });
 
   it('surfaces the anonymity over-promise, the finding this builder exists for', () => {

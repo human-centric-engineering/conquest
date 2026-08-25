@@ -3,12 +3,12 @@
  *
  * Pins what the helpers DO:
  *  - buildDefinitionExport stamps kind/version, carries the title, flattens tags → labels, reuses
- *    extractConfig (drops `saved`), and carries data slots + Adaptive Scope topics/settings + scoring
+ *    extractConfig (drops `saved`), and carries data slots + Conditional Topics topics/settings + scoring
  *  - parseDefinitionImport round-trips an export, rejects junk / wrong kind / wrong schema version /
  *    malformed shape, and strips unknown config keys
  *  - cross-references survive: question.tagLabels, data-slot questionKeys, topic member keys,
  *    scoring refs
- *  - Adaptive Scope (`topics` + `adaptiveScope`) travels as a top-level field, not inside `config`
+ *  - Conditional Topics (`topics` + `conditionalTopics`) travels as a top-level field, not inside `config`
  *
  * @see lib/app/questionnaire/authoring/definition-export.ts
  */
@@ -23,7 +23,7 @@ import {
 } from '@/lib/app/questionnaire/authoring/definition-export';
 import { CONFIG_EXPORT_KIND } from '@/lib/app/questionnaire/authoring/config-export';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { Topic } from '@/lib/app/questionnaire/scope/types';
@@ -138,7 +138,7 @@ describe('buildDefinitionExport', () => {
     expect(env.version.scoringSchema?.name).toBe('Morale score');
   });
 
-  it('carries Adaptive Scope topics (by key) and settings as a sibling of `config`', () => {
+  it('carries Conditional Topics topics (by key) and settings as a sibling of `config`', () => {
     const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
     expect(env.version.topics).toEqual([
       {
@@ -154,7 +154,7 @@ describe('buildDefinitionExport', () => {
         dataSlotKeys: ['morale_overall'],
       },
     ]);
-    expect(env.version.adaptiveScope).toEqual(DEFAULT_ADAPTIVE_SCOPE_SETTINGS);
+    expect(env.version.conditionalTopics).toEqual(DEFAULT_CONDITIONAL_TOPICS_SETTINGS);
   });
 
   it('does not carry embedding vectors or captured respondent data', () => {
@@ -226,16 +226,16 @@ describe('parseDefinitionImport', () => {
     );
   });
 
-  it('round-trips Adaptive Scope topics + settings — the bug this test pins', () => {
-    // Regression: `topics` used to be entirely absent from the envelope, and `adaptiveScope` was
+  it('round-trips Conditional Topics topics + settings — the bug this test pins', () => {
+    // Regression: `topics` used to be entirely absent from the envelope, and `conditionalTopics` was
     // silently stripped on import because it rode inside `config` (validated by `updateConfigSchema`,
     // which has no such field). Both must survive export → parse unchanged.
     const graph: VersionGraphView = {
       ...GRAPH,
       config: {
         ...GRAPH.config,
-        adaptiveScope: {
-          ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        conditionalTopics: {
+          ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
           enabled: true,
           maxConditionalTopics: 2,
           plannerInstructions: 'Prefer depth over breadth.',
@@ -256,9 +256,46 @@ describe('parseDefinitionImport', () => {
         source: 'manual',
       }),
     ]);
-    expect(parsed.version.adaptiveScope?.enabled).toBe(true);
-    expect(parsed.version.adaptiveScope?.maxConditionalTopics).toBe(2);
-    expect(parsed.version.adaptiveScope?.plannerInstructions).toBe('Prefer depth over breadth.');
+    expect(parsed.version.conditionalTopics?.enabled).toBe(true);
+    expect(parsed.version.conditionalTopics?.maxConditionalTopics).toBe(2);
+    expect(parsed.version.conditionalTopics?.plannerInstructions).toBe(
+      'Prefer depth over breadth.'
+    );
+  });
+
+  it('imports a file exported under the old feature name', () => {
+    // Files exported while the feature was called "Adaptive Scope" carry `adaptiveScope`. Dropping
+    // it would import a version with its routing design silently unconfigured — every topic
+    // conditional on paper and the switch off — which is exactly the state F17.22 Phase 4 exists to
+    // warn about. The legacy key is folded into the current one and does not survive parsing.
+    const env = JSON.parse(exported()) as Record<string, unknown> & {
+      version: Record<string, unknown>;
+    };
+    delete env.version.conditionalTopics;
+    env.version.adaptiveScope = {
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      enabled: true,
+      maxConditionalTopics: 4,
+    };
+
+    const parsed = parseDefinitionImport(JSON.stringify(env));
+
+    expect(parsed.version.conditionalTopics?.enabled).toBe(true);
+    expect(parsed.version.conditionalTopics?.maxConditionalTopics).toBe(4);
+    expect(parsed.version).not.toHaveProperty('adaptiveScope');
+  });
+
+  it('prefers the current key when a hand-edited file carries both names', () => {
+    const env = JSON.parse(exported()) as Record<string, unknown> & {
+      version: Record<string, unknown>;
+    };
+    env.version.conditionalTopics = { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true };
+    env.version.adaptiveScope = { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: false };
+
+    const parsed = parseDefinitionImport(JSON.stringify(env));
+
+    // The name this build writes is the one the author most recently meant.
+    expect(parsed.version.conditionalTopics?.enabled).toBe(true);
   });
 
   it('rejects two topics sharing a key', () => {
@@ -319,7 +356,7 @@ describe('parseDefinitionImport', () => {
     expect('bogusKey' in (parsed.version.config ?? {})).toBe(false);
   });
 
-  it('defaults absent optional collections (tags / dataSlots / topics / adaptiveScope)', () => {
+  it('defaults absent optional collections (tags / dataSlots / topics / conditionalTopics)', () => {
     const env = {
       kind: DEFINITION_EXPORT_KIND,
       schemaVersion: DEFINITION_EXPORT_SCHEMA_VERSION,
@@ -330,6 +367,6 @@ describe('parseDefinitionImport', () => {
     expect(parsed.version.tags).toEqual([]);
     expect(parsed.version.dataSlots).toEqual([]);
     expect(parsed.version.topics).toEqual([]);
-    expect(parsed.version.adaptiveScope).toBeUndefined();
+    expect(parsed.version.conditionalTopics).toBeUndefined();
   });
 });

@@ -150,7 +150,7 @@ export const policyStructureSchema = z
       .strict(),
     routing: z
       .object({
-        adaptiveScopeEnabled: z.boolean(),
+        conditionalTopicsEnabled: z.boolean(),
         maxConditionalTopics: z.number().int().min(0),
         limitOpeningProbes: z.boolean(),
         maxOpeningProbes: z.number().int().min(0),

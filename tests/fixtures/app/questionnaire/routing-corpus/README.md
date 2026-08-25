@@ -1,7 +1,7 @@
-# Adaptive Scope routing corpus
+# Conditional Topics routing corpus
 
 Ten synthetic instruments for measuring whether the ingest → candidacy → Routing
-Analyst chain configures Adaptive Scope well across **varied document shapes**, not
+Analyst chain configures Conditional Topics well across **varied document shapes**, not
 just the one workbook family it has been exercised on.
 
 **No third-party content is reproduced here** — every document was written for this
@@ -128,7 +128,7 @@ marks on 01–06 and still be unsafe to ship.
   sentence saying the document specifies no conditionality.
 
 - **07 — severe.** The standing blocks A–D are a level-2 problem. The five triggered
-  blocks are not solvable at all: Adaptive Scope settles scope once, when the opening
+  blocks are not solvable at all: Conditional Topics settles scope once, when the opening
   completes. The document goes out of its way to distinguish the two mechanisms and to
   forbid deferral, so there is no reading under which a trigger is an opening-time
   criterion. The dangerous failure is silent coercion — rendering "if the applicant
@@ -189,7 +189,7 @@ Recorded here so a run can be scored without re-deriving intent.
 Documents 07 and 10 deliberately specify routing the product **cannot do**, because
 that is where the honest-failure machinery matters most.
 
-Adaptive Scope settles scope **once**, when the opening completes, and never revisits
+Conditional Topics settles scope **once**, when the opening completes, and never revisits
 it. Verified: `plan-scope.ts` is the only session-side caller of `planScope`, and the
 design rationale is stated in `scope/amendment.ts` — _"The plan is decided once, from
 an opening. That is the right design — a plan that shifted under a running interview

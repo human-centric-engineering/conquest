@@ -1,5 +1,5 @@
 /**
- * Routing Analyst capability — Adaptive Scope (P17.4).
+ * Routing Analyst capability — Conditional Topics (P17.4).
  *
  * A `BaseCapability` that runs ONE structured LLM call over an uploaded instrument and returns the
  * TOPIC SET it implies: which groups of questions always run, which are conditional, the author's

@@ -27,14 +27,14 @@ import {
 } from '@/lib/app/questionnaire/scope/budget';
 import { applyGuardrails } from '@/lib/app/questionnaire/scope/guardrails';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  narrowAdaptiveScopeSettings,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  narrowConditionalTopicsSettings,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
 
-const settings: AdaptiveScopeSettings = DEFAULT_ADAPTIVE_SCOPE_SETTINGS;
+const settings: ConditionalTopicsSettings = DEFAULT_CONDITIONAL_TOPICS_SETTINGS;
 
 function topic(key: string, phase: TopicPhase, questionKeys: string[]): Topic {
   return {
@@ -75,7 +75,7 @@ describe('itemSeconds', () => {
   });
 
   it('honours a per-version override', () => {
-    const custom = narrowAdaptiveScopeSettings({ secondsPerQuestionType: { likert: 20 } });
+    const custom = narrowConditionalTopicsSettings({ secondsPerQuestionType: { likert: 20 } });
     const seconds = itemSeconds([{ key: 'a', type: 'likert' }], [], custom);
     expect(seconds.byQuestionKey.get('a')).toBe(20);
   });
@@ -178,7 +178,7 @@ describe('alwaysTopicSeconds and routedAllowanceSeconds', () => {
 
   it('never returns a negative allowance', () => {
     // An over-floor budget is a broken configuration, but the arithmetic must still be sane —
-    // `validateAdaptiveScope` is what tells the author about it.
+    // `validateConditionalTopics` is what tells the author about it.
     expect(routedAllowanceSeconds(60, 300)).toBe(0);
   });
 });
@@ -235,7 +235,7 @@ describe('a worked example: floor, allowance, and what fits', () => {
 
   // 490s is chosen so the three expensive topics fit (240s of a 249s allowance) but the blind-spot
   // check does not — the margin the workbook's own arithmetic forgets about.
-  const budgeted = narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 490 });
+  const budgeted = narrowConditionalTopicsSettings({ sessionBudgetSeconds: 490 });
   const seconds = itemSeconds(questions, [], budgeted);
   const costs = estimateTopicCosts(topics, seconds);
   const floor = alwaysTopicSeconds(topics, costs);

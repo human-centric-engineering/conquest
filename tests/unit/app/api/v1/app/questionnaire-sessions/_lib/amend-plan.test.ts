@@ -88,14 +88,20 @@ function rawPlan(excludedKeys: string[]) {
   };
 }
 
-function session(over: { interviewPlan?: unknown; adaptiveScope?: Record<string, unknown> } = {}) {
+function session(
+  over: { interviewPlan?: unknown; conditionalTopics?: Record<string, unknown> } = {}
+) {
   return {
     versionId: 'v1',
     interviewPlan: 'interviewPlan' in over ? over.interviewPlan : rawPlan(['talent']),
     version: {
       goal: 'grow the pipeline',
       config: {
-        adaptiveScope: { enabled: true, allowRespondentAmendment: true, ...over.adaptiveScope },
+        conditionalTopics: {
+          enabled: true,
+          allowRespondentAmendment: true,
+          ...over.conditionalTopics,
+        },
       },
     },
   };
@@ -138,9 +144,9 @@ describe('maybeAmendPlan — skip gates before any resolution', () => {
     expect(result).toEqual({ kind: 'skipped', reason: 'session not found' });
   });
 
-  it('skips when adaptive scope is off, without querying the version topics', async () => {
+  it('skips when conditional topics is off, without querying the version topics', async () => {
     mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
-      session({ adaptiveScope: { enabled: false } })
+      session({ conditionalTopics: { enabled: false } })
     );
 
     const result = await maybeAmendPlan({
@@ -149,13 +155,13 @@ describe('maybeAmendPlan — skip gates before any resolution', () => {
       atTurn: 3,
     });
 
-    expect(result).toEqual({ kind: 'skipped', reason: 'adaptive scope is off' });
+    expect(result).toEqual({ kind: 'skipped', reason: 'conditional topics is off' });
     expect(mocks.prisma.appQuestionnaireTopic.findMany).not.toHaveBeenCalled();
   });
 
   it('skips when the version disallows respondent amendment', async () => {
     mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
-      session({ adaptiveScope: { allowRespondentAmendment: false } })
+      session({ conditionalTopics: { allowRespondentAmendment: false } })
     );
 
     const result = await maybeAmendPlan({
@@ -310,7 +316,7 @@ describe('maybeAmendPlan — fail-soft: never throws', () => {
 
     expect(mocks.prisma.appQuestionnaireSession.updateMany).not.toHaveBeenCalled();
     expect(mocks.logger.error).toHaveBeenCalledWith(
-      'adaptive scope: amendment failed; the plan is unchanged',
+      'conditional topics: amendment failed; the plan is unchanged',
       expect.objectContaining({ sessionId: SESSION_ID, error: 'connection reset' })
     );
   });

@@ -648,7 +648,7 @@ describe('copyVersionGraph — with config and scoring schema', () => {
     // The fork runs on every edit to a LAUNCHED version, so a config field missing from this copy
     // is silently reset the first time an admin touches a live questionnaire — and duplicating one
     // for a new client would hand them a differently-behaved interviewer. Exactly the class of bug
-    // the Adaptive Scope import/export regression was.
+    // the Conditional Topics import/export regression was.
     const houseRules = {
       enabled: true,
       rules: [
@@ -779,7 +779,7 @@ describe('copyVersionGraph — with config and scoring schema', () => {
  * no ids, and the join back is the per-version-unique `normalizedTerm`. Get that wrong and the
  * copy lands with orphaned or cross-linked definitions.
  */
-describe('adaptive scope topics', () => {
+describe('conditional topics topics', () => {
   let tx: ReturnType<typeof buildTx>;
 
   beforeEach(() => {

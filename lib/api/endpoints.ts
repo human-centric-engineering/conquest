@@ -502,7 +502,7 @@ export const API = {
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,
       /**
-       * Adaptive Scope topics for a version (GET topics + settings + coherence findings +
+       * Conditional Topics topics for a version (GET topics + settings + coherence findings +
        * key inventory, PUT replace-set the reviewed topics, PATCH the settings blob).
        */
       versionTopics: (id: string, versionId: string): string =>
@@ -520,7 +520,7 @@ export const API = {
       versionTopicsPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/preview`,
       /**
-       * Run the Adaptive Scope evaluation judge panel over a version (POST — F17.21). Ephemeral:
+       * Run the Conditional Topics evaluation judge panel over a version (POST — F17.21). Ephemeral:
        * writes nothing, returns each judge's score + findings.
        */
       versionScopeEvaluatePreview: (id: string, versionId: string): string =>

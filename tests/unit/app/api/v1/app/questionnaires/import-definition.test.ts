@@ -74,7 +74,7 @@ const tx = {
   appQuestionSlotTag: { createMany: vi.fn(async () => ({ count: 0 })) },
   appQuestionnaireConfig: {
     create: vi.fn(async () => ({ id: 'cfg-1' })),
-    // Consulted by `patchAdaptiveScopeSettings` (Adaptive Scope) — no existing row for a fresh import.
+    // Consulted by `patchConditionalTopicsSettings` (Conditional Topics) — no existing row for a fresh import.
     findUnique: vi.fn(async () => null),
     upsert: vi.fn(async () => ({ id: 'cfg-1' })),
   },
@@ -131,7 +131,7 @@ function makeEnvelope(
         },
       ],
       dataSlots: [],
-      // Adaptive Scope (P17) — empty/absent here; the topic-persistence tests have their own cases.
+      // Conditional Topics (P17) — empty/absent here; the topic-persistence tests have their own cases.
       topics: [],
       ...versionOverrides,
     },
@@ -625,7 +625,7 @@ describe('persistDefinitionImport', () => {
     expect(configData.maxQuestionsPerSession).toBe(5);
   });
 
-  it('writes every JSON config field through the boundary when the envelope provides one — the same silent-drop bug class this branch fixes for adaptiveScope', async () => {
+  it('writes every JSON config field through the boundary when the envelope provides one — the same silent-drop bug class this branch fixes for conditionalTopics', async () => {
     const profileFields = [
       {
         key: 'role',
@@ -782,11 +782,11 @@ describe('persistDefinitionImport', () => {
     expect(tx.appDataSlotQuestion.createMany).not.toHaveBeenCalled();
   });
 
-  // Adaptive Scope (P17) — regression coverage for the bug this persister was fixed to close:
-  // topics were previously absent from the import envelope entirely, and `adaptiveScope` was
+  // Conditional Topics (P17) — regression coverage for the bug this persister was fixed to close:
+  // topics were previously absent from the import envelope entirely, and `conditionalTopics` was
   // silently dropped because it rode inside `config` (validated by `updateConfigSchema`, which has
   // no such field). See lib/app/questionnaire/authoring/definition-export.ts.
-  describe('Adaptive Scope topics + settings', () => {
+  describe('Conditional Topics topics + settings', () => {
     it('creates a topic row, remapping questionKeys/dataSlotKeys from original to deduped keys', async () => {
       const envelope = makeEnvelope({
         sections: [
@@ -975,9 +975,9 @@ describe('persistDefinitionImport', () => {
       expect(tx.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
     });
 
-    it('writes adaptiveScope settings via the same merge helper the Topics tab PATCH uses', async () => {
+    it('writes conditionalTopics settings via the same merge helper the Topics tab PATCH uses', async () => {
       const envelope = makeEnvelope({
-        adaptiveScope: { enabled: true, maxConditionalTopics: 4 },
+        conditionalTopics: { enabled: true, maxConditionalTopics: 4 },
       });
       await persistDefinitionImport(input({ envelope }));
 
@@ -988,9 +988,12 @@ describe('persistDefinitionImport', () => {
         })
       );
       const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
-        create: { adaptiveScope: unknown };
+        create: { conditionalTopics: unknown };
       };
-      expect(call.create.adaptiveScope).toMatchObject({ enabled: true, maxConditionalTopics: 4 });
+      expect(call.create.conditionalTopics).toMatchObject({
+        enabled: true,
+        maxConditionalTopics: 4,
+      });
     });
 
     it("remaps a hard rule's dataSlotKey when its data slot collided and was deduplicated", async () => {
@@ -1033,7 +1036,7 @@ describe('persistDefinitionImport', () => {
             dataSlotKeys: [],
           },
         ],
-        adaptiveScope: {
+        conditionalTopics: {
           rules: [
             {
               dataSlotKey: 'score',
@@ -1048,18 +1051,18 @@ describe('persistDefinitionImport', () => {
       await persistDefinitionImport(input({ envelope }));
 
       const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
-        create: { adaptiveScope: { rules: { dataSlotKey: string; topicKey: string }[] } };
+        create: { conditionalTopics: { rules: { dataSlotKey: string; topicKey: string }[] } };
       };
       // 'score' collided; the second data slot (which the rule was authored against, since the
       // persister processes data slots in file order and the rule's own semantics are opaque to
       // which one it meant) resolves through the same last-write-wins map as topic membership.
-      expect(call.create.adaptiveScope.rules[0].dataSlotKey).toBe('score_2');
-      expect(call.create.adaptiveScope.rules[0].topicKey).toBe('gated_topic');
+      expect(call.create.conditionalTopics.rules[0].dataSlotKey).toBe('score_2');
+      expect(call.create.conditionalTopics.rules[0].topicKey).toBe('gated_topic');
     });
 
     it('leaves a hard rule dataSlotKey untouched when it has no colliding data slot to remap through', async () => {
       const envelope = makeEnvelope({
-        adaptiveScope: {
+        conditionalTopics: {
           rules: [
             {
               dataSlotKey: 'no_such_slot',
@@ -1074,12 +1077,12 @@ describe('persistDefinitionImport', () => {
       await persistDefinitionImport(input({ envelope }));
 
       const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
-        create: { adaptiveScope: { rules: { dataSlotKey: string }[] } };
+        create: { conditionalTopics: { rules: { dataSlotKey: string }[] } };
       };
-      expect(call.create.adaptiveScope.rules[0].dataSlotKey).toBe('no_such_slot');
+      expect(call.create.conditionalTopics.rules[0].dataSlotKey).toBe('no_such_slot');
     });
 
-    it('does not touch appQuestionnaireConfig.upsert when adaptiveScope is absent', async () => {
+    it('does not touch appQuestionnaireConfig.upsert when conditionalTopics is absent', async () => {
       await persistDefinitionImport(input());
 
       expect(tx.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();

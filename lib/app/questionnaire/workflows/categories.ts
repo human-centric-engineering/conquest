@@ -73,7 +73,7 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
     id: 'evaluation',
     label: 'Evaluation & QA',
     description:
-      "Inspecting and scoring a preview turn, or a version's authored Adaptive Scope config.",
+      "Inspecting and scoring a preview turn, or a version's authored Conditional Topics config.",
     slugs: ['turn-inspector', 'turn-evaluation', 'scope-evaluation'],
   },
   // Last because an experience spans every stage above it: it composes questionnaires that were

@@ -39,7 +39,7 @@ import type { RoutingAnalyticsResult } from '@/lib/app/questionnaire/analytics/v
 export interface RoutingQualityCardProps {
   questionnaireId: string;
   versionId: string;
-  /** True when adaptive scope is switched on. With it off, no plan is ever written. */
+  /** True when conditional topics is switched on. With it off, no plan is ever written. */
   enabled: boolean;
   /** How many conditional topics the version has — with none, there is no decision to report on. */
   conditionalCount: number;
@@ -97,7 +97,7 @@ export function RoutingQualityCard({
     return (
       <ScopeEmptyState
         title="No interviews to report on yet"
-        body="Once adaptive scope is on and respondents have completed interviews, this is where you see which topics were actually chosen, how often the fallback ran, and what respondents asked to change."
+        body="Once conditional topics is on and respondents have completed interviews, this is where you see which topics were actually chosen, how often the fallback ran, and what respondents asked to change."
       />
     );
   }

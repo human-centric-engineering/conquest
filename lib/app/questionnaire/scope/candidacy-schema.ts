@@ -1,5 +1,5 @@
 /**
- * Ingestion-time Adaptive Scope candidacy check's structured-output contract (P17.19).
+ * Ingestion-time Conditional Topics candidacy check's structured-output contract (P17.19).
  *
  * A cheap, fast triage — NOT the Routing Analyst (`analysis-schema.ts`). Its only job is to decide
  * whether a freshly-uploaded document's OWN WORDS describe conditional routing at all: eligibility

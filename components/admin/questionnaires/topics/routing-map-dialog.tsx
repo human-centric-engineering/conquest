@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * "Routing map" — the Adaptive scope tab's picture of itself.
+ * "Routing map" — the Conditional topics tab's picture of itself.
  *
  * A near-full-screen dialog rather than another card or another workspace tab, for two reasons. The tab
  * is already a stack of seven cards and a canvas needs room to be panned; and the map is a **view of**
@@ -139,8 +139,8 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
             className="border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
             data-testid="routing-map-off-banner"
           >
-            Adaptive scope is <strong>off</strong>, so every respondent is asked everything today.
-            This is what would happen if you switched it on.
+            Conditional topics is <strong>off</strong>, so every respondent is asked everything
+            today. This is what would happen if you switched it on.
           </div>
         ) : null}
 

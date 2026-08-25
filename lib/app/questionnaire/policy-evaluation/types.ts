@@ -2,7 +2,7 @@
  * Interviewer-policy evaluation contract and in-memory shapes (F18.8).
  *
  * A third panel of judges, sibling to the design-evaluation panel (`evaluation/**`, F5.1–F5.3) and
- * the Adaptive Scope panel (`scope-evaluation/**`, F17.21). Those score the questions and the
+ * the Conditional Topics panel (`scope-evaluation/**`, F17.21). Those score the questions and the
  * routing; this one scores the **interviewer policy** — the client's house rules, the questioning
  * arc, and the per-question fidelity dial — which together decide how every question is actually
  * put to a respondent.
@@ -237,7 +237,7 @@ export interface PolicyStructureQuestion {
   level: QuestionFidelityLevel;
   /** The raw stored value's level, gate ignored. The "gate off, sliders set" finding needs both. */
   storedLevel: QuestionFidelityLevel;
-  /** Adaptive Scope topics claiming this question; empty when routing is off. */
+  /** Conditional Topics topics claiming this question; empty when routing is off. */
   topicKeys: string[];
 }
 
@@ -259,9 +259,9 @@ export interface PolicyStructureFidelity {
   truncated: boolean;
 }
 
-/** What routing does to the policy — empty/false when Adaptive Scope is off. */
+/** What routing does to the policy — empty/false when Conditional Topics is off. */
 export interface PolicyStructureRouting {
-  adaptiveScopeEnabled: boolean;
+  conditionalTopicsEnabled: boolean;
   maxConditionalTopics: number;
   limitOpeningProbes: boolean;
   maxOpeningProbes: number;

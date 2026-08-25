@@ -56,7 +56,7 @@ export interface PlanPreviewCardProps {
   versionId: string;
   form: PlanPreviewForm;
   topics: readonly Topic[];
-  /** True when adaptive scope is switched on — a preview against an off version still runs. */
+  /** True when conditional topics is switched on — a preview against an off version still runs. */
   enabled: boolean;
   disabled?: boolean;
 }
@@ -174,7 +174,7 @@ export function PlanPreviewCard({
         <CardDescription>
           {enabled
             ? 'Check what a respondent would be asked before anyone is asked it.'
-            : 'Adaptive scope is off, so this changes nothing for respondents yet — the switch is at the top of this tab. The preview runs against your settings exactly as they stand.'}
+            : 'Conditional topics is off, so this changes nothing for respondents yet — the switch is at the top of this tab. The preview runs against your settings exactly as they stand.'}
         </CardDescription>
       </CardHeader>
 

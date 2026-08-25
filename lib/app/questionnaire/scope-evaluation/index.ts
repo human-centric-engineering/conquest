@@ -1,5 +1,5 @@
 /**
- * Public surface of the Adaptive Scope evaluation core (F17.21).
+ * Public surface of the Conditional Topics evaluation core (F17.21).
  *
  * Pure, DB-free: the dimension vocabulary + registry, the judge output contract (Zod), and the
  * prompt builder. The `evaluate-scope` capability and the evaluate-preview route consume these;

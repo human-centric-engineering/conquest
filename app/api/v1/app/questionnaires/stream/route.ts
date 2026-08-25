@@ -34,7 +34,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
 import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
-import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { checkConditionalTopicsCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   canProposeDuringIngest,
   proposeScopeDuringIngest,
@@ -192,7 +192,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         });
       }
 
-      // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-persisted version.
+      // Conditional Topics (P17.19): a cheap, fail-soft triage read over the just-persisted version.
       // Its own phase event so the admin sees why the stream keeps going a little past "saving"
       // rather than reading it as a stall.
       yield {
@@ -200,7 +200,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         phase: 'checking_scope',
         message: 'Checking for conditional routing…',
       };
-      const candidacy = await checkAdaptiveScopeCandidacy({
+      const candidacy = await checkConditionalTopicsCandidacy({
         versionId: result.versionId,
         documentText: parsed.fullText,
         fileName: file.name,
@@ -233,8 +233,8 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
             phase: 'proposing_scope',
             message:
               scopeProposal.conditionalCount > 0
-                ? `Proposed ${scopeProposal.topicCount} topics, ${scopeProposal.conditionalCount} of them conditional — review them on the Adaptive scope tab.`
-                : `Proposed ${scopeProposal.topicCount} topics — review them on the Adaptive scope tab.`,
+                ? `Proposed ${scopeProposal.topicCount} topics, ${scopeProposal.conditionalCount} of them conditional — review them on the Conditional topics tab.`
+                : `Proposed ${scopeProposal.topicCount} topics — review them on the Conditional topics tab.`,
           };
         }
       } else if (candidacy?.isCandidate) {
@@ -285,8 +285,8 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         sectionCount: result.sectionCount,
         questionCount: result.questionCount,
         changeCount: result.changeCount,
-        ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
-        ...(scopeProposal ? { adaptiveScopeProposal: scopeProposal } : {}),
+        ...(candidacy ? { conditionalTopicsCandidate: candidacy } : {}),
+        ...(scopeProposal ? { conditionalTopicsProposal: scopeProposal } : {}),
       };
     } catch (err) {
       log.error('Ingest stream: persist failed (response already streamed)', {

@@ -385,7 +385,7 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
     section: 'scopeEvaluationRunsTriggered',
     disposition: 'attribution',
     description:
-      'Adaptive Scope evaluation runs you triggered. The judges’ findings about the questionnaire are not included here.',
+      'Conditional Topics evaluation runs you triggered. The judges’ findings about the questionnaire are not included here.',
     fetch: async ({ userId }) =>
       toAttribution(
         await prisma.appQuestionnaireScopeEvaluationRun.findMany({
@@ -400,7 +400,7 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
     section: 'scopeEvaluationFindingsDecided',
     disposition: 'attribution',
     description:
-      'Adaptive Scope evaluation findings you accepted, declined, edited, or applied. The finding’s content is not included here.',
+      'Conditional Topics evaluation findings you accepted, declined, edited, or applied. The finding’s content is not included here.',
     fetch: async ({ userId }) =>
       toAttribution(
         await prisma.appQuestionnaireScopeEvaluationFinding.findMany({

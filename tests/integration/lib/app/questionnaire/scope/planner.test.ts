@@ -28,8 +28,8 @@ vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({ logCost: mocks.logCost 
 
 import { isOpeningComplete, planScope } from '@/lib/app/questionnaire/scope/planner';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -60,9 +60,9 @@ const TOPICS = [
   topic('close', 'closing'),
 ];
 
-function settings(over: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
+function settings(over: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
   return {
-    ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     enabled: true,
     maxConditionalTopics: 2,
     includeCheckTopic: false,

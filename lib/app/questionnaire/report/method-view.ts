@@ -105,7 +105,7 @@ export function buildReportMethodView(
       value: String(answers.unansweredListed),
     });
   }
-  // Adaptive Scope (P17): what the interview never asked about, kept SEPARATE from the unanswered
+  // Conditional Topics (P17): what the interview never asked about, kept SEPARATE from the unanswered
   // count above. They are different claims about the same reader — one says they skipped something,
   // the other says nobody put it to them — and a panel that merged them would misdescribe both.
   const notAssessed = answers.notAssessed ?? [];

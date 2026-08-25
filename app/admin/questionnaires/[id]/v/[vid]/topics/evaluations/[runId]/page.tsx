@@ -1,5 +1,5 @@
 /**
- * Scope evaluation run detail — findings from one Adaptive Scope evaluation run (F17.21).
+ * Scope evaluation run detail — findings from one Conditional Topics evaluation run (F17.21).
  */
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -15,7 +15,7 @@ import type { ScopeEvaluationRunDetail as ScopeEvaluationRunDetailView } from '@
 
 export const metadata: Metadata = {
   title: 'Review of this setup · Questionnaire',
-  description: 'Findings from one Adaptive Scope evaluation run.',
+  description: 'Findings from one Conditional Topics evaluation run.',
 };
 
 interface PageProps {

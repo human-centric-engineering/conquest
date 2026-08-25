@@ -71,7 +71,7 @@ export interface SessionExportInput {
   /** Captured data-slot values grouped by theme (rendered when `includeDataSlots`). */
   dataSlotGroups?: ExportDataSlotGroup[];
   /**
-   * Adaptive Scope (P17): areas the interview did not cover, or sampled only. Absent for a
+   * Conditional Topics (P17): areas the interview did not cover, or sampled only. Absent for a
    * non-adaptive session. Rendered unconditionally when non-empty — unlike the Q&A listing and the
    * data-slot appendix, this is not an appendix an author opts into: it is the caveat that stops
    * the rest of the document being read as a complete assessment.

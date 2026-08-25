@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The topic set editor — the authoring surface for Adaptive Scope's conditional unit.
+ * The topic set editor — the authoring surface for Conditional Topics' conditional unit.
  *
  * The whole set is edited locally and saved with one PUT (`replaceTopics` deletes and rewrites),
  * matching `data-slots-review.tsx`. A per-row PATCH surface would buy nothing here: ordinals come
@@ -896,7 +896,7 @@ export function TopicListEditor({
                               </p>
                               <p className="mt-2">
                                 Each question should sit in exactly one topic. A question in none
-                                can never be asked once adaptive scope is on.
+                                can never be asked once conditional topics is on.
                               </p>
                             </>
                           }

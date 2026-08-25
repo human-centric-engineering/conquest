@@ -66,7 +66,7 @@ describe('buildObjectivesContext — an unconfigured questionnaire', () => {
   it('states the negative for each policy block rather than omitting it', () => {
     const ctx = buildObjectivesContext(version());
     expect(ctx.houseRules).toMatch(/none/i);
-    expect(ctx.adaptiveScope).toMatch(/disabled/i);
+    expect(ctx.conditionalTopics).toMatch(/disabled/i);
     expect(ctx.questionFidelity).toMatch(/off/i);
   });
 
@@ -137,13 +137,13 @@ describe('buildObjectivesContext — describing a configured policy', () => {
     expect(ctx.interviewerStrategy).toMatch(/pace/i);
   });
 
-  it('describes adaptive scope when the interview is narrowed', () => {
+  it('describes conditional topics when the interview is narrowed', () => {
     const ctx = buildObjectivesContext(
       version({
-        adaptiveScope: { ...DEFAULT_QUESTIONNAIRE_CONFIG.adaptiveScope, enabled: true },
+        conditionalTopics: { ...DEFAULT_QUESTIONNAIRE_CONFIG.conditionalTopics, enabled: true },
       })
     );
-    expect(ctx.adaptiveScope).toMatch(/enabled/i);
+    expect(ctx.conditionalTopics).toMatch(/enabled/i);
   });
 
   it('renders as a description, never as an instruction to the judge', () => {

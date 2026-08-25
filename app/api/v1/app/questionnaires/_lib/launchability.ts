@@ -21,10 +21,10 @@ import {
 import { slotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { dataSlotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
-import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 
 export interface VersionLaunchReadiness {
@@ -42,15 +42,15 @@ export interface LaunchReadinessOptions {
 }
 
 /**
- * How many `error`-severity Adaptive Scope findings a version has.
+ * How many `error`-severity Conditional Topics findings a version has.
  *
  * Deliberately re-reads the topics and key inventory rather than taking them from the caller: this
  * runs only when the feature is ON, which is a small minority of versions, and paying three extra
  * queries there is cheaper than making every launch check carry topic data it will not use.
  */
-async function countAdaptiveScopeErrors(
+async function countConditionalTopicsErrors(
   versionId: string,
-  settings: Awaited<ReturnType<typeof loadAdaptiveScopeSettings>>
+  settings: Awaited<ReturnType<typeof loadConditionalTopicsSettings>>
 ): Promise<number> {
   const [topics, questionKeys, dataSlotKeys, scoring] = await Promise.all([
     loadTopics(versionId),
@@ -64,7 +64,7 @@ async function countAdaptiveScopeErrors(
     // schema, so blocking launch on it would strand the admin on a tab where the key is not shown.
     loadScoringSchemaContent(versionId),
   ]);
-  const issues = validateAdaptiveScope({
+  const issues = validateConditionalTopics({
     topics,
     settings,
     allQuestionKeys: questionKeys.map((q) => q.key),
@@ -114,18 +114,18 @@ export async function loadLaunchReadiness(
       select: { selectionStrategy: true },
     }),
     prisma.appDataSlot.count({ where: { versionId } }),
-    loadAdaptiveScopeSettings(versionId),
+    loadConditionalTopicsSettings(versionId),
     // Counted unconditionally, unlike the error count below: it costs one indexed count that
     // rides along in this Promise.all, whereas making it conditional on the settings would cost
     // a serial round-trip after them. It is read only while the feature is OFF.
     prisma.appQuestionnaireTopic.count({ where: { versionId, phase: 'conditional' } }),
   ]);
 
-  // Adaptive Scope coherence is only a launch concern once the version opted in — while it is off,
-  // `validateAdaptiveScope` reports the same orphans as WARNINGS on the Topics tab, which is where
+  // Conditional Topics coherence is only a launch concern once the version opted in — while it is off,
+  // `validateConditionalTopics` reports the same orphans as WARNINGS on the Topics tab, which is where
   // an admin wants to see them BEFORE flipping the switch, not as a gate on an unrelated launch.
-  const adaptiveScopeErrorCount = scopeSettings.enabled
-    ? await countAdaptiveScopeErrors(versionId, scopeSettings)
+  const conditionalTopicsErrorCount = scopeSettings.enabled
+    ? await countConditionalTopicsErrors(versionId, scopeSettings)
     : 0;
 
   // Question embeddings are a launch requirement only for an adaptive version — otherwise adaptive
@@ -164,9 +164,9 @@ export async function loadLaunchReadiness(
     dataSlotEmbeddingsRequired,
     dataSlotEmbeddingsReady:
       dataSlotCoverage !== null && dataSlotCoverage.total > 0 && dataSlotCoverage.missing === 0,
-    adaptiveScopeEnabled: scopeSettings.enabled,
-    adaptiveScopeErrorCount,
-    adaptiveScopeConditionalCount: conditionalTopicCount,
+    conditionalTopicsEnabled: scopeSettings.enabled,
+    conditionalTopicsErrorCount,
+    conditionalTopicsConditionalCount: conditionalTopicCount,
   });
 
   // `blocksLaunch`, not `every(ok)`: the conditional-topics-with-the-feature-off row is a warning,

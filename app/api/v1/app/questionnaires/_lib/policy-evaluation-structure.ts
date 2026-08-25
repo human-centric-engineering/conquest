@@ -91,7 +91,7 @@ export async function buildPolicyEvaluationStructure(
   if (!graph) return null;
 
   const config = graph.config;
-  const topics = config.adaptiveScope.enabled ? await loadTopics(versionId) : [];
+  const topics = config.conditionalTopics.enabled ? await loadTopics(versionId) : [];
 
   const [questionnaire, sectionQuestions] = [
     await prisma.appQuestionnaire.findUnique({
@@ -233,10 +233,10 @@ export async function buildPolicyEvaluationStructure(
       truncated: shown.length < allQuestions.length,
     },
     routing: {
-      adaptiveScopeEnabled: config.adaptiveScope.enabled,
-      maxConditionalTopics: config.adaptiveScope.maxConditionalTopics,
-      limitOpeningProbes: config.adaptiveScope.limitOpeningProbes,
-      maxOpeningProbes: config.adaptiveScope.maxOpeningProbes,
+      conditionalTopicsEnabled: config.conditionalTopics.enabled,
+      maxConditionalTopics: config.conditionalTopics.maxConditionalTopics,
+      limitOpeningProbes: config.conditionalTopics.limitOpeningProbes,
+      maxOpeningProbes: config.conditionalTopics.maxOpeningProbes,
       mustAskByTopic,
     },
     knownIssues: conflicts.map((c) => ({

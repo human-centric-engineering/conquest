@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * "How adaptive scope works" — the orientation panel at the top of the tab.
+ * "How conditional topics works" — the orientation panel at the top of the tab.
  *
  * Everything else on this page is a form. Forms answer *what does this field do*; nothing on the
- * page answered *what am I building, and in what order* — and adaptive scope has an order that is
+ * page answered *what am I building, and in what order* — and conditional topics has an order that is
  * not guessable from the controls (group first, mark conditional second, pin certainties third,
  * switch on last). An admin who turns the switch on before any topic is conditional gets a
  * questionnaire that behaves exactly as it did before, with no clue why.
@@ -25,7 +25,7 @@ import { ChevronDown, Route } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
-import type { AdaptiveScopeTab } from '@/lib/constants/adaptive-scope-tabs';
+import type { ConditionalTopicsTab } from '@/lib/constants/conditional-topics-tabs';
 
 /**
  * The four authoring steps, in the order they must actually happen — and, since F17.26, which
@@ -35,7 +35,7 @@ import type { AdaptiveScopeTab } from '@/lib/constants/adaptive-scope-tabs';
  * has somewhere to point. `tab: null` is step four, which is the header switch a few pixels above
  * this panel rather than a tab, so a jump would be theatre.
  */
-const STEPS: ReadonlyArray<{ title: string; body: string; tab: AdaptiveScopeTab | null }> = [
+const STEPS: ReadonlyArray<{ title: string; body: string; tab: ConditionalTopicsTab | null }> = [
   {
     title: 'Group every question into a topic',
     body: 'A topic is the unit this page decides about. Uploading a document does this for you — one topic per section, all set to “Always ask”, so nothing changes yet. A question in no topic can never be asked once you switch on.',
@@ -61,7 +61,7 @@ const STEPS: ReadonlyArray<{ title: string; body: string; tab: AdaptiveScopeTab 
 export interface ScopeExplainerProps {
   className?: string;
   /** Go to the sub-tab a step is done on. Omitted renders the steps as plain text. */
-  onGoToTab?: (tab: AdaptiveScopeTab) => void;
+  onGoToTab?: (tab: ConditionalTopicsTab) => void;
 }
 
 export function ScopeExplainer({ className, onGoToTab }: ScopeExplainerProps) {
@@ -84,7 +84,7 @@ export function ScopeExplainer({ className, onGoToTab }: ScopeExplainerProps) {
         </span>
         <span className="min-w-0 flex-1 space-y-0.5">
           <span id="scope-explainer-heading" className="block text-sm font-semibold tracking-tight">
-            How adaptive scope works
+            How conditional topics works
           </span>
           <span className="text-muted-foreground block text-xs leading-relaxed">
             Ask each respondent only the parts of this questionnaire that apply to them — without

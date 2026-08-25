@@ -52,7 +52,7 @@ import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
-import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import type {
   ConfigView,
   QuestionnaireDetail,
@@ -148,7 +148,7 @@ export const CONFIG_SELECT = {
   respondentReport: true,
   cohortReport: true,
   intro: true,
-  adaptiveScope: true,
+  conditionalTopics: true,
 } as const;
 
 type ConfigRow = {
@@ -203,7 +203,7 @@ type ConfigRow = {
   respondentReport: Prisma.JsonValue;
   cohortReport: Prisma.JsonValue;
   intro: Prisma.JsonValue;
-  adaptiveScope: Prisma.JsonValue;
+  conditionalTopics: Prisma.JsonValue;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -348,7 +348,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
     cohortReport: narrowCohortReportSettings(row.cohortReport),
     intro: narrowIntroSettings(row.intro),
-    adaptiveScope: narrowAdaptiveScopeSettings(row.adaptiveScope),
+    conditionalTopics: narrowConditionalTopicsSettings(row.conditionalTopics),
     saved: true,
   };
 }

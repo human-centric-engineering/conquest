@@ -7,7 +7,7 @@
  * a parallel structure from nothing, which is the difference between a feature admins use and one
  * they look at once.
  *
- * Seeded topics are all `core` (always asked) and `adaptiveScope.enabled` defaults false, so the
+ * Seeded topics are all `core` (always asked) and `conditionalTopics.enabled` defaults false, so the
  * seed changes nothing about how the questionnaire runs. That is the point: seeding is preparation,
  * not activation.
  *
@@ -73,7 +73,7 @@ export interface AttachTopic {
  * afterwards, as a separate admin step. So a seeded topic's `dataSlotKeys` is always `[]` at birth,
  * and without this pass it stays that way forever: nothing else ever revisits membership. The
  * symptom is a questionnaire where every data slot belongs to no topic, which means the conversation
- * would target none of them the moment adaptive scope is switched on.
+ * would target none of them the moment conditional topics is switched on.
  *
  * Running this wherever slots are written is what makes the authoring ORDER stop mattering — slots
  * before topics, topics before slots, or slots regenerated years later all converge on the same

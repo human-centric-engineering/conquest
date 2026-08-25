@@ -289,6 +289,6 @@ rendering for the same reason: a preview that differs from what is actually sent
 ## Deferred
 
 - **Verbatim `if_asked` responses** — a per-rule flag for compliance clients needing exact wording.
-- **Per-topic scoping** — binding a rule to an Adaptive Scope topic or section, not the whole
+- **Per-topic scoping** — binding a rule to a conditional topic or section, not the whole
   questionnaire.
 - **Client-level rule libraries** — a shared set inherited by every questionnaire for a client.

@@ -46,7 +46,7 @@ const tx = {
     createMany: vi.fn(async () => ({ count: 0 })),
     findMany: vi.fn(async () => []),
   },
-  // Adaptive Scope (P17): re-ingest reconciles topics against the rewritten graph.
+  // Conditional Topics (P17): re-ingest reconciles topics against the rewritten graph.
   appDataSlot: { findMany: vi.fn(async () => []) },
   appQuestionnaireTopic: {
     findMany: vi.fn(async () => []),

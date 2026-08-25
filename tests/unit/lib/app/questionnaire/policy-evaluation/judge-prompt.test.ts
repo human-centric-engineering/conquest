@@ -88,7 +88,7 @@ const STRUCTURE: PolicyStructureInput = {
     truncated: true,
   },
   routing: {
-    adaptiveScopeEnabled: true,
+    conditionalTopicsEnabled: true,
     maxConditionalTopics: 3,
     limitOpeningProbes: true,
     maxOpeningProbes: 1,
@@ -146,9 +146,9 @@ describe('buildPolicyJudgePrompt — what each judge is shown', () => {
     // They exist so it can spot "never use humour" against a high humour dial, and must-asks in a
     // topic routing may never seat. No other rubric reasons across blocks.
     expect(userOf('cross_layer_conflict')).toContain('Humour');
-    expect(userOf('cross_layer_conflict')).toContain('Adaptive scope is ON');
+    expect(userOf('cross_layer_conflict')).toContain('Conditional topics is ON');
     expect(userOf('rule_coherence')).not.toContain('Humour +2');
-    expect(userOf('fidelity_calibration')).not.toContain('Adaptive scope is ON');
+    expect(userOf('fidelity_calibration')).not.toContain('Conditional topics is ON');
   });
 
   it('gives the arc judge the pre-computed bands rather than the pace name alone', () => {
@@ -211,10 +211,10 @@ describe('buildPolicyJudgePrompt — a bare questionnaire', () => {
       houseRules: { enabled: false, rules: [] },
       strategy: { ...STRUCTURE.strategy, enabled: false },
       fidelity: { ...STRUCTURE.fidelity, enabled: false },
-      routing: { ...STRUCTURE.routing, adaptiveScopeEnabled: false, mustAskByTopic: [] },
+      routing: { ...STRUCTURE.routing, conditionalTopicsEnabled: false, mustAskByTopic: [] },
     };
     expect(userContentOf('rule_coherence', bare)).toContain('House rules are switched OFF');
-    expect(userContentOf('cross_layer_conflict', bare)).toContain('Adaptive scope is OFF');
+    expect(userContentOf('cross_layer_conflict', bare)).toContain('Conditional topics is OFF');
   });
 
   it('tells the fidelity judge that stored values are inert when the gate is off', () => {

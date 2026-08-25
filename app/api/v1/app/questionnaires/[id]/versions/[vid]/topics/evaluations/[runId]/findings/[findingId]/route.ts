@@ -89,7 +89,7 @@ const handleReview = withAdminAuth<Params>(async (request, session, { params }) 
   if (!updated) throw new NotFoundError('Scope evaluation finding not found');
   const view = await buildScopedScopeFindingView(updated);
 
-  log.info('Adaptive Scope evaluation finding reviewed', {
+  log.info('Conditional Topics evaluation finding reviewed', {
     versionId: vid,
     runId,
     findingId,

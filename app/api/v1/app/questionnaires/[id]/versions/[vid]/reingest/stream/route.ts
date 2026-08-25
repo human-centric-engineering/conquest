@@ -45,7 +45,7 @@ import {
   reingestVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
 import {
-  checkAdaptiveScopeCandidacy,
+  checkConditionalTopicsCandidacy,
   isEligibleForScopeCandidacy,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
@@ -269,9 +269,9 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         });
       }
 
-      // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-replaced draft.
+      // Conditional Topics (P17.19): a cheap, fail-soft triage read over the just-replaced draft.
       // Pre-checked here (rather than relying only on the internal gate inside
-      // `checkAdaptiveScopeCandidacy`, which re-checks it anyway) so the "checking…" phase is only
+      // `checkConditionalTopicsCandidacy`, which re-checks it anyway) so the "checking…" phase is only
       // shown when a real check is about to run — a re-ingest, unlike a fresh ingest, may land on a
       // version that already has scope on or authored topics, and announcing a check that turns
       // out to be a silent no-op would read as "checked, found nothing" rather than "not applicable".
@@ -284,14 +284,14 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         });
         return false;
       });
-      let candidacy: Awaited<ReturnType<typeof checkAdaptiveScopeCandidacy>> = null;
+      let candidacy: Awaited<ReturnType<typeof checkConditionalTopicsCandidacy>> = null;
       if (eligibleForCandidacyCheck) {
         yield {
           type: 'phase',
           phase: 'checking_scope',
           message: 'Checking for conditional routing…',
         };
-        candidacy = await checkAdaptiveScopeCandidacy({
+        candidacy = await checkConditionalTopicsCandidacy({
           versionId: vid,
           documentText: parsed.fullText,
           fileName: file.name,
@@ -324,8 +324,8 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
             phase: 'proposing_scope',
             message:
               scopeProposal.conditionalCount > 0
-                ? `Proposed ${scopeProposal.topicCount} topics, ${scopeProposal.conditionalCount} of them conditional — review them on the Adaptive scope tab.`
-                : `Proposed ${scopeProposal.topicCount} topics — review them on the Adaptive scope tab.`,
+                ? `Proposed ${scopeProposal.topicCount} topics, ${scopeProposal.conditionalCount} of them conditional — review them on the Conditional topics tab.`
+                : `Proposed ${scopeProposal.topicCount} topics — review them on the Conditional topics tab.`,
           };
         }
       } else if (candidacy?.isCandidate) {
@@ -373,8 +373,8 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         questionCount: result.questionCount,
         changeCount: result.changeCount,
         deduped: false,
-        ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
-        ...(scopeProposal ? { adaptiveScopeProposal: scopeProposal } : {}),
+        ...(candidacy ? { conditionalTopicsCandidate: candidacy } : {}),
+        ...(scopeProposal ? { conditionalTopicsProposal: scopeProposal } : {}),
       };
     }
 

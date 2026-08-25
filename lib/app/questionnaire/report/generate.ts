@@ -173,7 +173,7 @@ function coverageRules(answered: number, total: number, unansweredBlock: string)
 }
 
 /**
- * The framing for topics the interview never asked about — Adaptive Scope (P17).
+ * The framing for topics the interview never asked about — Conditional Topics (P17).
  *
  * Deliberately SEPARATE from {@link coverageRules}, which lists questions the respondent was asked
  * and skipped. These are questions nobody put to them. Collapsing the two would be a lie in both
@@ -331,7 +331,7 @@ function buildReportMessages(opts: {
    */
   coverage?: { answered: number; total: number; unansweredBlock: string };
   /**
-   * Adaptive Scope (P17): topics this interview did not cover, or covered only as a sample. Empty
+   * Conditional Topics (P17): topics this interview did not cover, or covered only as a sample. Empty
    * or absent for every non-adaptive session, in which case no scope block is emitted at all.
    */
   notAssessed?: readonly NotAssessedTopic[];
@@ -497,7 +497,7 @@ export interface ReportGenerationInputs {
    */
   coverage?: { answered: number; total: number; unansweredBlock: string };
   /**
-   * Adaptive Scope (P17): the topics this respondent's interview deliberately did not cover, and
+   * Conditional Topics (P17): the topics this respondent's interview deliberately did not cover, and
    * the ones it only sampled. Comes straight off `loadSessionExport`. Absent/empty for every
    * non-adaptive session, which produces exactly the prompt this did before P17.
    */

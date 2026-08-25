@@ -183,8 +183,8 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 questionCount: Number(parsed.data.questionCount ?? 0),
                 changeCount: Number(parsed.data.changeCount ?? 0),
                 deduped: parsed.data.deduped === true,
-                ...(isScopeProposal(parsed.data.adaptiveScopeProposal)
-                  ? { scopeProposal: parsed.data.adaptiveScopeProposal }
+                ...(isScopeProposal(parsed.data.conditionalTopicsProposal)
+                  ? { scopeProposal: parsed.data.conditionalTopicsProposal }
                   : {}),
               };
             } else if (parsed.type === 'error') {
@@ -261,7 +261,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                     , <strong>{result.scopeProposal.conditionalCount}</strong> of them conditional
                   </>
                 ) : null}
-                . Nothing is live — review them on the <strong>Adaptive scope</strong> tab.
+                . Nothing is live — review them on the <strong>Conditional topics</strong> tab.
               </p>
             )}
             <DialogFooter>

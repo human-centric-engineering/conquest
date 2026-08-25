@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The Topics tab's client shell — everything Adaptive Scope needs in one place.
+ * The Topics tab's client shell — everything Conditional Topics needs in one place.
  *
  * Owns the one mutation runner with the workspace's fork-on-launch discipline (the same shape as
  * `version-settings-panel.tsx`): editing a launched version forks a new draft, surfaces the notice,
@@ -42,13 +42,13 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { useScopeTabs } from '@/components/admin/questionnaires/topics/use-scope-tabs';
 import {
-  ADAPTIVE_SCOPE_TABS,
-  ADAPTIVE_SCOPE_TAB_HINTS,
-  ADAPTIVE_SCOPE_TAB_LABELS,
-  narrowAdaptiveScopeTab,
+  CONDITIONAL_TOPICS_TABS,
+  CONDITIONAL_TOPICS_TAB_HINTS,
+  CONDITIONAL_TOPICS_TAB_LABELS,
+  narrowConditionalTopicsTab,
   tabForScopeIssue,
-} from '@/lib/constants/adaptive-scope-tabs';
-import type { AdaptiveScopeSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
+} from '@/lib/constants/conditional-topics-tabs';
+import type { ConditionalTopicsSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
@@ -175,8 +175,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // Fields are enumerated rather than spread, and that is load-bearing rather than an oversight:
   // `rules` reaches the server through this same PATCH but is edited as its own list, and a spread
   // would also push through any field the settings card does not own. The cost: every new
-  // `AdaptiveScopeSettings` field is a two-place change — here and in the card.
-  const saveSettings = (settings: AdaptiveScopeSettings) =>
+  // `ConditionalTopicsSettings` field is a two-place change — here and in the card.
+  const saveSettings = (settings: ConditionalTopicsSettings) =>
     run('PATCH', {
       // `enabled` is deliberately ABSENT. The status header owns it, and this PATCH is a
       // read-merge-write — so including it here would let the card's draft (captured whenever it
@@ -292,15 +292,17 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         </div>
       )}
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(narrowAdaptiveScopeTab(v))}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(narrowConditionalTopicsTab(v))}>
         <TabsList>
-          {ADAPTIVE_SCOPE_TABS.map((tab) => (
+          {CONDITIONAL_TOPICS_TABS.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
-              {ADAPTIVE_SCOPE_TAB_LABELS[tab]}
+              {CONDITIONAL_TOPICS_TAB_LABELS[tab]}
             </TabsTrigger>
           ))}
         </TabsList>
-        <p className="text-muted-foreground mt-2 text-sm">{ADAPTIVE_SCOPE_TAB_HINTS[activeTab]}</p>
+        <p className="text-muted-foreground mt-2 text-sm">
+          {CONDITIONAL_TOPICS_TAB_HINTS[activeTab]}
+        </p>
 
         {/* `forceMount` on all three, and it is load-bearing rather than tidy. Radix unmounts an
             inactive panel, and five things here hold state that must survive a switch: the
@@ -349,7 +351,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
                   Topics
                   <FieldHelp title="What a topic is">
                     <p>
-                      The unit adaptive scope decides about: a named group of questions and data
+                      The unit conditional topics decides about: a named group of questions and data
                       slots, with a phase saying when it runs and — if it is conditional — your
                       criteria for when it applies.
                     </p>
@@ -383,7 +385,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
               </Button>
             </div>
             {/* The second level of the strip at the top of the tab. Both render the SAME
-                `validateAdaptiveScope` output, so they cannot disagree about what is wrong — the
+                `validateConditionalTopics` output, so they cannot disagree about what is wrong — the
                 difference is only how much of it each says, and where. This one sits against the rows
                 it is about, and unlike the strip it also reports the all-clear. */}
             <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />

@@ -29,7 +29,7 @@ import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import {
   ALWAYS_PHASES,
   DEFAULT_SECONDS_PER_DATA_SLOT,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicDepth,
 } from '@/lib/app/questionnaire/scope/types';
@@ -84,7 +84,7 @@ export interface PricedQuestion {
 export function itemSeconds(
   questions: readonly PricedQuestion[],
   dataSlotKeys: readonly string[],
-  settings: AdaptiveScopeSettings
+  settings: ConditionalTopicsSettings
 ): ItemSeconds {
   const byQuestionKey = new Map<string, number>();
   for (const q of questions) {
@@ -97,7 +97,7 @@ export function itemSeconds(
 }
 
 /** Seconds for one question: the version override, else the default for its type, times its rows. */
-function secondsForQuestion(question: PricedQuestion, settings: AdaptiveScopeSettings): number {
+function secondsForQuestion(question: PricedQuestion, settings: ConditionalTopicsSettings): number {
   const type = asQuestionType(question.type);
   const perItem = settings.secondsPerQuestionType[type] ?? DEFAULT_SECONDS_PER_TYPE[type];
   if (type !== 'matrix') return perItem;

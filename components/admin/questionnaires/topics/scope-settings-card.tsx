@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * The Adaptive Scope knobs — the master switch and everything that governs how the plan is decided.
+ * The Conditional Topics knobs — the master switch and everything that governs how the plan is decided.
  *
  * These live beside the topics rather than on the Settings tab because most of them *address*
  * topics: the fallback set, the blind-spot preference and every hard rule name a topic key. Split
  * across two tabs, an admin would be picking from a list they cannot see.
  *
- * Everything on this card is one PATCH of the `adaptiveScope` blob. The order of the fields follows
+ * Everything on this card is one PATCH of the `conditionalTopics` blob. The order of the fields follows
  * the order of the decision itself, and the steps are numbered to say so: the hard rules that run
  * before the agent, then the cap the model cannot exceed, the blind-spot check, what happens when
  * the model cannot decide, and what the respondent is told.
@@ -37,7 +37,7 @@ import {
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -46,7 +46,7 @@ import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 import { cn } from '@/lib/utils';
 
 export interface ScopeSettingsCardProps {
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   topics: readonly Topic[];
   dataSlots: TopicsPayload['inventory']['dataSlots'];
   /**
@@ -55,7 +55,7 @@ export interface ScopeSettingsCardProps {
    */
   costs: TopicsPayload['costs'];
   /** Saves the settings patch. Resolving `false` means it did not land (error or declined fork). */
-  onSave: (settings: AdaptiveScopeSettings) => Promise<boolean>;
+  onSave: (settings: ConditionalTopicsSettings) => Promise<boolean>;
   busy: boolean;
 }
 
@@ -137,10 +137,10 @@ export function ScopeSettingsCard({
   onSave,
   busy,
 }: ScopeSettingsCardProps) {
-  const [draft, setDraft] = useState<AdaptiveScopeSettings>(settings);
+  const [draft, setDraft] = useState<ConditionalTopicsSettings>(settings);
   const [dirty, setDirty] = useState(false);
 
-  const set = (patch: Partial<AdaptiveScopeSettings>) => {
+  const set = (patch: Partial<ConditionalTopicsSettings>) => {
     setDirty(true);
     setDraft((prev) => ({ ...prev, ...patch }));
   };
@@ -559,7 +559,7 @@ export function ScopeSettingsCard({
 
         <div className="flex justify-end border-t pt-4">
           <SaveButton onSave={save} disabled={busy || !dirty} size="sm">
-            Save adaptive scope
+            Save conditional topics
           </SaveButton>
         </div>
       </CardContent>

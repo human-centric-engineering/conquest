@@ -1,5 +1,5 @@
 /**
- * Ingestion-time Adaptive Scope candidacy check's structured-output contract (P17.19).
+ * Ingestion-time Conditional Topics candidacy check's structured-output contract (P17.19).
  *
  * A cheap triage, not the Routing Analyst — these tests pin the shape it must accept (confidence
  * bounds, the signal cap, a non-empty summary) so a malformed model response fails loudly at the

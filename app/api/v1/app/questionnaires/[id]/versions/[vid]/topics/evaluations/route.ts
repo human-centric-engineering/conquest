@@ -1,10 +1,10 @@
 /**
- * Adaptive Scope evaluation runs (F17.21).
+ * Conditional Topics evaluation runs (F17.21).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/evaluations
  *   body: { dimensions?: ScopeEvaluationDimension[] }   // default: all four
  *
- *   Admin-only. Runs the scope-judge panel over a version's authored Adaptive Scope config (the
+ *   Admin-only. Runs the scope-judge panel over a version's authored Conditional Topics config (the
  *   shared dispatch seam — one structured LLM call per dimension, fail-soft per judge), then
  *   PERSISTS the run + one finding row per judge finding and returns the completed run detail.
  *   Synchronous, like the design-evaluation panel: no worker, no polling. The whole POST is paid
@@ -86,7 +86,7 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
 
     if (wantedSlugs.every((slug) => !agentBySlug.has(slug))) {
       log.error('No scope-evaluation judge agents found; run db:seed', { wantedSlugs });
-      throw new NotFoundError('Adaptive Scope evaluation is not configured');
+      throw new NotFoundError('Conditional Topics evaluation is not configured');
     }
 
     const startedAt = new Date();
@@ -111,7 +111,7 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
       completedAt,
     });
 
-    log.info('Adaptive Scope evaluation run persisted', {
+    log.info('Conditional Topics evaluation run persisted', {
       questionnaireId: id,
       versionId: vid,
       runId: run.id,
@@ -137,7 +137,7 @@ const handleListRuns = withAdminAuth<{ id: string; vid: string }>(
     const { page, limit, skip } = parsePaginationParams(searchParams);
 
     const { runs, total } = await listScopeEvaluationRuns(vid, { skip, limit });
-    log.info('Adaptive Scope evaluation runs listed', {
+    log.info('Conditional Topics evaluation runs listed', {
       versionId: vid,
       count: runs.length,
       total,

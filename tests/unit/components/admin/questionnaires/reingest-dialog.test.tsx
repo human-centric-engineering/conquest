@@ -75,7 +75,7 @@ function mockFetchSuccess(
     changeCount: number;
     deduped: boolean;
     /** F17.22 Phase 2 — present only when the analyst proposed during this upload. */
-    adaptiveScopeProposal?: { topicCount: number; conditionalCount: number };
+    conditionalTopicsProposal?: { topicCount: number; conditionalCount: number };
   } = {
     sectionCount: 2,
     questionCount: 5,
@@ -213,7 +213,7 @@ describe('ReingestDialog', () => {
       questionCount: 12,
       changeCount: 4,
       deduped: false,
-      adaptiveScopeProposal: { topicCount: 6, conditionalCount: 3 },
+      conditionalTopicsProposal: { topicCount: 6, conditionalCount: 3 },
     });
     const user = await openDialog();
 

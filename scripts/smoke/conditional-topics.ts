@@ -1,5 +1,5 @@
 /**
- * Live end-to-end smoke for Adaptive Scope against the real dev DB.
+ * Live end-to-end smoke for Conditional Topics against the real dev DB.
  *
  * Creates a scratch questionnaire, seeds topics through the real ingest seam, resolves scope with
  * and without a plan, then deletes everything. Proves the DB path, not just the pure logic.
@@ -8,8 +8,8 @@ import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { seedTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
-import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
-import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
+import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import {
   acceptTopicDraft,
@@ -124,7 +124,7 @@ async function main() {
     // 2. Inert: feature off → everything in scope, topic table not consulted.
     const off = await buildSessionScope(prisma, {
       versionId: v.id,
-      settings: narrowAdaptiveScopeSettings({}),
+      settings: narrowConditionalTopicsSettings({}),
       interviewPlan: null,
     });
     ok('inert when disabled', off.scope.active === false);
@@ -141,7 +141,7 @@ async function main() {
       data: { phase: 'opening' },
     });
 
-    const settings = narrowAdaptiveScopeSettings({
+    const settings = narrowConditionalTopicsSettings({
       enabled: true,
       maxConditionalTopics: 1,
       includeCheckTopic: false,
@@ -205,7 +205,7 @@ async function main() {
     ok('trimmed member reported as not-asked', light.scope.notAskedQuestionKeys.has('pipe_3'));
 
     // 6. Coherence checks see the live rows.
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       topics: await loadTopics(v.id),
       settings,
       allQuestionKeys: ['situation', 'pipe_1', 'pipe_2', 'pipe_3', 'orphan_q'],
@@ -295,8 +295,8 @@ async function main() {
     // leaves `enabled` exactly as it found it, rather than merely defaulting to false.
     await prisma.appQuestionnaireConfig.upsert({
       where: { versionId: v.id },
-      update: { adaptiveScope: { enabled: true } },
-      create: { versionId: v.id, adaptiveScope: { enabled: true } },
+      update: { conditionalTopics: { enabled: true } },
+      create: { versionId: v.id, conditionalTopics: { enabled: true } },
     });
 
     // The accept is the transaction that matters: topics live, draft gone, in one step. A

@@ -8,7 +8,7 @@
  *   - the write + finding-stamp go through one `prisma.$transaction`, not two separate writes
  *   - a topic-field write stamps `source: 'manual'` (an admin-approved apply is not an
  *     untouched auto-seed any more)
- *   - `loadAdaptiveScopeSettings` / `patchAdaptiveScopeSettings` are called with the
+ *   - `loadConditionalTopicsSettings` / `patchConditionalTopicsSettings` are called with the
  *     transaction client, not the bare `prisma` singleton, so they participate in the
  *     transaction rather than escaping it
  */
@@ -28,8 +28,8 @@ const forkMock = vi.hoisted(() => ({ forkVersionIfLaunched: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/fork', () => forkMock);
 
 const topicRoutesMock = vi.hoisted(() => ({
-  loadAdaptiveScopeSettings: vi.fn(),
-  patchAdaptiveScopeSettings: vi.fn(),
+  loadConditionalTopicsSettings: vi.fn(),
+  patchConditionalTopicsSettings: vi.fn(),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', () => topicRoutesMock);
 
@@ -39,8 +39,8 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-apply';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
-  loadAdaptiveScopeSettings,
-  patchAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
+  patchConditionalTopicsSettings,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import type { ScopeStructureInput } from '@/lib/app/questionnaire/scope-evaluation';
 
@@ -87,7 +87,7 @@ function structure(): ScopeStructureInput {
 }
 
 /**
- * What `loadAdaptiveScopeSettings` actually returns (`AdaptiveScopeSettings`) — distinct from
+ * What `loadConditionalTopicsSettings` actually returns (`ConditionalTopicsSettings`) — distinct from
  * `structure().settings` (`ScopeStructureInput`'s curated read-only slice), because only this
  * shape carries `rules`. The apply engine's rule ops (`add_rule`/`edit_rule`/`delete_rule`) read
  * `settings.rules` from THIS function, never from the structure DTO.
@@ -134,8 +134,8 @@ beforeEach(() => {
     forked: false,
     versionNumber: 1,
   });
-  (loadAdaptiveScopeSettings as unknown as Mock).mockResolvedValue(settingsFixture());
-  (patchAdaptiveScopeSettings as unknown as Mock).mockResolvedValue(settingsFixture());
+  (loadConditionalTopicsSettings as unknown as Mock).mockResolvedValue(settingsFixture());
+  (patchConditionalTopicsSettings as unknown as Mock).mockResolvedValue(settingsFixture());
 });
 
 describe('applyScopeFinding — early returns', () => {
@@ -187,7 +187,7 @@ describe('applyScopeFinding — early returns', () => {
   });
 
   it('is target_gone when an edit_rule/delete_rule targets a rule id no longer in settings', async () => {
-    (loadAdaptiveScopeSettings as unknown as Mock).mockResolvedValue({
+    (loadConditionalTopicsSettings as unknown as Mock).mockResolvedValue({
       ...structure().settings,
       rules: [],
     });
@@ -289,7 +289,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
     );
   });
 
-  it('add_rule appends to the existing rules and calls patchAdaptiveScopeSettings with the tx client', async () => {
+  it('add_rule appends to the existing rules and calls patchConditionalTopicsSettings with the tx client', async () => {
     const res = await applyScopeFinding({
       finding: finding({
         targetKey: 'settings',
@@ -309,7 +309,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       audit,
     });
     expect(res.status).toBe('applied');
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith(
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
       'v1',
       expect.objectContaining({
         rules: expect.arrayContaining([expect.objectContaining({ dataSlotKey: 'headcount' })]),
@@ -327,7 +327,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       current: structure(),
       audit,
     });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith('v1', { rules: [] }, prismaMock);
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith('v1', { rules: [] }, prismaMock);
   });
 
   it('edit_rule replaces the matching rule fields', async () => {
@@ -349,7 +349,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       current: structure(),
       audit,
     });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith(
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
       'v1',
       {
         rules: [
@@ -372,7 +372,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       current: structure(),
       audit,
     });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith(
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
       'v1',
       { maxConditionalTopics: 5 },
       prismaMock
@@ -391,7 +391,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       current: structure(),
       audit,
     });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith(
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
       'v1',
       { plannerInstructions: 'Prefer breadth.' },
       prismaMock
@@ -410,7 +410,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       current: structure(),
       audit,
     });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith(
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
       'v1',
       { fallbackTopicKeys: ['compliance'] },
       prismaMock
@@ -418,7 +418,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
   });
 
   it('add_fallback_topic is a no-op (still applied) when the key is already there', async () => {
-    (loadAdaptiveScopeSettings as unknown as Mock).mockResolvedValue({
+    (loadConditionalTopicsSettings as unknown as Mock).mockResolvedValue({
       ...structure().settings,
       fallbackTopicKeys: ['compliance'],
     });
@@ -434,7 +434,7 @@ describe('applyScopeFinding — each op writes the right thing', () => {
       audit,
     });
     expect(res.status).toBe('applied');
-    expect(patchAdaptiveScopeSettings).not.toHaveBeenCalled();
+    expect(patchConditionalTopicsSettings).not.toHaveBeenCalled();
   });
 });
 

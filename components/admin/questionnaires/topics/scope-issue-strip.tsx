@@ -5,7 +5,7 @@
  *
  * The same two-level shape `config-conflicts.tsx` uses: a strip at the top of the surface that says
  * how much is wrong and lets you jump to it, plus the existing {@link ScopeIssues} lower down as the
- * full read. Two renderings, ONE source — both are handed `validateAdaptiveScope`'s output, so they
+ * full read. Two renderings, ONE source — both are handed `validateConditionalTopics`'s output, so they
  * cannot report different counts.
  *
  * ## Why the rows are buttons, not links

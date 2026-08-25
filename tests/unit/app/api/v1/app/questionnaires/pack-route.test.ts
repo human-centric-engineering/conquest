@@ -69,7 +69,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes', () => ({
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', () => ({
   loadTopics: vi.fn(async () => []),
-  loadAdaptiveScopeSettings: vi.fn(async () => ({ enabled: false, rules: [] })),
+  loadConditionalTopicsSettings: vi.fn(async () => ({ enabled: false, rules: [] })),
 }));
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes', () => ({
@@ -115,7 +115,7 @@ import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
@@ -160,7 +160,7 @@ beforeEach(() => {
   (loadDataSlots as Mock).mockResolvedValue([]);
   (loadLatestEvaluationRun as Mock).mockResolvedValue(null);
   (loadTopics as Mock).mockResolvedValue([]);
-  (loadAdaptiveScopeSettings as Mock).mockResolvedValue({ enabled: false, rules: [] });
+  (loadConditionalTopicsSettings as Mock).mockResolvedValue({ enabled: false, rules: [] });
   (loadLatestScopeEvaluationRun as Mock).mockResolvedValue(null);
   (buildPackModel as Mock).mockReturnValue(PACK_MODEL);
 });
@@ -230,7 +230,7 @@ describe('GET pack — include flags', () => {
         setup: true,
         setupTechnical: false,
         evaluations: false,
-        adaptiveScope: false,
+        conditionalTopics: false,
         interviewerPolicy: false,
       },
       expect.any(String)
@@ -259,7 +259,7 @@ describe('GET pack — include flags', () => {
         setup: false,
         setupTechnical: false,
         evaluations: false,
-        adaptiveScope: false,
+        conditionalTopics: false,
         interviewerPolicy: false,
       },
       expect.any(String)
@@ -339,10 +339,10 @@ describe('GET pack — include flags', () => {
     );
   });
 
-  it('does not load topics/settings/scope-evaluation-run when adaptiveScope=false (default)', async () => {
+  it('does not load topics/settings/scope-evaluation-run when conditionalTopics=false (default)', async () => {
     await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
     expect(loadTopics).not.toHaveBeenCalled();
-    expect(loadAdaptiveScopeSettings).not.toHaveBeenCalled();
+    expect(loadConditionalTopicsSettings).not.toHaveBeenCalled();
     expect(loadLatestScopeEvaluationRun).not.toHaveBeenCalled();
     expect(buildPackModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
@@ -352,27 +352,27 @@ describe('GET pack — include flags', () => {
       null,
       null,
       null,
-      expect.objectContaining({ adaptiveScope: false }),
+      expect.objectContaining({ conditionalTopics: false }),
       expect.any(String)
     );
   });
 
-  it('loads topics + settings + the latest scope-evaluation run and threads them through when adaptiveScope=true', async () => {
+  it('loads topics + settings + the latest scope-evaluation run and threads them through when conditionalTopics=true', async () => {
     const topics = [{ id: 't1', key: 'topic-1' }];
     const settings = { enabled: true, rules: [] };
     const scopeEvaluationRun = { id: 'scope-run1' };
     (loadTopics as Mock).mockResolvedValue(topics);
-    (loadAdaptiveScopeSettings as Mock).mockResolvedValue(settings);
+    (loadConditionalTopicsSettings as Mock).mockResolvedValue(settings);
     (loadLatestScopeEvaluationRun as Mock).mockResolvedValue(scopeEvaluationRun);
 
     await GET(
-      makeRequest(QN_ID, VID, { format: 'md', adaptiveScope: 'true' }),
+      makeRequest(QN_ID, VID, { format: 'md', conditionalTopics: 'true' }),
       ADMIN_SESSION,
       makeContext()
     );
 
     expect(loadTopics).toHaveBeenCalledWith(VID);
-    expect(loadAdaptiveScopeSettings).toHaveBeenCalledWith(VID);
+    expect(loadConditionalTopicsSettings).toHaveBeenCalledWith(VID);
     expect(loadLatestScopeEvaluationRun).toHaveBeenCalledWith(VID);
     expect(buildPackModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
@@ -382,7 +382,7 @@ describe('GET pack — include flags', () => {
       null,
       { topics, settings, scopeEvaluationRun },
       null,
-      expect.objectContaining({ adaptiveScope: true }),
+      expect.objectContaining({ conditionalTopics: true }),
       expect.any(String)
     );
   });

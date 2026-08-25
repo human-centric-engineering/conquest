@@ -1,5 +1,5 @@
 /**
- * Streaming routing analysis — the Routing Analyst (Adaptive Scope, P17.4).
+ * Streaming routing analysis — the Routing Analyst (Conditional Topics, P17.4).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/analyse/stream
  *   Admin-only SSE endpoint. Runs the Routing Analyst over the version's questions AND its uploaded

@@ -68,7 +68,7 @@ function session(over: { answers?: string[]; fills?: string[] } = {}) {
   return {
     versionId: 'v1',
     interviewPlan: null,
-    version: { goal: 'find the constraint', config: { adaptiveScope: { enabled: true } } },
+    version: { goal: 'find the constraint', config: { conditionalTopics: { enabled: true } } },
     dataSlotFills: (over.fills ?? []).map((key) => ({
       confidence: 0.9,
       value: 'said something',
@@ -252,7 +252,7 @@ describe('maybePlanScope — the time budget', () => {
       ...session({ answers: ['q1', 'q2'] }),
       version: {
         goal: 'find the constraint',
-        config: { adaptiveScope: { enabled: true, sessionBudgetSeconds: seconds } },
+        config: { conditionalTopics: { enabled: true, sessionBudgetSeconds: seconds } },
       },
     };
   }

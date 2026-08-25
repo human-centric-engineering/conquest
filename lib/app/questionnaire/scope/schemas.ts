@@ -1,5 +1,5 @@
 /**
- * Zod schemas for Adaptive Scope (P17): the topic bulk-save body and the settings patch.
+ * Zod schemas for Conditional Topics (P17): the topic bulk-save body and the settings patch.
  *
  * Dependency-light (only `zod` plus the pure vocabulary) so routes and the eventual analyst
  * capability import without pulling server deps.
@@ -83,12 +83,12 @@ export const scopeRuleInputSchema = z.object({
 });
 
 /**
- * The `adaptiveScope` settings patch.
+ * The `conditionalTopics` settings patch.
  *
  * Every field optional so the Settings tab can PATCH one knob without resending the rest — the
  * caller merges onto the narrowed current value.
  */
-export const adaptiveScopeSettingsSchema = z.object({
+export const conditionalTopicsSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   maxConditionalTopics: z
     .number()
@@ -136,7 +136,7 @@ export const adaptiveScopeSettingsSchema = z.object({
   rules: z.array(scopeRuleInputSchema).max(100).optional(),
 });
 
-export type AdaptiveScopeSettingsPatch = z.infer<typeof adaptiveScopeSettingsSchema>;
+export type ConditionalTopicsSettingsPatch = z.infer<typeof conditionalTopicsSettingsSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* The Routing Analyst's draft (P17.4)                                        */
@@ -179,7 +179,7 @@ export const acceptTopicDraftSchema = z.object({
   /** Same contract as `fallbackTopicKeys` above. */
   checkTopicPreference: z.array(topicKeySchema).max(20).optional(),
   /**
-   * Turn adaptive scope ON as part of this accept (F17.22 Phase 4). Sent only when the admin ticks
+   * Turn conditional topics ON as part of this accept (F17.22 Phase 4). Sent only when the admin ticks
    * the offer in the accept dialog, which is itself only shown when the proposal contains a
    * conditional topic.
    *

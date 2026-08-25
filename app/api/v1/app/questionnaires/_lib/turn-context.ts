@@ -200,7 +200,7 @@ export interface LoadedTurnContext {
   /** Version goal + audience — used by the conversational question phraser (not the pure core). */
   meta: TurnMeta;
   /**
-   * Adaptive Scope (P17): what this interview is about.
+   * Conditional Topics (P17): what this interview is about.
    *
    * `base.questions`, `base.dataSlots` and {@link slots} are ALREADY filtered by it — this is
    * carried so the route can decide whether the planner needs to run, and so the reasoning trace
@@ -265,7 +265,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // "Don't nag" ledger for completeness milestones: percent-complete thresholds already
       // banner-shown this session (number[]). Empty list on a session that has raised none.
       raisedMilestones: true,
-      // Adaptive Scope (P17): the frozen decision about which topics this interview covers.
+      // Conditional Topics (P17): the frozen decision about which topics this interview covers.
       // Null on every ordinary session, and before the planner has run on an adaptive one —
       // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
       interviewPlan: true,
@@ -495,7 +495,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const { saved: _saved, ...config } = toConfigView(session.version.config);
   void _saved;
 
-  // ── Adaptive Scope (P17) ──────────────────────────────────────────────────────────────────
+  // ── Conditional Topics (P17) ──────────────────────────────────────────────────────────────────
   // THE choke point. Filtering here — rather than in each consumer — is what makes scope
   // impossible to apply inconsistently: targeting, the end-of-run sweep, coverage, completion and
   // contradiction candidates all read these three lists, so narrowing them once narrows everything.
@@ -504,7 +504,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   // important members rather than whichever happened to be authored first.
   const scope = await buildSessionScope(prisma, {
     versionId: session.versionId,
-    settings: config.adaptiveScope,
+    settings: config.conditionalTopics,
     interviewPlan: session.interviewPlan,
     weightByQuestionKey: new Map(questions.map((q) => [q.key, q.weight])),
     weightByDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight])),
@@ -608,7 +608,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       dataSlotAnswered,
       activeDataSlotKey,
       dataSlotAttempts,
-      // Adaptive Scope (G03): the opening's shared follow-up allowance, when one governs this turn.
+      // Conditional Topics (G03): the opening's shared follow-up allowance, when one governs this turn.
       ...(openingProbe ? { openingProbe } : {}),
       // Seriousness / abuse gate: the session's strikes so far (the core returns the updated count).
       abuseStrikes: session.abuseStrikes,

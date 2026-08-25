@@ -48,7 +48,7 @@ import {
   type ProposedTopic,
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type {
-  AdaptiveScopeSettings,
+  ConditionalTopicsSettings,
   InterviewPlan,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -94,7 +94,7 @@ export interface PlanScopeParams {
   briefing?: string | null;
   /** The questionnaire's stated goal, for framing. */
   goal?: string | null;
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /** Turn ordinal the plan is being decided at. */
   decidedAtTurn: number;
   /**

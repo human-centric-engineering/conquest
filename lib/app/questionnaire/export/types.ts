@@ -152,7 +152,7 @@ export interface SessionExportModel {
   /** The captured data-slot values, grouped by theme — rendered when {@link includeDataSlots}. */
   dataSlots: ExportDataSlotGroup[];
   /**
-   * Adaptive Scope (P17): the areas this interview did not cover, or covered only as a sample.
+   * Conditional Topics (P17): the areas this interview did not cover, or covered only as a sample.
    * Empty for every non-adaptive session, which is most of them.
    *
    * The document prints them because **it already narrows silently**: the section listing is

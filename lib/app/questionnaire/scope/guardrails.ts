@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope guardrails (P17) — pure.
+ * Conditional Topics guardrails (P17) — pure.
  *
  * The deterministic layer applied AFTER the planner proposes. This ordering is the whole design:
  * **the model proposes, it never gets the last word on a hard constraint.** Six numbered rules in a
@@ -26,7 +26,7 @@
 
 import {
   ALWAYS_PHASES,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ExcludedTopic,
   type InterviewPlan,
   type PlannedTopic,
@@ -69,7 +69,7 @@ export interface ApplyGuardrailsInput {
   proposed: readonly ProposedTopic[];
   /** What the hard rules decided. */
   rules: RuleOutcome;
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /** The planner's confidence, already clamped to 0–1. */
   confidence: number;
   /** What produced `proposed` — `llm`, or `fallback` when the planner could not be trusted. */
@@ -105,7 +105,7 @@ export interface ApplyGuardrailsInput {
 export function chooseCheckTopic(
   topics: readonly Topic[],
   selected: ReadonlySet<string>,
-  settings: AdaptiveScopeSettings
+  settings: ConditionalTopicsSettings
 ): Topic | null {
   if (!settings.includeCheckTopic) return null;
 
@@ -254,7 +254,7 @@ function fitToBudget(args: {
   planned: PlannedTopic[];
   seen: Set<string>;
   topics: readonly Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   budget: PlanBudget | undefined;
 }): Map<string, string> {
   const { planned, seen, topics, settings, budget } = args;

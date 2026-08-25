@@ -1,5 +1,5 @@
 /**
- * Unit tests for the streaming routing-analysis route (Adaptive Scope, P17.4).
+ * Unit tests for the streaming routing-analysis route (Conditional Topics, P17.4).
  *
  * File under test:
  *   app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/analyse/stream/route.ts

@@ -355,7 +355,7 @@ export const glossaryAnalysisLimiter = createRateLimiter({
 });
 
 /**
- * Routing-analysis sub-cap (Adaptive Scope, P17.4). One reasoning-model call carrying an ENTIRE
+ * Routing-analysis sub-cap (Conditional Topics, P17.4). One reasoning-model call carrying an ENTIRE
  * source document — the largest single input any app capability takes, and correspondingly the
  * priciest per call. Tighter than the glossary's 20/min for that reason alone: the honest loop here
  * is analyse → review → accept, which an admin runs once or twice per instrument, not repeatedly.
@@ -372,7 +372,7 @@ export const routingAnalysisLimiter = createRateLimiter({
 });
 
 /**
- * Scope-preview sub-cap (Adaptive Scope, F17.14). One reasoning-model call over the version's
+ * Scope-preview sub-cap (Conditional Topics, F17.14). One reasoning-model call over the version's
  * conditional criteria and a synthetic opening — the same class of spend as the live planner, but
  * triggered by a button an admin is *meant* to press repeatedly.
  *
@@ -392,7 +392,7 @@ export const scopePreviewLimiter = createRateLimiter({
 });
 
 /**
- * Scope-evaluation preview sub-cap (Adaptive Scope, F17.21). One call fans out to **four** judge
+ * Scope-evaluation preview sub-cap (Conditional Topics, F17.21). One call fans out to **four** judge
  * LLM completions (the whole panel) — the same paid class as the design-evaluation panel, just a
  * smaller fan-out (4 judges vs. 7), so the same 20/min ceiling leaves at least as much headroom.
  * Keyed on the admin user id, who owns the spend.

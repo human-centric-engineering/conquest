@@ -12,7 +12,7 @@ import { logger } from '@/lib/logging';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { scoreSession, type ItemBounds } from '@/lib/app/questionnaire/scoring/score';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
-import { narrowAdaptiveScopeSettings, type Topic } from '@/lib/app/questionnaire/scope/types';
+import { narrowConditionalTopicsSettings, type Topic } from '@/lib/app/questionnaire/scope/types';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { toTopic, TOPIC_SELECT } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import type { RespondentScores, ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
@@ -63,7 +63,7 @@ export function itemBounds(type: string, typeConfig: unknown): ItemBounds | null
  * A version's scoring schema, narrowed — or null when it has none.
  *
  * A one-query read given its own name because two callers outside the scoring pipeline now need it
- * for a reason that has nothing to do with computing a score: the Adaptive Scope comparability
+ * for a reason that has nothing to do with computing a score: the Conditional Topics comparability
  * checks (F17.15) ask which scales routing can leave partially assessed, and the Topics tab and the
  * launch gate must ask it the same way or they will disagree about whether a version is coherent.
  */
@@ -144,7 +144,7 @@ export async function scoreSessions(
     if (key && num !== null) get(f.sessionId).set(key, num);
   }
 
-  // Adaptive Scope (P17): which items each session's interview actually covered. Only fetched when
+  // Conditional Topics (P17): which items each session's interview actually covered. Only fetched when
   // at least one of these sessions runs on a version that opted in — on a fresh install that is
   // never, so the common path costs one cheap query and no scope resolution at all.
   const inScopeBySession = await loadInScopeRefs(sessionIds);
@@ -166,7 +166,7 @@ export async function scoreSessions(
  * because a scoring item's `ref` addresses either.
  *
  * Absent from the map means "everything was asked", which is the answer for every session on a
- * version that never opted into Adaptive Scope — and, deliberately, for one whose scope resolved
+ * version that never opted into Conditional Topics — and, deliberately, for one whose scope resolved
  * inert. Resolving scope is per session because the plan is; the settings are resolved once per
  * version so a cohort of hundreds on one instrument does not re-narrow the same blob each time.
  *
@@ -184,17 +184,17 @@ async function loadInScopeRefs(sessionIds: string[]): Promise<Map<string, Readon
       id: true,
       versionId: true,
       interviewPlan: true,
-      version: { select: { config: { select: { adaptiveScope: true } } } },
+      version: { select: { config: { select: { conditionalTopics: true } } } },
     },
   });
   if (sessions.length === 0) return out;
 
-  const settingsByVersion = new Map<string, ReturnType<typeof narrowAdaptiveScopeSettings>>();
+  const settingsByVersion = new Map<string, ReturnType<typeof narrowConditionalTopicsSettings>>();
   for (const session of sessions) {
     if (!settingsByVersion.has(session.versionId)) {
       settingsByVersion.set(
         session.versionId,
-        narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope)
+        narrowConditionalTopicsSettings(session.version.config?.conditionalTopics)
       );
     }
   }

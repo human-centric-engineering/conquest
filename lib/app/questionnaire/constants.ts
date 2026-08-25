@@ -1142,7 +1142,7 @@ export const ANALYSE_GLOSSARY_TERMS_FUNCTION_DEFINITION: CapabilityFunctionDefin
 };
 
 /* -------------------------------------------------------------------------- */
-/* Adaptive Scope — the Routing Analyst (P17.4)                               */
+/* Conditional Topics — the Routing Analyst (P17.4)                               */
 /* -------------------------------------------------------------------------- */
 
 /** Slug of the routing-analysis capability — proposes topics, criteria and hard rules. */
@@ -1218,11 +1218,11 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
 };
 
 /* -------------------------------------------------------------------------- */
-/* Adaptive Scope — ingestion-time candidacy detection (P17.19)               */
+/* Conditional Topics — ingestion-time candidacy detection (P17.19)               */
 /* -------------------------------------------------------------------------- */
 
 /** Slug of the candidacy-check capability — a cheap triage read, not the Routing Analyst. */
-export const DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG = 'app_detect_adaptive_scope_candidacy';
+export const DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG = 'app_detect_conditional_topics_candidacy';
 
 /** `AiCapability.executionHandler` for the check — the class the dispatcher resolves. */
 export const DETECT_SCOPE_CANDIDACY_HANDLER = 'AppDetectScopeCandidacyCapability';
@@ -1272,13 +1272,13 @@ export const DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION: CapabilityFunctionDefin
 };
 
 /* -------------------------------------------------------------------------- */
-/* Adaptive Scope — the scope-evaluation judge panel (F17.21)                 */
+/* Conditional Topics — the scope-evaluation judge panel (F17.21)                 */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Slug of the evaluate-scope capability. One source of truth shared by the `BaseCapability`
  * subclass, its `AiCapability` seed row, and the evaluate-preview route that dispatches it once
- * per dimension — the sibling of `EVALUATE_STRUCTURE_CAPABILITY_SLUG` for Adaptive Scope's own
+ * per dimension — the sibling of `EVALUATE_STRUCTURE_CAPABILITY_SLUG` for Conditional Topics' own
  * judge panel. The judge agents themselves are slugged in `scope-evaluation/dimensions.ts`.
  */
 export const EVALUATE_SCOPE_CAPABILITY_SLUG = 'app_evaluate_scope';
@@ -1300,7 +1300,7 @@ export const EVALUATE_SCOPE_HANDLER = 'AppEvaluateScopeCapability';
 export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
   name: EVALUATE_SCOPE_CAPABILITY_SLUG,
   description:
-    "Judge one dimension of a questionnaire version's Adaptive Scope configuration (criteria quality, rule integrity, budget realism, or coverage and burden) — the authored topics, hard rules, planner instructions, and time budget — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the scope evaluate-preview route; persists nothing.",
+    "Judge one dimension of a questionnaire version's Conditional Topics configuration (criteria quality, rule integrity, budget realism, or coverage and burden) — the authored topics, hard rules, planner instructions, and time budget — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the scope evaluate-preview route; persists nothing.",
   parameters: {
     type: 'object',
     properties: {

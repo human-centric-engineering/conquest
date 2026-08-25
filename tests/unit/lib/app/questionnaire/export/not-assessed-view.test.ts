@@ -1,5 +1,5 @@
 /**
- * Unit: the "what this interview did not cover" view — Adaptive Scope (P17).
+ * Unit: the "what this interview did not cover" view — Conditional Topics (P17).
  *
  * The wording lives in a pure function precisely so it can be asserted here: the document that
  * renders it is React-PDF, which emits a binary buffer, and a claim this consequential must not be

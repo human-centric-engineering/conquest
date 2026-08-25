@@ -17,7 +17,7 @@
 import { prisma } from '@/lib/db/client';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
-import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import {
   ANSWER_PROVENANCES,
   ANSWER_SLOT_PANEL_SCOPES,
@@ -111,10 +111,10 @@ export async function loadAnswerPanelState(
               answerSlotPanelScope: true,
               presentationMode: true,
               inlineCorrectionEnabled: true,
-              // Adaptive Scope (P17): the panel must show the interview the respondent is
+              // Conditional Topics (P17): the panel must show the interview the respondent is
               // actually having, not the whole bank. Seeing "12 of 70 answered" after a complete
               // run is the single most confidence-destroying way this feature could fail.
-              adaptiveScope: true,
+              conditionalTopics: true,
             },
           },
           // Data Slots feature: the version's data slots (rendered when dataSlotMode), each with the
@@ -178,19 +178,19 @@ export async function loadAnswerPanelState(
         },
       },
       turns: { select: { id: true, ordinal: true } },
-      // Adaptive Scope (P17): the frozen decision about which topics this interview covers.
+      // Conditional Topics (P17): the frozen decision about which topics this interview covers.
       interviewPlan: true,
       versionId: true,
     },
   });
   if (!row) return null;
 
-  // Adaptive Scope (P17): narrow the structure to what this respondent is actually being asked.
+  // Conditional Topics (P17): narrow the structure to what this respondent is actually being asked.
   // Applied to the SECTIONS the panel renders and to the data-slot groups below, so progress,
   // the required-count and the breadth meter all measure the real interview.
   const scoped = await buildSessionScope(prisma, {
     versionId: row.versionId,
-    settings: narrowAdaptiveScopeSettings(row.version.config?.adaptiveScope),
+    settings: narrowConditionalTopicsSettings(row.version.config?.conditionalTopics),
     interviewPlan: row.interviewPlan,
     weightByQuestionKey: new Map(
       row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
@@ -307,7 +307,7 @@ export async function loadAnswerPanelState(
       // `questions` is itemised only in `both` mode; otherwise the meter shows the summary alone.
       const mappedKeys = ds.questions
         .map((q) => q.questionSlot.key)
-        // Adaptive Scope (P17): a slot in a `light`-depth topic maps to questions this respondent
+        // Conditional Topics (P17): a slot in a `light`-depth topic maps to questions this respondent
         // will never be asked. Counting them would report "1 of 5" on a slot that is, for this
         // interview, complete.
         .filter((k) => isQuestionInScope(scoped.scope, k))

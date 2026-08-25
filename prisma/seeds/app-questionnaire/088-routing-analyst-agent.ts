@@ -27,7 +27,7 @@ then the instrument routes on your invention rather than the author's rule; that
 that matters here.`;
 
 /**
- * Seed the Routing Analyst agent (Adaptive Scope, P17.4).
+ * Seed the Routing Analyst agent (Conditional Topics, P17.4).
  *
  * Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts` — the
  * analyst asks for the `reasoning` tier, since reading prose instructions and turning them into a
@@ -62,7 +62,7 @@ const unit: SeedUnit = {
         name: 'Routing Analyst',
         slug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
         description:
-          'Reads the author’s guidance in an uploaded instrument and proposes the adaptive-scope ' +
+          'Reads the author’s guidance in an uploaded instrument and proposes the conditional-topics ' +
           'topics and hard rules it describes, each traced back to the span it came from. A proposer — ' +
           'everything it returns lands in a draft for an admin to review.',
         systemInstructions: ANALYST_INSTRUCTIONS,

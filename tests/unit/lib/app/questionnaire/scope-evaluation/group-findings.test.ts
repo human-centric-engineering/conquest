@@ -90,7 +90,7 @@ describe('groupScopeFindingsByTarget', () => {
       ...topicWith('talent', 'Talent & culture', ['major']),
       finding({ target: target({ kind: 'rule', key: 'rule-1', label: 'A rule sentence' }) }),
       finding({
-        target: target({ kind: 'settings', key: 'settings', label: 'Adaptive scope settings' }),
+        target: target({ kind: 'settings', key: 'settings', label: 'Conditional topics settings' }),
       }),
       finding({ target: target({ kind: 'unknown', key: 'invented', label: 'invented' }) }),
       finding({ target: null, targetKey: 'unresolved' }),
@@ -126,7 +126,11 @@ describe('groupScopeFindingsByTarget', () => {
         finding({ target: target({ kind: 'unknown', key: 'zz', label: 'zz' }) }),
         ...topicWith('talent', 'Talent & culture', ['minor']),
         finding({
-          target: target({ kind: 'settings', key: 'settings', label: 'Adaptive scope settings' }),
+          target: target({
+            kind: 'settings',
+            key: 'settings',
+            label: 'Conditional topics settings',
+          }),
         }),
       ]);
       expect(keysOf(groups)).toEqual(['settings', 'talent', 'rule-1', 'zz']);

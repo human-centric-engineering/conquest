@@ -4,10 +4,10 @@ The admin can download a **branded, shareable artifact** covering everything abo
 questionnaire is set up — title/version/goals, the question structure, the semantic data slots
 (with their linked questions), the definitions/glossary, the experience-setup summary, (opt-in) the
 latest F5.1–F5.3 design-evaluation run's judge findings, and (opt-in) the
-[Adaptive Scope](./adaptive-scope.md) routing logic in plain language — as a PDF, CSV, or Markdown
+[Conditional Topics](./conditional-topics.md) routing logic in plain language — as a PDF, CSV, or Markdown
 file. The admin picks which of those seven sections to include from a dialog opened by the
 **Questionnaire pack** button in the workspace header; five are ticked by default, "Evaluation
-findings" and "Adaptive scope" are not (see below).
+findings" and "Conditional topics" are not (see below).
 
 Distinct from the brand-free [blank instrument export](./admin-ui.md) (F14.9): the instrument is
 the design-time reviewer copy of just the questions, deliberately unbranded. The Pack is the
@@ -71,14 +71,14 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   continuation rows would break all three. "Name the question once" is a rule about documents a
   person reads top to bottom.
 
-- **Adaptive scope** (opt-in, off by default) — the [routing logic](./adaptive-scope.md) explained
+- **Conditional topics** (opt-in, off by default) — the [routing logic](./conditional-topics.md) explained
   in plain language for a stakeholder audience, not the authoring vocabulary: which topics are
   **always asked** (opening/core/closing), which are **asked when it fits** (conditional, with the
   admin's own plain-English criteria), and the hard rules that force a topic in or out — each
   rendered as a sentence ("Always include ... when ...") rather than an operator/action pair. When
-  the version has never turned Adaptive Scope on, the section still renders — it states that fact
+  the version has never turned Conditional Topics on, the section still renders — it states that fact
   rather than being omitted, the same "state it, don't hide it" choice `PackEvaluations.hasRun: false`
-  makes. `buildAdaptiveScopeSection` (`build-pack-model.ts`) resolves a rule's topic/data-slot keys
+  makes. `buildConditionalTopicsSection` (`build-pack-model.ts`) resolves a rule's topic/data-slot keys
   to their authored labels via the version's topics and data slots; an unresolvable key (one since
   deleted — silently skipped everywhere else in this feature) falls back to the raw key rather than
   dropping the rule, so a stale rule stays visible as something to clean up.
@@ -86,7 +86,7 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
 Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
 so every serialiser skips it the same way.
 
-**Why `evaluations` and `adaptiveScope` default off, unlike the other five:** the Pack is the
+**Why `evaluations` and `conditionalTopics` default off, unlike the other five:** the Pack is the
 external/showcase artifact — built to hand to a client or stakeholder. Judge findings are unreviewed
 AI critique of the questionnaire (`this question is redundant`, `off-mission`, etc.), and shipping
 that by accident in a document meant to showcase the questionnaire would be an easy, embarrassing
@@ -159,37 +159,37 @@ spreadsheet.
 
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&adaptiveScope=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
-use. Each include flag is `true`/`false`; all default `true` except `evaluations`, `adaptiveScope`,
+use. Each include flag is `true`/`false`; all default `true` except `evaluations`, `conditionalTopics`,
 and `setupTechnical`, which default `false`. `setupTechnical` is a sub-option of `setup`, not an
 eighth section — it widens the setup summary rather than adding one, and is ignored when
 `setup=false`. `runtime = 'nodejs'` (react-pdf). Filename: `pack-<slug>-v<N>.<ext>`,
 `Cache-Control: no-store`. The evaluation run is only loaded (`loadLatestEvaluationRun`) when
-`evaluations=true`, and the version's topics + Adaptive Scope settings are only loaded
-(`loadTopics`, `loadAdaptiveScopeSettings`) when `adaptiveScope=true` — the common case skips both
+`evaluations=true`, and the version's topics + Conditional Topics settings are only loaded
+(`loadTopics`, `loadConditionalTopicsSettings`) when `conditionalTopics=true` — the common case skips both
 queries entirely.
 
 Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 
 ## Code map
 
-| Concern                    | File                                                                                             |
-| -------------------------- | ------------------------------------------------------------------------------------------------ |
-| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                     |
-| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                               |
-| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                     |
-| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                 |
-| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                            |
-| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                      |
-| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                     |
-| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                |
-| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                         |
-| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                        |
-| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                  |
-| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)        |
-| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadAdaptiveScopeSettings`) |
+| Concern                    | File                                                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                         |
+| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                   |
+| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                         |
+| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                     |
+| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                |
+| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                          |
+| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                         |
+| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                    |
+| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                             |
+| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                            |
+| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                      |
+| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)            |
+| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`) |
 
 ## UI surface
 
@@ -205,7 +205,7 @@ Two entry points, both opening the same `PackExportDialog`:
   export menu.
 
 The dialog offers seven section checkboxes (five default-checked, "Evaluation findings" and
-"Adaptive scope" default-unchecked), one nested sub-checkbox — **Technical & tuning settings**, indented under
+"Conditional topics" default-unchecked), one nested sub-checkbox — **Technical & tuning settings**, indented under
 "Experience setup" and disabled while that parent is off — and a format select (PDF / CSV /
 Markdown). The sub-option does not count toward the "pick at least one section" gate, since it
 produces nothing on its own. Since the download URL depends on that dialog state (unlike the menu's static

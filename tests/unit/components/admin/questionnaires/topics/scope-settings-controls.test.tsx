@@ -76,11 +76,11 @@ vi.mock('@/components/admin/questionnaires/topics/scope-rules-editor', () => ({
 
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   MAX_CONDITIONAL_TOPICS_CEILING,
   MIN_CONDITIONAL_TOPICS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -125,13 +125,13 @@ const COSTS: TopicsPayload['costs'] = {
 };
 
 function renderCard(
-  settings: Partial<AdaptiveScopeSettings> = {},
+  settings: Partial<ConditionalTopicsSettings> = {},
   { topics = CONDITIONALS, busy = false } = {}
 ) {
   const onSave = vi.fn().mockResolvedValue(true);
   render(
     <ScopeSettingsCard
-      settings={{ ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...settings }}
+      settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings }}
       topics={topics}
       dataSlots={[]}
       costs={COSTS}
@@ -150,10 +150,10 @@ function renderCard(
 const saveButton = () => screen.getByRole('button', { name: /^Save/ });
 
 /** The draft the card would save. Read by clicking Save, which is the only way it leaves the card. */
-async function savedDraft(onSave: ReturnType<typeof vi.fn>): Promise<AdaptiveScopeSettings> {
+async function savedDraft(onSave: ReturnType<typeof vi.fn>): Promise<ConditionalTopicsSettings> {
   fireEvent.click(saveButton());
   await waitFor(() => expect(onSave).toHaveBeenCalled());
-  return onSave.mock.calls.at(-1)![0] as AdaptiveScopeSettings;
+  return onSave.mock.calls.at(-1)![0] as ConditionalTopicsSettings;
 }
 
 /**
@@ -186,9 +186,9 @@ describe('ScopeSettingsCard — no longer owns the master switch', () => {
   // render one at all: two writers of `enabled` drift, and the loser is whichever rendered last —
   // an admin toggling the header and then saving unrelated settings here would have silently
   // undone their own toggle.
-  it('renders no adaptive-scope switch', () => {
+  it('renders no conditional-topics switch', () => {
     renderCard({ enabled: false });
-    expect(document.getElementById('adaptive-scope-enabled')).toBeNull();
+    expect(document.getElementById('conditional-topics-enabled')).toBeNull();
   });
 
   it('reads `enabled` from props for its conditional copy, not from a local draft', () => {
@@ -204,7 +204,7 @@ describe('ScopeSettingsCard — no longer owns the master switch', () => {
   });
 
   it('cannot change `enabled`, whatever else it saves', async () => {
-    // The card still CARRIES the field — its draft is a whole AdaptiveScopeSettings — but it has
+    // The card still CARRIES the field — its draft is a whole ConditionalTopicsSettings — but it has
     // no control that writes to it, so what it saves is whatever the server last said. The panel
     // is what stops it reaching the wire (see topics-panel.test.tsx); this asserts the card never
     // mutates it on the way through.
@@ -438,7 +438,7 @@ describe('ScopeSettingsCard — dirty state', () => {
         vi.advanceTimersByTime(2500);
       });
 
-      expect(saveButton()).toHaveTextContent('Save adaptive scope');
+      expect(saveButton()).toHaveTextContent('Save conditional topics');
       expect(saveButton()).toBeDisabled();
     } finally {
       vi.useRealTimers();
@@ -449,7 +449,7 @@ describe('ScopeSettingsCard — dirty state', () => {
     const onSave = vi.fn().mockResolvedValue(false);
     render(
       <ScopeSettingsCard
-        settings={{ ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true }}
+        settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true }}
         topics={CONDITIONALS}
         dataSlots={[]}
         costs={COSTS}

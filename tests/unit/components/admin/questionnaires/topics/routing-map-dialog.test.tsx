@@ -1,5 +1,5 @@
 /**
- * Unit tests: `RoutingMapDialog` — the Adaptive scope routing map.
+ * Unit tests: `RoutingMapDialog` — the Conditional topics routing map.
  *
  * The graph itself is asserted in `tests/unit/lib/app/questionnaire/scope/graph.test.ts`; what is tested
  * here is the shell around it — the two states an author can misread (a map of a switched-off version,
@@ -44,8 +44,8 @@ vi.mock('@/hooks/use-theme', () => ({
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ALWAYS_BAND_NODE_ID } from '@/lib/app/questionnaire/scope/graph';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
@@ -67,11 +67,14 @@ function topic(key: string, phase: Topic['phase'], label = `Topic ${key}`): Topi
   };
 }
 
-function payload(topics: Topic[], settings: Partial<AdaptiveScopeSettings> = {}): TopicsPayload {
+function payload(
+  topics: Topic[],
+  settings: Partial<ConditionalTopicsSettings> = {}
+): TopicsPayload {
   return {
     ...EMPTY_TOPICS_PAYLOAD,
     topics,
-    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...settings },
+    settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings },
   };
 }
 
@@ -123,7 +126,7 @@ describe('RoutingMapDialog', () => {
   });
 
   describe('the states an author could misread', () => {
-    it('says so when adaptive scope is off', () => {
+    it('says so when conditional topics is off', () => {
       render(
         <RoutingMapDialog payload={payload(FULL, { enabled: false })} onEditTopic={vi.fn()} />
       );

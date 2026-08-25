@@ -6,7 +6,7 @@
  *
  * Test Coverage:
  * - Five of the seven section checkboxes are checked by default; "Evaluation findings" and
- *   "Adaptive scope" are not
+ *   "Conditional topics" are not
  * - The nested "Technical & tuning settings" sub-option: off by default, disabled with its parent,
  *   and not counted as a section by the "pick at least one" gate
  * - Download is disabled once every SECTION checkbox is unchecked, with a hint message
@@ -61,7 +61,7 @@ afterEach(() => {
 
 describe('PackExportDialog', () => {
   describe('section checkboxes', () => {
-    it('renders seven section checkboxes, all checked by default except "Evaluation findings" and "Adaptive scope"', () => {
+    it('renders seven section checkboxes, all checked by default except "Evaluation findings" and "Conditional topics"', () => {
       renderDialog();
       const boxes = sectionBoxes();
       expect(boxes).toHaveLength(7);
@@ -120,7 +120,7 @@ describe('PackExportDialog', () => {
   });
 
   describe('download URL', () => {
-    it('navigates to the pack URL with format=pdf, evaluations=false, adaptiveScope=false, and every other include flag true by default', async () => {
+    it('navigates to the pack URL with format=pdf, evaluations=false, conditionalTopics=false, and every other include flag true by default', async () => {
       const user = userEvent.setup();
       const onOpenChange = renderDialog();
 
@@ -134,7 +134,7 @@ describe('PackExportDialog', () => {
       expect(window.location.href).toContain('definitions=true');
       expect(window.location.href).toContain('setup=true');
       expect(window.location.href).toContain('evaluations=false');
-      expect(window.location.href).toContain('adaptiveScope=false');
+      expect(window.location.href).toContain('conditionalTopics=false');
       expect(window.location.href).toContain('setupTechnical=false');
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -162,15 +162,15 @@ describe('PackExportDialog', () => {
       expect(window.location.href).toContain('evaluations=true');
     });
 
-    it('checking "Adaptive scope" reflects as adaptiveScope=true in the URL', async () => {
+    it('checking "Conditional topics" reflects as conditionalTopics=true in the URL', async () => {
       const user = userEvent.setup();
       renderDialog();
 
-      // "Adaptive scope" is the seventh (last) section checkbox in document order.
+      // "Conditional topics" is the seventh (last) section checkbox in document order.
       await user.click(sectionBoxes()[6]);
       await user.click(screen.getByRole('button', { name: /download/i }));
 
-      expect(window.location.href).toContain('adaptiveScope=true');
+      expect(window.location.href).toContain('conditionalTopics=true');
     });
 
     it('checking "Technical & tuning settings" reflects as setupTechnical=true in the URL', async () => {

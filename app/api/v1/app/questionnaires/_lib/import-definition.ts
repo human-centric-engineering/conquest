@@ -3,7 +3,7 @@
  *
  * Writes a validated {@link DefinitionImport} envelope into the app graph as a **brand-new**
  * questionnaire (v1 draft) — `AppQuestionnaire` → `AppQuestionnaireVersion` → sections → questions
- * (+ tags, config, data slots, Adaptive Scope topics + settings, scoring schema) — in one
+ * (+ tags, config, data slots, Conditional Topics topics + settings, scoring schema) — in one
  * transaction, all-or-nothing. The import is always create-only: it never touches an existing
  * questionnaire, so a bad/duplicate file can't clobber live work.
  *
@@ -12,7 +12,7 @@
  * no tags, and uses `createMany` so it can't attach per-question tags). Embeddings are NOT written
  * here — the route regenerates question + data-slot vectors after commit (they're reproducible from
  * the text). Cross-references survive by stable `key`: tags are remapped by normalised label,
- * data-slot↔question + scoring refs by question key, and Adaptive Scope topic membership
+ * data-slot↔question + scoring refs by question key, and Conditional Topics topic membership
  * (`questionKeys`/`dataSlotKeys`) is remapped from the envelope's original keys to whatever key each
  * question/slot actually landed on after dedup.
  *
@@ -30,7 +30,7 @@ import type { DefinitionImport } from '@/lib/app/questionnaire/authoring';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import {
   buildTopicCreateInput,
-  patchAdaptiveScopeSettings,
+  patchConditionalTopicsSettings,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 export interface ImportDefinitionInput {
@@ -146,7 +146,7 @@ export async function persistDefinitionImport(
       // deduped key is unique within the version, so we map it back to the original exported key.
       const takenKeys = new Set<string>();
       const originalKeyByDeduped = new Map<string, string>();
-      // Reverse of the above — lets Adaptive Scope topics (which reference questions by their
+      // Reverse of the above — lets Conditional Topics topics (which reference questions by their
       // ORIGINAL exported key) remap onto whatever key a question actually landed on. A duplicate
       // original key resolves to the last-declared question, same as `questionIdByOriginalKey` below.
       const dedupedQuestionKeyByOriginal = new Map<string, string>();
@@ -251,7 +251,7 @@ export async function persistDefinitionImport(
       const takenSlotKeys = new Set<string>();
       const slotRows: Prisma.AppDataSlotCreateManyInput[] = [];
       const slotQuestionKeysByDeduped = new Map<string, string[]>();
-      // Reverse map for Adaptive Scope topics (below), same reasoning as `dedupedQuestionKeyByOriginal`.
+      // Reverse map for Conditional Topics topics (below), same reasoning as `dedupedQuestionKeyByOriginal`.
       const dedupedSlotKeyByOriginal = new Map<string, string>();
       for (const slot of version.dataSlots) {
         const key = nextAvailableKey(slot.key || slugifyKey(slot.name), takenSlotKeys);
@@ -289,7 +289,7 @@ export async function persistDefinitionImport(
         }
       }
 
-      // 8. Adaptive Scope (P17) topics — membership is KEYS (never row ids), so each topic's
+      // 8. Conditional Topics (P17) topics — membership is KEYS (never row ids), so each topic's
       //    `questionKeys`/`dataSlotKeys` are remapped from the ORIGINAL exported key to whatever key
       //    the question/slot actually landed on above; an unresolvable key is silently skipped, same
       //    as everywhere else in this feature (a stale reference must never break the import).
@@ -315,7 +315,7 @@ export async function persistDefinitionImport(
         await tx.appQuestionnaireTopic.createMany({ data: topicRows });
       }
 
-      // 8b. Adaptive Scope (P17) settings — a top-level envelope field, not part of `version.config`
+      // 8b. Conditional Topics (P17) settings — a top-level envelope field, not part of `version.config`
       //     (see definition-export.ts for why). Routed through the same read-narrow-merge-write
       //     helper the Topics tab's settings PATCH uses, rather than a raw write, so rule ordinals get
       //     re-stamped and every field is normalised exactly as a live read would produce — a fresh
@@ -324,14 +324,14 @@ export async function persistDefinitionImport(
       //     reference exactly like a topic's membership, and needs the same remap onto whatever key a
       //     collided data slot actually landed on — `topicKey` needs no such remap because topic keys
       //     are never deduped (uniqueness is enforced by the import schema, not `nextAvailableKey`).
-      if (version.adaptiveScope !== undefined) {
-        const rules = version.adaptiveScope.rules?.map((rule) => ({
+      if (version.conditionalTopics !== undefined) {
+        const rules = version.conditionalTopics.rules?.map((rule) => ({
           ...rule,
           dataSlotKey: dedupedSlotKeyByOriginal.get(rule.dataSlotKey) ?? rule.dataSlotKey,
         }));
-        await patchAdaptiveScopeSettings(
+        await patchConditionalTopicsSettings(
           versionId,
-          { ...version.adaptiveScope, ...(rules !== undefined ? { rules } : {}) },
+          { ...version.conditionalTopics, ...(rules !== undefined ? { rules } : {}) },
           tx
         );
       }

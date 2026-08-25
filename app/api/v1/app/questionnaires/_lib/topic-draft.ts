@@ -1,5 +1,5 @@
 /**
- * Route-local DB seam for the Routing Analyst's reviewable draft (Adaptive Scope, P17.4).
+ * Route-local DB seam for the Routing Analyst's reviewable draft (Conditional Topics, P17.4).
  *
  * `AppQuestionnaireTopicDraft` holds ONE pending proposal per version and is explicitly not live:
  * the runtime scope resolver, the planner and the launch gate read only `AppQuestionnaireTopic`.
@@ -15,9 +15,9 @@ import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import type { AcceptTopicDraftBody } from '@/lib/app/questionnaire/scope/schemas';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowProposedTopicSet,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ProposedTopicSet,
   type ScopeRule,
   type Topic,
@@ -60,7 +60,7 @@ export async function discardTopicDraft(versionId: string): Promise<void> {
 /** What an accept wrote back. */
 export interface AcceptTopicDraftResult {
   topics: Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
 }
 
 /**
@@ -114,9 +114,9 @@ export async function acceptTopicDraft(
 
     const config = await tx.appQuestionnaireConfig.findUnique({
       where: { versionId },
-      select: { adaptiveScope: true },
+      select: { conditionalTopics: true },
     });
-    const current = narrowAdaptiveScopeSettings(config?.adaptiveScope);
+    const current = narrowConditionalTopicsSettings(config?.conditionalTopics);
 
     // Rules REPLACE rather than append. The analyst read the document's routing instructions as one
     // piece and proposed the rules they describe; appending would leave an admin who re-ran the
@@ -131,7 +131,7 @@ export async function acceptTopicDraft(
       ordinal: i,
     }));
 
-    const merged: AdaptiveScopeSettings = {
+    const merged: ConditionalTopicsSettings = {
       ...current,
       rules,
       ...(body.maxConditionalTopics !== undefined
@@ -151,8 +151,8 @@ export async function acceptTopicDraft(
 
     await tx.appQuestionnaireConfig.upsert({
       where: { versionId },
-      update: { adaptiveScope: jsonInput(merged) },
-      create: { versionId, adaptiveScope: jsonInput(merged) },
+      update: { conditionalTopics: jsonInput(merged) },
+      create: { versionId, conditionalTopics: jsonInput(merged) },
     });
 
     await tx.appQuestionnaireTopicDraft.deleteMany({ where: { versionId } });
@@ -163,7 +163,7 @@ export async function acceptTopicDraft(
       select: TOPIC_SELECT,
     });
 
-    return { topics: rows.map(toTopic), settings: narrowAdaptiveScopeSettings(merged) };
+    return { topics: rows.map(toTopic), settings: narrowConditionalTopicsSettings(merged) };
   });
 }
 

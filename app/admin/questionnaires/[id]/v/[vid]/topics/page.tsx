@@ -1,5 +1,5 @@
 /**
- * Adaptive scope tab — which parts of this questionnaire apply to which respondent, and who
+ * Conditional topics tab — which parts of this questionnaire apply to which respondent, and who
  * decides.
  *
  * ConQuest already decides which question next (selection strategies) and which questionnaire next
@@ -8,7 +8,7 @@
  * requirement — and before this the only way to express it was to split the questionnaire, which
  * costs cross-section scoring and cohort analysis.
  *
- * The URL segment stays `topics` (the unit this page edits) while the tab reads "Adaptive scope"
+ * The URL segment stays `topics` (the unit this page edits) while the tab reads "Conditional topics"
  * (the capability it configures) — renaming the route would break every bookmark and the launch
  * checklist deep-link for no behavioural gain.
  *
@@ -22,7 +22,7 @@ import { TopicsPanel } from '@/components/admin/questionnaires/topics/topics-pan
 import { getVersionTopicsCached } from '@/lib/app/questionnaire/workspace-data';
 
 export const metadata: Metadata = {
-  title: 'Adaptive scope · Questionnaire',
+  title: 'Conditional topics · Questionnaire',
   description:
     'Decide which parts of this questionnaire each respondent is asked, and who makes that call.',
 };
@@ -31,7 +31,7 @@ interface PageProps {
   params: Promise<{ id: string; vid: string }>;
 }
 
-export default async function AdaptiveScopeTab({ params }: PageProps) {
+export default async function ConditionalTopicsTab({ params }: PageProps) {
   const { id, vid } = await params;
   const payload = await getVersionTopicsCached(id, vid);
 

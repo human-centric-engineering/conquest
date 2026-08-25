@@ -1,5 +1,5 @@
 /**
- * Unit tests: `TopicsPanel` — the Adaptive scope tab's client shell.
+ * Unit tests: `TopicsPanel` — the Conditional topics tab's client shell.
  *
  * The panel renders no controls of its own; every card below it has its own test file. What it *owns*
  * is the wiring between them, and each strand of that wiring is a decision the module header defends:
@@ -183,8 +183,8 @@ vi.mock('@/components/admin/questionnaires/topics/topic-list-editor', () => ({
 import { TopicsPanel } from '@/components/admin/questionnaires/topics/topics-panel';
 import { ForkCancelledError } from '@/components/admin/questionnaires/authoring-mutate';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
@@ -205,8 +205,8 @@ const GAP_FIXTURE = {
  * A settings blob with every field set to something other than its default, so a field the panel
  * forgets to enumerate shows up as a missing key rather than as a coincidentally-equal value.
  */
-const SETTINGS_FIXTURE: AdaptiveScopeSettings = {
-  ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+const SETTINGS_FIXTURE: ConditionalTopicsSettings = {
+  ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   enabled: true,
   maxConditionalTopics: 5,
   sessionBudgetSeconds: 900,
@@ -269,7 +269,7 @@ function payload(overrides: Partial<TopicsPayload> = {}): TopicsPayload {
   return {
     ...EMPTY_TOPICS_PAYLOAD,
     topics: [topic('open', 'opening'), topic('pricing', 'conditional')],
-    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true },
+    settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true },
     ...overrides,
   };
 }
@@ -356,7 +356,7 @@ describe('TopicsPanel — the status header owns the master switch', () => {
 
   it('PATCHes `enabled` ALONE, so the merge cannot touch a sibling', async () => {
     const user = userEvent.setup();
-    renderPanel(payload({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: false } }));
+    renderPanel(payload({ settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: false } }));
 
     await user.click(headerSwitch());
 
@@ -371,7 +371,7 @@ describe('TopicsPanel — the status header owns the master switch', () => {
   it('renders the server value, so a declined fork leaves the switch where it was', async () => {
     const user = userEvent.setup();
     authoringMutateMock.mockRejectedValue(new ForkCancelledError());
-    renderPanel(payload({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: false } }));
+    renderPanel(payload({ settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: false } }));
 
     await user.click(headerSwitch());
 
@@ -982,7 +982,7 @@ describe('TopicsPanel — composition', () => {
   it('mounts the whole tab: explainer, map, findings and the five cards', () => {
     renderPanel();
 
-    expect(screen.getByText('How adaptive scope works')).toBeInTheDocument();
+    expect(screen.getByText('How conditional topics works')).toBeInTheDocument();
     expect(screen.getByTestId('routing-map')).toBeInTheDocument();
     expect(screen.getByTestId('scope-issues')).toBeInTheDocument();
     expect(screen.getByTestId('analyst-card')).toBeInTheDocument();

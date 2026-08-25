@@ -1,7 +1,7 @@
 /**
- * Adaptive Scope evaluation capability (F17.21).
+ * Conditional Topics evaluation capability (F17.21).
  *
- * A `BaseCapability` that runs ONE judge over a questionnaire version's Adaptive Scope
+ * A `BaseCapability` that runs ONE judge over a questionnaire version's Conditional Topics
  * configuration for ONE dimension and returns a {@link ScopeJudgeVerdict} — a continuous score in
  * [0, 1] plus a list of actionable findings (proposed edits). The scope evaluate-preview route
  * dispatches it once per dimension, passing each judge agent's resolvable binding; the four calls

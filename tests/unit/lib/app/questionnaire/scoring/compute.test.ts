@@ -24,7 +24,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: {
     appAnswerSlot: { findMany: (...a: unknown[]) => findManyAnswers(...a) },
     appDataSlotFill: { findMany: (...a: unknown[]) => findManyFills(...a) },
-    // Adaptive Scope (P17): `scoreSessions` reads each session's plan to separate "not answered"
+    // Conditional Topics (P17): `scoreSessions` reads each session's plan to separate "not answered"
     // from "never asked". Default returns no sessions, which is the pre-P17 behaviour.
     appQuestionnaireSession: { findMany: (...a: unknown[]) => findManySessions(...a) },
     appQuestionnaireTopic: { findMany: (...a: unknown[]) => findManyTopics(...a) },
@@ -110,7 +110,7 @@ describe('scoreSessions', () => {
   });
 });
 
-describe('scoreSessions — Adaptive Scope (P17)', () => {
+describe('scoreSessions — Conditional Topics (P17)', () => {
   /** A session on a version that opted in, with a plan covering only the `core_a` topic. */
   function adaptiveSession() {
     findManySessions.mockResolvedValue([
@@ -128,7 +128,7 @@ describe('scoreSessions — Adaptive Scope (P17)', () => {
           decidedAtTurn: 2,
           decidedAt: '2026-08-12T00:00:00.000Z',
         },
-        version: { config: { adaptiveScope: { enabled: true } } },
+        version: { config: { conditionalTopics: { enabled: true } } },
       },
     ]);
     findManyTopics.mockResolvedValue([
@@ -314,7 +314,7 @@ describe('recomputeSessionScores', () => {
 
     expect(count).toBe(1);
     // raw = mean(4,5) = 4.5; schema has no bands, so normalised/band stay null; both items counted
-    // and (no adaptive-scope session row) both are treated as asked.
+    // and (no conditional-topics session row) both are treated as asked.
     const expectedScores = {
       open: {
         raw: 4.5,

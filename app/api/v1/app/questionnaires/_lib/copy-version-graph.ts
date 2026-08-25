@@ -107,7 +107,7 @@ export async function copyVersionGraph(
           uploadedBy: true,
         },
       },
-      // Adaptive Scope (P17): topics fork with the version. Their membership is KEYS, not row ids,
+      // Conditional Topics (P17): topics fork with the version. Their membership is KEYS, not row ids,
       // so — unlike tags and data-slot links — there is nothing to re-link: a verbatim copy lands on
       // the copied questions automatically, because those carry their keys over 1:1.
       topics: {
@@ -189,7 +189,7 @@ export async function copyVersionGraph(
         cohortReport: jsonInput(source.config.cohortReport),
         intro: jsonInput(source.config.intro),
         milestoneBannerThresholds: jsonInput(source.config.milestoneBannerThresholds),
-        adaptiveScope: jsonInput(source.config.adaptiveScope),
+        conditionalTopics: jsonInput(source.config.conditionalTopics),
       },
     });
   }
@@ -355,7 +355,7 @@ export async function copyVersionGraph(
     await tx.appDataSlotQuestion.createMany({ data: newDataSlotQuestions });
   }
 
-  // Adaptive Scope (P17): one createMany, no re-linking. See the select above for why.
+  // Conditional Topics (P17): one createMany, no re-linking. See the select above for why.
   // The DRAFT is deliberately NOT copied: a fork is a new editing surface, and carrying an
   // un-reviewed proposal into it would make the same proposal reviewable in two places at once.
   if (source.topics.length > 0) {

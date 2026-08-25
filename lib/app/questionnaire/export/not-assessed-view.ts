@@ -1,5 +1,5 @@
 /**
- * "What this interview did not cover", as a document renders it — Adaptive Scope (P17). Pure.
+ * "What this interview did not cover", as a document renders it — Conditional Topics (P17). Pure.
  *
  * The exports already narrow silently: every listing is filtered to what was in scope, so an area
  * an adaptive interview decided not to ask about simply is not there. A reader — often months

@@ -64,7 +64,10 @@ import {
   getVersionEmbeddingCoverageCached,
   getVersionDataSlotEmbeddingCoverageCached,
 } from '@/lib/app/questionnaire/workspace-data';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS, type Topic } from '@/lib/app/questionnaire/scope/types';
+import {
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type Topic,
+} from '@/lib/app/questionnaire/scope/types';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
@@ -154,7 +157,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       questionFidelity: DEFAULT_QUESTION_FIDELITY,
-      adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     },
     ...over,
   };
@@ -547,7 +550,7 @@ function makeTopic(over: Partial<Topic> = {}): Topic {
 function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
   return {
     topics: [makeTopic()],
-    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true },
+    settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true },
     issues: [],
     inventory: { questions: [], dataSlots: [] },
     costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
@@ -609,7 +612,7 @@ describe('getVersionTopicsCached', () => {
       // make the Overview claim a version is incoherent
       expect(result).toEqual({
         ...EMPTY_TOPICS_PAYLOAD,
-        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       });
     });
 
@@ -640,7 +643,7 @@ describe('getVersionTopicsCached', () => {
       // Assert: body.success=false → the same "feature off" fallback as any other failure
       expect(result).toEqual({
         ...EMPTY_TOPICS_PAYLOAD,
-        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       });
     });
   });
@@ -656,7 +659,7 @@ describe('getVersionTopicsCached', () => {
       // Assert: documented fallback on a thrown error is the same "feature off" payload
       expect(result).toEqual({
         ...EMPTY_TOPICS_PAYLOAD,
-        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       });
     });
 

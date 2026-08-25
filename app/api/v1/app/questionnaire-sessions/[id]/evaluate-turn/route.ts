@@ -19,7 +19,7 @@
  *   The dump is supplied by the client because inspector data is never persisted elsewhere; it is
  *   validated here (external data → Zod, never `as`). The questionnaire objectives (goal, audience,
  *   strategy, tone) and the interviewer policy the turn ran under (house rules, questioning
- *   approach, question fidelity, adaptive scope) are loaded SERVER-SIDE from the session's version
+ *   approach, question fidelity, conditional topics) are loaded SERVER-SIDE from the session's version
  *   so they can't be spoofed — `questionKey` is a lookup handle, never a claimed value.
  *
  *   Requires the session to be a *preview* — the same gate the inspector that produces the dump

@@ -34,7 +34,7 @@
 import {
   ALWAYS_PHASES,
   LIGHT_DEPTH_MEMBER_COUNT,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type InterviewPlan,
   type Topic,
   type TopicDepth,
@@ -47,7 +47,7 @@ export interface ScopeInput {
   /** The session's plan, or null before one is made (and forever, on a non-adaptive version). */
   plan: InterviewPlan | null;
   /** The version's resolved settings. */
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /**
    * Every question key in the version. Supplied only by callers that need
    * {@link ResolvedScope.notAskedQuestionKeys} — the report and the exports, which must say

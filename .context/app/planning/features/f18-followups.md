@@ -65,7 +65,7 @@ since `f18.4` is told the level and can now be asked to report on it.
 
 ## 3. The opening-probe allowance is not reported · **~half a day**
 
-Derivable from the turn record the way Adaptive Scope already derives `spent` (opening turns minus
+Derivable from the turn record the way Conditional Topics already derives `spent` (opening turns minus
 distinct opening slots), but it needs the opening-topic join. Cut from `f18.7` to keep that phase to
 one migration.
 
@@ -73,7 +73,7 @@ one migration.
 
 - **House rules, from the feature doc's own Deferred list:** verbatim `if_asked` responses (a
   per-rule flag for compliance clients needing exact wording); per-topic rule scoping (binding a rule
-  to an Adaptive Scope topic or section rather than the whole questionnaire); client-level rule
+  to a conditional topic or section rather than the whole questionnaire); client-level rule
   libraries (a shared set inherited by every questionnaire for a client).
 - **The two PDF `QuestionBlock` components are duplicated** — byte-identical in
   `instrument-pdf-document.tsx` and `pack-pdf-document.tsx`. Deduping is a real refactor of two
@@ -93,4 +93,4 @@ one migration.
 - [`f18.1.md`](./f18.1.md) · [`f18.2.md`](./f18.2.md) · [`f18.3.md`](./f18.3.md) — the three features
 - [`f18.4.md`](./f18.4.md) · [`f18.5.md`](./f18.5.md) · [`f18.6.md`](./f18.6.md) ·
   [`f18.7.md`](./f18.7.md) — the ring of follow-ups
-- [`f17-followups.md`](./f17-followups.md) — the same shape, for Adaptive Scope
+- [`f17-followups.md`](./f17-followups.md) — the same shape, for Conditional Topics

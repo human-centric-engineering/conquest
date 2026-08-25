@@ -1,7 +1,7 @@
 # Interviewer-policy evaluation (F18.8)
 
 The third judge panel. The [design-evaluation panel](../planning/features/f5.1.md)
-scores the **questions**; the [Adaptive Scope panel](./adaptive-scope.md#scope-evaluation-f1721)
+scores the **questions**; the [Conditional Topics panel](./conditional-topics.md#scope-evaluation-f1721)
 scores the **routing**; this one scores the **interviewer policy** — the client's house rules, the
 questioning arc, and the per-question ask-as-written dial, which together decide how every question
 is actually put to a respondent.
@@ -245,8 +245,8 @@ missed warning to a noisy one", and a blocking gate driven by keyword matching w
 ### One genuinely new helper
 
 `patchVersionConfigBlocks(versionId, patch, tx?)` in `_lib/config-routes.ts`. There was no
-transaction-aware read-modify-write seam for the plain config blocks — `patchAdaptiveScopeSettings`
-covers only adaptive scope, and the config PATCH route does an inline upsert over a whole validated
+transaction-aware read-modify-write seam for the plain config blocks — `patchConditionalTopicsSettings`
+covers only conditional topics, and the config PATCH route does an inline upsert over a whole validated
 body. Modelled on the former, down to the optional `tx`.
 
 ## In the Questionnaire Pack

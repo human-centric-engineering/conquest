@@ -202,7 +202,7 @@ describe('reconcileTopicsForVersion', () => {
     });
     expect(tx.appQuestionnaireTopic.update).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledWith(
-      'adaptive scope: dropped topics emptied by a structure rewrite',
+      'conditional topics: dropped topics emptied by a structure rewrite',
       { versionId: 'v-1', count: 1 }
     );
   });
@@ -286,7 +286,7 @@ describe('seedTopicsBestEffort', () => {
 
     await seedTopicsBestEffort('v-1');
 
-    expect(logger.info).toHaveBeenCalledWith('adaptive scope: seeded topics', {
+    expect(logger.info).toHaveBeenCalledWith('conditional topics: seeded topics', {
       versionId: 'v-1',
       count: 3,
     });
@@ -305,7 +305,7 @@ describe('seedTopicsBestEffort', () => {
 
     await expect(seedTopicsBestEffort('v-1')).resolves.toBeUndefined();
 
-    expect(logger.error).toHaveBeenCalledWith('adaptive scope: topic seeding failed', {
+    expect(logger.error).toHaveBeenCalledWith('conditional topics: topic seeding failed', {
       versionId: 'v-1',
       error: 'db unavailable',
     });
@@ -316,7 +316,7 @@ describe('seedTopicsBestEffort', () => {
 
     await seedTopicsBestEffort('v-1');
 
-    expect(logger.error).toHaveBeenCalledWith('adaptive scope: topic seeding failed', {
+    expect(logger.error).toHaveBeenCalledWith('conditional topics: topic seeding failed', {
       versionId: 'v-1',
       error: 'plain string failure',
     });

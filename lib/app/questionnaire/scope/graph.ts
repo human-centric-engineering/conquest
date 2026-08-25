@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope (P17) — the routing map's graph, built from the authoring payload.
+ * Conditional Topics (P17) — the routing map's graph, built from the authoring payload.
  *
  * Turns a version's topics, hard rules and settings into a laid-out node/edge graph the admin canvas
  * renders. Pure: no Prisma, no Next, and deliberately **no `@xyflow/react` import** — it emits its own
@@ -10,7 +10,7 @@
  *
  * **There are no topic-to-topic edges, because there is no such mechanism.** Topics do not flow into one
  * another — a topic is selected or it is not. Arrows between them would draw a state machine the runtime
- * does not have. What Adaptive Scope actually is, is a decision pipeline, and the pipeline is what the
+ * does not have. What Conditional Topics actually is, is a decision pipeline, and the pipeline is what the
  * map shows:
  *
  * ```
@@ -34,7 +34,7 @@
  * would this actually do".
  *
  * The one thing the structure *can* settle is where a rule's evidence comes from, and it classifies that
- * exactly as `validateAdaptiveScope` does — **opening, `core`, or neither**. A rule reading a slot the
+ * exactly as `validateConditionalTopics` does — **opening, `core`, or neither**. A rule reading a slot the
  * opening does not gather never matches; for `not_exists` it is worse, and fires for everybody. Those
  * rules hang off an explicit "not gathered in the opening" node rather than off nothing, so the failure is
  * visible as a shape rather than only as a sentence in the findings list above the map.
@@ -49,7 +49,7 @@ import {
   TOPIC_DEPTH_LABELS,
   TOPIC_PHASE_LABELS,
   VALUELESS_SCOPE_OPERATORS,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ScopeRuleOperator,
   type Topic,
   type TopicDepth,
@@ -115,7 +115,7 @@ export const SCOPE_BADGES = {
     label: 'Fallback',
     tone: 'neutral',
     meaning:
-      'Named as a fallback on the Adaptive scope tab. It is used only when the decision chooses nothing at all: if the agent fails, or picks no topics, the fallback topics are asked instead, so the respondent gets more than the always-asked ones. It is not a preference — on a normal run it changes nothing.',
+      'Named as a fallback on the Conditional topics tab. It is used only when the decision chooses nothing at all: if the agent fails, or picks no topics, the fallback topics are asked instead, so the respondent gets more than the always-asked ones. It is not a preference — on a normal run it changes nothing.',
   },
   preferredCheck: {
     label: 'Preferred check',
@@ -310,7 +310,7 @@ export interface ScopeGraph {
 
 export interface BuildScopeGraphInput {
   topics: readonly Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   costs: TopicsCostView;
   /** The version's data slots — for resolving a rule's slot key to the name an author recognises. */
   dataSlots: readonly TopicDataSlotRef[];
@@ -801,13 +801,13 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     x: COL.start * X_STEP,
     y: 0,
     label: 'Interview starts',
-    sublabel: settings.enabled ? 'adaptive scope on' : 'adaptive scope off',
+    sublabel: settings.enabled ? 'conditional topics on' : 'conditional topics off',
     detail: {
       title: 'Interview starts',
       summary:
         'Every respondent begins here. The opening runs first, and what they say in it is the only evidence the routing decision ever reads.',
       rows: [
-        { label: 'Adaptive scope', value: settings.enabled ? 'On' : 'Off' },
+        { label: 'Conditional topics', value: settings.enabled ? 'On' : 'Off' },
         { label: 'Topics', value: plural(topics.length, 'topic') },
       ],
     },
@@ -839,7 +839,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   /* --- where each rule's evidence comes from ------------------------------ */
 
-  // Classified exactly as `validateAdaptiveScope` classifies it, and for the same reason: rules are
+  // Classified exactly as `validateConditionalTopics` classifies it, and for the same reason: rules are
   // evaluated at one moment — when the opening completes — so only the opening reliably has an answer by
   // then. `core` runs alongside it in an order nothing guarantees; `conditional` and `closing` are by
   // construction not in scope until the plan exists, which puts them in the same bucket as a slot no
@@ -1087,7 +1087,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
       detail: {
         title: topic.label,
         summary:
-          'Asked only when it is selected. Nothing on this map says whether it will be — that depends on what a respondent says, which is what “Try it” on the Adaptive scope tab answers.',
+          'Asked only when it is selected. Nothing on this map says whether it will be — that depends on what a respondent says, which is what “Try it” on the Conditional topics tab answers.',
         rows: topicDetailRows(topic),
         topicKey: topic.key,
         ...(badgeKeys.length > 0 ? { badgeNotes: badgeNotes(badgeKeys) } : {}),

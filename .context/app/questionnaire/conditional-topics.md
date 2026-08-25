@@ -1,9 +1,9 @@
-# Adaptive Scope
+# Conditional Topics
 
 **Which parts of a questionnaire apply to this respondent, and who decides.**
 
 ConQuest already decides two things: **which question next** (selection strategies) and **which
-questionnaire next** (the Experience switcher). Adaptive Scope is the gap between them. Screeners,
+questionnaire next** (the Experience switcher). Conditional Topics is the gap between them. Screeners,
 eligibility checks, role-specific question sets, compliance sections that must be recorded as
 not-applicable, and any long instrument that should not ask all of itself to everyone are all the
 same requirement — and before P17 the only way to express it was to split the questionnaire into
@@ -19,7 +19,32 @@ several, which costs cross-section scoring and cohort analysis.
 > the remaining implementation vocabulary off the screen, and F17.28 mirrored the master switch
 > onto the Settings tab.
 
-### The tab is called "Adaptive scope"; the URL segment is still `topics`
+### It was called "Adaptive Scope" until 2026-08-25
+
+Everything below — the feature, the tab, the settings block, the docs — used to be named **Adaptive
+Scope**. That name described the mechanism (a scope that adapts) rather than the thing an admin
+authors, which is a set of topics, some of them conditional. Commits, PRs and the `f17.*` trackers
+written before the rename use the old name; this document and the code no longer do.
+
+The rename went all the way down, so there is no half-renamed layer to remember:
+
+| Layer                   | Then                                             | Now                                         |
+| ----------------------- | ------------------------------------------------ | ------------------------------------------- |
+| Config column           | `AppQuestionnaireConfig.adaptiveScope`           | `.conditionalTopics` (renamed by migration) |
+| Candidacy column        | `AppQuestionnaireVersion.adaptiveScopeCandidate` | `.conditionalTopicsCandidate`               |
+| Capability slug         | `app_detect_adaptive_scope_candidacy`            | `app_detect_conditional_topics_candidacy`   |
+| Audit action            | `questionnaire_adaptive_scope.update`            | `questionnaire_conditional_topics.update`   |
+| Instrument export field | `adaptiveScope`                                  | `conditionalTopics`                         |
+
+Both columns were renamed **in place**, so every configured version stayed configured and no
+back-compat read shim exists anywhere — a column rename cannot leave a row behind. The two places a
+pre-rename name can still arrive from outside are handled explicitly: a definition file exported
+under the old name still imports (`parseDefinitionImport` folds `adaptiveScope` into
+`conditionalTopics`), and seeded rows carrying the old wording are re-worded on the next seed run
+(`090` renames its own slug in place; `097` re-words the operator-facing text). Audit rows written
+before the rename keep the old action string, because history is not rewritten.
+
+### The tab is called "Conditional topics"; the URL segment is still `topics`
 
 The capability is what an admin is looking for in the tab bar, and "Topics" named only the unit it
 edits — a noun that collides with the data-slot `theme` and with the orchestration analytics
@@ -29,7 +54,9 @@ this document).
 
 The route stayed `…/v/[vid]/topics`: renaming it would break bookmarks and the launch checklist's
 deep link for no behavioural gain. Component and payload names (`TopicsPanel`, `TopicsPayload`,
-`getVersionTopicsCached`) follow the route, not the label.
+`getVersionTopicsCached`) follow the route, not the label — as do the `scope/` module directory and
+the runtime's own `SessionScope` / `resolveScope`, which name what the planner computes (the part of
+the instrument in scope for one respondent) rather than the feature.
 
 ---
 
@@ -37,7 +64,7 @@ deep link for no behavioural gain. Component and payload names (`TopicsPanel`, `
 
 **Off by default, inert by construction.**
 
-`adaptiveScope.enabled` defaults `false`, every auto-seeded topic is `core` (always asked), and
+`conditionalTopics.enabled` defaults `false`, every auto-seeded topic is `core` (always asked), and
 `resolveScope` short-circuits to full scope on either condition. A version that never opts in cannot
 reach a single new runtime code path — `buildSessionScope` does not even query the topic table.
 
@@ -51,7 +78,7 @@ output and the absent query.
 | Concept            | What it is                                                                                                              | Where it lives                          |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | **Topic**          | The conditional unit: a named group of question + data-slot **keys**, with a phase, plain-English criteria, and a depth | `AppQuestionnaireTopic`                 |
-| **Hard rules**     | A short optional list checked before the agent — the cases the author is certain about                                  | `adaptiveScope.rules` (config Json)     |
+| **Hard rules**     | A short optional list checked before the agent — the cases the author is certain about                                  | `conditionalTopics.rules` (config Json) |
 | **Scope Planner**  | Runs once, when the opening completes: rules → judgement → guardrails                                                   | `scope/planner.ts`                      |
 | **Interview Plan** | The per-session record: which topics, which not, why, and what the respondent was told                                  | `AppQuestionnaireSession.interviewPlan` |
 
@@ -69,7 +96,7 @@ with **no re-linking at all** — `copyVersionGraph` copies topics verbatim and 
 questions, because those carry their keys over 1:1. It also keeps an `AppAiRun` snapshot legible.
 
 Unresolvable keys are silently skipped everywhere. An author deleting a question a topic still names
-must never break a live interview; `validateAdaptiveScope` surfaces it on the authoring surface,
+must never break a live interview; `validateConditionalTopics` surfaces it on the authoring surface,
 which is where it can actually be fixed.
 
 ### Topic ≠ data-slot `theme`
@@ -303,7 +330,7 @@ opening**, and only when the answer is too abstract to route.
 The interviewer re-asks a data slot when what came back was not confidently captured — the
 `isReask` path in `data-slot-orchestrator.ts`. `maxDataSlotAttempts` bounds that **per slot**, which
 is the wrong unit for this: a per-slot cap has no idea a follow-up was already spent three questions
-ago. `adaptiveScope.maxOpeningProbes` is the shared allowance across the whole opening.
+ago. `conditionalTopics.maxOpeningProbes` is the shared allowance across the whole opening.
 
 Two fields rather than one — `limitOpeningProbes` (the switch, off) and `maxOpeningProbes` (the
 number, 1). `0` is a meaningful setting here ("never follow up"), so unlike `sessionBudgetSeconds`
@@ -498,13 +525,13 @@ The Topics tab now acts on it: when the cached verdict says a fresh, untouched v
 candidate, `RoutingAnalystCard` invokes the same analyst run the "Run" button makes, on its own, the
 first time the tab is opened — so an admin who discovers the feature by opening the tab at all finds
 a reviewed draft already waiting rather than an empty card. A banner names why it started. Nothing
-here auto-enables `adaptiveScope.enabled` or writes to the live topic set; a proposal is still only
+here auto-enables `conditionalTopics.enabled` or writes to the live topic set; a proposal is still only
 ever accepted by hand. The "already tried" signal that stops a discarded auto-proposal from
 re-proposing itself on every visit is the analyst's own `AppAiRun` (kind `routing_analysis`), not a
 new column — see [`f17.19.md`](../planning/features/f17.19.md) for the full phased history. Phase 4
 put the routing logic itself into the [Questionnaire Pack](./questionnaire-pack.md) — an off-by-default
-"Adaptive scope" section that explains the topics, criteria, and hard rules in plain language for a
-stakeholder audience, distinct from every other Adaptive Scope surface (all authoring tools, not
+"Conditional topics" section that explains the topics, criteria, and hard rules in plain language for a
+stakeholder audience, distinct from every other Conditional Topics surface (all authoring tools, not
 distribution artifacts).
 
 ### When the check says no (F17.22)
@@ -541,9 +568,9 @@ the version in a state nothing outside this tab described: **topics authored wit
 them, and every one of them asked to everybody.** The AI chain had succeeded; the product simply
 never said the configuration was inert. Two surfaces now say it.
 
-**A warning on the launch checklist.** `launchReadinessChecks` gains an `adaptiveScopeOff` row —
-"Adaptive scope is off, so all 4 conditional topics are asked to everyone" — shown only when the
-feature is off AND the version has ≥1 conditional topic. It is the mirror of the `adaptiveScope`
+**A warning on the launch checklist.** `launchReadinessChecks` gains an `conditionalTopicsOff` row —
+"Conditional topics is off, so all 4 conditional topics are asked to everyone" — shown only when the
+feature is off AND the version has ≥1 conditional topic. It is the mirror of the `conditionalTopics`
 coherence row, which appears only when the feature is on.
 
 It is also the first check on that list that does **not** block a launch, and that required a real
@@ -559,14 +586,14 @@ Asking everyone everything is a legitimate way to run a questionnaire. The row e
 rarely what someone who just authored conditional topics meant.
 
 **An offer in the accept dialog.** When the reviewed proposal contains a conditional topic and the
-feature is off, the accept confirmation carries an **unticked** "Turn adaptive scope on now" box.
+feature is off, the accept confirmation carries an **unticked** "Turn conditional topics on now" box.
 Ticking it sends `enable: true` alongside the accepted set, and `acceptTopicDraft` merges
 `enabled: true` into the settings in the same transaction that writes the topics.
 
 Three details keep the invariant intact:
 
 - The schema field is `z.literal(true)` and is named for the **act** (`enable`), not the state
-  (`enabled`). This route can turn adaptive scope on and has no way to turn it off, so a caller
+  (`enabled`). This route can turn conditional topics on and has no way to turn it off, so a caller
   that spread a settings object into an accept body cannot switch routing off for every respondent
   in flight. The `enabled` key remains unsettable through the accept contract, as it was.
 - The box starts unticked on every open **and** resets on cancel. Accepting is authoring; going
@@ -578,7 +605,7 @@ Three details keep the invariant intact:
 
 The dialog's closing sentence follows the same three cases: already on ("these topics decide what
 respondents are asked as soon as you accept"), off with conditional topics ("every topic here would
-be asked to everyone until you turn it on"), and off with none ("adaptive scope stays off until you
+be asked to everyone until you turn it on"), and off with none ("conditional topics stays off until you
 turn it on yourself" — the sentence that used to be shown unconditionally, including, wrongly, to
 versions where the feature was already on).
 
@@ -673,9 +700,9 @@ outage, an unusable reply and a thrown query all resolve to "no proposal". An up
 is never reported as failed because an optional proposal could not be made — and the admin can
 still press the button on the tab, which reports failures properly, unlike a silent run.
 
-The `done` event carries `adaptiveScopeProposal: { topicCount, conditionalCount }` when a proposal
+The `done` event carries `conditionalTopicsProposal: { topicCount, conditionalCount }` when a proposal
 was made, and a second `proposing_scope` phase message names the counts in prose. Nothing is live:
-it is a pending draft, and `adaptiveScope.enabled` is untouched, exactly as with a button-triggered
+it is a pending draft, and `conditionalTopics.enabled` is untouched, exactly as with a button-triggered
 run. The **re-ingest dialog** reports it on its result screen — that dialog is the only place the
 admin is still standing when the run finishes, since the upload dialog navigates to the new draft.
 
@@ -731,7 +758,7 @@ The `notAssessed` list on the session export is what makes an adaptive instrumen
 
 ## Routing quality — what actually happened (F17.16)
 
-Every other Adaptive Scope surface is about **intent**: the criteria you wrote, the limits you set,
+Every other Conditional Topics surface is about **intent**: the criteria you wrote, the limits you set,
 what a plan would do against an opening you typed. `analytics/routing.ts` is the only account of what
 happened when real respondents met them, and it exists because the two failures that matter most
 were both invisible.
@@ -891,7 +918,7 @@ queries, and only for a version whose author set a budget.
 
 ## Coherence checks
 
-`validateAdaptiveScope` runs on read (the Topics page, the launch checklist) rather than blocking
+`validateConditionalTopics` runs on read (the Topics page, the launch checklist) rather than blocking
 saves — an admin mid-edit routinely has an incoherent set, and a surface that refuses the save is a
 surface they fight.
 
@@ -949,7 +976,7 @@ to fix first, and one reachability warning per rule on top of it buries the caus
 
 ### Comparability — what routing does to a score (F17.15)
 
-Scoring combines answers into a scale; Adaptive Scope decides which of them get asked. Together they
+Scoring combines answers into a scale; Conditional Topics decides which of them get asked. Together they
 can compute a scale from a different subset of its own items for every respondent, and
 `scoreSession` returns a number either way.
 
@@ -1007,7 +1034,7 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 
 ## Scope evaluation (F17.21)
 
-`validateAdaptiveScope` (above) and the cost model answer "is this configuration well-formed and
+`validateConditionalTopics` (above) and the cost model answer "is this configuration well-formed and
 what does it cost" — both mechanical, both free. Neither answers "is this a **good** routing
 design toward the module's own goal" — minimize respondent burden while never silently dropping a
 topic that genuinely applies (the [one invariant](#the-one-invariant): hard rules always win, "when
@@ -1016,7 +1043,7 @@ judge panel — sibling to the design-evaluation panel (F5.1–F5.3) that review
 but reading the scope config instead.
 
 **Structural only, v1.** The four judges read the authored topics, hard rules, planner
-instructions, and budget — the same inputs `validateAdaptiveScope` and the cost model read. They do
+instructions, and budget — the same inputs `validateConditionalTopics` and the cost model read. They do
 not read live session data or the routing-analytics engine (F17.16); a later phase could layer that
 signal in, but v1 answers "is this well-designed" from the config alone.
 
@@ -1043,10 +1070,10 @@ finding could plausibly ask for:
 | ---------------------------------------- | -------------------------------------------------------------------- | --------------------------------------- |
 | `edit_topic_criteria`                    | `AppQuestionnaireTopic.criteria`                                     | single-row update by `(versionId, key)` |
 | `edit_topic_depth`                       | `AppQuestionnaireTopic.depth`                                        | single-row update                       |
-| `add_rule` / `edit_rule` / `delete_rule` | `AppQuestionnaireConfig.adaptiveScope.rules[]`                       | `patchAdaptiveScopeSettings` merge      |
-| `adjust_budget`                          | `sessionBudgetSeconds` / `maxOpeningProbes` / `maxConditionalTopics` | `patchAdaptiveScopeSettings`            |
-| `edit_planner_instructions`              | `plannerInstructions`                                                | `patchAdaptiveScopeSettings`            |
-| `add_fallback_topic`                     | `fallbackTopicKeys[]`                                                | `patchAdaptiveScopeSettings`            |
+| `add_rule` / `edit_rule` / `delete_rule` | `AppQuestionnaireConfig.conditionalTopics.rules[]`                   | `patchConditionalTopicsSettings` merge  |
+| `adjust_budget`                          | `sessionBudgetSeconds` / `maxOpeningProbes` / `maxConditionalTopics` | `patchConditionalTopicsSettings`        |
+| `edit_planner_instructions`              | `plannerInstructions`                                                | `patchConditionalTopicsSettings`        |
+| `add_fallback_topic`                     | `fallbackTopicKeys[]`                                                | `patchConditionalTopicsSettings`        |
 
 There is no `add_topic` / `delete_topic` — every op edits something that already exists, keeping
 one-click-apply blast radius small. A finding that thinks a topic shouldn't exist at all stays
@@ -1075,12 +1102,12 @@ splitting run-history from apply would be an artificial seam.
 
 ### In the Questionnaire Pack
 
-The latest run's judge scores and findings nest inside the pack's existing `adaptiveScope` section
-as `PackAdaptiveScope.evaluation` — not an eighth top-level section — because it is a judgement
+The latest run's judge scores and findings nest inside the pack's existing `conditionalTopics` section
+as `PackConditionalTopics.evaluation` — not an eighth top-level section — because it is a judgement
 _about_ the routing design printed just above it, not a separate subject. `evaluation.hasRun: false`
 still renders (the same "state a fact rather than omit the section" choice the design-evaluation
 appendix makes) so a pack downloaded before the panel has ever run says so explicitly rather than
-silently having nothing there. No new `PackInclude` flag: it rides along with `adaptiveScope`,
+silently having nothing there. No new `PackInclude` flag: it rides along with `conditionalTopics`,
 which already defaults off.
 
 ---
@@ -1089,7 +1116,7 @@ which already defaults off.
 
 | Path                                                                                                   | What                                                                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/app/questionnaire/scope/types.ts`                                                                 | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `AdaptiveScopeSettings` without a runtime import cycle                                                                                 |
+| `lib/app/questionnaire/scope/types.ts`                                                                 | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `ConditionalTopicsSettings` without a runtime import cycle                                                                             |
 | `lib/app/questionnaire/scope/resolve.ts`                                                               | The pure filter                                                                                                                                                                                                                                                   |
 | `lib/app/questionnaire/scope/rules.ts`                                                                 | Hard-rule evaluator                                                                                                                                                                                                                                               |
 | `lib/app/questionnaire/scope/guardrails.ts`                                                            | Cap, fallback, the time fit, check topic                                                                                                                                                                                                                          |
@@ -1120,7 +1147,7 @@ which already defaults off.
 | `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                                                    | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                                                                                                         |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`                                     | Run the analyst (SSE) · accept or discard its proposal                                                                                                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`                                             | The amendment trigger                                                                                                                                                                                                                                             |
-| `components/admin/questionnaires/topics/**`                                                            | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                                                                                                   |
+| `components/admin/questionnaires/topics/**`                                                            | The Conditional topics tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                                                                                               |
 | `lib/app/questionnaire/scope-evaluation/**`                                                            | Scope evaluation (F17.21) — dimension registry, judge schema/prompt, structure DTO + Zod, fail-soft fan-out (`run-panel.ts`), by-target grouping, and `describe-op.ts`'s plain-English rendering of a `ScopeProposedEdit`, shared by the review card and the pack |
 | `lib/app/questionnaire/scope/rule-format.ts`                                                           | `describeScopeRule` — promoted out of the pack builder in F17.21 Phase A so the pack and the scope-evaluation judge prompt share one rule-sentence implementation                                                                                                 |
 | `lib/app/questionnaire/capabilities/evaluate-scope.ts`                                                 | The scope-evaluation judge-dispatch capability                                                                                                                                                                                                                    |
@@ -1133,7 +1160,7 @@ which already defaults off.
 
 ## Try it — the plan preview (F17.14)
 
-**Every other check on this tab is structural.** `validateAdaptiveScope` says the configuration is
+**Every other check on this tab is structural.** `validateConditionalTopics` says the configuration is
 well-formed; the cost table says what it would take. Neither says which topics a respondent actually
 gets — and for a feature whose premise is "the model makes a judgement you cannot fully specify in
 advance", that left the author's only feedback loop a complete interview run as a respondent, with
@@ -1221,7 +1248,7 @@ entirely from the payload the tab already holds.
 ### There are no topic-to-topic edges, because there is no such mechanism
 
 The obvious thing to draw — arrows between topics — would be a lie. Topics do not flow into one another;
-a topic is selected or it is not. What Adaptive Scope actually is, is a decision pipeline, and the
+a topic is selected or it is not. What Conditional Topics actually is, is a decision pipeline, and the
 pipeline is what is drawn:
 
 ```
@@ -1251,7 +1278,7 @@ points at it.
 ### The one thing the structure can settle
 
 Where a rule reads its evidence from. That is a fact about the topic set, not about a respondent, so it is
-drawn — and it is classified **exactly as `validateAdaptiveScope` classifies it**: opening, `core`, or
+drawn — and it is classified **exactly as `validateConditionalTopics` classifies it**: opening, `core`, or
 neither. A solid edge from the opening topic that gathers the slot; an amber dashed edge labelled _timing
 not guaranteed_ from a `core` topic; and from an explicit **"Not gathered in the opening"** node when
 nothing reachable gathers it at all.
@@ -1541,14 +1568,14 @@ resolved by whoever saved last.
 
 `ScopeIssueStrip` is the summary half of the two-level pattern `config-conflicts.tsx` established;
 `ScopeIssues` remains the full read, moved down beside the topic rows it is about. Both render the
-same `validateAdaptiveScope` output, so they cannot disagree. Rows are **buttons, not anchors** —
+same `validateConditionalTopics` output, so they cannot disagree. Rows are **buttons, not anchors** —
 `ScopeIssue` carries no `sectionId`, and what fixes a finding is a topic row whose DOM id is a
 client-side detail — and a topic-scoped row reuses the routing map's existing focus handoff rather
 than growing a second mechanism that behaves almost the same.
 
 ### The switch is mirrored on the Settings tab (F17.28)
 
-`enabled` is editable in two places now: the status header above, and an **Adaptive scope** group
+`enabled` is editable in two places now: the status header above, and an **Conditional topics** group
 on the workspace's Settings tab. The reason is the header's own question — "is this even on?" —
 asked from the other end. An admin auditing how a version behaves at run time reads the Settings
 tab, and the one switch deciding whether half the instrument gets asked was the only run-time
@@ -1561,18 +1588,18 @@ tab.
 
 **This does not reopen the two-writer race the section above closed.** That race was between two
 controls in one render, decided by whichever rendered last. These are two tabs, each seeded and
-resynced from the server's value, and the Settings tab sends `adaptiveScope` **only when its own
+resynced from the server's value, and the Settings tab sends `conditionalTopics` **only when its own
 switch differs from the config it loaded**. The PATCH is partial by contract — an omitted key
 leaves the stored value alone — so a Settings tab opened before someone flipped the switch here
 saves everything else it holds and leaves `enabled` where it found it. The version of this change
 that sends the key unconditionally is the version that silently reverts the header.
 
-The route needed no change: `…/config` has accepted `adaptiveScope` since the settings
-export/import round-trip required it, merging through `patchAdaptiveScopeSettings` — the same
+The route needed no change: `…/config` has accepted `conditionalTopics` since the settings
+export/import round-trip required it, merging through `patchConditionalTopicsSettings` — the same
 helper this tab's PATCH uses — inside the same fork decision, so an edit to a launched version
 forks exactly once.
 
-The three conflicts that only fire when scope is on (`adaptive-scope-targeted-opening`,
+The three conflicts that only fire when scope is on (`conditional-topics-targeted-opening`,
 `-no-probes`, `-guided-openings`) now read the Settings tab's **live** switch rather than the saved
 config, so turning scope on there raises them while the admin is still deciding rather than after a
 save and a reload. They stay anchored to `interviewer-strategy`: turning the feature off is not the
@@ -1606,7 +1633,7 @@ admin never sees. Both are on Topics.
 
 Three more things about the tab are load-bearing rather than cosmetic.
 
-**The page teaches an order the controls cannot.** Adaptive scope only works if it is authored in a
+**The page teaches an order the controls cannot.** Conditional topics only works if it is authored in a
 sequence — group every question into a topic, mark the conditional ones, pin the certainties, then
 switch on — and an admin who flips the switch first gets a questionnaire that behaves exactly as it
 did before, with nothing on screen explaining why. `ScopeExplainer` states that sequence at the top

@@ -57,7 +57,7 @@ import {
 } from '@/lib/app/questionnaire/scope/planner';
 import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   type InterviewPlan,
 } from '@/lib/app/questionnaire/scope/types';
@@ -86,7 +86,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
         version: {
           select: {
             goal: true,
-            config: { select: { adaptiveScope: true } },
+            config: { select: { conditionalTopics: true } },
           },
         },
         dataSlotFills: {
@@ -116,8 +116,8 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
     });
     if (!session) return { kind: 'skipped', reason: 'session not found' };
 
-    const settings = narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope);
-    if (!settings.enabled) return { kind: 'skipped', reason: 'adaptive scope is off' };
+    const settings = narrowConditionalTopicsSettings(session.version.config?.conditionalTopics);
+    if (!settings.enabled) return { kind: 'skipped', reason: 'conditional topics is off' };
 
     // A plan already exists: never re-plan. The interview has been acting on it.
     if (narrowInterviewPlan(session.interviewPlan)) {
@@ -242,7 +242,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       },
     });
 
-    logger.info('adaptive scope: planned', {
+    logger.info('conditional topics: planned', {
       sessionId,
       source: result.plan.source,
       confidence: result.plan.confidence,
@@ -254,7 +254,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
   } catch (err) {
     // The session simply stays unplanned, which resolves to the always-run topics. A shorter
     // interview is recoverable; a failed turn is not.
-    logger.error('adaptive scope: planning failed; the interview continues unplanned', {
+    logger.error('conditional topics: planning failed; the interview continues unplanned', {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });

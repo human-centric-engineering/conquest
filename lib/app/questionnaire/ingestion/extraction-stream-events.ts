@@ -20,7 +20,7 @@ import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candid
  * `checking_scope` fires only on a fresh, eligible version (P17.19) — see
  * `_lib/scope-candidacy.ts`. `proposing_scope` fires only when that check said yes (F17.22
  * Phase 2): the Routing Analyst runs there and then, while the admin is still watching, rather
- * than on some later visit to the Adaptive scope tab.
+ * than on some later visit to the Conditional topics tab.
  */
 export type ExtractionPhase =
   'extracting' | 'verifying' | 'repairing' | 'checking_scope' | 'proposing_scope' | 'saving';
@@ -66,21 +66,21 @@ export interface ExtractionDoneEvent {
    */
   deduped?: boolean;
   /**
-   * Adaptive Scope candidacy check (P17.19) — present only when the check actually ran (a fresh,
+   * Conditional Topics candidacy check (P17.19) — present only when the check actually ran (a fresh,
    * eligible version) and returned a verdict. Absent on a deduped no-op, on an ineligible version
    * (scope already on / already authored), and on any check failure — all of which mean "nothing to
    * report" rather than "checked and found nothing".
    */
-  adaptiveScopeCandidate?: ScopeCandidacyVerdict;
+  conditionalTopicsCandidate?: ScopeCandidacyVerdict;
   /**
    * What the Routing Analyst proposed during this upload (F17.22 Phase 2) — present only when the
    * candidacy check said yes AND the proposal succeeded. Nothing is live: it is a pending draft
-   * waiting on the Adaptive scope tab, and adaptive scope itself stays off. Absent means "no
+   * waiting on the Conditional topics tab, and conditional topics itself stays off. Absent means "no
    * proposal was made", which covers the check saying no, the analyst failing, and the whole
    * fail-soft path — an upload that completed is never reported as failed because an optional
    * proposal could not be made.
    */
-  adaptiveScopeProposal?: { topicCount: number; conditionalCount: number };
+  conditionalTopicsProposal?: { topicCount: number; conditionalCount: number };
 }
 
 export type ExtractionStreamEvent =

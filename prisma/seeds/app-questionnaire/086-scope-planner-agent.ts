@@ -22,7 +22,7 @@ above your own general judgement, you report your confidence honestly rather tha
 you never invent a topic that was not offered to you.`;
 
 /**
- * Seed the Adaptive Scope planner agent (P17).
+ * Seed the Conditional Topics planner agent (P17).
  *
  * Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts` — the
  * planner asks for the `reasoning` tier, since weighing free-text answers against several topics'
@@ -40,7 +40,7 @@ you never invent a topic that was not offered to you.`;
 const unit: SeedUnit = {
   name: 'app-questionnaire/086-scope-planner-agent',
   async run({ prisma, logger }) {
-    logger.info('📋 Seeding Adaptive Scope planner agent...');
+    logger.info('📋 Seeding Conditional Topics planner agent...');
 
     const admin = await prisma.user.findFirst({
       where: serviceAccountWhere,

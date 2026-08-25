@@ -92,7 +92,7 @@ function structure(over: Partial<PolicyStructureInput> = {}): PolicyStructureInp
       truncated: false,
     },
     routing: {
-      adaptiveScopeEnabled: false,
+      conditionalTopicsEnabled: false,
       maxConditionalTopics: 3,
       limitOpeningProbes: false,
       maxOpeningProbes: 1,

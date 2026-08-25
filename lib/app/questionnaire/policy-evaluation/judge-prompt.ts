@@ -91,14 +91,14 @@ const DIMENSION_RUBRICS: Record<PolicyEvaluationDimension, PolicyDimensionRubric
   },
   cross_layer_conflict: {
     focus:
-      'You are the ONLY judge allowed to reason across blocks. Look for: a house rule that fights a tone dial ("never use humour" with the humour dial set high, "keep replies to one sentence" with verbosity high) — house rules are applied AFTER the tone dials, so the rule wins silently and the dial the admin set is a lie; a rule prescribing a register while a selectable persona already prescribes another; a `targeted` approach while Adaptive Scope is on — the routing planner decides the whole interview from the OPENING, and a targeted approach means there is barely an opening to read (this is the highest-value finding you can make); a brisk pace against an opening follow-up allowance that assumed several opening turns, or a gradual one against an allowance of one; Must-ask questions concentrated in a CONDITIONAL topic, which a plan may never seat at all (routing always wins — a must-ask is never a reason to widen an interview, so the author has marked something an instrument that many respondents will never see); a large Must-ask set with an `open` approach, whose broad-invitation clause overrides the very "ask the one question provided" behaviour a must-ask depends on; and a rule that implies confidentiality without using any word a keyword matcher would catch.',
+      'You are the ONLY judge allowed to reason across blocks. Look for: a house rule that fights a tone dial ("never use humour" with the humour dial set high, "keep replies to one sentence" with verbosity high) — house rules are applied AFTER the tone dials, so the rule wins silently and the dial the admin set is a lie; a rule prescribing a register while a selectable persona already prescribes another; a `targeted` approach while Conditional Topics is on — the routing planner decides the whole interview from the OPENING, and a targeted approach means there is barely an opening to read (this is the highest-value finding you can make); a brisk pace against an opening follow-up allowance that assumed several opening turns, or a gradual one against an allowance of one; Must-ask questions concentrated in a CONDITIONAL topic, which a plan may never seat at all (routing always wins — a must-ask is never a reason to widen an interview, so the author has marked something an instrument that many respondents will never see); a large Must-ask set with an `open` approach, whose broad-invitation clause overrides the very "ask the one question provided" behaviour a must-ask depends on; and a rule that implies confidentiality without using any word a keyword matcher would catch.',
     scale: `- 1.0 — The layers reinforce each other; nothing one sets is silently undone by another.
 - 0.7 — One minor tension that would rarely bite.
 - 0.5 — A real conflict an admin would be surprised by.
 - 0.3 — Several layers work against each other.
 - 0.0 — The configuration is self-defeating.`,
     ignore:
-      "Every keyword-matchable version of the above is already under KNOWN ISSUES with an id — do not repeat any of them, in particular `house-rules-overpromise-anonymity`, `house-rules-identity-vs-anonymous`, `house-rules-support-not-configured`, `house-rules-engine-controlled`, `house-rules-format-override`, `house-rules-multi-question`, `anonymous-hides-capture`, `sensitivity-no-support`, the `form-only-*` family, and the `adaptive-scope-*` family. Also NOT yours: the INTERNAL coherence of the rule set (Rule-Coherence), whether the arc suits the goal (Arc-Fit), or whether one question's stop is right (Fidelity-Calibration). You judge only the interactions BETWEEN blocks.",
+      "Every keyword-matchable version of the above is already under KNOWN ISSUES with an id — do not repeat any of them, in particular `house-rules-overpromise-anonymity`, `house-rules-identity-vs-anonymous`, `house-rules-support-not-configured`, `house-rules-engine-controlled`, `house-rules-format-override`, `house-rules-multi-question`, `anonymous-hides-capture`, `sensitivity-no-support`, the `form-only-*` family, and the `conditional-topics-*` family. Also NOT yours: the INTERNAL coherence of the rule set (Rule-Coherence), whether the arc suits the goal (Arc-Fit), or whether one question's stop is right (Fidelity-Calibration). You judge only the interactions BETWEEN blocks.",
     editGuidance:
       'Prefer the cheapest fix that resolves the conflict. For a rule-vs-dial conflict, target `"tone"` with `{ "op": "set_tone_dimension", "dimension": "<key>", "enabled": <bool>, "level": <1-5> }` — adjusting the dial the rule already overrides is usually less destructive than rewriting the client\'s rule. You may also use `{ "op": "set_house_rule_enabled", "enabled": false }` on `"house_rule:<id>"`, or the `set_approach` / `set_pace` ops on `"strategy"`. **Do NOT propose `edit_house_rule` (rewriting a rule\'s text) — that is Rule-Coherence\'s op.** Flag the collision and propose the other side of it, or say it in prose.',
   },
@@ -264,11 +264,11 @@ function renderFidelity(input: PolicyStructureInput): string {
 
 function renderRouting(input: PolicyStructureInput): string {
   const r = input.routing;
-  if (!r.adaptiveScopeEnabled) {
-    return 'Adaptive scope is OFF — every topic runs for every respondent, so routing cannot hide a question.';
+  if (!r.conditionalTopicsEnabled) {
+    return 'Conditional topics is OFF — every topic runs for every respondent, so routing cannot hide a question.';
   }
   const lines = [
-    `Adaptive scope is ON: up to ${r.maxConditionalTopics} conditional topics per interview.`,
+    `Conditional topics is ON: up to ${r.maxConditionalTopics} conditional topics per interview.`,
     r.limitOpeningProbes
       ? `Opening follow-ups are capped at ${r.maxOpeningProbes} for the whole opening.`
       : 'Opening follow-ups are not capped.',
@@ -302,7 +302,7 @@ const SECTION_RENDERERS: Record<
   strategy: { heading: 'QUESTIONING ARC', render: renderStrategy },
   fidelity: { heading: 'ASK-AS-WRITTEN DIAL', render: renderFidelity },
   tone: { heading: 'TONE', render: renderTone },
-  routing: { heading: 'ROUTING (ADAPTIVE SCOPE)', render: renderRouting },
+  routing: { heading: 'ROUTING (CONDITIONAL TOPICS)', render: renderRouting },
 };
 
 /** Build the `[system, user]` messages for one dimension's judge call. */

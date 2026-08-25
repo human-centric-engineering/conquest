@@ -20,7 +20,7 @@ import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
  * questionnaire with no stated audience, or a turn with no prior history).
  *
  * The four **policy** fields below (`houseRules`, `interviewerStrategy`, `questionFidelity`,
- * `adaptiveScope`) exist for the same reason `tone` does: they describe behaviour the admin
+ * `conditionalTopics`) exist for the same reason `tone` does: they describe behaviour the admin
  * *configured*, so the judge must read it as the standard to score against rather than as a fault.
  * Without them a `must_ask` question — required to be put verbatim, with its options recited —
  * reads to the rubric as a closed, leading question and is marked down for doing exactly as it
@@ -32,7 +32,7 @@ import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
  * behave that way).
  *
  * Unlike the interviewer's own prompt blocks, these do NOT vanish when a feature is off: the
- * registry states "House rules: None" and "Adaptive scope: Disabled" rather than emitting nothing.
+ * registry states "House rules: None" and "Conditional topics: Disabled" rather than emitting nothing.
  * That is deliberate here — a judge that is simply not told about a policy cannot tell "none is in
  * force" from "you weren't told", and will speculate. The interviewer needs silence (an empty
  * block costs it nothing and says nothing); the judge needs the negative stated. `tone` is the one
@@ -53,8 +53,8 @@ export interface TurnEvaluationContext {
   interviewerStrategy?: string;
   /** The version-level question-fidelity gate, summarised. */
   questionFidelity?: string;
-  /** Whether this interview was narrowed by Adaptive Scope, and under what limits. */
-  adaptiveScope?: string;
+  /** Whether this interview was narrowed by Conditional Topics, and under what limits. */
+  conditionalTopics?: string;
   /**
    * How faithfully THIS turn's targeted question had to be put — the resolved five-stop level,
    * already gate-aware. Omitted at `balanced` (the default behaviour the rubric already assumes)

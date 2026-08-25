@@ -29,7 +29,7 @@ export interface ScopeFindingGroup {
   /** `target.key` when resolved, else the raw `targetKey` — unique per target within a run. */
   key: string;
   kind: ScopeFindingTargetKind;
-  /** The topic's label, the rule's rendered sentence, or "Adaptive scope settings". */
+  /** The topic's label, the rule's rendered sentence, or "Conditional topics settings". */
   label: string;
   /** The target no longer exists in the live config (named from the run's snapshot). */
   removed: boolean;

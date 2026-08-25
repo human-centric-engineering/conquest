@@ -6,8 +6,8 @@
  * covers everything about how the questionnaire is set up: title/version/goals, the question
  * structure, the semantic data slots (with their linked questions), the definitions/glossary, the
  * experience-setup summary, (opt-in) the F5.1–F5.3 judge panel's findings for this version, and
- * (opt-in) the Adaptive Scope routing logic in plain language — nesting the F17.21 scope-evaluation
- * judge panel's verdict on that routing design as {@link PackAdaptiveScope.evaluation}, rather than
+ * (opt-in) the Conditional Topics routing logic in plain language — nesting the F17.21 scope-evaluation
+ * judge panel's verdict on that routing design as {@link PackConditionalTopics.evaluation}, rather than
  * an eighth top-level section, since it is a judgement ABOUT the section above it, not a separate
  * subject. The admin picks which of those seven top-level sections to include via
  * {@link PackInclude}; excluded sections are `null` on the model so every serialiser
@@ -46,7 +46,7 @@ import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/se
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   ALWAYS_PHASES,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
@@ -85,7 +85,7 @@ import {
 
 /**
  * Which of the pack's seven sections to include, plus the one sub-option (`setupTechnical`). All
- * default `true` except `evaluations`, `adaptiveScope`, and `setupTechnical`.
+ * default `true` except `evaluations`, `conditionalTopics`, and `setupTechnical`.
  */
 export interface PackInclude {
   /** Title, version, goal, audience. */
@@ -118,9 +118,9 @@ export interface PackInclude {
    * `false`, like `evaluations`: it is the routing *design*, not the questionnaire content, and not
    * every reader of the pack needs (or should see) how a client's instrument routes respondents
    * before the admin has decided to share that. See {@link file://./build-pack-model.ts}'s
-   * `buildAdaptiveScopeSection`.
+   * `buildConditionalTopicsSection`.
    */
-  adaptiveScope: boolean;
+  conditionalTopics: boolean;
   /**
    * The interviewer policy — the client's house rules, the questioning arc, and which questions are
    * asked as written — plus the F18.8 judge panel's verdict on it.
@@ -129,14 +129,14 @@ export interface PackInclude {
    * across ~15 setting groups, so nesting a verdict about three of them there would attach a
    * judgement to twelve things it never read. And `setup` defaults **true**, which would ship
    * unreviewed AI critique into every default download the moment this landed. Defaults `false`,
-   * like `evaluations` and `adaptiveScope`, for that second reason.
+   * like `evaluations` and `conditionalTopics`, for that second reason.
    */
   interviewerPolicy: boolean;
 }
 
 /**
  * The export dialog's default checkbox state — every section except `evaluations` and
- * `adaptiveScope`, and the standard settings tier only.
+ * `conditionalTopics`, and the standard settings tier only.
  */
 export const DEFAULT_PACK_INCLUDE: PackInclude = {
   meta: true,
@@ -146,7 +146,7 @@ export const DEFAULT_PACK_INCLUDE: PackInclude = {
   setup: true,
   setupTechnical: false,
   evaluations: false,
-  adaptiveScope: false,
+  conditionalTopics: false,
   interviewerPolicy: false,
 };
 
@@ -270,10 +270,10 @@ export interface PackEvaluations {
 }
 
 /**
- * One topic, resolved for the pack's plain-language Adaptive scope section — a stakeholder reading
+ * One topic, resolved for the pack's plain-language Conditional topics section — a stakeholder reading
  * this has never seen `TopicPhase` or `TopicDepth` and shouldn't need to.
  */
-export interface PackAdaptiveScopeTopic {
+export interface PackConditionalTopicsTopic {
   key: string;
   label: string;
   description: string | null;
@@ -294,7 +294,7 @@ export interface PackAdaptiveScopeTopic {
  * "employee count" is greater than "50".` — rather than the operator/action enum a stakeholder was
  * never meant to learn.
  */
-export interface PackAdaptiveScopeRule {
+export interface PackConditionalTopicsRule {
   sentence: string;
 }
 
@@ -325,7 +325,7 @@ export interface PackScopeEvaluationTarget {
   /** `topic:<key>` / `rule:<id>` / `settings`, resolved when possible, else the raw `targetKey`. */
   key: string;
   kind: ScopeFindingTargetKind;
-  /** The topic's label, the rule's rendered sentence, or "Adaptive scope settings". */
+  /** The topic's label, the rule's rendered sentence, or "Conditional topics settings". */
   label: string;
   /** The target is gone from the live structure (named from the run's snapshot). */
   removed: boolean;
@@ -347,9 +347,9 @@ export interface PackScopeEvaluationScore {
 
 /**
  * The scope-evaluation appendix — the latest F17.21 run for this version, if one has ever been
- * made. Nested under {@link PackAdaptiveScope} (not a sibling pack section) because it is a
+ * made. Nested under {@link PackConditionalTopics} (not a sibling pack section) because it is a
  * judgement ABOUT the routing design directly above it, not a separate subject — see the module
- * doc's "extends the existing `adaptiveScope` section" note.
+ * doc's "extends the existing `conditionalTopics` section" note.
  */
 export interface PackScopeEvaluation {
   /** `false` when the version has never been scope-evaluated — every other field is empty/null. */
@@ -364,18 +364,18 @@ export interface PackScopeEvaluation {
 }
 
 /**
- * The Adaptive scope appendix — the routing logic in plain language. `enabled: false` still renders
+ * The Conditional topics appendix — the routing logic in plain language. `enabled: false` still renders
  * (it is informative in its own right: every respondent gets the full instrument), the same "state
  * a fact rather than omit the section" choice `PackEvaluations.hasRun` makes.
  */
-export interface PackAdaptiveScope {
-  /** Whether this version has Adaptive scope switched on at all. */
+export interface PackConditionalTopics {
+  /** Whether this version has Conditional topics switched on at all. */
   enabled: boolean;
   /** Opening / core / closing topics, in authored order. */
-  alwaysAskedTopics: PackAdaptiveScopeTopic[];
+  alwaysAsked: PackConditionalTopicsTopic[];
   /** Conditional topics, in authored order. */
-  conditionalTopics: PackAdaptiveScopeTopic[];
-  rules: PackAdaptiveScopeRule[];
+  conditional: PackConditionalTopicsTopic[];
+  rules: PackConditionalTopicsRule[];
   /** How many conditional topics one interview may cover at most. */
   maxConditionalTopics: number;
   /** Whether one additional, unselected topic is sampled lightly to check for blind spots. */
@@ -442,7 +442,7 @@ export interface PackHouseRule {
  * The interviewer-policy appendix — how this questionnaire's interviewer is set up, in plain
  * language, with the judge panel's verdict nested inside it.
  *
- * Duplicates the one-line `setup` rows deliberately, exactly as `PackAdaptiveScope` does: the setup
+ * Duplicates the one-line `setup` rows deliberately, exactly as `PackConditionalTopics` does: the setup
  * row is the summary, this is the appendix.
  */
 export interface PackInterviewerPolicy {
@@ -484,7 +484,7 @@ export interface PackModel {
   glossary: GlossaryAppendixView | null;
   setup: PackSetupItem[] | null;
   evaluations: PackEvaluations | null;
-  adaptiveScope: PackAdaptiveScope | null;
+  conditionalTopics: PackConditionalTopics | null;
   interviewerPolicy: PackInterviewerPolicy | null;
 }
 
@@ -641,43 +641,43 @@ function buildScopeEvaluationSection(run: ScopeEvaluationRunDetail | null): Pack
 }
 
 /**
- * Build the Adaptive scope appendix from the version's topics and settings — the routing logic
+ * Build the Conditional topics appendix from the version's topics and settings — the routing logic
  * explained in plain language, for a stakeholder who has never seen the authoring surface.
  *
- * Topics split into `alwaysAskedTopics` / `conditionalTopics` up front rather than carrying a raw
+ * Topics split into `alwaysAsked` / `conditionalTopics` up front rather than carrying a raw
  * `phase` for the serialisers to branch on: every serialiser wants exactly this grouping ("what
  * everyone gets" vs "what depends"), and deriving it three times would be the same drift risk the
  * settings registry exists to avoid elsewhere in this file.
  */
-function buildAdaptiveScopeSection(
+function buildConditionalTopicsSection(
   topics: Topic[],
-  settings: AdaptiveScopeSettings,
+  settings: ConditionalTopicsSettings,
   dataSlots: DataSlotView[],
   scopeEvaluationRun: ScopeEvaluationRunDetail | null
-): PackAdaptiveScope {
+): PackConditionalTopics {
   const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
   const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
   const alwaysAskedPhases = ALWAYS_PHASES as readonly string[];
 
-  const alwaysAskedTopics: PackAdaptiveScopeTopic[] = [];
-  const conditionalTopics: PackAdaptiveScopeTopic[] = [];
+  const alwaysAsked: PackConditionalTopicsTopic[] = [];
+  const conditional: PackConditionalTopicsTopic[] = [];
   for (const topic of topics) {
-    const alwaysAsked = alwaysAskedPhases.includes(topic.phase);
-    const row: PackAdaptiveScopeTopic = {
+    const isAlwaysAsked = alwaysAskedPhases.includes(topic.phase);
+    const row: PackConditionalTopicsTopic = {
       key: topic.key,
       label: topic.label,
       description: topic.description,
-      alwaysAsked,
-      criteria: alwaysAsked ? null : topic.criteria,
+      alwaysAsked: isAlwaysAsked,
+      criteria: isAlwaysAsked ? null : topic.criteria,
       sampledOnly: topic.depth === 'light',
     };
-    (alwaysAsked ? alwaysAskedTopics : conditionalTopics).push(row);
+    (isAlwaysAsked ? alwaysAsked : conditional).push(row);
   }
 
   return {
     enabled: settings.enabled,
-    alwaysAskedTopics,
-    conditionalTopics,
+    alwaysAsked,
+    conditional,
     rules: settings.rules.map((rule) => ({
       sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
     })),
@@ -689,16 +689,16 @@ function buildAdaptiveScopeSection(
 }
 
 /**
- * The routing data behind the Adaptive scope section — loaded by the route only when
- * `include.adaptiveScope` is set (the same "skip the query when the section is excluded" pattern
+ * The routing data behind the Conditional topics section — loaded by the route only when
+ * `include.conditionalTopics` is set (the same "skip the query when the section is excluded" pattern
  * `evaluationRun` already uses), so the common download pays no extra cost for a section that
  * defaults off. `scopeEvaluationRun` is `null` both when the section is excluded and when the
  * version has never been scope-evaluated — `buildScopeEvaluationSection` folds both into
  * `hasRun: false`.
  */
-export interface PackAdaptiveScopeSource {
+export interface PackConditionalTopicsSource {
   topics: Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   scopeEvaluationRun: ScopeEvaluationRunDetail | null;
 }
 
@@ -867,7 +867,7 @@ export function buildPackModel(
   dataSlots: DataSlotView[],
   glossary: GlossaryAppendixView | null,
   evaluationRun: EvaluationRunDetail | null,
-  adaptiveScopeSource: PackAdaptiveScopeSource | null,
+  conditionalTopicsSource: PackConditionalTopicsSource | null,
   policyEvaluationRun: PolicyEvaluationRunDetail | null,
   include: PackInclude,
   generatedAt: string
@@ -906,13 +906,13 @@ export function buildPackModel(
     interviewerPolicy: include.interviewerPolicy
       ? buildInterviewerPolicySection(graph, policyEvaluationRun)
       : null,
-    adaptiveScope:
-      include.adaptiveScope && adaptiveScopeSource
-        ? buildAdaptiveScopeSection(
-            adaptiveScopeSource.topics,
-            adaptiveScopeSource.settings,
+    conditionalTopics:
+      include.conditionalTopics && conditionalTopicsSource
+        ? buildConditionalTopicsSection(
+            conditionalTopicsSource.topics,
+            conditionalTopicsSource.settings,
             dataSlots,
-            adaptiveScopeSource.scopeEvaluationRun
+            conditionalTopicsSource.scopeEvaluationRun
           )
         : null,
   };

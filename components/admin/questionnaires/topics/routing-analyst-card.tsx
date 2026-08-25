@@ -115,7 +115,7 @@ export interface RoutingAnalystCardProps {
   /** Live topic count, so the banner can say what accepting would replace. */
   liveTopicCount: number;
   /**
-   * Whether adaptive scope is currently ON for this version (F17.22 Phase 4).
+   * Whether conditional topics is currently ON for this version (F17.22 Phase 4).
    *
    * Two things read it, both in the accept dialog: whether to offer "turn it on as part of this
    * accept" at all, and whether the dialog's closing sentence should promise the topics take
@@ -214,7 +214,7 @@ export function RoutingAnalystCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(false);
-  // The accept dialog's "turn adaptive scope on now" offer. Starts UNTICKED every time the dialog
+  // The accept dialog's "turn conditional topics on now" offer. Starts UNTICKED every time the dialog
   // opens (see the `onOpenChange` below): a box that remembered a previous yes would turn the
   // feature on for an admin who only came back to re-read the proposal.
   const [enableOnAccept, setEnableOnAccept] = useState(false);
@@ -577,7 +577,7 @@ export function RoutingAnalystCard({
                 <span>
                   {uncovered.length} question{uncovered.length === 1 ? '' : 's'} would belong to no
                   topic, so {uncovered.length === 1 ? 'it' : 'they'} could never be asked once
-                  adaptive scope is on. Accept, then fix below — or discard and re-run.
+                  conditional topics is on. Accept, then fix below — or discard and re-run.
                 </span>
               </p>
             )}
@@ -747,10 +747,10 @@ export function RoutingAnalystCard({
               {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}. You can
               still edit everything afterwards.{' '}
               {scopeEnabled
-                ? 'Adaptive scope is already on, so these topics decide what respondents are asked as soon as you accept.'
+                ? 'Conditional topics is already on, so these topics decide what respondents are asked as soon as you accept.'
                 : offerEnable
-                  ? 'Adaptive scope is off, so every topic here would be asked to everyone until you turn it on.'
-                  : 'Adaptive scope stays off until you turn it on yourself.'}
+                  ? 'Conditional topics is off, so every topic here would be asked to everyone until you turn it on.'
+                  : 'Conditional topics stays off until you turn it on yourself.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -772,7 +772,7 @@ export function RoutingAnalystCard({
                 className="mt-0.5"
               />
               <span>
-                <span className="font-medium">Turn adaptive scope on now</span>
+                <span className="font-medium">Turn conditional topics on now</span>
                 <span className="text-muted-foreground block text-xs">
                   {conditionalCount === 1
                     ? 'The 1 conditional topic below is asked only when it fits what the respondent said. Leave this unticked to keep asking everyone everything for now.'

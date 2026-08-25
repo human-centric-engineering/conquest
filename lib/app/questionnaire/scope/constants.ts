@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope constants (P17).
+ * Conditional Topics constants (P17).
  *
  * Kept out of `types.ts` so that module stays a pure leaf importable from client components — this
  * one names a runtime agent, which only the server cares about.

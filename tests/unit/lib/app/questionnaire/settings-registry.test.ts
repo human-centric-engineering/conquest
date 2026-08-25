@@ -27,7 +27,7 @@ import {
   type QuestionnaireConfigShape,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 function configOf(overrides: Partial<QuestionnaireConfigShape> = {}): ConfigView {
   return { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...overrides, saved: true };
@@ -350,7 +350,7 @@ describe('value formatting', () => {
     // which limit actually stopped an interview.
     const scoped = (over: Record<string, unknown>) =>
       configOf({
-        adaptiveScope: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...over },
+        conditionalTopics: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...over },
       });
 
     expect(rowsOf(scoped({})).byLabel.get('Opening follow-ups')).toBe('Not limited');

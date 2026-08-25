@@ -158,7 +158,7 @@ describe('buildSessionExportModel', () => {
 
   describe('what the interview did not cover (P17)', () => {
     it('defaults to empty, so a non-adaptive export says nothing about scope', () => {
-      // Every session that predates Adaptive Scope, and every one that never enabled it.
+      // Every session that predates Conditional Topics, and every one that never enabled it.
       expect(buildSessionExportModel(input()).notAssessed).toEqual([]);
     });
 

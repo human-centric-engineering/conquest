@@ -1,5 +1,5 @@
 /**
- * Prompt builder for the ingestion-time Adaptive Scope candidacy check (P17.19).
+ * Prompt builder for the ingestion-time Conditional Topics candidacy check (P17.19).
  *
  * Pure and provider-agnostic: returns `LlmMessage[]`. Deliberately narrow — this is a triage
  * question, not an analysis. It answers exactly one thing: does this document's own text describe

@@ -26,7 +26,7 @@ import {
   matrixRowCount,
 } from '@/lib/app/questionnaire/scope/budget';
 import type { PlanBudget } from '@/lib/app/questionnaire/scope/guardrails';
-import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
+import type { ConditionalTopicsSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 /**
  * Price the version's topics for the fit stage (C7b), or null when there is no budget to fit to.
@@ -40,7 +40,7 @@ import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope
  */
 export async function loadPlanBudget(
   versionId: string,
-  settings: AdaptiveScopeSettings,
+  settings: ConditionalTopicsSettings,
   topics: readonly Topic[]
 ): Promise<PlanBudget | null> {
   if (settings.sessionBudgetSeconds <= 0) return null;

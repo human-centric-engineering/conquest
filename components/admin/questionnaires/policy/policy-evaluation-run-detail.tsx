@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * PolicyEvaluationRunDetail (F17.21) — one Adaptive Scope evaluation run, with its review queue.
+ * PolicyEvaluationRunDetail (F17.21) — one Conditional Topics evaluation run, with its review queue.
  *
  * Leaner than `EvaluationRunDetail` (F5.3) by design: four judges over a handful of topics/rules
  * is small enough to read as one list grouped by target (topic/rule/settings), so there is no

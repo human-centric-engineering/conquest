@@ -16,8 +16,8 @@ import { describe, it, expect } from 'vitest';
 import { buildPlanPreviewForm, type TopicDataSlotRef } from '@/lib/app/questionnaire/scope/views';
 import { readProposedTopicKeys } from '@/lib/app/questionnaire/scope/planner';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
   type TopicPhase,
@@ -50,8 +50,8 @@ function rule(dataSlotKey: string, operator: ScopeRule['operator']): ScopeRule {
   };
 }
 
-function settingsWith(rules: ScopeRule[]): AdaptiveScopeSettings {
-  return { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, rules };
+function settingsWith(rules: ScopeRule[]): ConditionalTopicsSettings {
+  return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, rules };
 }
 
 function slot(key: string, name: string): TopicDataSlotRef {
@@ -68,7 +68,7 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('offers the opening topics questions and nothing from other phases', () => {
     const form = buildPlanPreviewForm(
       [topic('opening', 'opening', ['open_a', 'open_b'], 0), topic('spine', 'core', ['core_a'], 1)],
-      DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       [],
       PROMPTS
     );
@@ -82,7 +82,7 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('orders questions the way the interview would ask them, across several opening topics', () => {
     const form = buildPlanPreviewForm(
       [topic('second', 'opening', ['open_b'], 5), topic('first', 'opening', ['open_a'], 1)],
-      DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       [],
       PROMPTS
     );
@@ -95,7 +95,7 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('skips a member naming a question that no longer exists', () => {
     const form = buildPlanPreviewForm(
       [topic('opening', 'opening', ['open_a', 'deleted_q'], 0)],
-      DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       [],
       PROMPTS
     );
@@ -108,7 +108,7 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('offers one box per question when two opening topics claim the same key', () => {
     const form = buildPlanPreviewForm(
       [topic('one', 'opening', ['open_a'], 0), topic('two', 'opening', ['open_a', 'open_b'], 1)],
-      DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       [],
       PROMPTS
     );
@@ -119,7 +119,7 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('returns no questions when the version has no opening topic', () => {
     const form = buildPlanPreviewForm(
       [topic('spine', 'core', ['core_a'], 0)],
-      DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       [],
       PROMPTS
     );

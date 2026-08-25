@@ -117,7 +117,7 @@ export interface CohortScaleSummary {
   /**
    * Respondents this scale is reported over — those asked ALL of its items.
    *
-   * Adaptive Scope (P17): a respondent whose interview covered part of the scale is NOT counted
+   * Conditional Topics (P17): a respondent whose interview covered part of the scale is NOT counted
    * here and contributes to neither the mean nor the band counts. Their score is a measurement of a
    * different, shorter instrument, and averaging the two produces a number that describes nobody.
    */

@@ -147,7 +147,7 @@ async function handlePutAnswers(
       });
     }
 
-    // Adaptive Scope (P17): the form only RENDERS in-scope questions, so an out-of-scope key here
+    // Conditional Topics (P17): the form only RENDERS in-scope questions, so an out-of-scope key here
     // is a crafted or stale request. Refuse it rather than storing an answer to something this
     // interview never asked — the report and the scores would then include data the instrument
     // itself reports as not assessed, which is the one inconsistency nothing downstream could

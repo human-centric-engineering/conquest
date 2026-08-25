@@ -1,5 +1,5 @@
 /**
- * Integration tests: plan preview route — Adaptive Scope (F17.14).
+ * Integration tests: plan preview route — Conditional Topics (F17.14).
  *
  *   POST /api/v1/app/questionnaires/:id/versions/:vid/topics/preview
  *
@@ -40,7 +40,7 @@ vi.mock('@/lib/app/questionnaire/scope/planner', async (importOriginal) => {
 vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/topic-routes')>();
-  return { ...real, loadAdaptiveScopeSettings: vi.fn(), loadTopics: vi.fn() };
+  return { ...real, loadConditionalTopicsSettings: vi.fn(), loadTopics: vi.fn() };
 });
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/authoring-routes', async (importOriginal) => {
@@ -56,12 +56,12 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { planScope } from '@/lib/app/questionnaire/scope/planner';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type InterviewPlan,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -148,7 +148,7 @@ beforeEach(() => {
     versionNumber: 2,
     status: 'draft',
   });
-  (loadAdaptiveScopeSettings as Mock).mockResolvedValue(DEFAULT_ADAPTIVE_SCOPE_SETTINGS);
+  (loadConditionalTopicsSettings as Mock).mockResolvedValue(DEFAULT_CONDITIONAL_TOPICS_SETTINGS);
   (loadTopics as Mock).mockResolvedValue([conditionalTopic()]);
   (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
     { key: 'open_a', prompt: 'What brought you here?' },
@@ -266,8 +266,8 @@ describe('POST topics/preview — what the planner is given', () => {
 
 describe('POST topics/preview — it prices the instrument like the interview does', () => {
   it('hands the planner the same budget the live trigger would', async () => {
-    (loadAdaptiveScopeSettings as Mock).mockResolvedValue({
-      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    (loadConditionalTopicsSettings as Mock).mockResolvedValue({
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       sessionBudgetSeconds: 600,
     });
     (loadTopics as Mock).mockResolvedValue([
@@ -371,8 +371,8 @@ describe('POST topics/preview — the decision trace', () => {
   });
 
   it('names the confidence floor when the agent answered and was overruled', async () => {
-    (loadAdaptiveScopeSettings as Mock).mockResolvedValue({
-      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    (loadConditionalTopicsSettings as Mock).mockResolvedValue({
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       minConfidence: 0.7,
     });
     (planScope as Mock).mockResolvedValue(

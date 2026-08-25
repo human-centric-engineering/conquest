@@ -429,49 +429,49 @@ describe('upsert + response', () => {
     expect(call.update.intro).toEqual(intro);
   });
 
-  it('merges an `adaptiveScope` key via patchAdaptiveScopeSettings instead of dropping it', async () => {
-    // Regression: `adaptiveScope` used to ride inside the body validated by `updateConfigSchema`,
+  it('merges an `conditionalTopics` key via patchConditionalTopicsSettings instead of dropping it', async () => {
+    // Regression: `conditionalTopics` used to ride inside the body validated by `updateConfigSchema`,
     // which has no such field — Zod silently stripped it, so a full settings-export round-trip
-    // (which PATCHes this endpoint with every exported key) never restored Adaptive Scope.
+    // (which PATCHes this endpoint with every exported key) never restored Conditional Topics.
     const res = await configPATCH(
-      req({ voiceEnabled: true, adaptiveScope: { enabled: true, maxConditionalTopics: 5 } }),
+      req({ voiceEnabled: true, conditionalTopics: { enabled: true, maxConditionalTopics: 5 } }),
       ctx(PARAMS)
     );
     expect(res.status).toBe(200);
 
-    // Two upserts: the adaptiveScope merge-write, then the main scalar config write.
+    // Two upserts: the conditionalTopics merge-write, then the main scalar config write.
     expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(2);
     const [scopeCall, configCall] = (
       prismaMock.appQuestionnaireConfig.upsert as Mock
     ).mock.calls.map((c) => c[0]);
     expect(scopeCall.where).toEqual({ versionId: 'v1' });
-    expect(scopeCall.update.adaptiveScope).toMatchObject({
+    expect(scopeCall.update.conditionalTopics).toMatchObject({
       enabled: true,
       maxConditionalTopics: 5,
     });
     expect(configCall.update).toMatchObject({ voiceEnabled: true });
-    expect(configCall.update).not.toHaveProperty('adaptiveScope');
+    expect(configCall.update).not.toHaveProperty('conditionalTopics');
 
     expect(logAdminAction).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update', entityId: 'v1' })
+      expect.objectContaining({ action: 'questionnaire_conditional_topics.update', entityId: 'v1' })
     );
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire_config.update', entityId: 'v1' })
     );
   });
 
-  it('does not touch adaptiveScope when the key is absent from the body', async () => {
+  it('does not touch conditionalTopics when the key is absent from the body', async () => {
     const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
     expect(res.status).toBe(200);
     expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(1);
     expect(logAdminAction).not.toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update' })
+      expect.objectContaining({ action: 'questionnaire_conditional_topics.update' })
     );
   });
 
-  it('400s on an invalid adaptiveScope value without writing anything', async () => {
+  it('400s on an invalid conditionalTopics value without writing anything', async () => {
     const res = await configPATCH(
-      req({ adaptiveScope: { maxConditionalTopics: -1 } }),
+      req({ conditionalTopics: { maxConditionalTopics: -1 } }),
       ctx(PARAMS)
     );
     expect(res.status).toBe(400);

@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope (P17) — reading an author's routing criteria as the structure it already has.
+ * Conditional Topics (P17) — reading an author's routing criteria as the structure it already has.
  *
  * A conditional topic's `criteria` is free text: whatever the admin typed, or whatever the Routing
  * Analyst proposed. In practice both converge on the same shape, because it is the shape the

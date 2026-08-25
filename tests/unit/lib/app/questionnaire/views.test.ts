@@ -36,7 +36,7 @@ import type {
   RefLookupTurn,
   RefLookupResult,
 } from '@/lib/app/questionnaire/views';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import {
   DEFAULT_HOUSE_RULES_SETTINGS,
   DEFAULT_QUESTION_FIDELITY,
@@ -268,7 +268,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       },
     },
     intro: { enabled: false, background: '', buttonLabel: '', videoUrl: '' },
-    adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
     questionFidelity: DEFAULT_QUESTION_FIDELITY,
     ...overrides,

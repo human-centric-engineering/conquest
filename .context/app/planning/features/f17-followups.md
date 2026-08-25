@@ -1,11 +1,11 @@
 ---
 feature: F17-followups
-title: P17 Adaptive Scope — everything deferred, open, or deliberately not built
-phase: P17 — Adaptive Scope
+title: P17 Conditional Topics — everything deferred, open, or deliberately not built
+phase: P17 — Conditional Topics
 status: open
 owner: TBD
 opened: 2026-08-12
-docs: .context/app/questionnaire/adaptive-scope.md
+docs: .context/app/questionnaire/conditional-topics.md
 ---
 
 # P17 follow-ups
@@ -14,7 +14,7 @@ Everything left open when F17.1–F17.7 shipped. Consolidated here so a follow-u
 reconstruct it by reading seven trackers, the pilot client research notes' capability table, and the
 authoring script's stdout.
 
-**Nothing below is blocking.** Adaptive Scope works end to end without any of it, and the pilot
+**Nothing below is blocking.** Conditional Topics works end to end without any of it, and the pilot
 client instrument runs. What the first four items blocked was a **faithful** rendering of it — all
 of them (§1, §3, §4) have since shipped, as has the guardrail in §5, leaving **§2 alone** as the
 workbook behaviour we cannot yet express — and §2 is deliberately gated on a second instrument
@@ -56,7 +56,7 @@ The three most expensive routed sections (S14+S11+S2)      = 332s ← exactly fi
 A fourth, even the cheapest (S6/S8/S9 at 61s)              = 393s ✗
 ```
 
-**What we built:** `adaptiveScope.maxConditionalTopics`, a topic **count**, defaulting 3.
+**What we built:** `conditionalTopics.maxConditionalTopics`, a topic **count**, defaulting 3.
 
 **Why it matters:** a client who says "make it fifteen minutes" needs a code change today. Modelled
 in seconds, they need a settings field. The count also cannot see that S14 (10 items) and S6 (3
@@ -116,7 +116,7 @@ are there — normalise each item to 0–1 against its own bounds before combini
 ## 4. Open-vs-close reconciliation (G05 / C9) · **DONE** — see [`f17.11.md`](./f17.11.md)
 
 > Shipped 2026-08-13. `generation.reconciliation` (off by default) names the two ends by key, or
-> derives them from Adaptive Scope topic phases, and puts freshly-computed scores in the writer's
+> derives them from Conditional Topics topic phases, and puts freshly-computed scores in the writer's
 > prompt for the first time. The prompt block instructs the writer to name the disagreement, and
 > forbids manufacturing one.
 
@@ -291,7 +291,7 @@ for P17. Bringing the plan itself up to date across P10–P17 is a separate job,
   its phases have shipped
 - [`f17.20.md`](./f17.20.md) — turning a gap `f17.19.md` reports into a topic in one click, the one
   item that tracker's own follow-ups left open
-- [`../../questionnaire/adaptive-scope.md`](../../questionnaire/adaptive-scope.md) — the domain doc
+- [`../../questionnaire/conditional-topics.md`](../../questionnaire/conditional-topics.md) — the domain doc
 - The pilot client research notes (held outside this repo) — the
   capability table (C1–C11) these are numbered against
 - [`f15-followups.md`](./f15-followups.md) — the same shape, for Experiences

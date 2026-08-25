@@ -42,8 +42,8 @@ vi.mock('@/components/admin/questionnaires/topics/scope-rules-editor', () => ({
 
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
 } from '@/lib/app/questionnaire/scope/types';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
@@ -57,11 +57,11 @@ function costs(over: Partial<TopicsPayload['costs']> = {}): TopicsPayload['costs
   };
 }
 
-function renderCard(settings: Partial<AdaptiveScopeSettings>, costView = costs()) {
+function renderCard(settings: Partial<ConditionalTopicsSettings>, costView = costs()) {
   const onSave = vi.fn().mockResolvedValue(true);
   render(
     <ScopeSettingsCard
-      settings={{ ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...settings }}
+      settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings }}
       topics={[]}
       dataSlots={[]}
       costs={costView}

@@ -34,7 +34,7 @@ export interface AdminPlannedTopicView {
 }
 
 /**
- * The interview plan as the admin viewer renders it — Adaptive Scope (P17).
+ * The interview plan as the admin viewer renders it — Conditional Topics (P17).
  *
  * "Why did this respondent get those topics" is THE question an admin asks about an adaptive
  * instrument, usually months later and usually because a client challenged a report. The plan
@@ -82,7 +82,7 @@ export interface AdminSessionView {
   /** Respondent display name — null in anonymous mode (never even queried), mirroring the export. */
   respondentName: string | null;
   /**
-   * Adaptive Scope (P17): the plan this interview ran under, or null.
+   * Conditional Topics (P17): the plan this interview ran under, or null.
    *
    * Null for every ordinary session AND for an adaptive one whose opening never completed — both
    * are "no decision was made", which is what the viewer says.

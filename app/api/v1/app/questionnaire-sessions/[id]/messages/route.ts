@@ -318,7 +318,7 @@ async function handleMessage(
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlots.length > 0;
 
-    // Adaptive Scope (P17): the plan's handover line, on the ONE turn that follows the decision.
+    // Conditional Topics (P17): the plan's handover line, on the ONE turn that follows the decision.
     //
     // Delivered as a briefing line rather than a prepended string so the interviewer weaves it in
     // its own voice — "based on what you've said I want to go deeper on pipeline and forecasting"
@@ -353,7 +353,7 @@ async function handleMessage(
         ]
       : [];
 
-    // Adaptive Scope (P17.6): the acknowledgement for a topic the respondent asked for on the
+    // Conditional Topics (P17.6): the acknowledgement for a topic the respondent asked for on the
     // PREVIOUS turn. Same one-outing mechanic as the announcement above — `atTurn` was stamped with
     // that turn's `selectionRound`, so this matches exactly once and never repeats.
     const scopeAmendmentNotice: string[] = (scopePlan?.amendments ?? [])
@@ -574,7 +574,7 @@ async function handleMessage(
     // fill (when any) so a correction merges/updates rather than re-derives, plus a move-on
     // `parkPending` flag when the slot has hit the re-ask cap and still isn't confidently filled.
     //
-    // Adaptive Scope (G03): a spent allowance ends the slot's follow-ups too, and earlier than the
+    // Conditional Topics (G03): a spent allowance ends the slot's follow-ups too, and earlier than the
     // per-slot cap does. Reading only the cap left the extractor un-asked for a best-effort reading
     // on exactly the turns the allowance parks, so those slots recorded the floor placeholder
     // instead of what the respondent actually said. Only the DETERMINISTIC half is knowable here —
@@ -693,7 +693,7 @@ async function handleMessage(
       // Anonymous (no-login) session: the adaptive selectors skip the LLM pick (its `streamChat`
       // would FK-violate on the synthetic `anon:<sessionId>` user) and fall back to deterministic.
       ...(access.anonymous ? { anonymous: true } : {}),
-      // Adaptive Scope (G03): the criteria a follow-up would have to make decidable. Supplied only
+      // Conditional Topics (G03): the criteria a follow-up would have to make decidable. Supplied only
       // when the opening's allowance governs this turn — `openingProbe` is itself present only
       // before the plan is decided on a version that opted in — so the invoker is omitted, and the
       // check never runs, for everyone else.
@@ -721,7 +721,7 @@ async function handleMessage(
     // re-ask counts + the configured cap, used to frame a sharper/final re-ask.
     const dataSlotAttempts = loaded.base.dataSlotAttempts ?? {};
     const maxDataSlotAttempts = loaded.base.config.maxDataSlotAttempts;
-    // Adaptive Scope (G03): the opening's shared follow-up allowance, so the phraser can tell that
+    // Conditional Topics (G03): the opening's shared follow-up allowance, so the phraser can tell that
     // a follow-up is the last one this interview will ask about the slot.
     const openingProbe = loaded.base.openingProbe;
 
@@ -900,7 +900,7 @@ async function handleMessage(
         // allowed attempt so it stays pressure-free before we move on.
         const currentUnderstanding = dataSlotFillByDataSlotId.get(r.dataSlotId)?.paraphrase ?? null;
         const attemptsForTarget = dataSlotAttempts[r.dataSlotId] ?? 0;
-        // Adaptive Scope (G03): the opening's shared allowance ends a slot's follow-ups just as
+        // Conditional Topics (G03): the opening's shared allowance ends a slot's follow-ups just as
         // firmly as the per-slot cap, and one turn sooner. Reading only the cap let the phraser ask
         // "let me try once more" and then move on regardless — the abrupt hand-off `isFinalAttempt`
         // exists to prevent. This follow-up spends the last probe when only one remains.
@@ -1184,7 +1184,7 @@ async function handleMessage(
         });
       }
 
-      // Adaptive Scope (P17): once the turn's fills are on the row, decide the interview plan if the
+      // Conditional Topics (P17): once the turn's fills are on the row, decide the interview plan if the
       // opening has just completed. Runs here — after persistence, before the next turn — so the
       // plan exists by the time `buildTurnContext` next resolves scope, and the announcement lands
       // immediately before the first deeper question rather than trailing the opening answer.
@@ -1192,14 +1192,14 @@ async function handleMessage(
       // runs the always-run topics.
       const planned = await maybePlanScope(sessionId);
       if (planned.kind === 'planned') {
-        log.info('Adaptive scope planned', {
+        log.info('Conditional topics planned', {
           sessionId,
           source: planned.plan.source,
           topicKeys: planned.plan.topics.map((t) => t.key),
         });
       }
 
-      // Adaptive Scope (P17.6): "actually, ask me about talent". Runs only when a plan already
+      // Conditional Topics (P17.6): "actually, ask me about talent". Runs only when a plan already
       // exists, so it can never race the decision it amends — and after `maybePlanScope`, so a turn
       // that both completes the opening AND asks for something is planned before it is amended.
       // Never throws; an unhonoured request is the same outcome as the feature being off.
@@ -1212,7 +1212,7 @@ async function handleMessage(
         atTurn: state.selectionRound + 1,
       });
       if (amended.kind === 'amended') {
-        log.info('Adaptive scope amended by the respondent', {
+        log.info('Conditional topics amended by the respondent', {
           sessionId,
           topicKey: amended.amendment.key,
         });

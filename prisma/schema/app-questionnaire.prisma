@@ -54,10 +54,10 @@ model AppQuestionnaire {
 /// are inferred by the F1.1 extractor (recorded as infer_goal / infer_audience
 /// change records) or admin-set, with admin-wins-per-field merge.
 model AppQuestionnaireVersion {
-  id                     String    @id @default(cuid())
-  questionnaireId        String
-  versionNumber          Int       @default(1)
-  status                 String    @default("draft")
+  id                         String    @id @default(cuid())
+  questionnaireId            String
+  versionNumber              Int       @default(1)
+  status                     String    @default("draft")
   // Per-version soft-archive — ORTHOGONAL to `status` (mirrors AppQuestionnaire.archivedAt).
   // Non-null = archived: the version is hidden from the default admin version list (selector +
   // history) but fully recoverable (Restore nulls it). Deliberately NOT a `status` value: the
@@ -66,19 +66,19 @@ model AppQuestionnaireVersion {
   // in-flight respondent sessions pinned to it untouched. Set on demand, or offered when an edit to a
   // launched version forks a new draft (archive the superseded version). Respondent-facing resolution
   // is intentionally unchanged. See .context/app/questionnaire/archiving.md.
-  archivedAt             DateTime?
-  goal                   String? // inferred (infer_goal change) or admin-set
-  audience               Json? // structured AudienceShape (types.ts); inferred or admin-set
-  goalProvenance         String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
-  audienceProvenance     Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
-  // Adaptive Scope (P17.19): the ingestion-time candidacy check's verdict, cached for cheap reads
+  archivedAt                 DateTime?
+  goal                       String? // inferred (infer_goal change) or admin-set
+  audience                   Json? // structured AudienceShape (types.ts); inferred or admin-set
+  goalProvenance             String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
+  audienceProvenance         Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
+  // Conditional Topics (P17.19): the ingestion-time candidacy check's verdict, cached for cheap reads
   // without joining AppAiRun (kind 'scope_candidacy' carries the full record). ScopeCandidacyVerdict
   // (scope/candidacy-schema.ts): { isCandidate, confidence, summary }. Null until the check has run,
   // or when it was skipped as ineligible (scope already on, or the version already carries authored
   // topics or a pending draft).
-  adaptiveScopeCandidate Json?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  conditionalTopicsCandidate Json?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
   questionnaire        AppQuestionnaire                      @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
   sections             AppQuestionnaireSection[]
@@ -95,7 +95,7 @@ model AppQuestionnaireVersion {
   dataSlotDraft        AppDataSlotDraft?
   scoringSchema        AppScoringSchema?
   errors               AppQuestionnaireError[]
-  // Adaptive Scope (P17): the conditional units and the Routing Analyst's pending proposal.
+  // Conditional Topics (P17): the conditional units and the Routing Analyst's pending proposal.
   // Both fork with the version, like tags / data slots / glossary terms.
   topics               AppQuestionnaireTopic[]
   topicDraft           AppQuestionnaireTopicDraft?
@@ -392,15 +392,15 @@ model AppQuestionnaireConfig {
   // (lib/.../cohort-report/settings.ts). (types.ts)
   cohortReport Json @default("{}")
 
-  // Adaptive Scope (P17): AdaptiveScopeSettings — how much of the questionnaire applies to a given
+  // Conditional Topics (P17): ConditionalTopicsSettings — how much of the questionnaire applies to a given
   // respondent, and who decides. `{ enabled, maxConditionalTopics, includeCheckTopic,
   // checkTopicPreference, minConfidence, fallbackTopicKeys, announce, allowRespondentAmendment,
-  // plannerInstructions, rules }`. Narrowed by narrowAdaptiveScopeSettings (lib/.../scope/settings.ts).
+  // plannerInstructions, rules }`. Narrowed by narrowConditionalTopicsSettings (lib/.../scope/settings.ts).
   //
   // OFF BY DEFAULT and inert by construction: with `enabled: false` — or before a session's plan
   // exists — `resolveScope` short-circuits to "every topic in scope", which is byte-identical to the
   // pre-P17 behaviour. A version that never opts in cannot reach a single new runtime code path.
-  adaptiveScope Json @default("{}")
+  conditionalTopics Json @default("{}")
 
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
@@ -1019,7 +1019,7 @@ model AppQuestionnaireSession {
   // banner-shown this session — the orchestrator fires a threshold once, on first crossing, and never
   // again even if displayCoverage later dips (e.g. an answer is invalidated). Defaults to empty.
   raisedMilestones     Json     @default("[]")
-  // Adaptive Scope (P17): the INTERVIEW PLAN — which topics this respondent's interview covers,
+  // Conditional Topics (P17): the INTERVIEW PLAN — which topics this respondent's interview covers,
   // which were excluded and why, and what they were told (InterviewPlan — lib/.../scope/types.ts).
   // Written ONCE by the Scope Planner when the opening topics are covered, then frozen apart from
   // respondent amendments. Null means "no plan yet": every topic is in scope, which is both the
@@ -1507,7 +1507,7 @@ model AppDataSlotFill {
   @@map("app_data_slot_fill")
 }
 
-/// A TOPIC — the unit of conditionality (Adaptive Scope, P17).
+/// A TOPIC — the unit of conditionality (Conditional Topics, P17).
 ///
 /// A named group of question slots and/or data slots that is included in a respondent's interview
 /// as a whole, or not at all. Answers "which parts of this questionnaire apply to this person?",
@@ -1536,7 +1536,7 @@ model AppDataSlotFill {
 ///
 /// AUTO-SEEDED at ingest: one `core` topic per extracted section, so a freshly-uploaded
 /// questionnaire has a complete, coherent topic set that changes nothing (every topic always asked,
-/// `adaptiveScope.enabled` false). Authoring is then editing, never creating from nothing.
+/// `conditionalTopics.enabled` false). Authoring is then editing, never creating from nothing.
 model AppQuestionnaireTopic {
   id          String  @id @default(cuid())
   versionId   String
@@ -1944,7 +1944,7 @@ model AppQuestionnaireEvaluationFinding {
   @@map("app_questionnaire_evaluation_finding")
 }
 
-/// One persisted Adaptive Scope evaluation run over a version's authored scope config (F17.21).
+/// One persisted Conditional Topics evaluation run over a version's authored scope config (F17.21).
 ///
 /// The sibling of `AppQuestionnaireEvaluationRun` for the scope-evaluation judge panel — same
 /// synchronous, no-worker dispatch (four judges, fail-soft, F17.21's own `runScopeEvaluationPanel`

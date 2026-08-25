@@ -79,17 +79,17 @@ export function initAppCapabilities(): void {
   // to adjudicate. Dispatched by the Definitions tab's analysis route.
   registerAppCapability(new AppAnalyseGlossaryTermsCapability());
 
-  // Adaptive Scope (P17.4) — the Routing Analyst. Reads the uploaded instrument's own instruction
+  // Conditional Topics (P17.4) — the Routing Analyst. Reads the uploaded instrument's own instruction
   // pages and proposes the topics + hard rules they describe. Dispatched by the Topics tab's
   // analysis route; writes nothing live.
   registerAppCapability(new AppAnalyseRoutingCapability());
 
-  // Adaptive Scope (P17.19) — the ingestion-time candidacy check. A cheap triage read that decides
+  // Conditional Topics (P17.19) — the ingestion-time candidacy check. A cheap triage read that decides
   // whether a freshly-uploaded document is worth flagging as a routing candidate. Dispatched by the
   // ingest pipeline, on every fresh upload; writes nothing itself.
   registerAppCapability(new AppDetectScopeCandidacyCapability());
 
-  // Adaptive Scope (F17.21) — the scope-evaluation judge panel. One judge per dimension
+  // Conditional Topics (F17.21) — the scope-evaluation judge panel. One judge per dimension
   // (criteria_quality, rule_integrity, budget_realism, coverage_and_burden) scoring the authored
   // topics/rules/budget. Dispatched once per dimension by the scope evaluate-preview route.
   registerAppCapability(new AppEvaluateScopeCapability());

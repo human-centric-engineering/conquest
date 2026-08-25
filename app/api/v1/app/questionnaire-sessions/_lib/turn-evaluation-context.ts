@@ -9,7 +9,7 @@
  *
  * The projection reads the **whole** config row rather than two columns, because the interviewer
  * policy the judge has to score against (house rules, questioning approach, question fidelity,
- * adaptive scope) is spread across four blocks. It is rendered through
+ * conditional topics) is spread across four blocks. It is rendered through
  * {@link SETTING_DESCRIPTORS} — the same registry the Questionnaire Pack's setup listing uses —
  * so there is one definition of "how a config block reads in English", and a new field is
  * described the moment it gains a descriptor. Deliberately NOT the `chat/**` prompt builders:
@@ -49,7 +49,7 @@ export function summariseAudience(audience: unknown): string | undefined {
  * Technical-tier rows are kept: this is a judge, not the external pack, and "planner confidence
  * floor 0.6" is exactly the kind of detail that explains a turn.
  *
- * Most descriptors state the negative when a feature is off ("House rules: None", "Adaptive scope:
+ * Most descriptors state the negative when a feature is off ("House rules: None", "Conditional topics:
  * Disabled") and that is what the judge wants — see `TurnEvaluationContext`. `undefined` is
  * returned only when a descriptor emits no rows at all, which today means `tone` with no dial set
  * and no persona; the prompt builder then omits the field rather than printing an empty label.
@@ -88,7 +88,7 @@ export function buildObjectivesContext(version: EvaluatorVersionObjectives): Tur
   const houseRules = describeBlock(config, 'houseRules');
   const interviewerStrategy = describeBlock(config, 'interviewerStrategy');
   const questionFidelity = describeBlock(config, 'questionFidelity');
-  const adaptiveScope = describeBlock(config, 'adaptiveScope');
+  const conditionalTopics = describeBlock(config, 'conditionalTopics');
   return {
     ...(version.goal ? { goal: version.goal } : {}),
     ...(audience ? { audience } : {}),
@@ -97,7 +97,7 @@ export function buildObjectivesContext(version: EvaluatorVersionObjectives): Tur
     ...(houseRules ? { houseRules } : {}),
     ...(interviewerStrategy ? { interviewerStrategy } : {}),
     ...(questionFidelity ? { questionFidelity } : {}),
-    ...(adaptiveScope ? { adaptiveScope } : {}),
+    ...(conditionalTopics ? { conditionalTopics } : {}),
   };
 }
 

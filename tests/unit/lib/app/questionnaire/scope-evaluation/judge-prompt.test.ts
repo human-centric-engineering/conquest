@@ -92,7 +92,7 @@ describe('buildScopeJudgePrompt', () => {
     }
   });
 
-  it('states the goal Adaptive Scope serves, so every judge shares the same north star', () => {
+  it('states the goal Conditional Topics serves, so every judge shares the same north star', () => {
     for (const dimension of SCOPE_EVALUATION_DIMENSIONS) {
       const system = buildScopeJudgePrompt(dimension, STRUCTURE)[0].content;
       expect(system).toContain('minimise how much a respondent is asked');

@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope (P17) — the shapes the admin surfaces read.
+ * Conditional Topics (P17) — the shapes the admin surfaces read.
  *
  * One declaration of what `GET …/versions/:vid/topics` returns, shared by the server fetcher
  * (`workspace-data.ts`), the Topics tab page, and the client panel. Without it the payload would be
@@ -12,7 +12,7 @@ import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
 import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
   NEGATIVE_SCOPE_OPERATOR,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type InterviewPlan,
   type ProposedTopicSet,
   type Topic,
@@ -73,12 +73,12 @@ export interface TopicsCostView {
  * findings computed server-side, and the key inventory the membership pickers offer.
  *
  * The findings are computed on the server rather than in the browser because the launch gate runs
- * the same `validateAdaptiveScope` — one evaluation, so the page and the gate can never disagree
+ * the same `validateConditionalTopics` — one evaluation, so the page and the gate can never disagree
  * about whether a version is coherent.
  */
 export interface TopicsPayload {
   topics: Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   issues: ScopeIssue[];
   inventory: {
     questions: TopicQuestionRef[];
@@ -222,7 +222,7 @@ export interface PlanPreviewResult {
  */
 export function buildPlanPreviewForm(
   topics: readonly Topic[],
-  settings: AdaptiveScopeSettings,
+  settings: ConditionalTopicsSettings,
   dataSlots: readonly TopicDataSlotRef[],
   questionPrompts: ReadonlyMap<string, string>
 ): PlanPreviewForm {

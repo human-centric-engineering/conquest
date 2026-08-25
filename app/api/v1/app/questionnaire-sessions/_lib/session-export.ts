@@ -20,7 +20,7 @@ import { prisma } from '@/lib/db/client';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   type NotAssessedTopic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -87,13 +87,13 @@ export interface LoadedSessionExport {
    */
   dataSlotGroups: ExportDataSlotGroup[];
   /**
-   * Adaptive Scope (P17): the topics this interview deliberately did not cover (or covered only
+   * Conditional Topics (P17): the topics this interview deliberately did not cover (or covered only
    * as a sample). Empty for every non-adaptive session. Consumed by the report so it can say what
    * it did not assess, and by the exports so a blank cell reads as *not asked*.
    */
   notAssessed: NotAssessedTopic[];
   /**
-   * Adaptive Scope (P17): which topic PHASE each in-scope key belongs to — `opening`, `core`,
+   * Conditional Topics (P17): which topic PHASE each in-scope key belongs to — `opening`, `core`,
    * `conditional` or `closing`. Empty for a version with no topics authored.
    *
    * Exposed for the report's open-vs-close reconciliation (C9), which needs to tell an opening
@@ -145,8 +145,8 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
             select: {
               anonymousMode: true,
               glossaryReportAppendix: true,
-              // Adaptive Scope (P17): the export must distinguish NOT ASKED from NOT ANSWERED.
-              adaptiveScope: true,
+              // Conditional Topics (P17): the export must distinguish NOT ASKED from NOT ANSWERED.
+              conditionalTopics: true,
             },
           },
           questionnaire: {
@@ -170,7 +170,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
                   type: true,
                   required: true,
                   typeConfig: true,
-                  // Adaptive Scope (P17): a `light`-depth topic samples its highest-weight members.
+                  // Conditional Topics (P17): a `light`-depth topic samples its highest-weight members.
                   weight: true,
                 },
               },
@@ -180,7 +180,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
           // optional "Captured information" appendix; empty for versions not in a data-slot mode.
           dataSlots: {
             orderBy: { ordinal: 'asc' },
-            // `key` is Adaptive Scope's addressing (P17) — membership is keys, never row ids.
+            // `key` is Conditional Topics' addressing (P17) — membership is keys, never row ids.
             select: { id: true, key: true, name: true, description: true, theme: true },
           },
         },
@@ -241,12 +241,12 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
 
   const turnOrdinal = new Map(row.turns.map((t) => [t.id, t.ordinal]));
 
-  // Adaptive Scope (P17): narrow the record to the interview this respondent actually had.
+  // Conditional Topics (P17): narrow the record to the interview this respondent actually had.
   // Without this the export lists every unasked question as UNANSWERED, which reads as a
   // respondent who skipped forty questions rather than an instrument that never asked them.
   const scoped = await buildSessionScope(prisma, {
     versionId: row.versionId,
-    settings: narrowAdaptiveScopeSettings(row.version.config?.adaptiveScope),
+    settings: narrowConditionalTopicsSettings(row.version.config?.conditionalTopics),
     interviewPlan: row.interviewPlan,
     weightByQuestionKey: new Map(
       row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
@@ -434,7 +434,7 @@ export async function buildSessionExportPdfModel(
     sections: loaded.sections,
     answers: loaded.answers,
     dataSlotGroups: loaded.dataSlotGroups,
-    // Adaptive Scope (P17): what the interview left out. Not gated on a config switch — the
+    // Conditional Topics (P17): what the interview left out. Not gated on a config switch — the
     // section listing above is ALREADY filtered to what was in scope, so without this the document
     // narrows silently and reads as a complete assessment of a shorter instrument.
     notAssessed: loaded.notAssessed,

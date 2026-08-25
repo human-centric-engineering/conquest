@@ -7,8 +7,8 @@ import {
   type ScopeInput,
 } from '@/lib/app/questionnaire/scope/resolve';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type InterviewPlan,
   type Topic,
   type TopicPhase,
@@ -30,8 +30,8 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
   };
 }
 
-function settings(overrides: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
-  return { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...overrides };
+function settings(overrides: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
+  return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...overrides };
 }
 
 function plan(

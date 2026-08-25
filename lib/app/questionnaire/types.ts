@@ -6,8 +6,8 @@
  */
 
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
 } from '@/lib/app/questionnaire/scope/types';
 
 /**
@@ -1098,7 +1098,7 @@ export type RespondentReportSettings = {
      * all. This block names the two ends and turns the comparison on.
      *
      * `statedGoalRefs` / `askedForRefs` are question keys or data-slot keys. Leave either empty and
-     * the ends are derived from Adaptive Scope's topic phases instead (free-text answers under
+     * the ends are derived from Conditional Topics' topic phases instead (free-text answers under
      * `opening` topics, and under `closing` ones) — which is why an instrument with topics authored
      * needs no configuration at all, and one without them needs the keys.
      */
@@ -1577,10 +1577,10 @@ export type QuestionnaireConfigShape = {
    */
   intro: IntroSettings;
   /**
-   * Adaptive Scope (P17): which parts of this questionnaire apply to a given respondent, and who
-   * decides. Off by default — see {@link DEFAULT_ADAPTIVE_SCOPE_SETTINGS}.
+   * Conditional Topics (P17): which parts of this questionnaire apply to a given respondent, and who
+   * decides. Off by default — see {@link DEFAULT_CONDITIONAL_TOPICS_SETTINGS}.
    */
-  adaptiveScope: AdaptiveScopeSettings;
+  conditionalTopics: ConditionalTopicsSettings;
 };
 
 /**
@@ -1664,5 +1664,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,
-  adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
 };

@@ -65,25 +65,25 @@ export interface LaunchReadinessInput {
    */
   misconfiguredMatrixCount?: number;
   /**
-   * True when this version has `adaptiveScope.enabled`. The Adaptive Scope row appears ONLY then:
+   * True when this version has `conditionalTopics.enabled`. The Conditional Topics row appears ONLY then:
    * a version that never opted in has nothing to check, and showing a passing row for a feature
    * nobody turned on is noise on every other questionnaire in the system.
    */
-  adaptiveScopeEnabled?: boolean;
+  conditionalTopicsEnabled?: boolean;
   /**
-   * How many `error`-severity findings `validateAdaptiveScope` returns. Launch requires 0 —
+   * How many `error`-severity findings `validateConditionalTopics` returns. Launch requires 0 —
    * an orphaned question under active scope is a question that can never be asked, and nothing
    * else in the system would report it. Warnings never block.
    */
-  adaptiveScopeErrorCount?: number;
+  conditionalTopicsErrorCount?: number;
   /**
-   * How many `conditional` topics the version has. Read only while adaptive scope is OFF, to raise
+   * How many `conditional` topics the version has. Read only while conditional topics is OFF, to raise
    * the warning row below: conditional topics that nothing ever chooses between are asked to every
-   * respondent, and until F17.22 nothing outside the Adaptive scope tab said so. Never blocks —
+   * respondent, and until F17.22 nothing outside the Conditional topics tab said so. Never blocks —
    * "every topic is asked" is a legitimate way to run a questionnaire, just rarely the intended one
    * once someone has authored conditions for it.
    */
-  adaptiveScopeConditionalCount?: number;
+  conditionalTopicsConditionalCount?: number;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -97,8 +97,8 @@ export type LaunchCheckKey =
   | 'embeddings'
   | 'dataSlots'
   | 'dataSlotEmbeddings'
-  | 'adaptiveScope'
-  | 'adaptiveScopeOff';
+  | 'conditionalTopics'
+  | 'conditionalTopicsOff';
 
 /**
  * Whether a failed check stops a launch.
@@ -214,25 +214,25 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
           },
         ]
       : []),
-    ...(input.adaptiveScopeEnabled
+    ...(input.conditionalTopicsEnabled
       ? [
           {
-            key: 'adaptiveScope' as const,
-            ok: (input.adaptiveScopeErrorCount ?? 0) === 0,
-            label: 'Adaptive scope topics are coherent',
+            key: 'conditionalTopics' as const,
+            ok: (input.conditionalTopicsErrorCount ?? 0) === 0,
+            label: 'Conditional topics topics are coherent',
             severity: 'blocker' as const,
           },
         ]
       : []),
     // The mirror image of the row above, and the only warning on the list: conditional topics with
     // the feature off. The AI proposes them, an admin accepts them, and every one of them is then
-    // asked to everybody — a state the Adaptive scope tab reports plainly and nothing else did.
-    ...(!input.adaptiveScopeEnabled && (input.adaptiveScopeConditionalCount ?? 0) > 0
+    // asked to everybody — a state the Conditional topics tab reports plainly and nothing else did.
+    ...(!input.conditionalTopicsEnabled && (input.conditionalTopicsConditionalCount ?? 0) > 0
       ? [
           {
-            key: 'adaptiveScopeOff' as const,
+            key: 'conditionalTopicsOff' as const,
             ok: false,
-            label: adaptiveScopeOffLabel(input.adaptiveScopeConditionalCount ?? 0),
+            label: conditionalTopicsOffLabel(input.conditionalTopicsConditionalCount ?? 0),
             severity: 'warning' as const,
           },
         ]
@@ -240,11 +240,11 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
   ];
 }
 
-/** "Adaptive scope is off, so all 4 conditional topics are asked to everyone." */
-function adaptiveScopeOffLabel(conditionalCount: number): string {
+/** "Conditional topics is off, so all 4 conditional topics are asked to everyone." */
+function conditionalTopicsOffLabel(conditionalCount: number): string {
   return conditionalCount === 1
-    ? 'Adaptive scope is off, so its 1 conditional topic is asked to everyone'
-    : `Adaptive scope is off, so all ${conditionalCount} conditional topics are asked to everyone`;
+    ? 'Conditional topics is off, so its 1 conditional topic is asked to everyone'
+    : `Conditional topics is off, so all ${conditionalCount} conditional topics are asked to everyone`;
 }
 
 /**

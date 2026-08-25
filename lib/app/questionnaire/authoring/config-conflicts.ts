@@ -71,10 +71,10 @@ export interface ConfigConflictInput {
     trigger?: string;
   }>;
   /**
-   * Adaptive Scope master switch. Off ⇒ every topic runs and the opening decides nothing beyond
+   * Conditional Topics master switch. Off ⇒ every topic runs and the opening decides nothing beyond
    * itself, so none of checks 18–20 apply.
    */
-  adaptiveScopeEnabled: boolean;
+  conditionalTopicsEnabled: boolean;
   /** Whether the opening's follow-up allowance is capped (G03). */
   limitOpeningProbes: boolean;
   /** The allowance, when capped. `0` means the planner may never ask a clarifying follow-up. */
@@ -119,9 +119,9 @@ export function configConflictInputFromConfig(
     openingExamples: config.interviewerStrategy.openingExamples,
     houseRulesEnabled: config.houseRules.enabled,
     houseRules: config.houseRules.rules,
-    adaptiveScopeEnabled: config.adaptiveScope.enabled,
-    limitOpeningProbes: config.adaptiveScope.limitOpeningProbes,
-    maxOpeningProbes: config.adaptiveScope.maxOpeningProbes,
+    conditionalTopicsEnabled: config.conditionalTopics.enabled,
+    limitOpeningProbes: config.conditionalTopics.limitOpeningProbes,
+    maxOpeningProbes: config.conditionalTopics.maxOpeningProbes,
   };
 }
 
@@ -549,7 +549,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  /* ── Adaptive Scope × the interviewer ───────────────────────────────────────
+  /* ── Conditional Topics × the interviewer ───────────────────────────────────────
    *
    * The only checks here that cross a tab boundary, and they exist because the two features meet at
    * exactly one point that neither surface shows: **the opening**.
@@ -560,23 +560,23 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
    * still produces a plan, because `planScope` never throws, it just falls back. Nothing errors and
    * nothing is empty; the instrument simply asks less than its author believes it asks.
    *
-   * All three are anchored to `interviewer-strategy` rather than to Adaptive Scope: that is the
+   * All three are anchored to `interviewer-strategy` rather than to Conditional Topics: that is the
    * setting the admin would change to resolve them. The Settings tab does now carry Adaptive
    * Scope's master switch, but turning the feature off is not the fix any of these three is
-   * asking for — the topics and their coherence still live on the Adaptive scope tab, which has
+   * asking for — the topics and their coherence still live on the Conditional topics tab, which has
    * its own (server-side) checker.
    */
-  if (input.adaptiveScopeEnabled) {
+  if (input.conditionalTopicsEnabled) {
     // 18 — The sharpest of the three. `targeted` asks one specific question from the very first
     //      turn, so there is no broad opening for the planner to read at all.
     if (input.interviewerStrategyEnabled && input.interviewerApproach === 'targeted') {
       conflicts.push({
-        id: 'adaptive-scope-targeted-opening',
+        id: 'conditional-topics-targeted-opening',
         severity: 'warning',
         sectionId: 'interviewer-strategy',
-        title: 'Adaptive scope may have little to go on',
+        title: 'Conditional topics may have little to go on',
         message:
-          'Adaptive scope decides which topics to cover from the respondent’s opening answers, and ' +
+          'Conditional topics decides which topics to cover from the respondent’s opening answers, and ' +
           'the targeted approach asks one specific question from the very first turn. There may be ' +
           'too little there to route on, in which case everyone gets the same fallback topics. ' +
           'Switch the approach to Funnel or Open throughout to give it something to read.',
@@ -587,18 +587,18 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     //      abstract to route on ("a predictable revenue engine"); with none, it cannot.
     if (input.limitOpeningProbes && input.maxOpeningProbes === 0) {
       conflicts.push({
-        id: 'adaptive-scope-no-probes',
+        id: 'conditional-topics-no-probes',
         severity: 'warning',
         sectionId: 'interviewer-strategy',
         title: 'The opening can’t ask for clarification',
         message:
           'Opening follow-ups are limited to none, so if a respondent’s opening answer is too vague ' +
-          'to route on, the interviewer can’t ask them to say more — adaptive scope falls back ' +
+          'to route on, the interviewer can’t ask them to say more — conditional topics falls back ' +
           'instead. Allow at least one follow-up unless the opening questions are very concrete.',
       });
     }
 
-    // 20 — Guided openings under adaptive scope. Not a mistake at all — but the examples are now
+    // 20 — Guided openings under conditional topics. Not a mistake at all — but the examples are now
     //      steering the very answer the planner reads, which an admin writing them for tone alone
     //      would not realise. `info`, and only when there is something written to steer with.
     if (
@@ -607,12 +607,12 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
       input.openingExamples.some((example) => example.trim() !== '')
     ) {
       conflicts.push({
-        id: 'adaptive-scope-guided-openings',
+        id: 'conditional-topics-guided-openings',
         severity: 'info',
         sectionId: 'interviewer-strategy',
         title: 'Your example openings steer the routing too',
         message:
-          'Adaptive scope reads the opening answers to decide which topics to cover, so your ' +
+          'Conditional topics reads the opening answers to decide which topics to cover, so your ' +
           'example openings shape more than the tone — they shape what the interview becomes. ' +
           'Check they invite the kind of answer the topic criteria are written against.',
       });

@@ -69,7 +69,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
-// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// Conditional Topics candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
 vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOriginal) => {
@@ -80,7 +80,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOr
 });
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
-  checkAdaptiveScopeCandidacy: vi.fn(),
+  checkConditionalTopicsCandidacy: vi.fn(),
   isEligibleForScopeCandidacy: vi.fn(),
 }));
 
@@ -99,7 +99,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
-  checkAdaptiveScopeCandidacy,
+  checkConditionalTopicsCandidacy,
   isEligibleForScopeCandidacy,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import { proposeScopeDuringIngest } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
@@ -231,9 +231,9 @@ beforeEach(() => {
   (reingestVersion as Mock).mockResolvedValue(REINGEST_RESULT);
   // Default: eligible (so the pre-check the route runs before announcing "checking…" doesn't
   // itself suppress the phase), but the check finds nothing — keeps every pre-existing test's
-  // frame sequence and done-event shape (no `adaptiveScopeCandidate` key) unchanged.
+  // frame sequence and done-event shape (no `conditionalTopicsCandidate` key) unchanged.
   (isEligibleForScopeCandidacy as Mock).mockResolvedValue(true);
-  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
+  (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(null);
   (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 });
 
@@ -504,14 +504,14 @@ describe('POST …/reingest/stream — mid-stream failures', () => {
   });
 });
 
-// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
-// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// ─── Conditional Topics candidacy wiring (P17.19) ───────────────────────────────────
+// `checkConditionalTopicsCandidacy` itself is mocked at the module boundary — its Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These tests only prove this route
 // wires the result into its own `checking_scope` phase frame and terminal `done` frame,
 // scoped to the non-deduped success path — the deduped short-circuit returns before the
 // candidacy check ever runs, so it needs no coverage here (see the dedup describe block above).
 
-describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
+describe('POST …/reingest/stream — conditional topics candidacy wiring', () => {
   it('emits a checking_scope phase frame before the terminal done frame', async () => {
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
     const frames = await drainSse(res);
@@ -521,19 +521,19 @@ describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
     expect(frames[frames.length - 1].type).toBe('done');
   });
 
-  it('carries adaptiveScopeCandidate on the done frame when the check resolves a verdict', async () => {
+  it('carries conditionalTopicsCandidate on the done frame when the check resolves a verdict', async () => {
     const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(verdict);
 
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
     const frames = await drainSse(res);
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect(doneFrame.data.adaptiveScopeCandidate).toEqual(verdict);
+    expect(doneFrame.data.conditionalTopicsCandidate).toEqual(verdict);
   });
 
-  it('omits adaptiveScopeCandidate from the done frame when the check resolves null', async () => {
+  it('omits conditionalTopicsCandidate from the done frame when the check resolves null', async () => {
     // beforeEach already defaults the mock to null — pins the omission (not
     // present-and-undefined) directly against the parsed SSE frame data.
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
@@ -541,7 +541,7 @@ describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+    expect('conditionalTopicsCandidate' in doneFrame.data).toBe(false);
   });
 
   it('does not announce a checking_scope phase when the version is pre-check ineligible', async () => {
@@ -556,10 +556,10 @@ describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
 
     const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
     expect(phaseNames).not.toContain('checking_scope');
-    expect(checkAdaptiveScopeCandidacy).not.toHaveBeenCalled();
+    expect(checkConditionalTopicsCandidacy).not.toHaveBeenCalled();
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+    expect('conditionalTopicsCandidate' in doneFrame.data).toBe(false);
   });
 });
 
@@ -569,7 +569,7 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
   const CANDIDATE = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
 
   it('runs the analyst after the check says yes, and reports what it proposed', async () => {
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 4, conditionalCount: 2 });
 
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
@@ -580,7 +580,10 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
       phaseNames.indexOf('checking_scope')
     );
     const doneFrame = frames[frames.length - 1];
-    expect(doneFrame.data.adaptiveScopeProposal).toEqual({ topicCount: 4, conditionalCount: 2 });
+    expect(doneFrame.data.conditionalTopicsProposal).toEqual({
+      topicCount: 4,
+      conditionalCount: 2,
+    });
   });
 
   it('never runs the analyst when the version was pre-check ineligible', async () => {
@@ -595,7 +598,7 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
   });
 
   it('skips the proposal when the re-ingest has already spent the wall-clock budget', async () => {
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     const realNow = Date.now;
     let ticks = 0;
     Date.now = () => ticks++ * 90_000;
@@ -612,7 +615,7 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
   });
 
   it('completes the re-ingest when the proposal fails', async () => {
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
@@ -620,7 +623,7 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect('adaptiveScopeProposal' in doneFrame.data).toBe(false);
+    expect('conditionalTopicsProposal' in doneFrame.data).toBe(false);
     expect(frames.some((f) => f.type === 'error')).toBe(false);
   });
 });

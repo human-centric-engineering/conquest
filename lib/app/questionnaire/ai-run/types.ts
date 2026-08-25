@@ -70,7 +70,7 @@ export const APP_AI_RUN_KINDS = [
    */
   'glossary_analysis',
   /**
-   * Adaptive Scope planning (P17) — which conditional topics a respondent's interview covers, and
+   * Conditional Topics planning (P17) — which conditional topics a respondent's interview covers, and
    * why each was chosen or left out.
    *
    * Recorded for EVERY plan, including the ones no model produced (a hard rule, the fallback, or an
@@ -92,7 +92,7 @@ export const APP_AI_RUN_KINDS = [
    */
   'routing_analysis',
   /**
-   * Adaptive Scope candidacy check (P17.19) — the cheap ingestion-time triage read that decides
+   * Conditional Topics candidacy check (P17.19) — the cheap ingestion-time triage read that decides
    * whether a freshly-uploaded document is worth flagging as a routing candidate.
    *
    * Recorded because the verdict drives an automatic action downstream (the Routing Analyst

@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope hard rules (P17) — pure, DB-free.
+ * Conditional Topics hard rules (P17) — pure, DB-free.
  *
  * Evaluated BEFORE the planner. These exist for the cases an author is *certain* about — "if they
  * said they have done this before, always ask the follow-up section", "if they never named an
@@ -131,7 +131,7 @@ export interface RuleOutcome {
  *
  * `validTopicKeys`, when supplied, drops rules naming a topic that no longer exists. A dangling
  * rule is a non-match, never an error: an author deleting a topic must not break a live interview,
- * and `validateAdaptiveScope` surfaces the dangling rule on the authoring surface where it can be
+ * and `validateConditionalTopics` surfaces the dangling rule on the authoring surface where it can be
  * fixed.
  */
 export function evaluateScopeRules(

@@ -8,8 +8,8 @@ import {
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -30,9 +30,9 @@ function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Top
   };
 }
 
-function settings(over: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
+function settings(over: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
   return {
-    ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     enabled: true,
     maxConditionalTopics: 3,
     includeCheckTopic: false,

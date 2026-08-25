@@ -163,7 +163,7 @@ code, plus the domain doc named alongside.
 | **P14** | Cohort Report, then hardening & cleanup | done   | 15 trackers, `f14.1`–`f14.15` — the phase splits in two: the cohort report, then a quality sweep                      |
 | **P15** | Experiences                             | done   | 9 trackers · [`f15-followups.md`](./features/f15-followups.md) — **the record of what is still open**                 |
 | **P16** | Definitions & Glossary                  | done   | [`definitions-glossary.md`](../questionnaire/definitions-glossary.md) — no trackers; the domain doc is the record     |
-| **P17** | Adaptive Scope                          | done   | 19 trackers · [`f17-followups.md`](./features/f17-followups.md) — **the record of what is still open**                |
+| **P17** | Conditional Topics                      | done   | 19 trackers · [`f17-followups.md`](./features/f17-followups.md) — **the record of what is still open**                |
 | **P18** | Per-questionnaire interviewer policy    | done   | `f18.1`–`f18.7` — house rules, question fidelity, the funnel arc, and the ring of follow-ups closing around all three |
 
 Two caveats a reader should carry:

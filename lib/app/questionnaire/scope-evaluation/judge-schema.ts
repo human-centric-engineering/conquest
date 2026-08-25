@@ -46,7 +46,7 @@ const PROPOSED_CHANGE_MAX = 2_000;
 const RATIONALE_MAX = 2_000;
 const SOURCE_QUOTE_MAX = 2_000;
 
-/** A session budget in seconds: 0 (no budget) or within the legal range — mirrors `adaptiveScopeSettingsSchema`. */
+/** A session budget in seconds: 0 (no budget) or within the legal range — mirrors `conditionalTopicsSettingsSchema`. */
 const budgetSecondsSchema = z
   .number()
   .int()

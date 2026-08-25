@@ -1,9 +1,9 @@
 /**
- * Integration tests: topics collection routes — Adaptive Scope (P17).
+ * Integration tests: topics collection routes — Conditional Topics (P17).
  *
  *   GET   /api/v1/app/questionnaires/:id/versions/:vid/topics  → topics + settings + inventory
  *   PUT   /api/v1/app/questionnaires/:id/versions/:vid/topics  → replace-set (fork if launched)
- *   PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics  → patch `adaptiveScope` settings
+ *   PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics  → patch `conditionalTopics` settings
  *
  * Gate order for all three handlers: non-admin → 403; unauthenticated → 401; missing/cross-id
  * version → 404.
@@ -48,10 +48,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', async (importOrigin
     await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/topic-routes')>();
   return {
     ...real,
-    loadAdaptiveScopeSettings: vi.fn(),
+    loadConditionalTopicsSettings: vi.fn(),
     loadTopics: vi.fn(),
     replaceTopics: vi.fn(),
-    patchAdaptiveScopeSettings: vi.fn(),
+    patchConditionalTopicsSettings: vi.fn(),
   };
 });
 
@@ -78,16 +78,16 @@ import { GET, PUT, PATCH } from '@/app/api/v1/app/questionnaires/[id]/versions/[
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
   replaceTopics,
-  patchAdaptiveScopeSettings,
+  patchConditionalTopicsSettings,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -170,12 +170,12 @@ beforeEach(() => {
 
   setAuth(mockAdminUser());
   (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
-  (loadAdaptiveScopeSettings as Mock).mockResolvedValue(DEFAULT_ADAPTIVE_SCOPE_SETTINGS);
+  (loadConditionalTopicsSettings as Mock).mockResolvedValue(DEFAULT_CONDITIONAL_TOPICS_SETTINGS);
   (loadTopics as Mock).mockResolvedValue([sampleTopic()]);
   (loadTopicDraft as Mock).mockResolvedValue(null);
   (replaceTopics as Mock).mockResolvedValue([sampleTopic()]);
-  (patchAdaptiveScopeSettings as Mock).mockResolvedValue({
-    ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  (patchConditionalTopicsSettings as Mock).mockResolvedValue({
+    ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     enabled: true,
   });
   (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
@@ -186,7 +186,7 @@ beforeEach(() => {
   (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue(null);
   // No cached candidacy verdict by default — most cases have nothing to say about auto-trigger.
   (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-    adaptiveScopeCandidate: null,
+    conditionalTopicsCandidate: null,
   });
   (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
   (prisma.appAiRun.count as Mock).mockResolvedValue(0);
@@ -252,7 +252,7 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
 
   it('prices the inventory and the topics it feeds, with real slots (F17.8/F17.15)', async () => {
     // Every other GET test leaves the key inventory empty, which means the seconds arithmetic
-    // `handleList` feeds to `validateAdaptiveScope` and to `costs.byTopicKey` never actually runs.
+    // `handleList` feeds to `validateConditionalTopics` and to `costs.byTopicKey` never actually runs.
     // A likert is 8s and a data slot 40s by default, so the numbers below are the real ones.
     (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
       {
@@ -361,8 +361,8 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
   it('reports a scale that routing can leave partially assessed (F17.15)', async () => {
     // `wellbeing` is the version's only topic and it is conditional, so a respondent not routed to
     // it is scored on none of the scale — and the cohort report will exclude them.
-    (loadAdaptiveScopeSettings as Mock).mockResolvedValue({
-      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    (loadConditionalTopicsSettings as Mock).mockResolvedValue({
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       enabled: true,
     });
     (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue({
@@ -408,7 +408,7 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
 
     it('reports pending: true for a flagged version with only a seeded topic and no prior run', async () => {
       (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+        conditionalTopicsCandidate: { ...VERDICT, signals: [] },
       });
       (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
 
@@ -421,7 +421,7 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
 
     it('reports pending: false when the version already has a hand-authored topic', async () => {
       (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+        conditionalTopicsCandidate: { ...VERDICT, signals: [] },
       });
       (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'manual' })]);
 
@@ -434,7 +434,7 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
 
     it('reports pending: false when a draft is already pending review', async () => {
       (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+        conditionalTopicsCandidate: { ...VERDICT, signals: [] },
       });
       (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
       (loadTopicDraft as Mock).mockResolvedValue({
@@ -454,7 +454,7 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
 
     it('reports pending: false once the analyst has already run for this version', async () => {
       (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+        conditionalTopicsCandidate: { ...VERDICT, signals: [] },
       });
       (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
       (prisma.appAiRun.findFirst as Mock).mockResolvedValue({ id: 'run-1' });
@@ -573,14 +573,14 @@ describe('PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
       error: { code: 'NOT_FOUND', message: expect.any(String) },
     });
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
-    expect(patchAdaptiveScopeSettings).not.toHaveBeenCalled();
+    expect(patchConditionalTopicsSettings).not.toHaveBeenCalled();
   });
 
   it('patches settings on a draft version WITHOUT forking', async () => {
     (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
     (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
-    (patchAdaptiveScopeSettings as Mock).mockResolvedValue({
-      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    (patchConditionalTopicsSettings as Mock).mockResolvedValue({
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       enabled: true,
     });
 
@@ -590,11 +590,11 @@ describe('PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     expect(body.success).toBe(true);
     expect(body.meta).toMatchObject({ forked: false, versionId: 'ver-1', versionNumber: 2 });
 
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith('ver-1', { enabled: true });
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith('ver-1', { enabled: true });
     expect(body.data.settings.enabled).toBe(true);
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'questionnaire_adaptive_scope.update',
+        action: 'questionnaire_conditional_topics.update',
         entityId: 'ver-1',
         metadata: expect.objectContaining({ enabled: true }),
       })
@@ -604,8 +604,8 @@ describe('PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
   it('forks a LAUNCHED version and writes settings to the fork — the handler-derived id', async () => {
     (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('launched'));
     (forkVersionIfLaunched as Mock).mockResolvedValue(forkResult());
-    (patchAdaptiveScopeSettings as Mock).mockResolvedValue({
-      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    (patchConditionalTopicsSettings as Mock).mockResolvedValue({
+      ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
       enabled: true,
     });
 
@@ -614,7 +614,7 @@ describe('PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     const body = await res.json();
 
     expect(body.meta).toMatchObject({ forked: true, versionId: 'ver-2', versionNumber: 3 });
-    expect(patchAdaptiveScopeSettings).toHaveBeenCalledWith('ver-2', { enabled: true });
+    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith('ver-2', { enabled: true });
     expect(logAdminAction).toHaveBeenCalledWith(expect.objectContaining({ entityId: 'ver-2' }));
   });
 });

@@ -7,7 +7,7 @@
  *
  * The ones worth naming, because each is a decision rather than plumbing:
  *
- * - **"Questions in no topic" is computed off the live drafts, not the saved set.** Once adaptive scope
+ * - **"Questions in no topic" is computed off the live drafts, not the saved set.** Once conditional topics
  *   is on, a question no topic claims can never be asked — and the findings above the list only know
  *   about what was saved. An author who removes the last topic covering a question has to see it
  *   immediately, so the count tracks the draft and names the questions rather than only counting them.

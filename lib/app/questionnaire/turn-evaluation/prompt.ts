@@ -164,7 +164,11 @@ function buildContextBlock(input: TurnEvaluationInput): string {
     pushField(lines, 'Interviewer house rules (the client’s behaviour policy)', ctx.houseRules);
     pushField(lines, 'Questioning approach', ctx.interviewerStrategy);
     pushField(lines, 'Question fidelity setting', ctx.questionFidelity);
-    pushField(lines, 'Adaptive scope (which topics this interview covers)', ctx.adaptiveScope);
+    pushField(
+      lines,
+      'Conditional topics (which topics this interview covers)',
+      ctx.conditionalTopics
+    );
     // The per-question level for THIS turn — the one that most often makes a correct turn look
     // wrong to the rubric — so it comes last of the policy lines, closest to the turn itself.
     pushField(

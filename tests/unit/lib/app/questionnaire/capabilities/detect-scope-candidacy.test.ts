@@ -123,7 +123,7 @@ describe('execute — happy path', () => {
         inputTokens: 800,
         outputTokens: 150,
         metadata: expect.objectContaining({
-          capability: 'app_detect_adaptive_scope_candidacy',
+          capability: 'app_detect_conditional_topics_candidacy',
           versionId: 'ver-1',
         }),
       })

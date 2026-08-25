@@ -207,7 +207,7 @@ async function buildScoring(
   /**
    * Collect raw scores + band labels for a scale across a set of sessions.
    *
-   * **Partially-assessed respondents are excluded** — Adaptive Scope (P17). A band computed from
+   * **Partially-assessed respondents are excluded** — Conditional Topics (P17). A band computed from
    * three of a scale's eight items and one computed from all eight can otherwise land in the same
    * column, and the chart looks exactly as confident either way. Averaging them produces a number
    * that describes nobody: it is arithmetic over two different instruments.

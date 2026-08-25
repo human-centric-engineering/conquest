@@ -1,9 +1,9 @@
 /**
- * Route-local DB seam for Adaptive Scope (P17) — the `lib/app/questionnaire/scope/**` module stays
+ * Route-local DB seam for Conditional Topics (P17) — the `lib/app/questionnaire/scope/**` module stays
  * Prisma-free.
  *
  * Loads a version's topics into the client-safe {@link Topic}, replaces the set on a bulk save, and
- * patches the `adaptiveScope` settings blob. Sibling of `data-slot-routes.ts`, deliberately shaped
+ * patches the `conditionalTopics` settings blob. Sibling of `data-slot-routes.ts`, deliberately shaped
  * the same way.
  */
 
@@ -12,14 +12,17 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
-import type { TopicInput, AdaptiveScopeSettingsPatch } from '@/lib/app/questionnaire/scope/schemas';
+import type {
+  TopicInput,
+  ConditionalTopicsSettingsPatch,
+} from '@/lib/app/questionnaire/scope/schemas';
 import {
   TOPIC_DEPTHS,
   TOPIC_PHASES,
   TOPIC_SOURCES,
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowTopicMembers,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
   type TopicSource,
@@ -86,26 +89,26 @@ export async function loadTopics(versionId: string): Promise<Topic[]> {
  * callback type additionally omits `$transaction` and is therefore NOT assignable to
  * `Prisma.TransactionClient` itself. A caller can run a read-modify-write inside its own transaction
  * either way (e.g. the scope-evaluation apply engine writes a settings op + stamps the finding applied
- * atomically; the definition importer seeds Adaptive Scope settings inside its create-only transaction).
+ * atomically; the definition importer seeds Conditional Topics settings inside its create-only transaction).
  */
 type DbClient = Pick<typeof prisma, 'appQuestionnaireConfig'>;
 
-/** A version's resolved Adaptive Scope settings — defaults when no config row exists. */
-export async function loadAdaptiveScopeSettings(
+/** A version's resolved Conditional Topics settings — defaults when no config row exists. */
+export async function loadConditionalTopicsSettings(
   versionId: string,
   client: DbClient = prisma
-): Promise<AdaptiveScopeSettings> {
+): Promise<ConditionalTopicsSettings> {
   const config = await client.appQuestionnaireConfig.findUnique({
     where: { versionId },
-    select: { adaptiveScope: true },
+    select: { conditionalTopics: true },
   });
-  return narrowAdaptiveScopeSettings(config?.adaptiveScope);
+  return narrowConditionalTopicsSettings(config?.conditionalTopics);
 }
 
 /**
  * The version's per-slot re-ask cap (G03).
  *
- * Read on its own rather than folded into {@link loadAdaptiveScopeSettings} because it belongs to a
+ * Read on its own rather than folded into {@link loadConditionalTopicsSettings} because it belongs to a
  * different blob and a different tab: it governs the interviewer, not the routing. Only the Topics
  * tab needs it, and only to say when a follow-up limit set there cannot bind.
  */
@@ -180,19 +183,19 @@ export async function replaceTopics(versionId: string, topics: TopicInput[]): Pr
 }
 
 /**
- * Merge a settings patch onto the version's current Adaptive Scope settings.
+ * Merge a settings patch onto the version's current Conditional Topics settings.
  *
  * Read-narrow-merge-write rather than a blind overwrite, so the Settings tab can send one knob
  * without resending the rest — and so a legacy or partial blob is normalised on the way through.
  * Creates the config row when the version has none (upsert), since a version with no config row is
  * a perfectly ordinary state that should not block turning the feature on.
  */
-export async function patchAdaptiveScopeSettings(
+export async function patchConditionalTopicsSettings(
   versionId: string,
-  patch: AdaptiveScopeSettingsPatch,
+  patch: ConditionalTopicsSettingsPatch,
   client: DbClient = prisma
-): Promise<AdaptiveScopeSettings> {
-  const current = await loadAdaptiveScopeSettings(versionId, client);
+): Promise<ConditionalTopicsSettings> {
+  const current = await loadConditionalTopicsSettings(versionId, client);
 
   const rules: ScopeRule[] = (patch.rules ?? current.rules).map((r, i) => ({
     id: 'id' in r && typeof r.id === 'string' && r.id.length > 0 ? r.id : `rule-${i}`,
@@ -204,15 +207,15 @@ export async function patchAdaptiveScopeSettings(
     ordinal: i,
   }));
 
-  const merged: AdaptiveScopeSettings = { ...current, ...patch, rules };
+  const merged: ConditionalTopicsSettings = { ...current, ...patch, rules };
 
   await client.appQuestionnaireConfig.upsert({
     where: { versionId },
-    update: { adaptiveScope: jsonInput(merged) },
-    create: { versionId, adaptiveScope: jsonInput(merged) },
+    update: { conditionalTopics: jsonInput(merged) },
+    create: { versionId, conditionalTopics: jsonInput(merged) },
   });
 
   // Narrow on the way out so the caller sees exactly what a later read will produce — clamped
   // numbers, dropped blanks, sorted rules — rather than the un-normalised object it just sent.
-  return narrowAdaptiveScopeSettings(merged);
+  return narrowConditionalTopicsSettings(merged);
 }

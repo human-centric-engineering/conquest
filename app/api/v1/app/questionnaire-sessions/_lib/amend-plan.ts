@@ -44,7 +44,7 @@ import {
   matchTopicByLabel,
 } from '@/lib/app/questionnaire/scope/amendment';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   type PlanAmendment,
   type Topic,
@@ -89,13 +89,13 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
       select: {
         versionId: true,
         interviewPlan: true,
-        version: { select: { goal: true, config: { select: { adaptiveScope: true } } } },
+        version: { select: { goal: true, config: { select: { conditionalTopics: true } } } },
       },
     });
     if (!session) return { kind: 'skipped', reason: 'session not found' };
 
-    const settings = narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope);
-    if (!settings.enabled) return { kind: 'skipped', reason: 'adaptive scope is off' };
+    const settings = narrowConditionalTopicsSettings(session.version.config?.conditionalTopics);
+    if (!settings.enabled) return { kind: 'skipped', reason: 'conditional topics is off' };
     if (!settings.allowRespondentAmendment) {
       return { kind: 'skipped', reason: 'amendment is not allowed on this version' };
     }
@@ -167,7 +167,7 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
       },
     });
 
-    logger.info('adaptive scope: plan amended at the respondent’s request', {
+    logger.info('conditional topics: plan amended at the respondent’s request', {
       sessionId,
       topicKey: topic.key,
       resolvedBy,
@@ -176,7 +176,7 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
 
     return { kind: 'amended', amendment };
   } catch (err) {
-    logger.error('adaptive scope: amendment failed; the plan is unchanged', {
+    logger.error('conditional topics: amendment failed; the plan is unchanged', {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
