@@ -621,6 +621,39 @@ admin's own button is the way back in — it reports its errors, which the silen
 deliberately does not. Legacy rows are unaffected: `AppAiRun.status` defaults to `succeeded`, so
 anything written before failures were recorded still reads as conclusive.
 
+### Proposing during the upload (F17.22 Phase 2)
+
+The candidacy check's verdict used to sit in the database waiting for someone to open the Adaptive
+scope tab. On a **streaming** ingest or re-ingest, a `true` verdict now runs the Routing Analyst
+immediately, under a `proposing_scope` phase after `checking_scope`, and saves the draft before the
+stream closes. The admin is already watching an upload progress stream, so the added time reads as
+work rather than as a stall — and an admin who never opens the tab still has a reviewed proposal
+waiting when they do.
+
+**Only the streaming routes.** The plain (non-streaming) ingest and re-ingest keep the lazy
+tab-visit trigger: there is no job queue in this repo to hand a 180-second run to, and no ordinary
+request should be held open for one. Both streaming routes now declare `maxDuration = 300`, since
+the worst case is extraction (120s) + candidacy (20s) + analyst (180s).
+
+**Fail-soft, absolutely.** `proposeScopeDuringIngest` never throws: a missing agent, a provider
+outage, an unusable reply and a thrown query all resolve to "no proposal". An upload that completed
+is never reported as failed because an optional proposal could not be made — and the admin can
+still press the button on the tab, which reports failures properly, unlike a silent run.
+
+The `done` event carries `adaptiveScopeProposal: { topicCount, conditionalCount }` when a proposal
+was made. Nothing is live: it is a pending draft, and `adaptiveScope.enabled` is untouched, exactly
+as with a button-triggered run.
+
+**One implementation, two callers.** The analyst run moved into
+`app/api/v1/app/questionnaires/_lib/routing-analysis.ts` — `dispatchRoutingAnalysis` (which records
+the **failed** `AppAiRun` on both failure paths) and `persistRoutingAnalysis` (which saves the
+draft and records the **succeeded** one). The SSE route keeps its phase events and owns nothing
+else. That split is not tidiness: the `routing_analysis` run row is the "already tried" signal the
+auto-trigger reads, so a second copy that forgot to record one would re-propose on every tab visit,
+and one that recorded the wrong status would disable the automation for the life of the version.
+The run's `detail.trigger` (`admin` | `ingest`) and the audit entry's matching field are what let
+"where did these topics come from" be answered afterwards.
+
 ## Reports and scoring (F17.5)
 
 The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.

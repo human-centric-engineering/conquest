@@ -18,10 +18,12 @@ import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candid
  * ticker these are REAL: each is emitted by the orchestrator as it reaches that stage.
  * `verifying`/`repairing` fire only when the ingest verify+repair pass is enabled.
  * `checking_scope` fires only on a fresh, eligible version (P17.19) — see
- * `_lib/scope-candidacy.ts`.
+ * `_lib/scope-candidacy.ts`. `proposing_scope` fires only when that check said yes (F17.22
+ * Phase 2): the Routing Analyst runs there and then, while the admin is still watching, rather
+ * than on some later visit to the Adaptive scope tab.
  */
 export type ExtractionPhase =
-  'extracting' | 'verifying' | 'repairing' | 'checking_scope' | 'saving';
+  'extracting' | 'verifying' | 'repairing' | 'checking_scope' | 'proposing_scope' | 'saving';
 
 /** A real progress event — the client renders `message` and, when present, the `progress` counts. */
 export interface ExtractionPhaseEvent {
@@ -70,6 +72,15 @@ export interface ExtractionDoneEvent {
    * report" rather than "checked and found nothing".
    */
   adaptiveScopeCandidate?: ScopeCandidacyVerdict;
+  /**
+   * What the Routing Analyst proposed during this upload (F17.22 Phase 2) — present only when the
+   * candidacy check said yes AND the proposal succeeded. Nothing is live: it is a pending draft
+   * waiting on the Adaptive scope tab, and adaptive scope itself stays off. Absent means "no
+   * proposal was made", which covers the check saying no, the analyst failing, and the whole
+   * fail-soft path — an upload that completed is never reported as failed because an optional
+   * proposal could not be made.
+   */
+  adaptiveScopeProposal?: { topicCount: number; conditionalCount: number };
 }
 
 export type ExtractionStreamEvent =

@@ -48,6 +48,10 @@ import {
   checkAdaptiveScopeCandidacy,
   isEligibleForScopeCandidacy,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import {
+  proposeScopeDuringIngest,
+  type IngestScopeProposal,
+} from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 
 /**
  * Convert a pre-built error `Response` from the pipeline into a terminal stream error
@@ -75,6 +79,14 @@ async function errorEventFromResponse(response: Response): Promise<ExtractionStr
     return fallback;
   }
 }
+
+/**
+ * Wall-clock ceiling. Extraction is bounded at 120s and the candidacy check at 20s; since F17.22
+ * Phase 2 a flagged document also runs the Routing Analyst inline (its own 180s bound), so the
+ * worst case needs materially more than the platform default. The stream keeps the connection
+ * alive throughout — this is the ceiling on the work, not on the idle time.
+ */
+export const maxDuration = 300;
 
 const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -277,6 +289,25 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         });
       }
 
+      // F17.22 Phase 2 — the same offer the fresh-ingest stream makes, for the same reason: the
+      // check said this document describes routing and the admin is still watching. Fail-soft;
+      // a re-ingest that completed is never reported as failed over an optional proposal.
+      let scopeProposal: IngestScopeProposal | null = null;
+      if (candidacy?.isCandidate) {
+        yield {
+          type: 'phase',
+          phase: 'proposing_scope',
+          message: 'Working out which parts apply to whom…',
+        };
+        scopeProposal = await proposeScopeDuringIngest({
+          questionnaireId: id,
+          versionId: vid,
+          adminId,
+          clientIp,
+          log,
+        });
+      }
+
       logAdminAction({
         userId: adminId,
         action: 'questionnaire.reingest',
@@ -313,6 +344,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         changeCount: result.changeCount,
         deduped: false,
         ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
+        ...(scopeProposal ? { adaptiveScopeProposal: scopeProposal } : {}),
       };
     }
 

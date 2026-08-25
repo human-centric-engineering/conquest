@@ -35,6 +35,10 @@ import {
 import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import {
+  proposeScopeDuringIngest,
+  type IngestScopeProposal,
+} from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
@@ -66,6 +70,14 @@ async function errorEventFromResponse(response: Response): Promise<ExtractionStr
     return fallback;
   }
 }
+
+/**
+ * Wall-clock ceiling. Extraction is bounded at 120s and the candidacy check at 20s; since F17.22
+ * Phase 2 a flagged document also runs the Routing Analyst inline (its own 180s bound), so the
+ * worst case needs materially more than the platform default. The stream keeps the connection
+ * alive throughout — this is the ceiling on the work, not on the idle time.
+ */
+export const maxDuration = 300;
 
 const handleIngestStream = withAdminAuth(async (request: NextRequest, session) => {
   const log = await getRouteLogger(request);
@@ -185,6 +197,26 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         log,
       });
 
+      // F17.22 Phase 2: the check just said this document describes routing, and the admin is
+      // still watching this stream. Propose the topics now rather than on some later visit to a
+      // tab they may not know exists — the added time is visible progress rather than a mystery.
+      // Fail-soft: `proposeScopeDuringIngest` never throws and never fails the upload.
+      let scopeProposal: IngestScopeProposal | null = null;
+      if (candidacy?.isCandidate) {
+        yield {
+          type: 'phase',
+          phase: 'proposing_scope',
+          message: 'Working out which parts apply to whom…',
+        };
+        scopeProposal = await proposeScopeDuringIngest({
+          questionnaireId: result.questionnaireId,
+          versionId: result.versionId,
+          adminId,
+          clientIp: clientIP,
+          log,
+        });
+      }
+
       logAdminAction({
         userId: adminId,
         action: 'questionnaire.ingest',
@@ -222,6 +254,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         questionCount: result.questionCount,
         changeCount: result.changeCount,
         ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
+        ...(scopeProposal ? { adaptiveScopeProposal: scopeProposal } : {}),
       };
     } catch (err) {
       log.error('Ingest stream: persist failed (response already streamed)', {

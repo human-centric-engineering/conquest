@@ -66,6 +66,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
 // Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', () => ({
+  proposeScopeDuringIngest: vi.fn(),
+}));
+
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
   checkAdaptiveScopeCandidacy: vi.fn(),
 }));
@@ -81,6 +85,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { proposeScopeDuringIngest } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -191,6 +196,7 @@ beforeEach(() => {
   // Default: not a candidate / check skipped — keeps every pre-existing test's frame
   // sequence and done-event shape unchanged (no `adaptiveScopeCandidate` key) untouched.
   (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
+  (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 });
 
 // ─── Gate + auth (pre-stream — JSON envelope, not SSE) ─────────────────────────
@@ -482,5 +488,58 @@ describe('POST /api/v1/app/questionnaires/stream — adaptive scope candidacy wi
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
     expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+  });
+});
+
+// ─── Proposing during the upload (F17.22 Phase 2) ────────────────────────────────
+
+describe('POST /api/v1/app/questionnaires/stream — proposing scope during the upload', () => {
+  const CANDIDATE = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
+
+  it('runs the analyst after the check says yes, and reports what it proposed', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 6, conditionalCount: 3 });
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    // Order matters: the admin sees "checking" resolve into "proposing" rather than a stall.
+    expect(phaseNames.indexOf('proposing_scope')).toBeGreaterThan(
+      phaseNames.indexOf('checking_scope')
+    );
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect(doneFrame.data.adaptiveScopeProposal).toEqual({ topicCount: 6, conditionalCount: 3 });
+  });
+
+  it('never runs the analyst when the check declined', async () => {
+    // The analyst is a reasoning-tier call over the whole document. Running it on every upload
+    // regardless of the verdict is exactly the cost the cheap triage check exists to avoid.
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue({ ...CANDIDATE, isCandidate: false });
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+    expect(frames.filter((f) => f.type === 'phase').map((f) => f.data.phase)).not.toContain(
+      'proposing_scope'
+    );
+  });
+
+  it('completes the upload when the proposal fails', async () => {
+    // Fail-soft is the whole contract: an upload that succeeded must never be reported as failed
+    // because an optional proposal could not be made.
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect('adaptiveScopeProposal' in doneFrame.data).toBe(false);
+    expect(frames.some((f) => f.type === 'error')).toBe(false);
   });
 });
