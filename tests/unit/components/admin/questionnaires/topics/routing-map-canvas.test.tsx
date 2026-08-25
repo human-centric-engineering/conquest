@@ -304,7 +304,7 @@ describe('RoutingMapCanvas — wiring', () => {
   it('labels the canvas for screen readers and hides the vendor attribution', () => {
     render(<RoutingMapCanvas graph={graph()} onSelectNode={vi.fn()} />);
 
-    expect(screen.getByLabelText('Adaptive scope routing map')).toBeInTheDocument();
+    expect(screen.getByLabelText('Conditional topics routing map')).toBeInTheDocument();
     expect(lastProps().proOptions).toEqual({ hideAttribution: true });
   });
 

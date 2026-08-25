@@ -72,16 +72,16 @@ export interface LaunchChecklistProps {
   matrixCount?: number;
   /** How many matrix questions are misconfigured (no rows / unlabelled scale) — launch requires 0. */
   misconfiguredMatrixCount?: number;
-  /** True when `adaptiveScope.enabled` — the coherence row shows only for a version that opted in. */
-  adaptiveScopeEnabled?: boolean;
-  /** How many `error`-severity Adaptive Scope findings the version has (launch requires 0). */
-  adaptiveScopeErrorCount?: number;
+  /** True when `conditionalTopics.enabled` — the coherence row shows only for a version that opted in. */
+  conditionalTopicsEnabled?: boolean;
+  /** How many `error`-severity Conditional Topics findings the version has (launch requires 0). */
+  conditionalTopicsErrorCount?: number;
   /**
-   * How many `conditional` topics the version has. With adaptive scope OFF and this above zero,
+   * How many `conditional` topics the version has. With conditional topics OFF and this above zero,
    * the checklist raises a warning row — the topics are authored, and every one of them is being
    * asked to every respondent. It never blocks a launch.
    */
-  adaptiveScopeConditionalCount?: number;
+  conditionalTopicsConditionalCount?: number;
 }
 
 interface LaunchCheck {
@@ -165,9 +165,9 @@ export function LaunchChecklist({
   unlabelledLikertCount = 0,
   matrixCount = 0,
   misconfiguredMatrixCount = 0,
-  adaptiveScopeEnabled = false,
-  adaptiveScopeErrorCount = 0,
-  adaptiveScopeConditionalCount = 0,
+  conditionalTopicsEnabled = false,
+  conditionalTopicsErrorCount = 0,
+  conditionalTopicsConditionalCount = 0,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -192,8 +192,8 @@ export function LaunchChecklist({
     embeddings: `${base}/settings`,
     dataSlots: `${base}/data-slots`,
     dataSlotEmbeddings: `${base}/data-slots`,
-    adaptiveScope: `${base}/topics`,
-    adaptiveScopeOff: `${base}/topics`,
+    conditionalTopics: `${base}/topics`,
+    conditionalTopicsOff: `${base}/topics`,
   };
   const checks: LaunchCheck[] = launchReadinessChecks({
     goal,
@@ -211,9 +211,9 @@ export function LaunchChecklist({
     embeddingsReady,
     dataSlotEmbeddingsRequired,
     dataSlotEmbeddingsReady,
-    adaptiveScopeEnabled,
-    adaptiveScopeErrorCount,
-    adaptiveScopeConditionalCount,
+    conditionalTopicsEnabled,
+    conditionalTopicsErrorCount,
+    conditionalTopicsConditionalCount,
   }).map((c) => ({
     key: c.key,
     ok: c.ok,

@@ -56,13 +56,13 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
   embeddings: 'Generate question embeddings before launching the adaptive strategy',
   dataSlots: 'Generate data slots before launch',
   dataSlotEmbeddings: 'Generate data-slot embeddings before launching adaptive data-slot selection',
-  adaptiveScope:
-    'Fix the adaptive-scope problems on the Adaptive scope tab before launch — most often a question that belongs to no topic, which could never be asked',
-  // Never reachable: `adaptiveScopeOff` is a warning, and the loop below skips warnings. Present
+  conditionalTopics:
+    'Fix the conditional-topics problems on the Conditional topics tab before launch — most often a question that belongs to no topic, which could never be asked',
+  // Never reachable: `conditionalTopicsOff` is a warning, and the loop below skips warnings. Present
   // because the map is exhaustive over the key union, which is what stops a future BLOCKING check
   // from shipping without a launch-gate message.
-  adaptiveScopeOff:
-    'Adaptive scope is off, so every conditional topic is asked to everyone — this does not stop a launch',
+  conditionalTopicsOff:
+    'Conditional topics is off, so every conditional topic is asked to everyone — this does not stop a launch',
 };
 
 /**

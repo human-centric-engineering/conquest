@@ -19,16 +19,12 @@ import userEvent from '@testing-library/user-event';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: () => createMockRouter(),
+  };
+});
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
@@ -75,7 +71,7 @@ function mockFetchSuccess(
     changeCount: number;
     deduped: boolean;
     /** F17.22 Phase 2 — present only when the analyst proposed during this upload. */
-    adaptiveScopeProposal?: { topicCount: number; conditionalCount: number };
+    conditionalTopicsProposal?: { topicCount: number; conditionalCount: number };
   } = {
     sectionCount: 2,
     questionCount: 5,
@@ -213,7 +209,7 @@ describe('ReingestDialog', () => {
       questionCount: 12,
       changeCount: 4,
       deduped: false,
-      adaptiveScopeProposal: { topicCount: 6, conditionalCount: 3 },
+      conditionalTopicsProposal: { topicCount: 6, conditionalCount: 3 },
     });
     const user = await openDialog();
 

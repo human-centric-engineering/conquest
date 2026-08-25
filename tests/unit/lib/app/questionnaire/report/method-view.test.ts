@@ -311,7 +311,7 @@ describe('buildReportMethodView — C9 stated-vs-measured reconciliation', () =>
   });
 });
 
-describe('buildReportMethodView / renderMethodSummaryTemplate — Adaptive Scope (P17)', () => {
+describe('buildReportMethodView / renderMethodSummaryTemplate — Conditional Topics (P17)', () => {
   /** A record for an adaptive session that skipped two areas and sampled one. */
   function adaptiveRecord(): ReportMethodRecord {
     const rec = new MethodRecorder('narrative', false, () => 0);

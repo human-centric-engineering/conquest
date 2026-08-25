@@ -108,7 +108,7 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
         answered: ctx.answered.filter(
           // An answer whose question is NOT in this version's set still has to be graded against
           // something, and the flat configured floor is what it was graded against before fidelity
-          // existed. These are real: an Adaptive Scope session narrows `questions` but keeps
+          // existed. These are real: a Conditional Topics session narrows `questions` but keeps
           // answers captured before the plan narrowed, so falling back to 0 here would let a
           // tentative out-of-scope answer start counting toward `minQuestionsAnswered`.
           (a) => (a.confidence ?? 1) >= (floorByQuestionId.get(a.questionId) ?? floor)

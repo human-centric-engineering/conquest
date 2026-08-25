@@ -15,7 +15,7 @@ import type { ScopeFindingTargetView } from '@/lib/app/questionnaire/views';
 const TOPIC_PREFIX = 'topic:';
 const RULE_PREFIX = 'rule:';
 const SETTINGS_KEY = 'settings';
-const SETTINGS_LABEL = 'Adaptive scope settings';
+const SETTINGS_LABEL = 'Conditional topics settings';
 
 /**
  * Resolve one scope finding's `targetKey` against the live config, falling back to the run's

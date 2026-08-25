@@ -104,7 +104,7 @@ const handleRetryJudge = withAdminAuth<{ id: string; vid: string; runId: string 
 
     const detail = await mergeScopeJudgeRetry({ run, result, completedAt: new Date() });
 
-    log.info('Adaptive Scope evaluation judge retried', {
+    log.info('Conditional Topics evaluation judge retried', {
       questionnaireId: id,
       versionId: vid,
       runId,

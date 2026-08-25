@@ -219,7 +219,7 @@ describe('POST evaluate-turn', () => {
     // rather than a generic ideal — a verbatim `must_ask` question otherwise reads as leading.
     expect(input.context.houseRules).toBeDefined();
     expect(input.context.interviewerStrategy).toBeDefined();
-    expect(input.context.adaptiveScope).toBeDefined();
+    expect(input.context.conditionalTopics).toBeDefined();
     expect(agent).toMatchObject({ provider: '', model: '' });
     expect(opts).toMatchObject({ agentId: 'agent-eval', sessionId: 'sess-1' });
   });

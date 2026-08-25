@@ -688,9 +688,9 @@ export function ConfigEditor({
   // Respondent intro / splash (admin opt-in): the whole block edited as one object.
   const [intro, setIntro] = useState<IntroSettings>(config.intro);
   /**
-   * Adaptive Scope's master switch — the ONLY part of Adaptive Scope editable here.
+   * Conditional Topics' master switch — the ONLY part of Conditional Topics editable here.
    *
-   * Topics, criteria, the budget and every other scope setting stay on the Adaptive scope tab,
+   * Topics, criteria, the budget and every other scope setting stay on the Conditional topics tab,
    * where the surface that explains them is. But "is this even on?" is a question an admin asks
    * from the Settings tab, alongside every other run-time switch, and before this the answer was
    * two tabs away.
@@ -698,7 +698,9 @@ export function ConfigEditor({
    * It is therefore the one field on this tab with a second editor, which is what the conditional
    * send in `save` is about.
    */
-  const [adaptiveScopeEnabled, setAdaptiveScopeEnabled] = useState(config.adaptiveScope.enabled);
+  const [conditionalTopicsEnabled, setConditionalTopicsEnabled] = useState(
+    config.conditionalTopics.enabled
+  );
 
   // Resync from the server graph after each refetch (mirrors version-editor.tsx).
   useEffect(() => {
@@ -753,7 +755,7 @@ export function ConfigEditor({
     setQuestionFidelity(config.questionFidelity);
     setHouseRules(config.houseRules);
     setIntro(config.intro);
-    setAdaptiveScopeEnabled(config.adaptiveScope.enabled);
+    setConditionalTopicsEnabled(config.conditionalTopics.enabled);
   }, [config]);
 
   const contradictionOff = contradictionMode === 'off';
@@ -887,12 +889,12 @@ export function ConfigEditor({
         houseRulesEnabled: houseRules.enabled,
         houseRules: houseRules.rules,
         // The master switch is edited on this tab now, so the conflicts read the EDITOR's value:
-        // an admin turning adaptive scope on should see the strategy warnings it raises while
+        // an admin turning conditional topics on should see the strategy warnings it raises while
         // they are still deciding, not after a save and a reload. The opening-probe settings have
         // no editor here and stay read straight off the saved config.
-        adaptiveScopeEnabled,
-        limitOpeningProbes: config.adaptiveScope.limitOpeningProbes,
-        maxOpeningProbes: config.adaptiveScope.maxOpeningProbes,
+        conditionalTopicsEnabled,
+        limitOpeningProbes: config.conditionalTopics.limitOpeningProbes,
+        maxOpeningProbes: config.conditionalTopics.maxOpeningProbes,
       }),
     [
       anonymousMode,
@@ -910,8 +912,8 @@ export function ConfigEditor({
       supportMessage,
       interviewerStrategy,
       houseRules,
-      adaptiveScopeEnabled,
-      config.adaptiveScope,
+      conditionalTopicsEnabled,
+      config.conditionalTopics,
     ]
   );
   const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);
@@ -1083,19 +1085,19 @@ export function ConfigEditor({
               ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
             }))
           : [],
-        // Adaptive Scope's master switch — sent ONLY when this editor actually changed it.
+        // Conditional Topics' master switch — sent ONLY when this editor actually changed it.
         //
         // Every other field here has exactly one editor, so sending it unconditionally can only
-        // ever rewrite it with itself. This one is also on the Adaptive scope tab: an admin who
+        // ever rewrite it with itself. This one is also on the Conditional topics tab: an admin who
         // turns scope on there, then saves a Settings tab that was loaded before they did, would
         // silently turn it back off. The PATCH is partial by contract — an omitted key leaves the
         // stored value alone — so not sending it is exactly "I did not touch this".
         //
-        // The route merges `adaptiveScope` through the same helper the Topics tab's own PATCH
+        // The route merges `conditionalTopics` through the same helper the Topics tab's own PATCH
         // uses, and both writes share one fork decision, so this cannot fork a launched version
         // twice.
-        ...(adaptiveScopeEnabled !== config.adaptiveScope.enabled
-          ? { adaptiveScope: { enabled: adaptiveScopeEnabled } }
+        ...(conditionalTopicsEnabled !== config.conditionalTopics.enabled
+          ? { conditionalTopics: { enabled: conditionalTopicsEnabled } }
           : {}),
       },
     ]);
@@ -1430,47 +1432,47 @@ export function ConfigEditor({
             />
           </SettingsGroup>
 
-          {/* ── Adaptive scope — the master switch, mirrored from the Adaptive scope tab so the
+          {/* ── Conditional topics — the master switch, mirrored from the Conditional topics tab so the
              question "is this on?" is answerable from the tab that holds every other run-time
              switch. Only the switch is here; the topics and their conditions stay where the
              surface that explains them is. ── */}
           <SettingsGroup
             icon={Route}
             accent="bg-teal-500/10 text-teal-600 dark:text-teal-400"
-            id="adaptive-scope"
-            title="Adaptive scope"
+            id="conditional-topics"
+            title="Conditional topics"
             description="Whether every respondent is asked the whole questionnaire, or only the parts that apply to them — decided from how they answer the opening questions."
             headerAction={
               <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
                 <span
-                  className={adaptiveScopeEnabled ? 'text-foreground' : 'text-muted-foreground'}
+                  className={conditionalTopicsEnabled ? 'text-foreground' : 'text-muted-foreground'}
                 >
-                  {adaptiveScopeEnabled ? 'On' : 'Off'}
+                  {conditionalTopicsEnabled ? 'On' : 'Off'}
                 </span>
                 <Switch
-                  checked={adaptiveScopeEnabled}
-                  onCheckedChange={setAdaptiveScopeEnabled}
+                  checked={conditionalTopicsEnabled}
+                  onCheckedChange={setConditionalTopicsEnabled}
                   disabled={busy}
-                  aria-label="Use adaptive scope"
+                  aria-label="Use conditional topics"
                 />
               </label>
             }
           >
             <div className="space-y-3">
               <p className="text-muted-foreground text-sm">
-                {adaptiveScopeEnabled ? (
+                {conditionalTopicsEnabled ? (
                   <>
                     Each respondent is asked the topics that apply to them. A topic with no
-                    condition on it is still asked of everyone — so if nothing on the Adaptive scope
-                    tab has a condition yet, everyone is asked everything.
+                    condition on it is still asked of everyone — so if nothing on the Conditional
+                    topics tab has a condition yet, everyone is asked everything.
                   </>
                 ) : (
                   <>
                     Every respondent is asked the whole questionnaire. Anything set up on the
-                    Adaptive scope tab sits idle until this is on.
+                    Conditional topics tab sits idle until this is on.
                   </>
                 )}{' '}
-                <FieldHelp title="Adaptive scope">
+                <FieldHelp title="Conditional topics">
                   Long questionnaires usually contain parts that only apply to some people —
                   eligibility sections, role-specific blocks, questions that only matter if an
                   earlier answer went a certain way. With this on, the opening answers decide which

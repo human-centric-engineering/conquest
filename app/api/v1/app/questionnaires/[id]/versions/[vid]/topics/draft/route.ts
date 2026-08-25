@@ -1,10 +1,10 @@
 /**
- * The Routing Analyst's pending proposal — Adaptive Scope (P17.4).
+ * The Routing Analyst's pending proposal — Conditional Topics (P17.4).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/draft
  *   Admin-only: ACCEPT the reviewed proposal. Writes the topics live (stamped `analyst`), replaces
  *   the hard rules, optionally applies the breadth limit the document stated, optionally turns
- *   adaptive scope on when the admin asked for it (`enable`), and clears the draft — in one
+ *   conditional topics on when the admin asked for it (`enable`), and clears the draft — in one
  *   transaction. Forks a new draft first if the target is launched.
  *
  * DELETE /api/v1/app/questionnaires/:id/versions/:vid/topics/draft
@@ -68,7 +68,7 @@ const handleAccept = withAdminAuth<{ id: string; vid: string }>(
         versionId: editId,
         topicCount: result.topics.length,
         ruleCount: result.settings.rules.length,
-        // Audited because this accept may be the moment adaptive scope went live for respondents —
+        // Audited because this accept may be the moment conditional topics went live for respondents —
         // a change in what gets asked, not just in what is authored.
         scopeEnabled: result.settings.enabled,
         enabledByAccept: body.enable === true,

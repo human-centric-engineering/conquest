@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 /**
- * The Adaptive Scope leak guard.
+ * The Conditional Topics leak guard.
  *
  * Scope is applied by FILTERING the lists a session-serving loader hands downstream. That makes it
  * invisible: a new loader that queries a version's questions and forgets to filter produces no
@@ -153,7 +153,7 @@ function isSessionServingLoader(source: string): boolean {
   return readsSession && readsStructure;
 }
 
-describe('Adaptive Scope leak guard', () => {
+describe('Conditional Topics leak guard', () => {
   const files = ROOTS.flatMap((r) => walk(r));
 
   it('finds source files to check (the guard itself is not silently a no-op)', () => {
@@ -191,7 +191,7 @@ describe('Adaptive Scope leak guard', () => {
       const source = readFileSync(file, 'utf8');
       expect(
         SCOPE_MARKERS.some((m) => source.includes(m)),
-        `${file} must apply Adaptive Scope`
+        `${file} must apply Conditional Topics`
       ).toBe(true);
     }
   });

@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope constants (P17).
+ * Conditional Topics constants (P17).
  *
  * Kept out of `types.ts` so that module stays a pure leaf importable from client components — this
  * one names a runtime agent, which only the server cares about.
@@ -63,3 +63,45 @@ export const PROBE_EVIDENCE_CHARS = 600;
 
 /** How many pieces of opening evidence to inline. */
 export const MAX_EVIDENCE_IN_PROBE_PROMPT = 20;
+
+/* -------------------------------------------------------------------------- */
+/* The Routing Analyst's document budget (F17.29)                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Total characters of SUPPLEMENTARY document text the analyst prompt may carry.
+ *
+ * The primary document is deliberately NOT bounded here: it is what every run before this one
+ * carried in full, and shrinking it would change the answer on versions nobody touched. The
+ * companions an admin attaches are new spend, so they get the budget — shared across all of them,
+ * oldest attachment first, because the earlier attachment is the one the admin has already seen the
+ * analyst act on.
+ */
+export const MAX_SUPPLEMENTARY_DOCUMENT_CHARS = 40_000;
+
+/** Marks where a supplementary document was cut, so the analyst never quotes across the seam. */
+export const SUPPLEMENTARY_TRUNCATION_MARKER = '\n\n[… document truncated to fit the budget …]';
+
+/* -------------------------------------------------------------------------- */
+/* Partial topic selection — what the planner is shown (C6 / F17.29)          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How many of a topic's questions the planner prompt lists, per topic.
+ *
+ * A topic whose items are not listed cannot be partially selected — the prompt says so, so the
+ * planner chooses it whole rather than guessing at keys it was never shown.
+ */
+export const MAX_PLANNER_ITEMS_PER_TOPIC = 12;
+
+/** Characters of one question's wording. Enough to recognise it; not enough to re-read it. */
+export const MAX_PLANNER_ITEM_CHARS = 90;
+
+/**
+ * Items listed across ALL candidates, spent best-first.
+ *
+ * The whole-prompt bound. Without it a forty-topic instrument would spend more of the planner's
+ * context on question wording than on what the respondent actually said — which is the evidence
+ * the decision rests on.
+ */
+export const MAX_PLANNER_RENDERED_ITEMS = 120;

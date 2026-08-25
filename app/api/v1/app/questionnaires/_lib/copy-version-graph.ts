@@ -13,7 +13,9 @@
  *     `Unsupported(...)` column, so without this the copy would land adaptive-blind,
  *   - the tag vocabulary (F2.2) with each assignment re-linked to the copied slot,
  *   - the definitions / glossary (P16): curated terms with their candidate definitions, and the
- *     authoritative definitions document they were drawn from.
+ *     authoritative definitions document they were drawn from,
+ *   - the source documents (F17.29): the instrument the structure was extracted from, plus any
+ *     supporting documents attached beside it, with their timestamps — the readers order by those.
  *
  * Returns the old→new id maps so a caller can retarget anything that references the
  * originals (the fork's child-mutation retarget; not needed by clone).
@@ -107,7 +109,26 @@ export async function copyVersionGraph(
           uploadedBy: true,
         },
       },
-      // Adaptive Scope (P17): topics fork with the version. Their membership is KEYS, not row ids,
+      // Source documents (F17.29): the instrument the version was extracted from, and any
+      // supporting documents attached beside it, fork with it. Before this they did not, and the
+      // consequence was silent: fork a launched version and the Routing Analyst — whose whole job
+      // is to read the author's own routing guidance — had no document to read, so it fell back to
+      // inferring from question wording and reported `fromDocument: false`.
+      sourceDocuments: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          role: true,
+          fileName: true,
+          fileHash: true,
+          byteSize: true,
+          mimeType: true,
+          pageCount: true,
+          warnings: true,
+          extractedText: true,
+          createdAt: true,
+        },
+      },
+      // Conditional Topics (P17): topics fork with the version. Their membership is KEYS, not row ids,
       // so — unlike tags and data-slot links — there is nothing to re-link: a verbatim copy lands on
       // the copied questions automatically, because those carry their keys over 1:1.
       topics: {
@@ -189,7 +210,7 @@ export async function copyVersionGraph(
         cohortReport: jsonInput(source.config.cohortReport),
         intro: jsonInput(source.config.intro),
         milestoneBannerThresholds: jsonInput(source.config.milestoneBannerThresholds),
-        adaptiveScope: jsonInput(source.config.adaptiveScope),
+        conditionalTopics: jsonInput(source.config.conditionalTopics),
       },
     });
   }
@@ -355,7 +376,7 @@ export async function copyVersionGraph(
     await tx.appDataSlotQuestion.createMany({ data: newDataSlotQuestions });
   }
 
-  // Adaptive Scope (P17): one createMany, no re-linking. See the select above for why.
+  // Conditional Topics (P17): one createMany, no re-linking. See the select above for why.
   // The DRAFT is deliberately NOT copied: a fork is a new editing surface, and carrying an
   // un-reviewed proposal into it would make the same proposal reviewable in two places at once.
   if (source.topics.length > 0) {
@@ -425,6 +446,27 @@ export async function copyVersionGraph(
     if (newDefinitions.length > 0) {
       await tx.appGlossaryDefinition.createMany({ data: newDefinitions });
     }
+  }
+
+  // Source documents (F17.29). `createdAt` is copied verbatim rather than defaulted, because the
+  // readers order by it: the newest PRIMARY row is the current instrument (re-ingest appends), and
+  // supplementary rows are budgeted oldest-first. Re-stamping them all with the fork's timestamp
+  // would preserve the rows and lose the order that gives them meaning.
+  if (source.sourceDocuments.length > 0) {
+    await tx.appQuestionnaireSourceDocument.createMany({
+      data: source.sourceDocuments.map((document) => ({
+        versionId: targetVersionId,
+        role: document.role,
+        fileName: document.fileName,
+        fileHash: document.fileHash,
+        byteSize: document.byteSize,
+        ...(document.mimeType !== null ? { mimeType: document.mimeType } : {}),
+        ...(document.pageCount !== null ? { pageCount: document.pageCount } : {}),
+        ...(document.warnings !== null ? { warnings: jsonInput(document.warnings) } : {}),
+        extractedText: document.extractedText,
+        createdAt: document.createdAt,
+      })),
+    });
   }
 
   // The definitions document the terms were drawn from (1:1 with the version, when one exists).

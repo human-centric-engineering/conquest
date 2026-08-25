@@ -205,26 +205,26 @@ export function buildPackMarkdown(model: PackModel): string {
     }
   }
 
-  if (model.adaptiveScope) {
-    lines.push('## Adaptive scope');
+  if (model.conditionalTopics) {
+    lines.push('## Conditional topics');
     lines.push('');
     lines.push(
       '*How this questionnaire adapts to each respondent — which parts everyone gets, which parts depend on what they say, and the rules that decide.*'
     );
     lines.push('');
-    if (!model.adaptiveScope.enabled) {
+    if (!model.conditionalTopics.enabled) {
       lines.push(
-        '_Adaptive scope is not enabled for this version — every respondent is asked the full instrument._'
+        '_Conditional topics is not enabled for this version — every respondent is asked the full instrument._'
       );
       lines.push('');
     } else {
       const facts = [
-        `Up to ${model.adaptiveScope.maxConditionalTopics} conditional topic(s) per interview`,
-        model.adaptiveScope.includeCheckTopic
+        `Up to ${model.conditionalTopics.maxConditionalTopics} conditional topic(s) per interview`,
+        model.conditionalTopics.includeCheckTopic
           ? 'one additional, unselected topic is sampled lightly to check for blind spots'
           : null,
-        model.adaptiveScope.sessionBudgetSeconds > 0
-          ? `interviews are budgeted to about ${Math.round(model.adaptiveScope.sessionBudgetSeconds / 60)} minute(s)`
+        model.conditionalTopics.sessionBudgetSeconds > 0
+          ? `interviews are budgeted to about ${Math.round(model.conditionalTopics.sessionBudgetSeconds / 60)} minute(s)`
           : null,
       ].filter((f): f is string => f !== null);
       lines.push(facts.join(' · '));
@@ -232,10 +232,10 @@ export function buildPackMarkdown(model: PackModel): string {
 
       lines.push('### Always asked');
       lines.push('');
-      if (model.adaptiveScope.alwaysAskedTopics.length === 0) {
+      if (model.conditionalTopics.alwaysAsked.length === 0) {
         lines.push('_None defined._');
       } else {
-        for (const topic of model.adaptiveScope.alwaysAskedTopics) {
+        for (const topic of model.conditionalTopics.alwaysAsked) {
           const suffix = topic.sampledOnly ? ' _(sampled lightly, not asked in full)_' : '';
           lines.push(`- **${cell(topic.label)}**${suffix}`);
           if (topic.description) lines.push(`  ${cell(topic.description)}`);
@@ -245,10 +245,10 @@ export function buildPackMarkdown(model: PackModel): string {
 
       lines.push('### Asked when it fits');
       lines.push('');
-      if (model.adaptiveScope.conditionalTopics.length === 0) {
+      if (model.conditionalTopics.conditional.length === 0) {
         lines.push('_None defined._');
       } else {
-        for (const topic of model.adaptiveScope.conditionalTopics) {
+        for (const topic of model.conditionalTopics.conditional) {
           const suffix = topic.sampledOnly ? ' _(sampled lightly, not asked in full)_' : '';
           lines.push(`- **${cell(topic.label)}**${suffix}`);
           if (topic.description) lines.push(`  ${cell(topic.description)}`);
@@ -257,16 +257,16 @@ export function buildPackMarkdown(model: PackModel): string {
       }
       lines.push('');
 
-      if (model.adaptiveScope.rules.length > 0) {
+      if (model.conditionalTopics.rules.length > 0) {
         lines.push('### Hard rules');
         lines.push('');
-        for (const rule of model.adaptiveScope.rules) {
+        for (const rule of model.conditionalTopics.rules) {
           lines.push(`- ${cell(rule.sentence)}`);
         }
         lines.push('');
       }
 
-      const evaluation = model.adaptiveScope.evaluation;
+      const evaluation = model.conditionalTopics.evaluation;
       lines.push('### Scope evaluation');
       lines.push('');
       lines.push(

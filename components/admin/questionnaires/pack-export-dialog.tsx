@@ -4,7 +4,7 @@
  * PackExportDialog — download a branded Questionnaire Pack (PDF/CSV/Markdown).
  *
  * Lets the admin pick which of the pack's seven sections to include (all ticked by default except
- * "Evaluation findings" and "Adaptive scope", which are opt-in — see their descriptions) and the
+ * "Evaluation findings" and "Conditional topics", which are opt-in — see their descriptions) and the
  * output format, then
  * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. "Experience
  * setup" carries one nested sub-option — the technical/tuning settings tier — which is indented
@@ -64,7 +64,13 @@ const FORMAT_LABELS: Record<PackFormat, string> = {
 
 interface SectionOption {
   key:
-    'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup' | 'evaluations' | 'adaptiveScope';
+    | 'meta'
+    | 'questions'
+    | 'dataSlots'
+    | 'definitions'
+    | 'setup'
+    | 'evaluations'
+    | 'conditionalTopics';
   label: string;
   description: string;
 }
@@ -105,8 +111,8 @@ const SECTIONS: SectionOption[] = [
       "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
   },
   {
-    key: 'adaptiveScope',
-    label: 'Adaptive scope',
+    key: 'conditionalTopics',
+    label: 'Conditional topics',
     description:
       'How this questionnaire routes respondents — which topics everyone gets, which depend on their answers, and the rules that decide — explained in plain language. Off by default.',
   },

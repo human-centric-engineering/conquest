@@ -22,7 +22,7 @@
  * Two ways to identify the ends, in priority order:
  *
  *  1. **Configured refs** — the admin names the question/data-slot keys. Precise, and the only
- *     option for an instrument with no Adaptive Scope topics authored.
+ *     option for an instrument with no Conditional Topics topics authored.
  *  2. **Topic phases** — free-text answers under `opening` topics against those under `closing`
  *     ones. Costs no configuration, which matters because a feature nobody switches on produces
  *     nothing; it is necessarily coarser, since it cannot tell "what do you want to achieve" from
@@ -59,7 +59,7 @@ export interface ReconciliationScale {
   raw: number;
   band: string | null;
   /**
-   * True when the interview covered only part of the scale — Adaptive Scope (P17). Carried because
+   * True when the interview covered only part of the scale — Conditional Topics (P17). Carried because
    * a partial scale is a weaker basis for contradicting a respondent than a complete one, and the
    * writer has no other way to know the difference.
    */
@@ -109,7 +109,7 @@ export interface BuildReconciliationParams {
   sections: readonly PanelSectionInput[];
   answers: readonly PanelAnswerInput[];
   dataSlots: readonly ReconciliationDataSlot[];
-  /** Topic phase per question key — empty when the version has no Adaptive Scope topics. */
+  /** Topic phase per question key — empty when the version has no Conditional Topics topics. */
   phaseByQuestionKey: ReadonlyMap<string, TopicPhase>;
   /** Topic phase per data-slot key. */
   phaseByDataSlotKey: ReadonlyMap<string, TopicPhase>;

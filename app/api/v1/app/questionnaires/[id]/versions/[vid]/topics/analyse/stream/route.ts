@@ -1,5 +1,5 @@
 /**
- * Streaming routing analysis — the Routing Analyst (Adaptive Scope, P17.4).
+ * Streaming routing analysis — the Routing Analyst (Conditional Topics, P17.4).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/analyse/stream
  *   Admin-only SSE endpoint. Runs the Routing Analyst over the version's questions AND its uploaded
@@ -29,7 +29,10 @@ import { getClientIP } from '@/lib/security/ip';
 
 import type { RoutingAnalysisEvent } from '@/lib/app/questionnaire/scope/analysis-events';
 import { runRoutingAnalysisSchema } from '@/lib/app/questionnaire/scope/schemas';
-import { buildRoutingAnalysisInput } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import {
+  buildRoutingAnalysisInput,
+  type RoutingAnalysisRouteInput,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
 import {
   dispatchRoutingAnalysis,
   loadRoutingAnalystAgent,
@@ -67,15 +70,25 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
      * Drive the run. A failure after the first event is streamed as `error` rather than thrown —
      * the response is already open, so it cannot become a 5xx.
      */
+    /** What the admin watching the stream is told is being read, before anything is spent on it. */
+    function readingMessage(loaded: RoutingAnalysisRouteInput): string {
+      const questions = `${loaded.questions.length} questions`;
+      const supporting = loaded.documents.filter((d) => d.role === 'supplementary').length;
+      if (loaded.documents.length === 0) {
+        return `Reading ${questions} — no source document is attached…`;
+      }
+      if (supporting === 0) return `Reading ${questions} and your uploaded document…`;
+      const plural = supporting === 1 ? 'document' : 'documents';
+      return `Reading ${questions}, your uploaded document and ${supporting} supporting ${plural}…`;
+    }
+
     async function* drive(): AsyncGenerator<RoutingAnalysisEvent> {
       const startedAt = Date.now();
 
       yield {
         type: 'phase',
         phase: 'reading',
-        message: input!.documentText
-          ? `Reading ${input!.questions.length} questions and your uploaded document…`
-          : `Reading ${input!.questions.length} questions — no source document is attached…`,
+        message: readingMessage(input!),
       };
 
       yield {

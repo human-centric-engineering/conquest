@@ -29,7 +29,7 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { id: 'overview', label: 'Overview', segment: '', exact: true },
   { id: 'structure', label: 'Structure', segment: 'structure' },
   { id: 'data-slots', label: 'Data slots', segment: 'data-slots' },
-  { id: 'topics', label: 'Adaptive scope', segment: 'topics' },
+  { id: 'topics', label: 'Conditional topics', segment: 'topics' },
   { id: 'definitions', label: 'Definitions', segment: 'definitions' },
   { id: 'invitations', label: 'Invitations', segment: 'invitations' },
   { id: 'sessions', label: 'Sessions', segment: 'sessions' },

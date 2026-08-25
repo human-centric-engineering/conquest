@@ -2,7 +2,7 @@
 
 /**
  * The interviewer-policy judge panel (F18.8) — a third structural review, alongside the
- * design-evaluation panel (questions) and the Adaptive Scope panel (routing). This one scores the
+ * design-evaluation panel (questions) and the Conditional Topics panel (routing). This one scores the
  * INTERVIEWER POLICY: house rules, the questioning arc, and the per-question ask-as-written dial.
  *
  * Ephemeral, like both siblings' first phase: this card runs the panel against `evaluate-preview`

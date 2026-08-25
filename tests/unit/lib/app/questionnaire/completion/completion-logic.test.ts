@@ -302,7 +302,7 @@ describe('assessCompletion — the per-question fidelity floor (P18)', () => {
   });
 
   it('grades an answer whose question is not in this version against the FLAT floor', () => {
-    // These are real: an Adaptive Scope session narrows `questions` but keeps answers captured
+    // These are real: a Conditional Topics session narrows `questions` but keeps answers captured
     // before the plan narrowed. Such an answer has no per-question floor, and falling back to 0
     // would let a tentative out-of-scope answer start counting toward `minQuestionsAnswered` —
     // a behaviour change the per-question floor must not smuggle in.

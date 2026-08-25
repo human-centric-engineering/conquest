@@ -7,7 +7,7 @@
  *
  * The ones worth naming, because each is a decision rather than plumbing:
  *
- * - **"Questions in no topic" is computed off the live drafts, not the saved set.** Once adaptive scope
+ * - **"Questions in no topic" is computed off the live drafts, not the saved set.** Once conditional topics
  *   is on, a question no topic claims can never be asked — and the findings above the list only know
  *   about what was saved. An author who removes the last topic covering a question has to see it
  *   immediately, so the count tracks the draft and names the questions rather than only counting them.
@@ -56,6 +56,7 @@ vi.mock('@/components/ui/select', () => ({
 
 import {
   TopicListEditor,
+  reorderDrafts,
   type DraftTopic,
 } from '@/components/admin/questionnaires/topics/topic-list-editor';
 import type { Topic } from '@/lib/app/questionnaire/scope/types';
@@ -366,6 +367,64 @@ describe('TopicListEditor — reordering', () => {
     const up = screen.getByRole('button', { name: 'Move Hiring and capability up' });
     expect(up).toBeDisabled();
     expect(up).toHaveAttribute('title', expect.stringContaining('Clear the filter to reorder'));
+  });
+
+  it('offers a drag handle per row, disabled by the same filter rule as the buttons', () => {
+    // The handle and the buttons are two ways to do one thing, so they must agree about when it is
+    // safe: a drop index under a filter names a position in the visible list, not in the set.
+    renderEditor();
+    expect(screen.getByRole('button', { name: 'Reorder Company basics' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Conditional/, pressed: false }));
+
+    const handle = screen.getByRole('button', { name: 'Reorder Hiring and capability' });
+    expect(handle).toBeDisabled();
+    expect(handle).toHaveAttribute('title', expect.stringContaining('Clear the filter to reorder'));
+  });
+
+  it('keeps the drag handle out of the row’s expand target', () => {
+    // The collapsed line is itself a button. If the handle were inside it, every drag would also
+    // toggle the row open — and dnd-kit's own pointer handling would fight the click.
+    renderEditor();
+
+    const handle = screen.getByRole('button', { name: 'Reorder Company basics' });
+    expect(handle.getAttribute('aria-expanded')).toBeNull();
+    expect(handle.closest('[aria-expanded]')).toBeNull();
+  });
+
+  it('disables the drag handle while a save is in flight', () => {
+    renderEditor({ busy: true });
+    expect(screen.getByRole('button', { name: 'Reorder Company basics' })).toBeDisabled();
+  });
+
+  describe('the drop itself (reorderDrafts)', () => {
+    // dnd-kit reads element geometry and happy-dom reports every rect as zero, so a simulated drag
+    // never produces a drop. The behaviour is pinned here instead, on the pure function the drag
+    // handler delegates to.
+    const rows = [{ clientId: 'a' }, { clientId: 'b' }, { clientId: 'c' }];
+
+    it('moves the dragged row to the drop position', () => {
+      expect(reorderDrafts(rows, 'c', 'a')?.map((r) => r.clientId)).toEqual(['c', 'a', 'b']);
+      expect(reorderDrafts(rows, 'a', 'c')?.map((r) => r.clientId)).toEqual(['b', 'c', 'a']);
+    });
+
+    it('treats a drop outside the list as a no-op, not a move to nowhere', () => {
+      // `over` is null when the pointer is released off the list. A findIndex on it returns -1,
+      // and an arrayMove to -1 silently sends the row to the END.
+      expect(reorderDrafts(rows, 'a', null)).toBeNull();
+    });
+
+    it('treats a drop on itself, or on a row no longer in the set, as a no-op', () => {
+      expect(reorderDrafts(rows, 'b', 'b')).toBeNull();
+      expect(reorderDrafts(rows, 'b', 'gone')).toBeNull();
+      expect(reorderDrafts(rows, 'gone', 'b')).toBeNull();
+    });
+
+    it('does not mutate the array it was given', () => {
+      const before = rows.map((r) => r.clientId);
+      reorderDrafts(rows, 'c', 'a');
+      expect(rows.map((r) => r.clientId)).toEqual(before);
+    });
   });
 });
 

@@ -213,31 +213,31 @@ export function buildPackCsv(model: PackModel): string {
     ]);
   }
 
-  if (model.adaptiveScope) {
+  if (model.conditionalTopics) {
     blocks.push([
-      '# Adaptive scope',
+      '# Conditional topics',
       row(['field', 'value']),
-      row(['Enabled', model.adaptiveScope.enabled ? 'yes' : 'no']),
+      row(['Enabled', model.conditionalTopics.enabled ? 'yes' : 'no']),
       row([
         'Max conditional topics per interview',
-        String(model.adaptiveScope.maxConditionalTopics),
+        String(model.conditionalTopics.maxConditionalTopics),
       ]),
       row([
         'Samples one unselected topic to check for blind spots',
-        model.adaptiveScope.includeCheckTopic ? 'yes' : 'no',
+        model.conditionalTopics.includeCheckTopic ? 'yes' : 'no',
       ]),
       row([
         'Session time budget',
-        model.adaptiveScope.sessionBudgetSeconds > 0
-          ? `${model.adaptiveScope.sessionBudgetSeconds}s`
+        model.conditionalTopics.sessionBudgetSeconds > 0
+          ? `${model.conditionalTopics.sessionBudgetSeconds}s`
           : 'no limit set',
       ]),
     ]);
 
     blocks.push([
-      '# Adaptive scope topics',
+      '# Conditional topics topics',
       row(['key', 'label', 'description', 'always_asked', 'criteria', 'sampled_only']),
-      ...[...model.adaptiveScope.alwaysAskedTopics, ...model.adaptiveScope.conditionalTopics].map(
+      ...[...model.conditionalTopics.alwaysAsked, ...model.conditionalTopics.conditional].map(
         (topic) =>
           row([
             topic.key,
@@ -251,12 +251,12 @@ export function buildPackCsv(model: PackModel): string {
     ]);
 
     blocks.push([
-      '# Adaptive scope rules',
+      '# Conditional topics rules',
       row(['rule']),
-      ...model.adaptiveScope.rules.map((rule) => row([rule.sentence])),
+      ...model.conditionalTopics.rules.map((rule) => row([rule.sentence])),
     ]);
 
-    const evaluation = model.adaptiveScope.evaluation;
+    const evaluation = model.conditionalTopics.evaluation;
     blocks.push([
       '# Scope evaluation judge scores',
       row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),

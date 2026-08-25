@@ -61,7 +61,7 @@ function bandPosition(bands: ScoringBand[], scaleKey: string, raw: number): numb
  * visible as `itemCount` falling short of `totalItemCount`, and the authoring route warns about it
  * before a schema is saved.
  *
- * `inScopeRefs` — Adaptive Scope (P17) — is the set of item refs this respondent's interview
+ * `inScopeRefs` — Conditional Topics (P17) — is the set of item refs this respondent's interview
  * actually covered. It does NOT change any arithmetic: an item outside scope has no answer, so it
  * was already being skipped. What it changes is the *record*, by separating "they were asked and
  * did not answer" from "the instrument never asked them". Omit it (or pass null) and every item

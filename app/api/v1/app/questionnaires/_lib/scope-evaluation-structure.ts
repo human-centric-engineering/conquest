@@ -1,12 +1,12 @@
 /**
- * Route-local scope-structure loader for the Adaptive Scope evaluation panel (F17.21).
+ * Route-local scope-structure loader for the Conditional Topics evaluation panel (F17.21).
  *
- * Maps a questionnaire version's persisted Adaptive Scope config (topics, hard rules, settings)
+ * Maps a questionnaire version's persisted Conditional Topics config (topics, hard rules, settings)
  * plus its question/data-slot inventory into the pure {@link ScopeStructureInput} DTO the judges
  * read. This is the DB seam — `lib/app/questionnaire/scope-evaluation/**` stays Prisma-free, the
  * same split as `evaluation-structure.ts` for the design-evaluation panel.
  *
- * Reuses the SAME pricing (`scope/budget.ts`) and coherence-checker (`validateAdaptiveScope`)
+ * Reuses the SAME pricing (`scope/budget.ts`) and coherence-checker (`validateConditionalTopics`)
  * calls the Topics tab's own GET route makes, rather than re-deriving them — "one implementation,
  * so the number an author reads on the Topics tab and the number a judge is handed cannot
  * disagree" applies to the judges exactly as it does to the tab itself.
@@ -21,11 +21,11 @@ import {
   routedAllowanceSeconds,
 } from '@/lib/app/questionnaire/scope/budget';
 import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
-import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 import type { ScopeStructureInput } from '@/lib/app/questionnaire/scope-evaluation';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadMaxDataSlotAttempts,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
@@ -45,7 +45,7 @@ export async function buildScopeEvaluationStructure(
   if (!version) return null;
 
   // Settings first: the key inventory and cost pricing both read the version's per-type overrides.
-  const settings = await loadAdaptiveScopeSettings(versionId);
+  const settings = await loadConditionalTopicsSettings(versionId);
 
   const [topics, questions, dataSlots, scoring, maxDataSlotAttempts] = await Promise.all([
     loadTopics(versionId),
@@ -57,9 +57,9 @@ export async function buildScopeEvaluationStructure(
       where: { versionId },
       select: { key: true, name: true, weight: true },
     }),
-    // For the comparability checks inside `validateAdaptiveScope` — null for versions that don't score.
+    // For the comparability checks inside `validateConditionalTopics` — null for versions that don't score.
     loadScoringSchemaContent(versionId),
-    // For the opening follow-up checks (G03) inside `validateAdaptiveScope`.
+    // For the opening follow-up checks (G03) inside `validateConditionalTopics`.
     loadMaxDataSlotAttempts(versionId),
   ]);
 
@@ -80,7 +80,7 @@ export async function buildScopeEvaluationStructure(
     .map((t) => byTopicKey.get(t.key)?.full ?? 0)
     .filter((s) => s > 0);
 
-  const knownIssues = validateAdaptiveScope({
+  const knownIssues = validateConditionalTopics({
     topics,
     settings,
     allQuestionKeys: questions.map((q) => q.key),

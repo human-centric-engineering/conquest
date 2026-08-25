@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * `?tab=` state for the Adaptive Scope sub-tabs, without an RSC round-trip (F17.26).
+ * `?tab=` state for the Conditional Topics sub-tabs, without an RSC round-trip (F17.26).
  *
  * ## Why not `useUrlTabs` / `useTrackedUrlTabs`
  *
  * The platform hooks write with `router.replace`. On this route that is a full RSC round-trip —
  * `next.config.js` sets no `staleTimes`, so every tab click would re-run `loadKeyInventory`,
- * `estimateTopicCosts`, `validateAdaptiveScope` and `loadTopicDraft` server-side to render markup
+ * `estimateTopicCosts`, `validateConditionalTopics` and `loadTopicDraft` server-side to render markup
  * that did not change. Worse, `app/admin/questionnaires/[id]/v/[vid]/loading.tsx` exists at the
  * parent segment: if a query-only navigation ever falls into that Suspense fallback the whole
  * subtree unmounts, and with it every piece of state the split exists to preserve — the analyst's
@@ -32,13 +32,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-import { narrowAdaptiveScopeTab, type AdaptiveScopeTab } from '@/lib/constants/adaptive-scope-tabs';
+import {
+  narrowConditionalTopicsTab,
+  type ConditionalTopicsTab,
+} from '@/lib/constants/conditional-topics-tabs';
 
 const PARAM = 'tab';
 
 export interface ScopeTabsState {
-  activeTab: AdaptiveScopeTab;
-  setActiveTab: (tab: AdaptiveScopeTab) => void;
+  activeTab: ConditionalTopicsTab;
+  setActiveTab: (tab: ConditionalTopicsTab) => void;
 }
 
 export function useScopeTabs(): ScopeTabsState {
@@ -54,14 +57,14 @@ export function useScopeTabs(): ScopeTabsState {
   // dynamic (it awaits `params` and fetches with `no-store`), so it is never prerendered, and the
   // hook returns the real query on the server as well as the client.
   const searchParams = useSearchParams();
-  const [activeTab, setTab] = useState<AdaptiveScopeTab>(() =>
-    narrowAdaptiveScopeTab(searchParams.get(PARAM))
+  const [activeTab, setTab] = useState<ConditionalTopicsTab>(() =>
+    narrowConditionalTopicsTab(searchParams.get(PARAM))
   );
 
   // No `typeof window` guard: this is only ever reached from an event handler — a tab click or an
   // explainer step — and neither runs during a server render. A guard here would be unreachable
   // code that reads as though the function might be called somewhere it cannot be.
-  const setActiveTab = useCallback((tab: AdaptiveScopeTab) => {
+  const setActiveTab = useCallback((tab: ConditionalTopicsTab) => {
     setTab(tab);
     const url = new URL(window.location.href);
     url.searchParams.set(PARAM, tab);
@@ -77,7 +80,7 @@ export function useScopeTabs(): ScopeTabsState {
   // because it carries the same `?tab=` forward and the tab is therefore unchanged.)
   useEffect(() => {
     const onPopState = () => {
-      setTab(narrowAdaptiveScopeTab(new URLSearchParams(window.location.search).get(PARAM)));
+      setTab(narrowConditionalTopicsTab(new URLSearchParams(window.location.search).get(PARAM)));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);

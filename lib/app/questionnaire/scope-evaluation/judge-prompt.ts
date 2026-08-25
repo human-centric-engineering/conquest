@@ -6,7 +6,7 @@
  * judge agents carry a mirror of it purely so they're self-describing in the admin UI.
  *
  * Every judge is handed the SAME serialised config and the SAME `knownIssues` list — what
- * `validateAdaptiveScope` already caught — and told explicitly not to repeat it. The four dimensions
+ * `validateConditionalTopics` already caught — and told explicitly not to repeat it. The four dimensions
  * are deliberately structural-only (no live session data, no `analytics/routing.ts` behavioural
  * findings): see `scope-evaluation/types.ts`'s module doc for why.
  *
@@ -163,9 +163,9 @@ function renderStructure(structure: ScopeStructureInput): string {
 /** The shared system frame, with the dimension's rubric spliced in. */
 function systemRules(dimension: ScopeEvaluationDimension): string {
   const rubric = DIMENSION_RUBRICS[dimension];
-  return `You are a design-time judge reviewing a conversational questionnaire's ADAPTIVE SCOPE configuration before it is launched — which topics are always asked, which are conditional and on what criteria, the hard rules that force a topic in or out, and the time budget. You evaluate ONE dimension and propose concrete edits.
+  return `You are a design-time judge reviewing a conversational questionnaire's CONDITIONAL TOPICS configuration before it is launched — which topics are always asked, which are conditional and on what criteria, the hard rules that force a topic in or out, and the time budget. You evaluate ONE dimension and propose concrete edits.
 
-The goal Adaptive Scope serves: minimise how much a respondent is asked by skipping conditional topics that genuinely do not apply to them, WITHOUT ever silently dropping a topic that does apply. A topic wrongly excluded is a worse failure than a topic wrongly included.
+The goal Conditional Topics serves: minimise how much a respondent is asked by skipping conditional topics that genuinely do not apply to them, WITHOUT ever silently dropping a topic that does apply. A topic wrongly excluded is a worse failure than a topic wrongly included.
 
 YOUR DIMENSION
 ${rubric.focus}
@@ -210,7 +210,7 @@ export function buildScopeJudgePrompt(
     { role: 'system', content: systemRules(dimension) },
     {
       role: 'user',
-      content: `Evaluate the following adaptive-scope configuration on your dimension.\n\n${renderStructure(structure)}`,
+      content: `Evaluate the following conditional-topics configuration on your dimension.\n\n${renderStructure(structure)}`,
     },
   ];
 }

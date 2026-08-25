@@ -84,7 +84,7 @@ import type {
 export const DATA_SLOT_SELECTION_TOOL_SLUG = 'app_select_data_slot';
 
 /**
- * Adaptive Scope (G03): the opening-routability check, recorded as a tool call so a turn that
+ * Conditional Topics (G03): the opening-routability check, recorded as a tool call so a turn that
  * withheld a follow-up says so in its own record rather than only in a log line.
  */
 export const OPENING_PROBE_TOOL_SLUG = 'app_assess_opening_routability';
@@ -404,7 +404,7 @@ export async function runDataSlotTurn(
   //     asked to infer this slot this turn (`parkPending`); if it returned nothing, synthesise a
   //     floor fill so progress is guaranteed regardless of model compliance.
   //
-  //     Adaptive Scope (G03): for a slot in the OPENING, the effective cap is whichever is lower —
+  //     Conditional Topics (G03): for a slot in the OPENING, the effective cap is whichever is lower —
   //     the author's per-slot cap, or one ask plus whatever is left of the opening's shared
   //     follow-up allowance. Lowering the cap is the whole mechanism: a probe the opening cannot
   //     afford becomes a park, which already knows how to record a provisional fill and bridge to a

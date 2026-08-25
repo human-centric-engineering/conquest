@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope guardrails (P17) — pure.
+ * Conditional Topics guardrails (P17) — pure.
  *
  * The deterministic layer applied AFTER the planner proposes. This ordering is the whole design:
  * **the model proposes, it never gets the last word on a hard constraint.** Six numbered rules in a
@@ -26,10 +26,11 @@
 
 import {
   ALWAYS_PHASES,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type ExcludedTopic,
   type InterviewPlan,
   type PlannedTopic,
+  type TopicMembers,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
@@ -38,6 +39,7 @@ import {
   formatSeconds,
   plannedSeconds,
   routedAllowanceSeconds,
+  type ItemSeconds,
   type TopicCost,
 } from '@/lib/app/questionnaire/scope/budget';
 
@@ -46,6 +48,14 @@ export interface ProposedTopic {
   key: string;
   /** The planner's own account of why — kept verbatim so an admin reads the model's reasoning. */
   rationale: string;
+  /**
+   * The items the planner named, when it judged that only part of the topic applies (C6).
+   *
+   * Seated as-is minus anything the topic does not actually contain — a proposal may narrow a
+   * topic, never widen it — and dropped entirely when the intersection is empty, which leaves the
+   * topic's depth to decide as it always has.
+   */
+  members?: { questionKeys?: readonly string[]; dataSlotKeys?: readonly string[] };
 }
 
 /**
@@ -60,6 +70,16 @@ export interface PlanBudget {
   budgetSeconds: number;
   /** Every topic's cost at both depths — {@link estimateTopicCosts}, over the SAME topic set. */
   costs: ReadonlyMap<string, TopicCost>;
+  /**
+   * Per-item seconds and weights, so a plan naming a SUBSET of a topic (C6) is priced on the items
+   * it names. Optional: without them a subset is charged at its depth, which over-states rather
+   * than under-states — a budget that drops one topic too many beats one that overruns.
+   */
+  seconds?: ItemSeconds;
+  weights?: {
+    byQuestionKey?: ReadonlyMap<string, number>;
+    byDataSlotKey?: ReadonlyMap<string, number>;
+  };
 }
 
 export interface ApplyGuardrailsInput {
@@ -69,7 +89,7 @@ export interface ApplyGuardrailsInput {
   proposed: readonly ProposedTopic[];
   /** What the hard rules decided. */
   rules: RuleOutcome;
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /** The planner's confidence, already clamped to 0–1. */
   confidence: number;
   /** What produced `proposed` — `llm`, or `fallback` when the planner could not be trusted. */
@@ -105,7 +125,7 @@ export interface ApplyGuardrailsInput {
 export function chooseCheckTopic(
   topics: readonly Topic[],
   selected: ReadonlySet<string>,
-  settings: AdaptiveScopeSettings
+  settings: ConditionalTopicsSettings
 ): Topic | null {
   if (!settings.includeCheckTopic) return null;
 
@@ -119,6 +139,40 @@ export function chooseCheckTopic(
   // Authored order, so the same unselected set always yields the same check topic — a diagnostic
   // whose blind-spot probe moved around between runs would be impossible to reason about.
   return available[0] ?? null;
+}
+
+/**
+ * Narrow a proposed member subset to what the topic actually contains (C6).
+ *
+ * Returns `{}` — no subset, the depth decides — when nothing was proposed, or when nothing proposed
+ * survives the intersection. A planner naming items that are not in the topic is the same class of
+ * mistake as naming a topic that does not exist, and gets the same treatment: the layer that exists
+ * to make any input coherent quietly discards it rather than routing into nothing.
+ *
+ * Authored order is preserved, so a subset asks the instrument's questions in the instrument's
+ * order rather than the order a model happened to list them.
+ */
+function seatedMembers(
+  topic: Topic,
+  proposed: ProposedTopic['members']
+): { members?: TopicMembers } {
+  if (!proposed) return {};
+  const keep = (authored: readonly string[], named: readonly string[] | undefined): string[] => {
+    if (!named || named.length === 0) return [];
+    const wanted = new Set(named);
+    return authored.filter((key) => wanted.has(key));
+  };
+  const questionKeys = keep(topic.members.questionKeys, proposed.questionKeys);
+  const dataSlotKeys = keep(topic.members.dataSlotKeys, proposed.dataSlotKeys);
+  if (questionKeys.length === 0 && dataSlotKeys.length === 0) return {};
+
+  // A subset naming only questions leaves the topic's data slots to the depth, and vice versa —
+  // narrowing one half is not a statement about the other. The un-named half is stored EMPTY
+  // rather than filled with the whole authored list, because `plannedMembers` reads an empty half
+  // as "the depth decides" and a full one as "ask all of these". Filling it would silently widen a
+  // `light` topic from its two sampled items to every one it has — the one thing a subset must
+  // never do, and the opposite of what narrowing the other half asked for.
+  return { members: { questionKeys, dataSlotKeys } };
 }
 
 /**
@@ -136,14 +190,25 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
   const planned: PlannedTopic[] = [];
   const seen = new Set<string>();
 
-  const seat = (key: string, source: PlannedTopic['source'], rationale: string): void => {
+  const seat = (
+    key: string,
+    source: PlannedTopic['source'],
+    rationale: string,
+    members?: ProposedTopic['members']
+  ): void => {
     if (seen.has(key)) return;
     const topic = byKey.get(key);
     // Unknown, always-run, or already-seated keys are silently skipped. A planner naming a topic
     // that does not exist is exactly what this layer is for — never route into nothing.
     if (!topic) return;
     seen.add(key);
-    planned.push({ key, depth: topic.depth, source, rationale });
+    planned.push({
+      key,
+      depth: topic.depth,
+      source,
+      rationale,
+      ...seatedMembers(topic, members),
+    });
   };
 
   // 1 + 2. Rules first, and BEFORE the cap: an author's "always include this" must not be
@@ -157,7 +222,7 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
   for (const proposal of input.proposed) {
     if (planned.length >= settings.maxConditionalTopics) break;
     if (input.rules.exclude.has(proposal.key)) continue;
-    seat(proposal.key, input.source, proposal.rationale);
+    seat(proposal.key, input.source, proposal.rationale, proposal.members);
   }
 
   // 4. The fallback — only when nothing at all was seated. An interview of just the always-run
@@ -225,9 +290,34 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
           budgetSeconds: input.budget.budgetSeconds,
           estimatedSeconds:
             alwaysTopicSeconds(topics, input.budget.costs) +
-            plannedSeconds(planned, input.budget.costs),
+            plannedSeconds(planned, input.budget.costs, exactPricing(topics, input.budget)),
         }
       : {}),
+  };
+}
+
+/**
+ * The per-item price list `plannedSeconds` needs to cost a partial topic (C6), or `undefined` when
+ * the caller did not supply one.
+ */
+function exactPricing(
+  topics: readonly Topic[],
+  budget: PlanBudget | undefined
+):
+  | {
+      topicsByKey: ReadonlyMap<string, Topic>;
+      seconds: ItemSeconds;
+      weights?: {
+        byQuestionKey?: ReadonlyMap<string, number>;
+        byDataSlotKey?: ReadonlyMap<string, number>;
+      };
+    }
+  | undefined {
+  if (!budget?.seconds) return undefined;
+  return {
+    topicsByKey: new Map(topics.map((t) => [t.key, t] as const)),
+    seconds: budget.seconds,
+    ...(budget.weights ? { weights: budget.weights } : {}),
   };
 }
 
@@ -254,12 +344,14 @@ function fitToBudget(args: {
   planned: PlannedTopic[];
   seen: Set<string>;
   topics: readonly Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   budget: PlanBudget | undefined;
 }): Map<string, string> {
   const { planned, seen, topics, settings, budget } = args;
   const dropped = new Map<string, string>();
   if (!budget || budget.budgetSeconds <= 0) return dropped;
+
+  const exact = exactPricing(topics, budget);
 
   const allowance = routedAllowanceSeconds(
     budget.budgetSeconds,
@@ -276,7 +368,7 @@ function fitToBudget(args: {
     return check ? (budget.costs.get(check.key)?.light ?? 0) : 0;
   };
 
-  while (plannedSeconds(planned, budget.costs) + reserveForCheck() > allowance) {
+  while (plannedSeconds(planned, budget.costs, exact) + reserveForCheck() > allowance) {
     // The last droppable entry — `findLastIndex` by hand, since a rule-seated topic in the middle
     // must be stepped over rather than ending the search.
     let index = -1;

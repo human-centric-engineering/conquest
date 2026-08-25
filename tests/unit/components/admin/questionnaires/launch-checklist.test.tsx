@@ -154,18 +154,18 @@ describe('LaunchChecklist', () => {
     expect(screen.getByRole('button', { name: /^launch$/i })).toBeDisabled();
   });
 
-  describe('the adaptive-scope warning row (F17.22 Phase 4)', () => {
+  describe('the conditional-topics warning row (F17.22 Phase 4)', () => {
     const OFF_WITH_CONDITIONALS = {
       ...READY,
-      adaptiveScopeEnabled: false,
-      adaptiveScopeConditionalCount: 3,
+      conditionalTopicsEnabled: false,
+      conditionalTopicsConditionalCount: 3,
     };
 
     it('reports the state as a warning, not as work still to do', async () => {
       render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
 
       const row = screen
-        .getAllByText(/Adaptive scope is off, so all 3 conditional topics/i)[0]
+        .getAllByText(/Conditional topics is off, so all 3 conditional topics/i)[0]
         .closest('li');
       expect(row).toHaveTextContent('(warning)');
       expect(row).not.toHaveTextContent('(not ready)');
@@ -181,20 +181,20 @@ describe('LaunchChecklist', () => {
       expect(screen.getByRole('button', { name: /^launch$/i })).toBeEnabled();
     });
 
-    it('links to the Adaptive scope tab', () => {
+    it('links to the Conditional topics tab', () => {
       render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
       expect(
-        screen.getByRole('link', { name: /configure: adaptive scope is off/i })
+        screen.getByRole('link', { name: /configure: conditional topics is off/i })
       ).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/v-1/topics');
     });
 
     it('is absent when the feature is on, and when there are no conditional topics', () => {
       const { rerender } = render(
-        <LaunchChecklist {...OFF_WITH_CONDITIONALS} adaptiveScopeEnabled />
+        <LaunchChecklist {...OFF_WITH_CONDITIONALS} conditionalTopicsEnabled />
       );
       expect(screen.queryByText(/asked to everyone/i)).not.toBeInTheDocument();
 
-      rerender(<LaunchChecklist {...READY} adaptiveScopeConditionalCount={0} />);
+      rerender(<LaunchChecklist {...READY} conditionalTopicsConditionalCount={0} />);
       expect(screen.queryByText(/asked to everyone/i)).not.toBeInTheDocument();
     });
   });

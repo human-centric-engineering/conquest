@@ -1,5 +1,5 @@
 /**
- * Ingestion-time Adaptive Scope candidacy check (P17.19).
+ * Ingestion-time Conditional Topics candidacy check (P17.19).
  *
  * Runs on every fresh questionnaire ingestion (new ingest + re-ingest, streaming and non-streaming)
  * and decides whether the uploaded document is worth flagging as a routing candidate — NOT the
@@ -21,7 +21,7 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import type { getRouteLogger } from '@/lib/api/context';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
-import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import { selectCandidacyExcerpt } from '@/lib/app/questionnaire/scope/candidacy-excerpt';
 import {
   validateScopeCandidacy,
@@ -145,11 +145,11 @@ function trimCandidacyVerdict(result: ScopeCandidacyResult): ScopeCandidacyVerdi
 }
 
 /**
- * A version is "untouched" by Adaptive Scope when none of these three facts hold — the one
+ * A version is "untouched" by Conditional Topics when none of these three facts hold — the one
  * predicate both the ingestion-time candidacy check and the Phase 3 auto-trigger gate on, so a
  * future fourth condition can't be added to one and silently forgotten on the other.
  */
-function isVersionUntouchedByAdaptiveScope(current: {
+function isVersionUntouchedByConditionalTopics(current: {
   enabled: boolean;
   hasDraft: boolean;
   hasAuthoredTopic: boolean;
@@ -160,20 +160,20 @@ function isVersionUntouchedByAdaptiveScope(current: {
 /**
  * Is this version worth checking at all? A detector for a FRESH, unrouted document — not a recheck
  * of one an admin has already looked at. The check is a no-op (no LLM call, no `AppAiRun`) when:
- *  - Adaptive Scope is already enabled for the version, or
+ *  - Conditional Topics is already enabled for the version, or
  *  - the version already carries a topic an admin or the analyst authored (`source !== 'seeded'`
  *    — the auto-seeded one-topic-per-section set doesn't count), or
  *  - a Routing Analyst draft is already pending review.
  *
  * Exported so a streaming route can pre-check before announcing a "checking…" progress phase —
- * `checkAdaptiveScopeCandidacy` itself re-checks this internally regardless, so a caller that
+ * `checkConditionalTopicsCandidacy` itself re-checks this internally regardless, so a caller that
  * skips the pre-check still gets the same fail-soft, no-op-when-ineligible behaviour.
  */
 export async function isEligibleForScopeCandidacy(versionId: string): Promise<boolean> {
   const [config, draft, authoredTopic] = await Promise.all([
     prisma.appQuestionnaireConfig.findUnique({
       where: { versionId },
-      select: { adaptiveScope: true },
+      select: { conditionalTopics: true },
     }),
     prisma.appQuestionnaireTopicDraft.findUnique({ where: { versionId }, select: { id: true } }),
     prisma.appQuestionnaireTopic.findFirst({
@@ -181,14 +181,14 @@ export async function isEligibleForScopeCandidacy(versionId: string): Promise<bo
       select: { id: true },
     }),
   ]);
-  return isVersionUntouchedByAdaptiveScope({
-    enabled: Boolean(config && narrowAdaptiveScopeSettings(config.adaptiveScope).enabled),
+  return isVersionUntouchedByConditionalTopics({
+    enabled: Boolean(config && narrowConditionalTopicsSettings(config.conditionalTopics).enabled),
     hasDraft: Boolean(draft),
     hasAuthoredTopic: Boolean(authoredTopic),
   });
 }
 
-export interface CheckAdaptiveScopeCandidacyParams {
+export interface CheckConditionalTopicsCandidacyParams {
   versionId: string;
   /** The parsed source document's full text (the same text the extractor/analyst read). */
   documentText: string;
@@ -203,11 +203,11 @@ export interface CheckAdaptiveScopeCandidacyParams {
  * the check could not be obtained (never a thrown error — ingestion must complete either way).
  *
  * On a real verdict, records an `AppAiRun` (kind `scope_candidacy`) and caches the full result on
- * `AppQuestionnaireVersion.adaptiveScopeCandidate` for cheap reads without joining the run table.
+ * `AppQuestionnaireVersion.conditionalTopicsCandidate` for cheap reads without joining the run table.
  * Both writes are best-effort: a provenance/cache miss must never fail a completed ingest.
  */
-export async function checkAdaptiveScopeCandidacy(
-  params: CheckAdaptiveScopeCandidacyParams
+export async function checkConditionalTopicsCandidacy(
+  params: CheckConditionalTopicsCandidacyParams
 ): Promise<ScopeCandidacyVerdict | null> {
   const { versionId, documentText, fileName, adminId, log } = params;
 
@@ -316,7 +316,7 @@ export async function checkAdaptiveScopeCandidacy(
   const durationMs = Date.now() - startedAt;
 
   // Re-check eligibility now that the (up to 20s) LLM call has finished — the version may have
-  // become genuinely authored while this was in flight (an admin flipped `adaptiveScope.enabled`,
+  // become genuinely authored while this was in flight (an admin flipped `conditionalTopics.enabled`,
   // or an analyst draft landed, on the SAME version this re-ingest is checking). Writing a stale
   // verdict onto a version that has since been authored is exactly the race `isEligibleForScopeCandidacy`
   // exists to prevent — only the write is skipped; the verdict is still returned to THIS caller
@@ -355,7 +355,7 @@ export async function checkAdaptiveScopeCandidacy(
   try {
     await prisma.appQuestionnaireVersion.update({
       where: { id: versionId },
-      data: { adaptiveScopeCandidate: jsonInput(result) },
+      data: { conditionalTopicsCandidate: jsonInput(result) },
       select: { id: true },
     });
   } catch (err) {
@@ -393,10 +393,10 @@ export async function loadCachedCandidacyVerdict(
 ): Promise<ScopeCandidacyVerdict | null> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { adaptiveScopeCandidate: true },
+    select: { conditionalTopicsCandidate: true },
   });
-  const validated = version?.adaptiveScopeCandidate
-    ? validateScopeCandidacy(version.adaptiveScopeCandidate)
+  const validated = version?.conditionalTopicsCandidate
+    ? validateScopeCandidacy(version.conditionalTopicsCandidate)
     : null;
   return validated?.ok ? trimCandidacyVerdict(validated.value) : null;
 }
@@ -429,7 +429,7 @@ export async function resolveAutoTriggerPending(
   current: { hasAuthoredTopic: boolean; hasDraft: boolean; enabled: boolean }
 ): Promise<boolean> {
   if (!candidacy?.isCandidate) return false;
-  if (!isVersionUntouchedByAdaptiveScope(current)) return false;
+  if (!isVersionUntouchedByConditionalTopics(current)) return false;
 
   // The durable "already tried" signal. Unlike the draft — which a discard deletes — this survives
   // a rejected proposal, so declining what the analyst proposed never re-fires the same auto-run

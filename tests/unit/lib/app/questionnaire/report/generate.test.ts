@@ -1432,7 +1432,7 @@ describe('generateRespondentReport — method record', () => {
   });
 });
 
-describe('generateRespondentReport — Adaptive Scope (P17) not-assessed topics', () => {
+describe('generateRespondentReport — Conditional Topics (P17) not-assessed topics', () => {
   async function systemPromptWith(notAssessed: unknown): Promise<string> {
     (loadSessionExport as Mock).mockResolvedValue({ ...loadedExport(), notAssessed });
     const { provider, chat } = fakeProvider(VALID_RESPONSE);

@@ -21,7 +21,7 @@ import type {
   InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
 
-/** The empty scope-evaluation state — reused by every adaptive-scope fixture that isn't testing
+/** The empty scope-evaluation state — reused by every conditional-topics fixture that isn't testing
  *  the evaluation blocks themselves. */
 const EMPTY_SCOPE_EVALUATION: PackScopeEvaluation = {
   hasRun: false,
@@ -74,7 +74,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
-      adaptiveScope: false,
+      conditionalTopics: false,
       interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -97,7 +97,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     },
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
-    adaptiveScope: null,
+    conditionalTopics: null,
     interviewerPolicy: null,
     ...over,
   };
@@ -413,18 +413,18 @@ describe('buildPackCsv', () => {
     });
   });
 
-  describe('adaptive scope blocks', () => {
-    it('omits every adaptive scope block when the model field is null', () => {
-      const csv = buildPackCsv(model({ adaptiveScope: null }));
-      expect(csv).not.toContain('# Adaptive scope');
+  describe('conditional topics blocks', () => {
+    it('omits every conditional topics block when the model field is null', () => {
+      const csv = buildPackCsv(model({ conditionalTopics: null }));
+      expect(csv).not.toContain('# Conditional topics');
     });
 
     it('renders the summary, topics, and rules blocks after Definitions', () => {
       const csv = buildPackCsv(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: true,
-            alwaysAskedTopics: [
+            alwaysAsked: [
               {
                 key: 'background',
                 label: 'Background',
@@ -434,7 +434,7 @@ describe('buildPackCsv', () => {
                 sampledOnly: false,
               },
             ],
-            conditionalTopics: [
+            conditional: [
               {
                 key: 'talent',
                 label: 'Talent & culture',
@@ -453,9 +453,9 @@ describe('buildPackCsv', () => {
         })
       );
       const definitionsIdx = csv.indexOf('# Definitions');
-      const summaryIdx = csv.indexOf('# Adaptive scope');
-      const topicsIdx = csv.indexOf('# Adaptive scope topics');
-      const rulesIdx = csv.indexOf('# Adaptive scope rules');
+      const summaryIdx = csv.indexOf('# Conditional topics');
+      const topicsIdx = csv.indexOf('# Conditional topics topics');
+      const rulesIdx = csv.indexOf('# Conditional topics rules');
       expect(definitionsIdx).toBeGreaterThan(-1);
       expect(definitionsIdx).toBeLessThan(summaryIdx);
       expect(summaryIdx).toBeLessThan(topicsIdx);
@@ -472,10 +472,10 @@ describe('buildPackCsv', () => {
     it('reports "no" for enabled and "no limit set" for an unset session budget', () => {
       const csv = buildPackCsv(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: false,
-            alwaysAskedTopics: [],
-            conditionalTopics: [],
+            alwaysAsked: [],
+            conditional: [],
             rules: [],
             maxConditionalTopics: 3,
             includeCheckTopic: false,
@@ -492,8 +492,8 @@ describe('buildPackCsv', () => {
   describe('scope evaluation blocks', () => {
     const baseScope = {
       enabled: true,
-      alwaysAskedTopics: [],
-      conditionalTopics: [],
+      alwaysAsked: [],
+      conditional: [],
       rules: [],
       maxConditionalTopics: 3,
       includeCheckTopic: false,
@@ -502,7 +502,7 @@ describe('buildPackCsv', () => {
 
     it('renders header-only score/finding blocks when the version has never been scope-evaluated', () => {
       const csv = buildPackCsv(
-        model({ adaptiveScope: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
+        model({ conditionalTopics: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
       );
       expect(csv).toContain('# Scope evaluation judge scores');
       expect(csv).toContain('# Scope evaluation findings');
@@ -547,7 +547,7 @@ describe('buildPackCsv', () => {
           },
         ],
       };
-      const csv = buildPackCsv(model({ adaptiveScope: { ...baseScope, evaluation } }));
+      const csv = buildPackCsv(model({ conditionalTopics: { ...baseScope, evaluation } }));
       expect(csv).toContain(
         'target_key,target_kind,target,target_removed,dimension,judge,severity,status,proposed_change,rationale,proposed_edit,source_quote'
       );

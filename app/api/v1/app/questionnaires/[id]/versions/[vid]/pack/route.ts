@@ -2,15 +2,15 @@
  * Questionnaire Pack download.
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md
- *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&adaptiveScope=
+ *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=
  *   Admin-only. Downloads a branded, shareable "pack" covering how the questionnaire is set up —
  *   title/version/goals, the question structure, the data slots (with linked questions), the
  *   definitions/glossary, the experience-setup summary, (opt-in) the latest F5.1–F5.3
- *   design-evaluation run's judge findings, and (opt-in) the Adaptive Scope routing logic (topics,
+ *   design-evaluation run's judge findings, and (opt-in) the Conditional Topics routing logic (topics,
  *   criteria, hard rules) in plain language — carrying the latest F17.21 scope-evaluation judge
  *   panel's verdict on that routing design nested inside it — as a PDF, CSV, or Markdown file. Each
  *   of the seven top-level sections can be toggled off via its query flag; all default `true` except
- *   `evaluations` and `adaptiveScope`, which default `false` (unreviewed AI critique, and routing
+ *   `evaluations` and `conditionalTopics`, which default `false` (unreviewed AI critique, and routing
  *   design a stakeholder pack doesn't always need — the admin opts in per download). `setupTechnical`
  *   (also `false` by default) widens the setup summary from the standard tier to every setting,
  *   including numeric tuning and cost/abuse thresholds — see
@@ -43,7 +43,7 @@ import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/ev
 import { loadLatestPolicyEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes';
 import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { renderPackPdf } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf';
@@ -71,7 +71,7 @@ const querySchema = z.object({
   // Unreviewed AI critique — opt-in, unlike every other section (see the route JSDoc).
   evaluations: includeParam('false'),
   // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
-  adaptiveScope: includeParam('false'),
+  conditionalTopics: includeParam('false'),
   interviewerPolicy: includeParam('false'),
 });
 
@@ -93,7 +93,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
-      adaptiveScope,
+      conditionalTopics,
       interviewerPolicy,
     } = validateQueryParams(searchParams, querySchema);
     const include = {
@@ -104,7 +104,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
-      adaptiveScope,
+      conditionalTopics,
       interviewerPolicy,
     };
 
@@ -123,20 +123,20 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     }
     const glossary = glossaryEntries ? buildGlossaryAppendix(glossaryEntries) : null;
 
-    // The latest design-evaluation run (F5.1–F5.3) and Adaptive Scope's topics + settings + latest
+    // The latest design-evaluation run (F5.1–F5.3) and Conditional Topics' topics + settings + latest
     // F17.21 scope-evaluation run — both top-level entries `null` when their section is excluded
     // (the common case, since both default off) or, for evaluations, when the version has never
     // been evaluated. Independent of each other, so they load in parallel rather than serially
     // when an admin opts into both; the scope-evaluation run rides along with the topics/settings
-    // load since it only matters when `adaptiveScope` is included.
+    // load since it only matters when `conditionalTopics` is included.
     // The interviewer-policy run (F18.8) rides the same parallel load, and is skipped entirely
     // when its section is excluded — the common case, since it defaults off like the other two.
-    const [evaluationRun, adaptiveScopeSource, policyEvaluationRun] = await Promise.all([
+    const [evaluationRun, conditionalTopicsSource, policyEvaluationRun] = await Promise.all([
       evaluations ? loadLatestEvaluationRun(vid) : Promise.resolve(null),
-      adaptiveScope
+      conditionalTopics
         ? Promise.all([
             loadTopics(vid),
-            loadAdaptiveScopeSettings(vid),
+            loadConditionalTopicsSettings(vid),
             loadLatestScopeEvaluationRun(vid),
           ]).then(([topics, settings, scopeEvaluationRun]) => ({
             topics,
@@ -153,7 +153,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       dataSlotViews,
       glossary,
       evaluationRun,
-      adaptiveScopeSource,
+      conditionalTopicsSource,
       policyEvaluationRun,
       include,
       new Date().toISOString()

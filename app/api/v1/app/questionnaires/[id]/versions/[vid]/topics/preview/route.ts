@@ -1,5 +1,5 @@
 /**
- * Plan preview — Adaptive Scope (F17.14).
+ * Plan preview — Conditional Topics (F17.14).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/preview
  *   Admin-only. Runs the Scope Planner over a **synthetic** opening the author typed and returns
@@ -8,7 +8,7 @@
  *
  * ## Why this exists
  *
- * Every other check on this tab is structural — `validateAdaptiveScope` says the configuration is
+ * Every other check on this tab is structural — `validateConditionalTopics` says the configuration is
  * well-formed, not what it will *do*. For a feature whose premise is "the model makes a judgement
  * you cannot fully specify in advance", that left the author's only feedback loop a complete
  * interview, run as a respondent, with the answer inferred backwards from what got asked.
@@ -53,7 +53,7 @@ import { SCOPE_RATIONALE_MAX_LENGTH } from '@/lib/app/questionnaire/scope/types'
 import type { PlanPreviewResult } from '@/lib/app/questionnaire/scope/views';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadPlanBudget } from '@/app/api/v1/app/questionnaires/_lib/plan-inputs';
@@ -125,7 +125,10 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
       return createRateLimitResponse(rl);
     }
 
-    const [settings, topics] = await Promise.all([loadAdaptiveScopeSettings(vid), loadTopics(vid)]);
+    const [settings, topics] = await Promise.all([
+      loadConditionalTopicsSettings(vid),
+      loadTopics(vid),
+    ]);
     if (topics.length === 0) {
       return errorResponse('This version has no topics to plan over', {
         code: 'NO_TOPICS',
@@ -196,7 +199,7 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
       costUsd: result.costUsd,
     };
 
-    log.info('Adaptive scope plan preview', {
+    log.info('Conditional topics plan preview', {
       questionnaireId: id,
       versionId: vid,
       adminId,

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The Topics tab's client shell — everything Adaptive Scope needs in one place.
+ * The Topics tab's client shell — everything Conditional Topics needs in one place.
  *
  * Owns the one mutation runner with the workspace's fork-on-launch discipline (the same shape as
  * `version-settings-panel.tsx`): editing a launched version forks a new draft, surfaces the notice,
@@ -14,7 +14,7 @@
  * them unable to tell which half landed.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
 
@@ -23,7 +23,11 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
+import { SupportingDocumentsCard } from '@/components/admin/questionnaires/topics/supporting-documents-card';
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
+import type { ScopeOverlayInput } from '@/lib/app/questionnaire/scope/graph-overlays';
+import type { RoutingAnalyticsResult } from '@/lib/app/questionnaire/analytics/views';
+import type { PlanPreviewResult } from '@/lib/app/questionnaire/scope/views';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeIssueStrip } from '@/components/admin/questionnaires/topics/scope-issue-strip';
@@ -42,13 +46,13 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { useScopeTabs } from '@/components/admin/questionnaires/topics/use-scope-tabs';
 import {
-  ADAPTIVE_SCOPE_TABS,
-  ADAPTIVE_SCOPE_TAB_HINTS,
-  ADAPTIVE_SCOPE_TAB_LABELS,
-  narrowAdaptiveScopeTab,
+  CONDITIONAL_TOPICS_TABS,
+  CONDITIONAL_TOPICS_TAB_HINTS,
+  CONDITIONAL_TOPICS_TAB_LABELS,
+  narrowConditionalTopicsTab,
   tabForScopeIssue,
-} from '@/lib/constants/adaptive-scope-tabs';
-import type { AdaptiveScopeSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
+} from '@/lib/constants/conditional-topics-tabs';
+import type { ConditionalTopicsSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
@@ -81,6 +85,45 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // shape as the two above, and for the same reason: pressing the button twice must scroll and run
   // twice, and unchanged state would leave the card's effect silent on the second press.
   const [analystRequest, setAnalystRequest] = useState<{ nonce: number } | null>(null);
+
+  /**
+   * The two overlays the routing map cannot compute for itself (F17.29).
+   *
+   * Held here rather than in the map because they belong to two OTHER cards on this tab — the dry
+   * run and the routing-quality table — and a map that fetched them again could show a number the
+   * card beside it disagrees with. Both are copies handed up by their owner; neither card loses
+   * anything by sharing.
+   */
+  const [lastPreview, setLastPreview] = useState<PlanPreviewResult | null>(null);
+  const [routingAnalytics, setRoutingAnalytics] = useState<RoutingAnalyticsResult | null>(null);
+
+  const overlays = useMemo<ScopeOverlayInput>(
+    () => ({
+      dryRun: lastPreview
+        ? {
+            selectedKeys: lastPreview.plan.topics.map((t) => t.key),
+            excluded: lastPreview.plan.excluded.map((t) => ({
+              key: t.key,
+              rationale: t.rationale,
+            })),
+            proposedKeys: lastPreview.proposedKeys,
+          }
+        : null,
+      selection: routingAnalytics
+        ? {
+            plans: routingAnalytics.plans,
+            byTopicKey: new Map(
+              routingAnalytics.topics.map((t) => [
+                t.key,
+                { chosen: t.chosen, chosenRate: t.chosenRate },
+              ])
+            ),
+          }
+        : null,
+      findings: payload.issues,
+    }),
+    [lastPreview, routingAnalytics, payload.issues]
+  );
 
   const turnGapIntoTopic = (gap: ProposedGap) =>
     setSeedTopic((prev) => ({
@@ -175,8 +218,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // Fields are enumerated rather than spread, and that is load-bearing rather than an oversight:
   // `rules` reaches the server through this same PATCH but is edited as its own list, and a spread
   // would also push through any field the settings card does not own. The cost: every new
-  // `AdaptiveScopeSettings` field is a two-place change — here and in the card.
-  const saveSettings = (settings: AdaptiveScopeSettings) =>
+  // `ConditionalTopicsSettings` field is a two-place change — here and in the card.
+  const saveSettings = (settings: ConditionalTopicsSettings) =>
     run('PATCH', {
       // `enabled` is deliberately ABSENT. The status header owns it, and this PATCH is a
       // read-merge-write — so including it here would let the card's draft (captured whenever it
@@ -272,6 +315,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           // button after a save would be a picture of a version that no longer exists.
           key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
           payload={payload}
+          overlays={overlays}
           onEditTopic={openTopic}
           disabled={busy}
         />
@@ -292,15 +336,17 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         </div>
       )}
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(narrowAdaptiveScopeTab(v))}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(narrowConditionalTopicsTab(v))}>
         <TabsList>
-          {ADAPTIVE_SCOPE_TABS.map((tab) => (
+          {CONDITIONAL_TOPICS_TABS.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
-              {ADAPTIVE_SCOPE_TAB_LABELS[tab]}
+              {CONDITIONAL_TOPICS_TAB_LABELS[tab]}
             </TabsTrigger>
           ))}
         </TabsList>
-        <p className="text-muted-foreground mt-2 text-sm">{ADAPTIVE_SCOPE_TAB_HINTS[activeTab]}</p>
+        <p className="text-muted-foreground mt-2 text-sm">
+          {CONDITIONAL_TOPICS_TAB_HINTS[activeTab]}
+        </p>
 
         {/* `forceMount` on all three, and it is load-bearing rather than tidy. Radix unmounts an
             inactive panel, and five things here hold state that must survive a switch: the
@@ -336,6 +382,15 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             onTurnGapIntoTopic={turnGapIntoTopic}
             disabled={busy}
           />
+          {/* Directly under the analyst, because this is the analyst's input and nothing else's:
+              an admin who has just read "no routing guidance found in the document" is one line
+              away from the reason — the memo that guidance lives in was never attached. */}
+          <SupportingDocumentsCard
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            documents={payload.documents}
+            disabled={busy}
+          />
           <section className="space-y-3">
             {/* The heading and the AI action share a row. The analyst has always been reachable, but
                 only from its own card — above the settings, the preview, the quality card and the
@@ -349,7 +404,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
                   Topics
                   <FieldHelp title="What a topic is">
                     <p>
-                      The unit adaptive scope decides about: a named group of questions and data
+                      The unit conditional topics decides about: a named group of questions and data
                       slots, with a phase saying when it runs and — if it is conditional — your
                       criteria for when it applies.
                     </p>
@@ -383,7 +438,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
               </Button>
             </div>
             {/* The second level of the strip at the top of the tab. Both render the SAME
-                `validateAdaptiveScope` output, so they cannot disagree about what is wrong — the
+                `validateConditionalTopics` output, so they cannot disagree about what is wrong — the
                 difference is only how much of it each says, and where. This one sits against the rows
                 it is about, and unlike the strip it also reports the all-clear. */}
             <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
@@ -447,6 +502,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             form={payload.preview}
             topics={payload.topics}
             enabled={payload.settings.enabled}
+            onResult={setLastPreview}
             disabled={busy}
           />
           {/* Immediately after the dry-run, and deliberately: "what it would do" and "what it did" are
@@ -458,6 +514,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             versionId={versionId}
             enabled={payload.settings.enabled}
             conditionalCount={conditionalCount}
+            onLoaded={setRoutingAnalytics}
           />
           {/* A second, structural opinion — independent of the coherence checks above and of the
               behavioural evidence RoutingQualityCard reports. Sits beside its siblings on the tab

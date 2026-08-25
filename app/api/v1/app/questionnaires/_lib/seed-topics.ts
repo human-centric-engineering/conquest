@@ -215,7 +215,7 @@ export async function reconcileTopicsForVersion(tx: Tx, versionId: string): Prom
 
     if (emptied.length > 0) {
       await tx.appQuestionnaireTopic.deleteMany({ where: { id: { in: emptied } } });
-      logger.info('adaptive scope: dropped topics emptied by a structure rewrite', {
+      logger.info('conditional topics: dropped topics emptied by a structure rewrite', {
         versionId,
         count: emptied.length,
       });
@@ -239,9 +239,9 @@ export async function reconcileTopicsForVersion(tx: Tx, versionId: string): Prom
 export async function seedTopicsBestEffort(versionId: string): Promise<void> {
   try {
     const count = await executeTransaction(async (tx) => seedTopicsForVersion(tx, versionId));
-    if (count > 0) logger.info('adaptive scope: seeded topics', { versionId, count });
+    if (count > 0) logger.info('conditional topics: seeded topics', { versionId, count });
   } catch (err) {
-    logger.error('adaptive scope: topic seeding failed', {
+    logger.error('conditional topics: topic seeding failed', {
       versionId,
       error: err instanceof Error ? err.message : String(err),
     });

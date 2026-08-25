@@ -26,6 +26,8 @@
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
+import type { SourceDocumentRole } from '@/lib/app/questionnaire/constants';
+
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
   ROUTING_ANALYSIS_MAX_RULES,
@@ -52,14 +54,34 @@ export interface RoutingAnalysisDataSlot {
   theme?: string;
 }
 
+/**
+ * One document the analyst reads.
+ *
+ * An instrument does not always arrive as one file. `primary` is the document the version's
+ * questions were extracted from; `supplementary` is a companion an admin attached beside it — the
+ * routing memo, the eligibility appendix — which carries no questions of its own and exists purely
+ * to say who gets asked what.
+ */
+export interface RoutingAnalysisDocument {
+  role: SourceDocumentRole;
+  fileName?: string;
+  text: string;
+  /** The text was cut to fit the budget. The prompt says so, so nothing is quoted across the seam. */
+  truncated?: boolean;
+  /** The budget was already spent — the analyst is told the document exists but is not shown it. */
+  omitted?: boolean;
+}
+
 export interface RoutingAnalysisInput {
   goal?: string | null;
   audience?: unknown;
   questions: RoutingAnalysisQuestion[];
   dataSlots?: RoutingAnalysisDataSlot[];
-  /** The uploaded instrument's own text — where the routing instructions live, when they exist. */
-  documentText?: string;
-  documentFileName?: string;
+  /**
+   * The instrument's own text and any companions attached to it — where the routing instructions
+   * live, when they exist. Primary first, then supplementary in attachment order.
+   */
+  documents?: RoutingAnalysisDocument[];
   /** The version's current topics, so a re-run proposes a revision rather than a duplicate set. */
   existingTopics?: readonly Topic[];
   /** Admin's free-text steer for this run ("the routing rules are in the notes up front"). */
@@ -255,6 +277,39 @@ function describeDataSlot(slot: RoutingAnalysisDataSlot): string {
   return `- ${slot.key}${theme}: ${slot.name}`;
 }
 
+/**
+ * Render one document with a header that says what it IS.
+ *
+ * The role is stated rather than implied: an analyst told only "SOURCE DOCUMENT" twice has no way
+ * to know that the second file is guidance about the first rather than a second instrument, and
+ * will happily propose topics for questions that do not exist.
+ */
+function describeDocument(document: RoutingAnalysisDocument): string {
+  const name = document.fileName ? ` (${document.fileName})` : '';
+
+  if (document.role === 'primary') {
+    return document.omitted
+      ? `THE INSTRUMENT${name} — not shown here; work from the questions below.`
+      : `THE INSTRUMENT${name} — the document its questions were taken from. Read the author's \
+guidance in it first:\n${document.text}`;
+  }
+
+  if (document.omitted) {
+    return `SUPPORTING DOCUMENT${name} — attached to this version but NOT shown to you, because \
+the earlier documents used the whole budget. Say so in your summary: your reading of this \
+instrument is incomplete.`;
+  }
+
+  const truncated = document.truncated
+    ? ' It is CUT SHORT where marked — do not quote across that seam, and say in your summary that \
+you did not see all of it.'
+    : '';
+
+  return `SUPPORTING DOCUMENT${name} — a companion an admin attached beside the instrument, \
+usually because the routing rules arrived as their own file. It carries guidance, not questions.\
+${truncated}\n${document.text}`;
+}
+
 /** Render an existing topic compactly — enough for the analyst to revise rather than duplicate. */
 function describeExistingTopic(topic: Topic): string {
   const criteria = topic.criteria ? ` — include when: ${topic.criteria}` : '';
@@ -277,11 +332,18 @@ export function buildRoutingAnalysisPrompt(input: RoutingAnalysisInput): LlmMess
     parts.push(`AUDIENCE:\n${JSON.stringify(input.audience)}`);
   }
 
-  if (input.documentText) {
-    const header = input.documentFileName
-      ? `SOURCE DOCUMENT (${input.documentFileName}) — read the author's guidance in it first:`
-      : "SOURCE DOCUMENT — read the author's guidance in it first:";
-    parts.push(`${header}\n${input.documentText}`);
+  const documents = input.documents ?? [];
+  if (documents.length > 0) {
+    for (const document of documents) parts.push(describeDocument(document));
+    if (documents.some((document) => document.role === 'supplementary')) {
+      parts.push(
+        'The documents above describe ONE instrument between them. Where a supporting document ' +
+          'and the instrument disagree about who gets asked what, do not pick a side quietly: ' +
+          'propose what the instrument supports and report the disagreement in "gaps", quoting ' +
+          'both. A supporting document carries no questions of its own — never invent a question ' +
+          'key from it; every key you use must come from the QUESTIONS list below.'
+      );
+    }
   } else {
     parts.push(
       'SOURCE DOCUMENT: none is attached to this version. You are working from the questions ' +

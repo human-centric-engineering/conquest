@@ -1,7 +1,7 @@
 /**
- * Adaptive Scope (P17) — rendering a hard rule as a plain sentence.
+ * Conditional Topics (P17) — rendering a hard rule as a plain sentence.
  *
- * One implementation, shared by the Questionnaire Pack's Adaptive scope section and the scope
+ * One implementation, shared by the Questionnaire Pack's Conditional topics section and the scope
  * evaluation judges' prompt (F17.21): a rule is stored as an operator/operand pair addressed by
  * key, and both a stakeholder reading the pack and a judge reading the authored config need it read
  * back as English, resolving the topic/data-slot keys to their authored names. Promoted out of
@@ -22,7 +22,7 @@ import {
  * Render one hard rule as a plain sentence, resolving its topic/data-slot keys to their authored
  * names so a reader never has to read a key. An unresolved key (a rule pointing at a topic or slot
  * since deleted — silently skipped everywhere else in this feature, per
- * `.context/app/questionnaire/adaptive-scope.md`) falls back to the raw key rather than dropping the
+ * `.context/app/questionnaire/conditional-topics.md`) falls back to the raw key rather than dropping the
  * rule, so a stale rule is still visible as *something* an admin should clean up.
  */
 export function describeScopeRule(

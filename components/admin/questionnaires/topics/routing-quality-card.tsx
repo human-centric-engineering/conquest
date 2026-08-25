@@ -25,7 +25,7 @@
  * knows which.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BarChart3, Loader2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -39,10 +39,16 @@ import type { RoutingAnalyticsResult } from '@/lib/app/questionnaire/analytics/v
 export interface RoutingQualityCardProps {
   questionnaireId: string;
   versionId: string;
-  /** True when adaptive scope is switched on. With it off, no plan is ever written. */
+  /** True when conditional topics is switched on. With it off, no plan is ever written. */
   enabled: boolean;
   /** How many conditional topics the version has — with none, there is no decision to report on. */
   conditionalCount: number;
+  /**
+   * Hand the loaded analytics up to the tab, so the routing map can weight each topic by how often
+   * it was really chosen (F17.29). A copy for a second reader, not a move: this card still owns the
+   * fetch and the table.
+   */
+  onLoaded?: (result: RoutingAnalyticsResult | null) => void;
 }
 
 /** One percentage, rendered the way an author reads a rate: `72%`, and `0%` rather than a blank. */
@@ -55,12 +61,22 @@ export function RoutingQualityCard({
   versionId,
   enabled,
   conditionalCount,
+  onLoaded,
 }: RoutingQualityCardProps) {
   const [result, setResult] = useState<RoutingAnalyticsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const active = enabled && conditionalCount > 0;
+
+  // Held in a ref so the effect does not re-run — and re-fetch — every time the tab re-renders with
+  // a fresh callback identity. The effect's dependencies are what it actually reads. Written in an
+  // effect rather than during render: a ref touched while rendering is not safe under concurrent
+  // rendering, and the compiler rejects it.
+  const onLoadedRef = useRef(onLoaded);
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  }, [onLoaded]);
 
   useEffect(() => {
     if (!active) return;
@@ -71,12 +87,15 @@ export function RoutingQualityCard({
     // stale table that reads as current.
     setError(null);
     setResult(null);
+    onLoadedRef.current?.(null);
     apiClient
       .get<RoutingAnalyticsResult>(
         API.APP.QUESTIONNAIRES.versionAnalyticsRouting(questionnaireId, versionId)
       )
       .then((data) => {
-        if (!cancelled) setResult(data);
+        if (cancelled) return;
+        setResult(data);
+        onLoadedRef.current?.(data);
       })
       .catch((err: unknown) => {
         // A failed read must not imply "nothing to report" — that is the same silence the card
@@ -97,7 +116,7 @@ export function RoutingQualityCard({
     return (
       <ScopeEmptyState
         title="No interviews to report on yet"
-        body="Once adaptive scope is on and respondents have completed interviews, this is where you see which topics were actually chosen, how often the fallback ran, and what respondents asked to change."
+        body="Once conditional topics is on and respondents have completed interviews, this is where you see which topics were actually chosen, how often the fallback ran, and what respondents asked to change."
       />
     );
   }

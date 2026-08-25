@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Node renderers for the Adaptive scope routing map.
+ * Node renderers for the Conditional topics routing map.
  *
  * One component for every {@link ScopeNodeKind}, sharing a single shell so a node's *kind* is the only
  * thing that varies — mirroring `conquest-workflow-node.tsx`, which does the same for workflow steps.

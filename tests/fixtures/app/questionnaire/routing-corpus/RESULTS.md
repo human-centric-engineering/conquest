@@ -52,7 +52,7 @@ below.
    did not.
 3. **Title them so the SQL can find them.** Convention: `R00N — 07 housing needs`, where
    `R00N` is the run id from the log below.
-4. **Read the proposal on the Adaptive scope tab** (URL segment is still `topics`). Score
+4. **Read the proposal on the Conditional topics tab** (URL segment is still `topics`). Score
    the proposal as proposed. **Do not accept it** — acceptance edits the version, and the
    thing being measured is what the analyst offered an admin, not what an admin made of it.
 5. **Pull the run rows** for timings, cost, resolved models and failures (below).
@@ -144,7 +144,7 @@ easy half. That is the pattern the two numbers exist to expose.
 
 ### The judge panel is a second signal, not this score
 
-The Adaptive Scope evaluation panel (F17.21 — four judges, 0–1 per dimension) scores a
+The Conditional Topics evaluation panel (F17.21 — four judges, 0–1 per dimension) scores a
 version's **persisted** scope config, so it has nothing to read until a proposal is
 accepted, and step 4 above says not to accept. If you do want panel numbers, accept the
 draft on a duplicate of the run's questionnaire and record them in the optional column —
@@ -161,19 +161,19 @@ Copy this block to the top of [the log](#run-log), fill it in, and add one row t
 ```markdown
 ### R00N — YYYY-MM-DD
 
-| Field                  | Value                                                      |
-| ---------------------- | ---------------------------------------------------------- |
-| Commit                 | `<short sha>` on `<branch>`                                |
-| Ran by                 |                                                            |
-| How                    | streaming ingest, admin UI · all ten / partial (say which) |
-| Extractor model        | `<provider>/<model>` (resolved, from `AppAiRun`)           |
-| Critic model           |                                                            |
-| Candidacy model        |                                                            |
-| Analyst model          |                                                            |
-| Adaptive scope enabled | before ingest? yes/no                                      |
-| Extract tables         | on/off                                                     |
-| Total cost / wall time |                                                            |
-| Environment            | local dev DB / other                                       |
+| Field                      | Value                                                      |
+| -------------------------- | ---------------------------------------------------------- |
+| Commit                     | `<short sha>` on `<branch>`                                |
+| Ran by                     |                                                            |
+| How                        | streaming ingest, admin UI · all ten / partial (say which) |
+| Extractor model            | `<provider>/<model>` (resolved, from `AppAiRun`)           |
+| Critic model               |                                                            |
+| Candidacy model            |                                                            |
+| Analyst model              |                                                            |
+| Conditional topics enabled | before ingest? yes/no                                      |
+| Extract tables             | on/off                                                     |
+| Total cost / wall time     |                                                            |
+| Environment                | local dev DB / other                                       |
 
 | Doc | Difficulty | P   | C   | T   | G   | R   | /10 | Failed at | Critical | Note |
 | --- | ---------- | --- | --- | --- | --- | --- | --- | --------- | -------- | ---- |

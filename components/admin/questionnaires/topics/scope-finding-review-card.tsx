@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ScopeFindingReviewCard (F17.21) — one Adaptive Scope evaluation finding in the review queue.
+ * ScopeFindingReviewCard (F17.21) — one Conditional Topics evaluation finding in the review queue.
  *
  * Deliberately leaner than `FindingReviewCard` (F5.3): the scope panel has no `add_question`
  * analogue (no op drafts something that doesn't exist yet), so there is no "deep-link" case and

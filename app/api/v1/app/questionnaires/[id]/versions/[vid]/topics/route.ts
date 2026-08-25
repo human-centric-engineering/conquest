@@ -1,8 +1,8 @@
 /**
- * Topics collection — Adaptive Scope (P17).
+ * Topics collection — Conditional Topics (P17).
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/topics
- *   Admin-only: the version's topics, its resolved `adaptiveScope` settings, the coherence
+ *   Admin-only: the version's topics, its resolved `conditionalTopics` settings, the coherence
  *   findings, the key inventory the editor needs to offer membership pickers, and the Routing
  *   Analyst's pending proposal when one is waiting for review (`draft`, else null). Also carries
  *   the ingestion-time candidacy verdict and whether the analyst should now auto-run from it
@@ -13,7 +13,7 @@
  *   target is launched (editable id returned in `meta`), matching every other authoring route.
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid/topics
- *   Admin-only: patch the `adaptiveScope` settings blob — the master switch, the limit, the
+ *   Admin-only: patch the `conditionalTopics` settings blob — the master switch, the limit, the
  *   fallback, the hard rules. Same fork discipline.
  *
  * Rate limiting is inherited from the `/api/v1/**` section cap in `proxy.ts` — nothing here is
@@ -34,29 +34,30 @@ import {
   matrixRowCount,
   routedAllowanceSeconds,
 } from '@/lib/app/questionnaire/scope/budget';
-import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import type { ConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 
 import {
-  adaptiveScopeSettingsSchema,
+  conditionalTopicsSettingsSchema,
   saveTopicsSchema,
 } from '@/lib/app/questionnaire/scope/schemas';
 import {
   uncoveredDataSlotKeys,
   uncoveredQuestionKeys,
-  validateAdaptiveScope,
+  validateConditionalTopics,
 } from '@/lib/app/questionnaire/scope/validate';
 import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 import { buildPlanPreviewForm } from '@/lib/app/questionnaire/scope/views';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   loadMaxDataSlotAttempts,
   loadTopics,
-  patchAdaptiveScopeSettings,
+  patchConditionalTopicsSettings,
   replaceTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import { listSourceDocuments } from '@/app/api/v1/app/questionnaires/_lib/source-documents';
 import {
   loadCachedCandidacyVerdict,
   resolveAutoTriggerPending,
@@ -68,7 +69,7 @@ import {
  * rows it asks the respondent to rate. `weight` rides along because a `light` topic asks its
  * highest-weight members, so the cost of one depends on it.
  */
-async function loadKeyInventory(versionId: string, settings: AdaptiveScopeSettings) {
+async function loadKeyInventory(versionId: string, settings: ConditionalTopicsSettings) {
   const [questions, dataSlots] = await Promise.all([
     prisma.appQuestionSlot.findMany({
       where: { versionId },
@@ -128,20 +129,24 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
     }
 
     // Settings first: the key inventory prices itself against this version's per-type overrides.
-    const settings = await loadAdaptiveScopeSettings(vid);
-    const [topics, inventory, draft, scoring, maxDataSlotAttempts, candidacy] = await Promise.all([
-      loadTopics(vid),
-      loadKeyInventory(vid, settings),
-      loadTopicDraft(vid),
-      // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
-      // `null` for the versions that do not score, which is most of them.
-      loadScoringSchemaContent(vid),
-      // For the opening follow-up checks (G03) — the per-slot re-ask cap the allowance sits under.
-      loadMaxDataSlotAttempts(vid),
-      // F17.19 Phase 3: the ingestion-time candidacy verdict — independent of everything else
-      // above, so it rides this same batch rather than paying a second serial round-trip.
-      loadCachedCandidacyVerdict(vid),
-    ]);
+    const settings = await loadConditionalTopicsSettings(vid);
+    const [topics, inventory, draft, scoring, maxDataSlotAttempts, candidacy, documents] =
+      await Promise.all([
+        loadTopics(vid),
+        loadKeyInventory(vid, settings),
+        loadTopicDraft(vid),
+        // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
+        // `null` for the versions that do not score, which is most of them.
+        loadScoringSchemaContent(vid),
+        // For the opening follow-up checks (G03) — the per-slot re-ask cap the allowance sits under.
+        loadMaxDataSlotAttempts(vid),
+        // F17.19 Phase 3: the ingestion-time candidacy verdict — independent of everything else
+        // above, so it rides this same batch rather than paying a second serial round-trip.
+        loadCachedCandidacyVerdict(vid),
+        // F17.29: the documents the analyst will read. Metadata only — the card above the topic list
+        // names them, and a second fetch for at most six filenames is a round-trip for nothing.
+        listSourceDocuments(vid),
+      ]);
 
     // The time arithmetic (C7), computed here for the same reason `issues` is: one implementation,
     // so the number an author reads and the number the planner works to cannot disagree.
@@ -155,7 +160,7 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
     const allQuestionKeys = inventory.questions.map((q) => q.key);
     const allDataSlotKeys = inventory.dataSlots.map((d) => d.key);
 
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       topics,
       settings,
       allQuestionKeys,
@@ -209,6 +214,7 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
         totalDataSlots: allDataSlotKeys.length,
         uncoveredDataSlots: uncoveredDataSlotKeys(topics, allDataSlotKeys).length,
       },
+      documents,
     });
   }
 );
@@ -239,7 +245,7 @@ const handleSave = withAdminAuth<{ id: string; vid: string }>(
       metadata: { questionnaireId: id, versionId: editId, topicCount: topics.length },
       clientIp,
     });
-    log.info('Adaptive scope topics saved', { versionId: editId, topicCount: topics.length });
+    log.info('Conditional topics topics saved', { versionId: editId, topicCount: topics.length });
 
     return successResponse({ topics }, forkMeta(fork));
   }
@@ -256,16 +262,16 @@ const handlePatchSettings = withAdminAuth<{ id: string; vid: string }>(
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
     }
 
-    const body = await validateRequestBody(request, adaptiveScopeSettingsSchema);
+    const body = await validateRequestBody(request, conditionalTopicsSettingsSchema);
 
     const fork = await forkVersionIfLaunched(scoped, { userId: session.user.id, clientIp });
     const editId = fork.versionId;
 
-    const settings = await patchAdaptiveScopeSettings(editId, body);
+    const settings = await patchConditionalTopicsSettings(editId, body);
 
     logAdminAction({
       userId: session.user.id,
-      action: 'questionnaire_adaptive_scope.update',
+      action: 'questionnaire_conditional_topics.update',
       entityType: 'questionnaire_version',
       entityId: editId,
       // `enabled` is the field worth being able to grep the audit log for: it is the one that
@@ -273,7 +279,10 @@ const handlePatchSettings = withAdminAuth<{ id: string; vid: string }>(
       metadata: { questionnaireId: id, versionId: editId, enabled: settings.enabled },
       clientIp,
     });
-    log.info('Adaptive scope settings updated', { versionId: editId, enabled: settings.enabled });
+    log.info('Conditional topics settings updated', {
+      versionId: editId,
+      enabled: settings.enabled,
+    });
 
     return successResponse({ settings }, forkMeta(fork));
   }

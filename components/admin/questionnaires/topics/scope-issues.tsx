@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * The Adaptive Scope coherence findings, as the Topics tab renders them.
+ * The Conditional Topics coherence findings, as the Topics tab renders them.
  *
- * Advisory by design. `validateAdaptiveScope` runs on READ — an admin mid-edit routinely has an
+ * Advisory by design. `validateConditionalTopics` runs on READ — an admin mid-edit routinely has an
  * incoherent set, and a surface that refuses the save is a surface they fight. So this shows what
  * is wrong and where, and never blocks a keystroke.
  *
@@ -45,7 +45,7 @@ export function ScopeIssues({ issues, enabled, className }: ScopeIssuesProps) {
         <p>
           {enabled
             ? 'This topic set is coherent — every question belongs to a topic and every reference resolves.'
-            : 'Nothing to fix. This topic set would still be coherent if you turned adaptive scope on.'}
+            : 'Nothing to fix. This topic set would still be coherent if you turned conditional topics on.'}
         </p>
       </div>
     );

@@ -99,16 +99,16 @@ export default async function OverviewTab({ params }: PageProps) {
     (q) => !isMatrixLabelled(q.typeConfig)
   ).length;
 
-  // Adaptive Scope coherence: only a launch concern once the version opted in. An `error` finding
+  // Conditional Topics coherence: only a launch concern once the version opted in. An `error` finding
   // means turning the feature on would make the questionnaire behave wrongly — most often a
   // question belonging to no topic, which under active scope can never be asked at all.
   const scope = isDraft ? await getVersionTopicsCached(id, vid) : null;
-  const adaptiveScopeEnabled = scope !== null && scope.settings.enabled;
-  const adaptiveScopeErrorCount =
+  const conditionalTopicsEnabled = scope !== null && scope.settings.enabled;
+  const conditionalTopicsErrorCount =
     scope === null ? 0 : scope.issues.filter((i) => i.severity === 'error').length;
   // The mirror of the above, read only while the feature is off: conditional topics exist, nothing
   // is choosing between them, so every respondent is asked all of them. A warning, never a gate.
-  const adaptiveScopeConditionalCount =
+  const conditionalTopicsConditionalCount =
     scope === null ? 0 : scope.topics.filter((t) => t.phase === 'conditional').length;
 
   // Settings conflicts for the saved version, from the same detector the Settings tab runs live —
@@ -200,9 +200,9 @@ export default async function OverviewTab({ params }: PageProps) {
               unlabelledLikertCount={unlabelledLikertCount}
               matrixCount={matrixSlots.length}
               misconfiguredMatrixCount={misconfiguredMatrixCount}
-              adaptiveScopeEnabled={adaptiveScopeEnabled}
-              adaptiveScopeErrorCount={adaptiveScopeErrorCount}
-              adaptiveScopeConditionalCount={adaptiveScopeConditionalCount}
+              conditionalTopicsEnabled={conditionalTopicsEnabled}
+              conditionalTopicsErrorCount={conditionalTopicsErrorCount}
+              conditionalTopicsConditionalCount={conditionalTopicsConditionalCount}
               configSaved={graph.config.saved}
               dataSlotsRequired={true}
               dataSlotsReady={dataSlotCount > 0}

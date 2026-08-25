@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope coherence checks (P17) — pure.
+ * Conditional Topics coherence checks (P17) — pure.
  *
  * Saving an incoherent topic set is allowed: an admin mid-edit routinely has one, and a surface
  * that refuses the save is a surface they fight. These checks run on READ instead — on the Topics
@@ -27,7 +27,7 @@ import { checkScaleComparability } from '@/lib/app/questionnaire/scope/comparabi
 import {
   ALWAYS_PHASES,
   LIGHT_DEPTH_MEMBER_COUNT,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
@@ -48,7 +48,7 @@ export interface ScopeIssue {
 
 export interface ValidateScopeInput {
   topics: readonly Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /** Every question key in the version — for the orphan check. */
   allQuestionKeys: readonly string[];
   /** Every data-slot key in the version — for the rule and orphan checks. */
@@ -80,7 +80,7 @@ export interface ValidateScopeInput {
    * The version's per-slot re-ask cap (`maxDataSlotAttempts`), when the caller has it — for the
    * opening follow-up checks (G03).
    *
-   * It lives in a different config blob from Adaptive Scope, which is exactly why it is worth
+   * It lives in a different config blob from Conditional Topics, which is exactly why it is worth
    * checking: an author rationing the opening's follow-ups has no way to see that the interview
    * does not ask any. Optional, like `seconds` and `scoring` — a caller without it gets every
    * other finding.
@@ -89,7 +89,7 @@ export interface ValidateScopeInput {
 }
 
 /**
- * Check a version's Adaptive Scope setup. Returns findings ordered errors-first.
+ * Check a version's Conditional Topics setup. Returns findings ordered errors-first.
  *
  * Pure and total: never throws, and an empty result means "nothing to say", not "not checked".
  */
@@ -129,7 +129,7 @@ export function uncoveredDataSlotKeys(
   return allDataSlotKeys.filter((k) => !covered.has(k));
 }
 
-export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
+export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue[] {
   const { topics, settings } = input;
   const issues: ScopeIssue[] = [];
   const topicKeys = new Set(topics.map((t) => t.key));
@@ -143,8 +143,8 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
       severity: settings.enabled ? 'error' : 'warning',
       code: 'orphaned_questions',
       message: settings.enabled
-        ? `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic, so ${orphans.length === 1 ? 'it is' : 'they are'} never asked while Adaptive Scope is on. Add ${orphans.length === 1 ? 'it' : 'them'} to a topic.`
-        : `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic. That is harmless today, but ${orphans.length === 1 ? 'it' : 'they'} would never be asked if you turn Adaptive Scope on.`,
+        ? `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic, so ${orphans.length === 1 ? 'it is' : 'they are'} never asked while Conditional Topics is on. Add ${orphans.length === 1 ? 'it' : 'them'} to a topic.`
+        : `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic. That is harmless today, but ${orphans.length === 1 ? 'it' : 'they'} would never be asked if you turn Conditional Topics on.`,
     });
   }
 
@@ -153,7 +153,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
     issues.push({
       severity: settings.enabled ? 'error' : 'warning',
       code: 'orphaned_data_slots',
-      message: `${orphanSlots.length} data slot${orphanSlots.length === 1 ? '' : 's'} belong to no topic, so the conversation would never target ${orphanSlots.length === 1 ? 'it' : 'them'} while Adaptive Scope is on.`,
+      message: `${orphanSlots.length} data slot${orphanSlots.length === 1 ? '' : 's'} belong to no topic, so the conversation would never target ${orphanSlots.length === 1 ? 'it' : 'them'} while Conditional Topics is on.`,
     });
   }
 
@@ -268,7 +268,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         severity: 'warning',
         code: 'no_conditional_topics',
         message:
-          'No topic is conditional, so every respondent gets the same questionnaire and Adaptive Scope has nothing to decide.',
+          'No topic is conditional, so every respondent gets the same questionnaire and Conditional Topics has nothing to decide.',
       });
     }
     const conditionalCount = topics.filter((t) => t.phase === 'conditional').length;

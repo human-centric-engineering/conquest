@@ -4,7 +4,7 @@
  * The sibling of {@link file://./config-export.ts}, one level up: where that envelope carries only a
  * version's run-time *settings*, this one carries the whole authored **instrument** — structure
  * (sections → questions → tags), the run-time config, the semantic data slots, the scoring
- * schema, and (P17) the [Adaptive Scope](../../../../.context/app/questionnaire/adaptive-scope.md)
+ * schema, and (P17) the [Conditional Topics](../../../../.context/app/questionnaire/conditional-topics.md)
  * topics + settings. Export serialises a {@link VersionGraphView} (+ data slots + topics + scoring)
  * into a portable JSON file; import parses such a file back into a typed payload the route persists
  * as a brand-new questionnaire.
@@ -15,9 +15,9 @@
  * off untrusted JSON. Embeddings are deliberately NOT serialised: question + data-slot vectors are
  * regenerated on import (they're large, model-specific, and reproducible from the text).
  *
- * `adaptiveScope` travels as its own top-level field, validated on import via
- * {@link adaptiveScopeSettingsSchema} — NOT nested inside `config` (which is validated via
- * {@link updateConfigSchema}, and that schema deliberately has no `adaptiveScope` field; the topics
+ * `conditionalTopics` travels as its own top-level field, validated on import via
+ * {@link conditionalTopicsSettingsSchema} — NOT nested inside `config` (which is validated via
+ * {@link updateConfigSchema}, and that schema deliberately has no `conditionalTopics` field; the topics
  * route owns that shape). Topics reference questions/data slots by their stable `key` (never a row
  * id — see {@link file://../scope/types.ts}), so they survive the persister's key-dedup the same way
  * data-slot↔question links do.
@@ -54,11 +54,11 @@ import { extractConfig } from '@/lib/app/questionnaire/authoring/config-export';
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring/config-schema';
 import {
   topicInputSchema,
-  adaptiveScopeSettingsSchema,
+  conditionalTopicsSettingsSchema,
 } from '@/lib/app/questionnaire/scope/schemas';
 import {
   TOPIC_SOURCES,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicSource,
 } from '@/lib/app/questionnaire/scope/types';
@@ -113,7 +113,7 @@ export interface DefinitionDataSlot {
 }
 
 /**
- * One Adaptive Scope topic in the export — links to questions/data slots by their stable `key`
+ * One Conditional Topics topic in the export — links to questions/data slots by their stable `key`
  * (never a row id), same as {@link DefinitionDataSlot}.
  */
 export interface DefinitionTopic {
@@ -164,13 +164,13 @@ export interface DefinitionExport {
     sections: DefinitionSection[];
     config: QuestionnaireConfigShape;
     dataSlots: DefinitionDataSlot[];
-    /** Adaptive Scope (P17) topics — see {@link DefinitionTopic}. */
+    /** Conditional Topics (P17) topics — see {@link DefinitionTopic}. */
     topics: DefinitionTopic[];
     /**
-     * Adaptive Scope (P17) settings — the master switch, budget, hard rules, planner instructions.
+     * Conditional Topics (P17) settings — the master switch, budget, hard rules, planner instructions.
      * A top-level sibling of `config`, not nested inside it (see the module docblock for why).
      */
-    adaptiveScope: AdaptiveScopeSettings;
+    conditionalTopics: ConditionalTopicsSettings;
     scoringSchema: { name: string; content: ScoringSchemaContent } | null;
     /**
      * Definitions / glossary (P16). Carries the CURATED set — terms, their status, and every
@@ -183,7 +183,7 @@ export interface DefinitionExport {
 }
 
 /**
- * Build the export envelope from a version's graph, its data slots, its Adaptive Scope topics, and
+ * Build the export envelope from a version's graph, its data slots, its Conditional Topics topics, and
  * its scoring schema (or null). The questionnaire `title` is passed separately (it lives on the
  * questionnaire row, not the version graph). Reuses {@link extractConfig} for the config block
  * (drops the read-only `saved` flag) and flattens each question's `tags` to bare labels.
@@ -218,7 +218,7 @@ export function buildDefinitionExport(
         questionKeys: t.members.questionKeys,
         dataSlotKeys: t.members.dataSlotKeys,
       })),
-      adaptiveScope: graph.config.adaptiveScope,
+      conditionalTopics: graph.config.conditionalTopics,
       sections: graph.sections.map((s) => ({
         ordinal: s.ordinal,
         title: s.title,
@@ -308,11 +308,11 @@ const dataSlotImportSchema = z.object({
 });
 
 /**
- * One Adaptive Scope topic, as an import file carries it. Extends {@link topicInputSchema} (the same
+ * One Conditional Topics topic, as an import file carries it. Extends {@link topicInputSchema} (the same
  * shape the Topics tab's bulk save validates) with `ordinal` and `source`, which a live topic has but
  * a fresh save does not. `questionKeys`/`dataSlotKeys` are remapped by the persister against the
  * freshly-created questions/data slots — an unresolvable key is silently skipped, same as everywhere
- * else in this feature (see `.context/app/questionnaire/adaptive-scope.md#membership-is-keys-never-row-ids`).
+ * else in this feature (see `.context/app/questionnaire/conditional-topics.md#membership-is-keys-never-row-ids`).
  */
 const definitionTopicImportSchema = topicInputSchema.extend({
   ordinal: z.number().int().nonnegative(),
@@ -347,7 +347,7 @@ const glossaryTermImportSchema = z.object({
 /**
  * The full envelope validator — the external-data boundary. `config` reuses the all-optional
  * {@link updateConfigSchema} (so an import is validated exactly like a settings PATCH and unknown
- * keys are stripped — this is why `adaptiveScope` travels as its own sibling field below rather than
+ * keys are stripped — this is why `conditionalTopics` travels as its own sibling field below rather than
  * inside `config`); `scoringSchema` reuses {@link scoringSchemaContentSchema}. Both optional so a
  * hand-authored or partial file still imports.
  */
@@ -363,7 +363,7 @@ export const definitionImportSchema = z.object({
     sections: z.array(sectionImportSchema),
     config: updateConfigSchema.optional(),
     dataSlots: z.array(dataSlotImportSchema).default([]),
-    // Adaptive Scope (P17). `.default([])`/`.optional()`, not a schemaVersion bump — same
+    // Conditional Topics (P17). `.default([])`/`.optional()`, not a schemaVersion bump — same
     // forward/backward-compatibility reasoning as `glossary` below: an old file (no topics) still
     // imports, and a new file imports into older code too (Zod strips the unknown keys).
     topics: z
@@ -374,7 +374,15 @@ export const definitionImportSchema = z.object({
         (topics) => new Set(topics.map((t) => t.key)).size === topics.length,
         'Two topics share a key'
       ),
-    adaptiveScope: adaptiveScopeSettingsSchema.optional(),
+    conditionalTopics: conditionalTopicsSettingsSchema.optional(),
+    /**
+     * The pre-rename name for {@link definitionImportSchema}'s `conditionalTopics` field, kept so a
+     * file exported while the feature was called "Adaptive Scope" still imports its routing design
+     * rather than silently landing as an unconfigured version. Export only ever writes the new key;
+     * `parseDefinitionImport` folds this one into it and drops it, so nothing downstream sees two
+     * names. Not a schemaVersion bump, for the same reason `glossary` was not one.
+     */
+    adaptiveScope: conditionalTopicsSettingsSchema.optional(),
     scoringSchema: z
       .object({ name: z.string().trim().min(1).max(120), content: scoringSchemaContentSchema })
       .nullable()
@@ -451,5 +459,21 @@ export function parseDefinitionImport(text: string): DefinitionImport {
       `This definition file is malformed${where}: ${first?.message ?? 'invalid shape'}`
     );
   }
-  return result.data;
+  return foldLegacyConditionalTopics(result.data);
+}
+
+/**
+ * Fold the pre-rename `adaptiveScope` field into `conditionalTopics` and drop it, so exactly one
+ * name reaches the importer. The new key wins if a hand-edited file somehow carries both — it is
+ * the one this build writes, so it is the one the author most recently meant.
+ */
+function foldLegacyConditionalTopics(data: DefinitionImport): DefinitionImport {
+  const { adaptiveScope, ...version } = data.version;
+  if (adaptiveScope === undefined) {
+    return { ...data, version };
+  }
+  return {
+    ...data,
+    version: { ...version, conditionalTopics: version.conditionalTopics ?? adaptiveScope },
+  };
 }

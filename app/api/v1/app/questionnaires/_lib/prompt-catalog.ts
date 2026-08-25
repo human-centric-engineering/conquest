@@ -437,7 +437,7 @@ const SCALE_MATRIX_REPAIR: PromptAgentCatalogEntry = {
 
 const SCOPE_CANDIDACY_CHECK: PromptAgentCatalogEntry = {
   slug: QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG,
-  name: 'Adaptive Scope candidacy check',
+  name: 'Conditional Topics candidacy check',
   stage: 'authoring',
   summary:
     'A fast, routing-tier triage over a freshly uploaded document: do its own words describe routing different respondents through different parts of it? Never proposes topics or rules — only decides whether to invite the admin to run the Routing Analyst.',
@@ -487,9 +487,18 @@ const ROUTING_ANALYST: PromptAgentCatalogEntry = {
               { key: 'q2', prompt: '{{ question 2 }}' },
             ],
             dataSlots: [{ key: 'slot_1', name: '{{ data slot 1 }}', theme: '{{ theme }}' }],
-            documentText:
-              '{{ text extracted from the uploaded document — its routing/eligibility guidance }}',
-            documentFileName: '{{ uploaded-file }}',
+            documents: [
+              {
+                role: 'primary',
+                fileName: '{{ uploaded-file }}',
+                text: '{{ text extracted from the uploaded document — its routing/eligibility guidance }}',
+              },
+              {
+                role: 'supplementary',
+                fileName: '{{ attached-routing-memo }}',
+                text: '{{ text of a companion document an admin attached beside the instrument }}',
+              },
+            ],
           })
         ),
     }),
@@ -1141,7 +1150,7 @@ const JUDGES: PromptAgentCatalogEntry[] = EVALUATION_DIMENSIONS.map((dimension) 
 });
 
 // ---------------------------------------------------------------------------
-// Adaptive Scope evaluation judges — one agent per dimension (F17.21)
+// Conditional Topics evaluation judges — one agent per dimension (F17.21)
 // ---------------------------------------------------------------------------
 
 const SAMPLE_SCOPE_STRUCTURE: ScopeStructureInput = {
@@ -1192,14 +1201,14 @@ const SCOPE_JUDGES: PromptAgentCatalogEntry[] = SCOPE_EVALUATION_DIMENSIONS.map(
     stage: 'evaluation' as const,
     summary: spec.summary,
     dispatch:
-      "Once per Adaptive Scope evaluation run, when the judge panel scores a version's scope config.",
+      "Once per Conditional Topics evaluation run, when the judge panel scores a version's scope config.",
     builderModule: 'lib/app/questionnaire/scope-evaluation/judge-prompt.ts',
     instructionsAreLoadBearing: false,
     specimens: [
       specimen({
         id: `${spec.slug}.judge`,
         label: `Judge: ${dimension}`,
-        description: `Scores the "${dimension}" dimension of a version's authored Adaptive Scope configuration, and proposes edits.`,
+        description: `Scores the "${dimension}" dimension of a version's authored Conditional Topics configuration, and proposes edits.`,
         build: () => norm(buildScopeJudgePrompt(dimension, SAMPLE_SCOPE_STRUCTURE)),
       }),
     ],

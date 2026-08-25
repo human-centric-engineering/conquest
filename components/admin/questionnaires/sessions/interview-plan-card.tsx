@@ -1,5 +1,5 @@
 /**
- * The interview plan, as an admin reads it back — Adaptive Scope (P17).
+ * The interview plan, as an admin reads it back — Conditional Topics (P17).
  *
  * "Why did this respondent get those topics" is the question an adaptive instrument generates, and
  * it is almost always asked months later, by someone holding a report a client has challenged. The
@@ -83,6 +83,13 @@ export function InterviewPlanCard({ plan }: InterviewPlanCardProps) {
                         {plan.checkTopicKey === topic.key
                           ? 'Blind-spot check — sampled, not scored'
                           : TOPIC_DEPTH_LABELS.light}
+                      </Badge>
+                    )}
+                    {topic.partial && (
+                      /* "We covered Talent" and "we asked three of Talent's ten questions" are
+                         different claims, and a challenged report turns on which one was true. */
+                      <Badge variant="outline" className="text-[10px]">
+                        {topic.partial.asked} of {topic.partial.total} asked
                       </Badge>
                     )}
                   </span>

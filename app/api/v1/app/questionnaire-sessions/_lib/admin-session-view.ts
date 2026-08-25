@@ -17,8 +17,10 @@
 import { prisma } from '@/lib/db/client';
 import { SESSION_STATUSES, narrowToEnum, type SessionStatus } from '@/lib/app/questionnaire/types';
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
+import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import {
   narrowInterviewPlan,
+  narrowTopicMembers,
   type ScopeDecisionSource,
   type TopicDepth,
 } from '@/lib/app/questionnaire/scope/types';
@@ -31,10 +33,18 @@ export interface AdminPlannedTopicView {
   depth?: TopicDepth;
   source: ScopeDecisionSource;
   rationale: string;
+  /**
+   * How much of the topic this interview asked, when the plan named a SUBSET of it (C6) — e.g.
+   * `{ asked: 3, total: 10 }`. Absent when the whole topic (at its depth) was in scope.
+   *
+   * On the viewer this is the difference between "we covered Talent" and "we asked three of
+   * Talent's ten questions", which is exactly the distinction a challenged report turns on.
+   */
+  partial?: { asked: number; total: number };
 }
 
 /**
- * The interview plan as the admin viewer renders it — Adaptive Scope (P17).
+ * The interview plan as the admin viewer renders it — Conditional Topics (P17).
  *
  * "Why did this respondent get those topics" is THE question an admin asks about an adaptive
  * instrument, usually months later and usually because a client challenged a report. The plan
@@ -82,7 +92,7 @@ export interface AdminSessionView {
   /** Respondent display name — null in anonymous mode (never even queried), mirroring the export. */
   respondentName: string | null;
   /**
-   * Adaptive Scope (P17): the plan this interview ran under, or null.
+   * Conditional Topics (P17): the plan this interview ran under, or null.
    *
    * Null for every ordinary session AND for an adaptive one whose opening never completed — both
    * are "no decision was made", which is what the viewer says.
@@ -154,6 +164,26 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
  * needs to see that the interview covered something since deleted, which is precisely the case a
  * silent drop would hide.
  */
+/**
+ * How many of one half of a topic an interview asked.
+ *
+ * A named subset is intersected with what the topic contains today; an un-named half falls to the
+ * topic's depth, exactly as `plannedMembers` resolves it at run time. Only the COUNT is needed
+ * here, so no weights are loaded — `membersAtDepth` picks which two a `light` topic samples, but
+ * how many it samples is the same either way.
+ */
+export function askedCount(
+  authored: readonly string[],
+  named: readonly string[] | undefined,
+  depth: TopicDepth
+): number {
+  if (named && named.length > 0) {
+    const kept = authored.filter((key) => named.includes(key));
+    if (kept.length > 0) return kept.length;
+  }
+  return membersAtDepth(authored, depth, undefined).length;
+}
+
 async function resolvePlanView(
   versionId: string,
   stored: unknown
@@ -163,10 +193,36 @@ async function resolvePlanView(
 
   const topics = await prisma.appQuestionnaireTopic.findMany({
     where: { versionId },
-    select: { key: true, label: true },
+    select: { key: true, label: true, members: true },
   });
   const labelByKey = new Map(topics.map((t) => [t.key, t.label]));
   const label = (key: string): string => labelByKey.get(key) ?? key;
+  const membersByKey = new Map(topics.map((t) => [t.key, narrowTopicMembers(t.members)] as const));
+
+  /**
+   * The "3 of 10" line, only when the plan actually narrowed the topic.
+   *
+   * Counted against what the topic contains TODAY. The instrument can be edited after an interview
+   * runs, so this can read "3 of 8" on a topic that had ten questions at the time — which is the
+   * honest answer to "how much of the topic as it now stands did this interview ask", and the
+   * alternative (storing the total on the plan) answers a question nobody puts.
+   */
+  const partial = (
+    t: (typeof plan.topics)[number]
+  ): { partial?: { asked: number; total: number } } => {
+    if (!t.members) return {};
+    const authored = membersByKey.get(t.key);
+    if (!authored) return {};
+    const total = authored.questionKeys.length + authored.dataSlotKeys.length;
+    // A plan narrows one half and leaves the other to the depth, so the halves are counted
+    // separately. Counting a `new Set` of both at once would read the un-named half — stored
+    // empty, meaning "the depth decides" — as nothing asked at all.
+    const asked =
+      askedCount(authored.questionKeys, t.members.questionKeys, t.depth) +
+      askedCount(authored.dataSlotKeys, t.members.dataSlotKeys, t.depth);
+    if (asked === 0 || asked >= total) return {};
+    return { partial: { asked, total } };
+  };
 
   return {
     selected: plan.topics.map((t) => ({
@@ -175,6 +231,7 @@ async function resolvePlanView(
       depth: t.depth,
       source: t.source,
       rationale: t.rationale,
+      ...partial(t),
     })),
     excluded: plan.excluded.map((t) => ({
       key: t.key,

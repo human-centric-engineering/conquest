@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The Adaptive Scope status header — "is this on, and is it ready?", answered before anything else.
+ * The Conditional Topics status header — "is this on, and is it ready?", answered before anything else.
  *
  * The tab it sits above is ordered by the runtime pipeline: the AI proposer leads, the verification
  * cards sit in the middle, and the topic list an admin edits most is last, below several screens of
@@ -79,7 +79,7 @@ export function ScopeStatusHeader({
           </span>
           <div className="min-w-0 space-y-1">
             <h2 id="scope-status-heading" className="text-sm font-semibold tracking-tight">
-              Adaptive scope
+              Conditional topics
             </h2>
             {/* The off-state sentence carries the invariant in the plainest words available. An
                 admin who reads "Off" and nothing else has to infer what off MEANS, and the
@@ -102,7 +102,7 @@ export function ScopeStatusHeader({
             checked={enabled}
             onCheckedChange={onToggleEnabled}
             disabled={busy}
-            aria-label="Adaptive scope"
+            aria-label="Conditional topics"
           />
         </div>
       </div>
@@ -129,7 +129,7 @@ export function ScopeStatusHeader({
           <span className="text-foreground font-semibold">{formatSeconds(alwaysSeconds)}</span>
         </span>
         <Divider />
-        {/* 0 is "no budget", NOT a zero-second budget — `narrowAdaptiveScopeSettings` uses 0 as the
+        {/* 0 is "no budget", NOT a zero-second budget — `narrowConditionalTopicsSettings` uses 0 as the
             off value because a duration of zero is not a usable one. Rendering it through
             `formatSeconds` would print "0m", which reads as a budget so tight nothing can run. */}
         <span>

@@ -188,7 +188,7 @@ const STRUCTURE = {
     truncated: false,
   },
   routing: {
-    adaptiveScopeEnabled: false,
+    conditionalTopicsEnabled: false,
     maxConditionalTopics: 3,
     limitOpeningProbes: false,
     maxOpeningProbes: 1,

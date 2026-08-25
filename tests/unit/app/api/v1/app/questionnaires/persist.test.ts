@@ -46,7 +46,7 @@ const tx = {
     createMany: vi.fn(async () => ({ count: 0 })),
     findMany: vi.fn(async () => []),
   },
-  // Adaptive Scope (P17): ingest seeds one topic per section inside the same transaction.
+  // Conditional Topics (P17): ingest seeds one topic per section inside the same transaction.
   appDataSlot: { findMany: vi.fn(async () => []) },
   appQuestionnaireTopic: {
     findMany: vi.fn(async () => []),

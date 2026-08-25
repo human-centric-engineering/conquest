@@ -121,7 +121,8 @@ describe('buildTurnEvaluatorPrompt — interviewer policy context', () => {
           houseRules: 'House rules: 2 x always, 1 x never',
           interviewerStrategy: 'Questioning approach: Funnel; Funnel pace: Narrow quickly',
           questionFidelity: 'Question fidelity: On - new questions start Balanced',
-          adaptiveScope: 'Adaptive scope: Enabled; Conditional topics per interview: Up to 3',
+          conditionalTopics:
+            'Conditional topics: Enabled; Conditional topics per interview: Up to 3',
           questionFidelityLevel: 'Must ask - Put it to them as written.',
         },
       })
@@ -147,14 +148,14 @@ describe('buildTurnEvaluatorPrompt — interviewer policy context', () => {
           houseRules: undefined,
           interviewerStrategy: undefined,
           questionFidelity: undefined,
-          adaptiveScope: undefined,
+          conditionalTopics: undefined,
           questionFidelityLevel: undefined,
         },
       })
     );
     expect(after).toBe(before);
     expect(after).not.toMatch(/house rules/i);
-    expect(after).not.toMatch(/adaptive scope/i);
+    expect(after).not.toMatch(/conditional topics/i);
   });
 
   it('drops a policy field that is present but blank', () => {

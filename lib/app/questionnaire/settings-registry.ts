@@ -585,65 +585,65 @@ export const SETTING_DESCRIPTORS = {
       ];
     },
   },
-  adaptiveScope: {
+  conditionalTopics: {
     group: 'Questioning & completion',
     tier: 'standard',
     rows: (c) => {
       // Off is the default and the pre-P17 behaviour: every topic runs, so the only honest row is
       // the switch itself. The rest of the block only describes an interview that is actually
       // being narrowed.
-      if (!c.adaptiveScope.enabled) {
-        return [{ label: 'Adaptive scope', value: 'Disabled' }];
+      if (!c.conditionalTopics.enabled) {
+        return [{ label: 'Conditional topics', value: 'Disabled' }];
       }
       return [
-        { label: 'Adaptive scope', value: 'Enabled' },
+        { label: 'Conditional topics', value: 'Enabled' },
         {
           label: 'Conditional topics per interview',
-          value: `Up to ${c.adaptiveScope.maxConditionalTopics}`,
+          value: `Up to ${c.conditionalTopics.maxConditionalTopics}`,
         },
         {
           // C7. Listed beside the count, not instead of it: they bound different things, and an
           // operator reading this needs to know which of the two actually stopped an interview.
           label: 'Session length budget',
           value:
-            c.adaptiveScope.sessionBudgetSeconds > 0
-              ? formatSeconds(c.adaptiveScope.sessionBudgetSeconds)
+            c.conditionalTopics.sessionBudgetSeconds > 0
+              ? formatSeconds(c.conditionalTopics.sessionBudgetSeconds)
               : 'No limit',
         },
         {
           // G03. Shown as one row rather than two because "off" and "how many" only mean anything
           // together — a bare "1" beside a switch nobody set reads as a limit that is in force.
           label: 'Opening follow-ups',
-          value: c.adaptiveScope.limitOpeningProbes
-            ? c.adaptiveScope.maxOpeningProbes === 0
+          value: c.conditionalTopics.limitOpeningProbes
+            ? c.conditionalTopics.maxOpeningProbes === 0
               ? 'None — never probe'
-              : `Up to ${c.adaptiveScope.maxOpeningProbes} across the opening`
+              : `Up to ${c.conditionalTopics.maxOpeningProbes} across the opening`
             : 'Not limited',
         },
         {
           label: 'Unraised-area check topic',
-          value: yesNo(c.adaptiveScope.includeCheckTopic),
+          value: yesNo(c.conditionalTopics.includeCheckTopic),
         },
-        { label: 'Chosen topics announced', value: yesNo(c.adaptiveScope.announce) },
+        { label: 'Chosen topics announced', value: yesNo(c.conditionalTopics.announce) },
         {
           label: 'Respondent can request a topic',
-          value: yesNo(c.adaptiveScope.allowRespondentAmendment),
+          value: yesNo(c.conditionalTopics.allowRespondentAmendment),
         },
         {
           label: 'Scope rules',
-          value: c.adaptiveScope.rules.length
-            ? `${c.adaptiveScope.rules.length} rule${c.adaptiveScope.rules.length === 1 ? '' : 's'}`
+          value: c.conditionalTopics.rules.length
+            ? `${c.conditionalTopics.rules.length} rule${c.conditionalTopics.rules.length === 1 ? '' : 's'}`
             : 'None',
         },
         {
           label: 'Planner confidence floor',
           tier: 'technical',
-          value: asPercent(c.adaptiveScope.minConfidence),
+          value: asPercent(c.conditionalTopics.minConfidence),
         },
         {
           label: 'Planner instructions',
           tier: 'technical',
-          value: setOrNot(c.adaptiveScope.plannerInstructions),
+          value: setOrNot(c.conditionalTopics.plannerInstructions),
         },
       ];
     },

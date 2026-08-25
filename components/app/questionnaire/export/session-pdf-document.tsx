@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     color: COLORS.faint,
     marginBottom: 1,
   },
-  // Adaptive Scope (P17): the "what this did not cover" note. Muted and italic like the partial-
+  // Conditional Topics (P17): the "what this did not cover" note. Muted and italic like the partial-
   // report caveat it is a sibling of — both say "read the rest of this document with this in mind".
   scopeNote: {
     fontSize: 9,
@@ -395,7 +395,7 @@ export interface SessionPdfDocumentProps {
 
 /** The full session export document. Server-rendered to a buffer by the route. */
 /**
- * What the interview deliberately did not ask about — Adaptive Scope (P17).
+ * What the interview deliberately did not ask about — Conditional Topics (P17).
  *
  * The document's section listing is already filtered to what was in scope, so without this an
  * adaptive interview renders as a complete assessment of a shorter instrument. Nobody reading it
@@ -551,7 +551,7 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             </View>
           ))}
 
-        {/* Adaptive Scope (P17). AFTER the answer record rather than before it: the reader has just
+        {/* Conditional Topics (P17). AFTER the answer record rather than before it: the reader has just
             seen what was asked, and this is the sentence that stops them concluding it was
             everything. Rendered whatever the report mode — a narrative with no appended Q&A narrows
             just as silently, and the caveat is about the interview, not about the listing. */}

@@ -236,7 +236,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
-      adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     },
     ...over,
   };
@@ -268,7 +268,7 @@ function makeDemoClientApiRow(
 // ─── Page import ──────────────────────────────────────────────────────────────
 
 import SettingsTab from '@/app/admin/questionnaires/[id]/v/[vid]/settings/page';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 function renderPage(opts: { id?: string; vid?: string } = {}) {
   return SettingsTab({

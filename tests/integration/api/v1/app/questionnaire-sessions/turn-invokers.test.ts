@@ -81,7 +81,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -168,7 +168,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
-      adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     },
     questions: [
       {

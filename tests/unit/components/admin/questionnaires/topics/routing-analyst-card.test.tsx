@@ -901,7 +901,7 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
 
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     const dialog = screen.getByRole('alertdialog');
-    const box = within(dialog).getByRole('checkbox', { name: /Turn adaptive scope on now/ });
+    const box = within(dialog).getByRole('checkbox', { name: /Turn conditional topics on now/ });
     expect(box).not.toBeChecked();
 
     await user.click(within(dialog).getByRole('button', { name: /^Accept$/ }));
@@ -915,7 +915,9 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
 
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     const dialog = screen.getByRole('alertdialog');
-    await user.click(within(dialog).getByRole('checkbox', { name: /Turn adaptive scope on now/ }));
+    await user.click(
+      within(dialog).getByRole('checkbox', { name: /Turn conditional topics on now/ })
+    );
     await user.click(within(dialog).getByRole('button', { name: /^Accept$/ }));
 
     await waitFor(() => expect(acceptedBody().enable).toBe(true));
@@ -931,7 +933,7 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     await user.click(
       within(screen.getByRole('alertdialog')).getByRole('checkbox', {
-        name: /Turn adaptive scope on now/,
+        name: /Turn conditional topics on now/,
       })
     );
     await user.click(
@@ -941,7 +943,7 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     expect(
       within(screen.getByRole('alertdialog')).getByRole('checkbox', {
-        name: /Turn adaptive scope on now/,
+        name: /Turn conditional topics on now/,
       })
     ).not.toBeChecked();
   });
@@ -953,7 +955,7 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     const dialog = screen.getByRole('alertdialog');
     expect(
-      within(dialog).queryByRole('checkbox', { name: /Turn adaptive scope on now/ })
+      within(dialog).queryByRole('checkbox', { name: /Turn conditional topics on now/ })
     ).not.toBeInTheDocument();
     expect(dialog).toHaveTextContent(/already on/i);
     expect(dialog).not.toHaveTextContent(/stays off until you turn it on yourself/i);
@@ -972,7 +974,7 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
     await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
     const dialog = screen.getByRole('alertdialog');
     expect(
-      within(dialog).queryByRole('checkbox', { name: /Turn adaptive scope on now/ })
+      within(dialog).queryByRole('checkbox', { name: /Turn conditional topics on now/ })
     ).not.toBeInTheDocument();
     expect(dialog).toHaveTextContent(/stays off until you turn it on yourself/i);
   });

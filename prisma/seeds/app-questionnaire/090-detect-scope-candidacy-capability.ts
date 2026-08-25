@@ -7,7 +7,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 
 /**
- * Seed the Adaptive Scope candidacy-check `AiCapability` row (P17.19).
+ * Seed the Conditional Topics candidacy-check `AiCapability` row (P17.19).
  *
  * `executionType: 'internal'` + `executionHandler` points the dispatcher at the in-memory
  * `AppDetectScopeCandidacyCapability` registered via `initAppCapabilities()`.
@@ -18,10 +18,43 @@ import {
  * `isSystem: false`). `rateLimit: null` — the ingest route already owns the per-admin sub-cap.
  * Idempotent.
  */
+/** The pre-rename slug this unit used to own. See the rename step in `run`. */
+const LEGACY_CAPABILITY_SLUG = 'app_detect_adaptive_scope_candidacy';
+
 const unit: SeedUnit = {
   name: 'app-questionnaire/090-detect-scope-candidacy-capability',
   async run({ prisma, logger }) {
-    logger.info('🧩 Seeding Adaptive Scope candidacy-check capability...');
+    logger.info('🧩 Seeding Conditional Topics candidacy-check capability...');
+
+    // The slug carries the feature's name, and the feature was renamed (Adaptive Scope → Conditional
+    // Topics). Rename the row this unit already owns BEFORE upserting, or the upsert would create a
+    // second row on every database seeded before the rename and leave the original stranded — the
+    // operator's edits to `name` / `description` / `isActive` with it. Renaming in place means the
+    // upsert below finds the same row it has always maintained. Idempotent: a database that has
+    // never seen the old slug, or that already carries the new one, skips this entirely.
+    const legacy = await prisma.aiCapability.findUnique({
+      where: { slug: LEGACY_CAPABILITY_SLUG },
+      select: { id: true },
+    });
+    if (legacy) {
+      const current = await prisma.aiCapability.findUnique({
+        where: { slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG },
+        select: { id: true },
+      });
+      if (current) {
+        // Both exist — this unit already ran post-rename and created the new row. `097` deactivates
+        // the stranded one; nothing here should touch it.
+        logger.warn(`   ${LEGACY_CAPABILITY_SLUG} is superseded and stranded — see seed 097`);
+      } else {
+        await prisma.aiCapability.update({
+          where: { id: legacy.id },
+          data: { slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG },
+        });
+        logger.info(
+          `   Renamed ${LEGACY_CAPABILITY_SLUG} → ${DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG}`
+        );
+      }
+    }
 
     await prisma.aiCapability.upsert({
       where: { slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG },
@@ -37,7 +70,7 @@ const unit: SeedUnit = {
       },
       create: {
         slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG,
-        name: 'Detect Adaptive Scope Candidacy',
+        name: 'Detect Conditional Topics Candidacy',
         description:
           'Cheap triage read over a freshly-uploaded questionnaire document: does its own text ' +
           'describe routing different respondents through different parts of it? Flags a ' +

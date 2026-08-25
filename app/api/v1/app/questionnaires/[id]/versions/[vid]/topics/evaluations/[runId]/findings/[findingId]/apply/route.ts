@@ -77,7 +77,7 @@ const handleApply = withAdminAuth<Params>(async (request, session, { params }) =
   });
 
   if (outcome.status === 'unapplicable') {
-    log.info('Adaptive Scope evaluation finding not applicable', {
+    log.info('Conditional Topics evaluation finding not applicable', {
       versionId: vid,
       runId,
       findingId,
@@ -93,7 +93,7 @@ const handleApply = withAdminAuth<Params>(async (request, session, { params }) =
   const updated = await loadScopedScopeFinding(vid, runId, findingId);
   const view = updated ? await buildScopedScopeFindingView(updated) : null;
 
-  log.info('Adaptive Scope evaluation finding applied', {
+  log.info('Conditional Topics evaluation finding applied', {
     versionId: vid,
     runId,
     findingId,

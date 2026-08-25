@@ -63,7 +63,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
-// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// Conditional Topics candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
 vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOriginal) => {
@@ -75,7 +75,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOr
 });
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
-  checkAdaptiveScopeCandidacy: vi.fn(),
+  checkConditionalTopicsCandidacy: vi.fn(),
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
-import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { checkConditionalTopicsCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import { proposeScopeDuringIngest } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 import {
   mockAdminUser,
@@ -198,8 +198,8 @@ beforeEach(() => {
   });
   (persistIngestion as Mock).mockResolvedValue(PERSIST_RESULT);
   // Default: not a candidate / check skipped — keeps every pre-existing test's frame
-  // sequence and done-event shape unchanged (no `adaptiveScopeCandidate` key) untouched.
-  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
+  // sequence and done-event shape unchanged (no `conditionalTopicsCandidate` key) untouched.
+  (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(null);
   (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 });
 
@@ -452,12 +452,12 @@ describe('POST /api/v1/app/questionnaires/stream — persist failure mid-stream'
   });
 });
 
-// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
-// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// ─── Conditional Topics candidacy wiring (P17.19) ───────────────────────────────────
+// `checkConditionalTopicsCandidacy` itself is mocked at the module boundary — its Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These tests only prove this route
 // wires the result into its own `checking_scope` phase frame and terminal `done` frame.
 
-describe('POST /api/v1/app/questionnaires/stream — adaptive scope candidacy wiring', () => {
+describe('POST /api/v1/app/questionnaires/stream — conditional topics candidacy wiring', () => {
   it('emits a checking_scope phase frame between saving and the terminal done frame', async () => {
     const res = await POST(makeRequest('onboarding.md'));
     const frames = await drainSse(res);
@@ -471,19 +471,19 @@ describe('POST /api/v1/app/questionnaires/stream — adaptive scope candidacy wi
     expect(frames[frames.length - 1].type).toBe('done');
   });
 
-  it('carries adaptiveScopeCandidate on the done frame when the check resolves a verdict', async () => {
+  it('carries conditionalTopicsCandidate on the done frame when the check resolves a verdict', async () => {
     const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(verdict);
 
     const res = await POST(makeRequest('onboarding.md'));
     const frames = await drainSse(res);
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect(doneFrame.data.adaptiveScopeCandidate).toEqual(verdict);
+    expect(doneFrame.data.conditionalTopicsCandidate).toEqual(verdict);
   });
 
-  it('omits adaptiveScopeCandidate from the done frame when the check resolves null', async () => {
+  it('omits conditionalTopicsCandidate from the done frame when the check resolves null', async () => {
     // beforeEach already defaults the mock to null — pins the omission (not
     // present-and-undefined) directly against the parsed SSE frame data.
     const res = await POST(makeRequest('onboarding.md'));
@@ -491,7 +491,7 @@ describe('POST /api/v1/app/questionnaires/stream — adaptive scope candidacy wi
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+    expect('conditionalTopicsCandidate' in doneFrame.data).toBe(false);
   });
 });
 
@@ -501,7 +501,7 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
   const CANDIDATE = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
 
   it('runs the analyst after the check says yes, and reports what it proposed', async () => {
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 6, conditionalCount: 3 });
 
     const res = await POST(makeRequest('onboarding.md'));
@@ -515,13 +515,19 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect(doneFrame.data.adaptiveScopeProposal).toEqual({ topicCount: 6, conditionalCount: 3 });
+    expect(doneFrame.data.conditionalTopicsProposal).toEqual({
+      topicCount: 6,
+      conditionalCount: 3,
+    });
   });
 
   it('never runs the analyst when the check declined', async () => {
     // The analyst is a reasoning-tier call over the whole document. Running it on every upload
     // regardless of the verdict is exactly the cost the cheap triage check exists to avoid.
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue({ ...CANDIDATE, isCandidate: false });
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue({
+      ...CANDIDATE,
+      isCandidate: false,
+    });
 
     const res = await POST(makeRequest('onboarding.md'));
     const frames = await drainSse(res);
@@ -536,7 +542,7 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
     // Being killed mid-`proposing_scope` is the failure worth avoiding: the version is persisted
     // but the client never sees `done`, so the dialog reports a failed upload for a questionnaire
     // that exists. Skipping costs only latency — the cached verdict makes the Topics tab propose.
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     const realNow = Date.now;
     // A clock that jumps a minute and a half per read: whatever else in the pipeline reads it, the
     // gap between the stream's start and the pre-proposal check is past the threshold.
@@ -558,7 +564,7 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
   });
 
   it('reports what it proposed as a second phase message', async () => {
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 6, conditionalCount: 3 });
 
     const res = await POST(makeRequest('onboarding.md'));
@@ -571,7 +577,7 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
   it('completes the upload when the proposal fails', async () => {
     // Fail-soft is the whole contract: an upload that succeeded must never be reported as failed
     // because an optional proposal could not be made.
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
     (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 
     const res = await POST(makeRequest('onboarding.md'));
@@ -579,7 +585,7 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
 
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
-    expect('adaptiveScopeProposal' in doneFrame.data).toBe(false);
+    expect('conditionalTopicsProposal' in doneFrame.data).toBe(false);
     expect(frames.some((f) => f.type === 'error')).toBe(false);
   });
 });

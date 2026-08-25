@@ -26,7 +26,7 @@ import {
   matrixRowCount,
 } from '@/lib/app/questionnaire/scope/budget';
 import type { PlanBudget } from '@/lib/app/questionnaire/scope/guardrails';
-import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
+import type { ConditionalTopicsSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 /**
  * Price the version's topics for the fit stage (C7b), or null when there is no budget to fit to.
@@ -40,7 +40,7 @@ import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope
  */
 export async function loadPlanBudget(
   versionId: string,
-  settings: AdaptiveScopeSettings,
+  settings: ConditionalTopicsSettings,
   topics: readonly Topic[]
 ): Promise<PlanBudget | null> {
   if (settings.sessionBudgetSeconds <= 0) return null;
@@ -59,11 +59,17 @@ export async function loadPlanBudget(
     settings
   );
 
+  const weights = {
+    byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
+    byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
+  };
+
   return {
     budgetSeconds: settings.sessionBudgetSeconds,
-    costs: estimateTopicCosts(topics, seconds, {
-      byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
-      byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
-    }),
+    costs: estimateTopicCosts(topics, seconds, weights),
+    // Carried so the fit can price a plan that asks only PART of a topic (C6) on the items it
+    // actually names, rather than charging the whole topic and dropping one that would have fitted.
+    seconds,
+    weights,
   };
 }

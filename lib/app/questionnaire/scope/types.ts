@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope (P17) — pure domain types.
+ * Conditional Topics (P17) — pure domain types.
  *
  * The vocabulary shared by the topic authoring surfaces, the scope resolver, the hard-rule
  * evaluator, the Scope Planner and the Routing Analyst. The `const` tuples below back the
@@ -10,14 +10,14 @@
  * ## What this feature is
  *
  * ConQuest already decides **which question next** (selection strategies) and **which questionnaire
- * next** (the Experience switcher). Adaptive Scope fills the gap between them: **which parts of this
+ * next** (the Experience switcher). Conditional Topics fills the gap between them: **which parts of this
  * questionnaire apply to this respondent at all.** Screeners, eligibility, role-specific question
  * sets, compliance sections that must be recorded as not-applicable, and any long instrument that
  * should not ask all of itself to everyone are all the same requirement.
  *
  * ## The one invariant
  *
- * **Off by default, inert by construction.** With `adaptiveScope.enabled` false — or before a
+ * **Off by default, inert by construction.** With `conditionalTopics.enabled` false — or before a
  * session's plan exists — `resolveScope` returns every topic. A version that never opts in behaves
  * exactly as it did before this feature existed, and that equivalence is a tested gate, not a hope.
  *
@@ -29,7 +29,7 @@ import { isRecord } from '@/lib/utils';
 /**
  * Local copy of `narrowToEnum` (`lib/app/questionnaire/types.ts`), deliberately.
  *
- * `QuestionnaireConfigShape` carries an {@link AdaptiveScopeSettings} and its default object, so
+ * `QuestionnaireConfigShape` carries an {@link ConditionalTopicsSettings} and its default object, so
  * `types.ts` imports THIS module at runtime. Importing back would make the cycle real: whichever
  * module evaluated second would read a not-yet-initialised const and throw at import time. Three
  * lines duplicated is a cheaper price than a load-order-dependent TDZ crash, and keeping this
@@ -428,13 +428,13 @@ export interface ScopeRule {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The lazily-defaulted `adaptiveScope` Json on `AppQuestionnaireConfig`.
+ * The lazily-defaulted `conditionalTopics` Json on `AppQuestionnaireConfig`.
  *
  * A blob rather than columns because this is one coherent feature with a dozen knobs and a rule
  * list — the same judgement `respondentReport` / `cohortReport` / `intro` already make. Read through
- * {@link narrowAdaptiveScopeSettings}, never destructured raw.
+ * {@link narrowConditionalTopicsSettings}, never destructured raw.
  */
-export interface AdaptiveScopeSettings {
+export interface ConditionalTopicsSettings {
   /**
    * The master switch. **False by default.** While false, `resolveScope` returns every topic and
    * the planner never runs, so the version behaves exactly as it did pre-P17.
@@ -554,7 +554,7 @@ export interface AdaptiveScopeSettings {
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
-export const DEFAULT_ADAPTIVE_SCOPE_SETTINGS: AdaptiveScopeSettings = {
+export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   enabled: false,
   maxConditionalTopics: 3,
   includeCheckTopic: true,
@@ -585,10 +585,25 @@ export interface PlannedTopic {
   source: ScopeDecisionSource;
   /** Why, in a sentence — for the admin surface, never shown to the respondent. */
   rationale: string;
+  /**
+   * An explicit subset of this topic's members, when only PART of the topic applies (C6, F17.29).
+   *
+   * Absent on nearly every planned topic, and that is the normal case: `depth` decides, `full`
+   * takes everything and `light` takes the two highest-weight members. Present when the planner
+   * judged that a few named items are what this respondent's situation calls for — three from one
+   * topic, one from another — which `depth` cannot express, because it is a dial with two stops
+   * and no way to say *which* items.
+   *
+   * Always intersected with what the topic actually claims at resolution time: a plan can narrow a
+   * topic, never widen it into questions the author did not put in it. An intersection that comes
+   * out empty falls back to the depth, because "in scope and asks nothing" is a topic that reports
+   * as covered while contributing no answer.
+   */
+  members?: TopicMembers;
 }
 
 /**
- * A topic the RESPONDENT asked for after the plan was made — Adaptive Scope (P17.6).
+ * A topic the RESPONDENT asked for after the plan was made — Conditional Topics (P17.6).
  *
  * Recorded alongside the topic's entry in {@link InterviewPlan.topics} (which carries
  * `source: 'respondent'`) rather than instead of it, because the two answer different questions:
@@ -743,6 +758,21 @@ function asKeyList(value: unknown, max = 64): string[] {
   return out;
 }
 
+/**
+ * Project a planned topic's optional member subset — `{}` when there is nothing usable in it.
+ *
+ * Spread into the planned topic rather than assigned, so `members` is genuinely absent on the
+ * common path instead of present-but-empty. The distinction is load-bearing: an empty subset means
+ * "the depth decides", and a reader that saw `{questionKeys: [], dataSlotKeys: []}` would have to
+ * know that to avoid resolving the topic to nothing.
+ */
+function narrowPlannedMembers(value: unknown): { members?: TopicMembers } {
+  if (!isRecord(value)) return {};
+  const members = narrowTopicMembers(value);
+  if (members.questionKeys.length === 0 && members.dataSlotKeys.length === 0) return {};
+  return { members };
+}
+
 /** Project a stored `members` Json onto a complete {@link TopicMembers}. */
 export function narrowTopicMembers(value: unknown): TopicMembers {
   const obj = isRecord(value) ? value : {};
@@ -782,15 +812,15 @@ function narrowScopeRule(value: unknown, index: number): ScopeRule | null {
 }
 
 /**
- * Project the stored `adaptiveScope` Json onto a complete {@link AdaptiveScopeSettings}.
+ * Project the stored `conditionalTopics` Json onto a complete {@link ConditionalTopicsSettings}.
  *
- * Missing keys fall back to {@link DEFAULT_ADAPTIVE_SCOPE_SETTINGS}; unknown keys are dropped;
+ * Missing keys fall back to {@link DEFAULT_CONDITIONAL_TOPICS_SETTINGS}; unknown keys are dropped;
  * numbers are clamped rather than rejected. A malformed blob therefore degrades to "feature off",
  * which is the only safe direction for a setting that decides what a respondent is asked.
  */
-export function narrowAdaptiveScopeSettings(value: unknown): AdaptiveScopeSettings {
+export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopicsSettings {
   const obj = isRecord(value) ? value : {};
-  const d = DEFAULT_ADAPTIVE_SCOPE_SETTINGS;
+  const d = DEFAULT_CONDITIONAL_TOPICS_SETTINGS;
   const rules: ScopeRule[] = Array.isArray(obj.rules)
     ? obj.rules
         .map((r, i) => narrowScopeRule(r, i))
@@ -877,6 +907,10 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
               'llm'
             ),
             rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+            // Absent on nearly every row. A stored `members` that narrows to nothing is dropped
+            // rather than kept as an empty object — an empty subset means "the depth decides", and
+            // carrying `{[], []}` would make every reader special-case the difference.
+            ...narrowPlannedMembers(t.members),
           },
         ];
       })
@@ -1055,7 +1089,7 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
             value.maxConditionalTopics,
             MIN_CONDITIONAL_TOPICS,
             MAX_CONDITIONAL_TOPICS_CEILING,
-            DEFAULT_ADAPTIVE_SCOPE_SETTINGS.maxConditionalTopics
+            DEFAULT_CONDITIONAL_TOPICS_SETTINGS.maxConditionalTopics
           )
         )
       : null;

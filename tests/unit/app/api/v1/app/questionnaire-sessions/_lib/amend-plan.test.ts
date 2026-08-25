@@ -88,14 +88,20 @@ function rawPlan(excludedKeys: string[]) {
   };
 }
 
-function session(over: { interviewPlan?: unknown; adaptiveScope?: Record<string, unknown> } = {}) {
+function session(
+  over: { interviewPlan?: unknown; conditionalTopics?: Record<string, unknown> } = {}
+) {
   return {
     versionId: 'v1',
     interviewPlan: 'interviewPlan' in over ? over.interviewPlan : rawPlan(['talent']),
     version: {
       goal: 'grow the pipeline',
       config: {
-        adaptiveScope: { enabled: true, allowRespondentAmendment: true, ...over.adaptiveScope },
+        conditionalTopics: {
+          enabled: true,
+          allowRespondentAmendment: true,
+          ...over.conditionalTopics,
+        },
       },
     },
   };
@@ -138,9 +144,9 @@ describe('maybeAmendPlan — skip gates before any resolution', () => {
     expect(result).toEqual({ kind: 'skipped', reason: 'session not found' });
   });
 
-  it('skips when adaptive scope is off, without querying the version topics', async () => {
+  it('skips when conditional topics is off, without querying the version topics', async () => {
     mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
-      session({ adaptiveScope: { enabled: false } })
+      session({ conditionalTopics: { enabled: false } })
     );
 
     const result = await maybeAmendPlan({
@@ -149,13 +155,13 @@ describe('maybeAmendPlan — skip gates before any resolution', () => {
       atTurn: 3,
     });
 
-    expect(result).toEqual({ kind: 'skipped', reason: 'adaptive scope is off' });
+    expect(result).toEqual({ kind: 'skipped', reason: 'conditional topics is off' });
     expect(mocks.prisma.appQuestionnaireTopic.findMany).not.toHaveBeenCalled();
   });
 
   it('skips when the version disallows respondent amendment', async () => {
     mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
-      session({ adaptiveScope: { allowRespondentAmendment: false } })
+      session({ conditionalTopics: { allowRespondentAmendment: false } })
     );
 
     const result = await maybeAmendPlan({
@@ -274,6 +280,125 @@ describe('maybeAmendPlan — label-match resolution (tier 2, no model call)', ()
   });
 });
 
+describe('maybeAmendPlan — a version conducted in another language', () => {
+  // The cue list is English phrasings. On a version whose `audience.locale` says the interview is
+  // held in another language it can only ever return false — silently, on every turn — so the gate
+  // moves to the topic LABELS, which are written in the instrument's own language.
+  const CANDIDATE = topicRow('talent', 'Personal och kompetens');
+
+  beforeEach(() => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(session());
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([CANDIDATE]);
+  });
+
+  it('still skips a message that names none of the excluded topics', async () => {
+    const result = await maybeAmendPlan({
+      sessionId: SESSION_ID,
+      message: 'Ja, det stämmer ganska bra.',
+      atTurn: 3,
+      locale: 'sv-SE',
+    });
+
+    expect(result).toEqual({ kind: 'skipped', reason: 'no request cue' });
+    expect(mocks.runStructuredCompletion).not.toHaveBeenCalled();
+    // It cost one indexed query, not a model call — the whole point of moving the gate rather than
+    // removing it.
+    expect(mocks.prisma.appQuestionnaireSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('sends a message that names an excluded topic to the agent, never straight to an amendment', async () => {
+    // Naming a subject is not asking for it ("we sorted talent last year"). The cue list is what
+    // tells those apart in English; with no cue list, the judgement is the agent's.
+    mocks.prisma.aiAgent.findUnique.mockResolvedValue({
+      id: 'agent-1',
+      provider: '',
+      model: '',
+      fallbackProviders: [],
+    });
+    mocks.resolveAgentProviderAndModel.mockResolvedValue({
+      providerSlug: 'openai',
+      model: 'gpt-4o-mini',
+      fallbacks: [],
+    });
+    mocks.getProvider.mockResolvedValue({ chat: vi.fn() });
+    mocks.runStructuredCompletion.mockResolvedValue({
+      value: { topicKey: 'talent' },
+      tokenUsage: { input: 400, output: 12 },
+      costUsd: 0.0019,
+    });
+
+    const result = await maybeAmendPlan({
+      sessionId: SESSION_ID,
+      message: 'Kan vi också prata om personal och kompetens?',
+      atTurn: 4,
+      locale: 'sv-SE',
+    });
+
+    expect(result.kind).toBe('amended');
+    expect(mocks.runStructuredCompletion).toHaveBeenCalledTimes(1);
+    expect(mocks.recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.objectContaining({ resolvedBy: 'agent' }) })
+    );
+  });
+
+  it('drops the request when the agent judges it was not one', async () => {
+    mocks.prisma.aiAgent.findUnique.mockResolvedValue({
+      id: 'agent-1',
+      provider: '',
+      model: '',
+      fallbackProviders: [],
+    });
+    mocks.resolveAgentProviderAndModel.mockResolvedValue({
+      providerSlug: 'openai',
+      model: 'gpt-4o-mini',
+      fallbacks: [],
+    });
+    mocks.getProvider.mockResolvedValue({ chat: vi.fn() });
+    mocks.runStructuredCompletion.mockResolvedValue({
+      value: { topicKey: '' },
+      tokenUsage: { input: 400, output: 4 },
+      costUsd: 0.0011,
+    });
+
+    const result = await maybeAmendPlan({
+      sessionId: SESSION_ID,
+      message: 'Vi löste personal och kompetens förra året.',
+      atTurn: 4,
+      locale: 'sv-SE',
+    });
+
+    expect(result).toEqual({ kind: 'skipped', reason: 'request did not resolve to a topic' });
+    expect(mocks.prisma.appQuestionnaireSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps the free English path on an en-GB version — cue, label match, no model call', async () => {
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([topicRow('talent', 'Talent')]);
+
+    const result = await maybeAmendPlan({
+      sessionId: SESSION_ID,
+      message: 'Can we also cover talent?',
+      atTurn: 5,
+      locale: 'en-GB',
+    });
+
+    expect(result.kind).toBe('amended');
+    expect(mocks.runStructuredCompletion).not.toHaveBeenCalled();
+  });
+
+  it('skips before any query at all on an English version with no cue', async () => {
+    // The promise the gate exists for: an ordinary answer on an English version pays nothing.
+    const result = await maybeAmendPlan({
+      sessionId: SESSION_ID,
+      message: 'Talent is fine, we sorted that last year.',
+      atTurn: 3,
+      locale: 'en',
+    });
+
+    expect(result).toEqual({ kind: 'skipped', reason: 'no request cue' });
+    expect(mocks.prisma.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
+  });
+});
+
 describe('maybeAmendPlan — the concurrent-write guard', () => {
   it('leaves the plan unchanged when another writer already updated it', async () => {
     mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(session());
@@ -310,7 +435,7 @@ describe('maybeAmendPlan — fail-soft: never throws', () => {
 
     expect(mocks.prisma.appQuestionnaireSession.updateMany).not.toHaveBeenCalled();
     expect(mocks.logger.error).toHaveBeenCalledWith(
-      'adaptive scope: amendment failed; the plan is unchanged',
+      'conditional topics: amendment failed; the plan is unchanged',
       expect.objectContaining({ sessionId: SESSION_ID, error: 'connection reset' })
     );
   });

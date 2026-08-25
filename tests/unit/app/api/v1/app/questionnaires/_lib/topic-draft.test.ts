@@ -45,6 +45,10 @@ import {
   acceptTopicDraft,
   buildRoutingAnalysisInput,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import {
+  MAX_SUPPLEMENTARY_DOCUMENT_CHARS,
+  SUPPLEMENTARY_TRUNCATION_MARKER,
+} from '@/lib/app/questionnaire/scope/constants';
 import type { AcceptTopicDraftBody } from '@/lib/app/questionnaire/scope/schemas';
 import type { ProposedTopicSet } from '@/lib/app/questionnaire/scope/types';
 
@@ -200,7 +204,7 @@ describe('acceptTopicDraft', () => {
 
   it('replaces rather than appends the hard rules onto the existing settings', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         rules: [
           {
             id: 'old-rule',
@@ -236,7 +240,7 @@ describe('acceptTopicDraft', () => {
 
   it('keeps the existing rules untouched when the accepted body omits rules', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         rules: [
           {
             id: 'kept',
@@ -276,7 +280,7 @@ describe('acceptTopicDraft', () => {
 
   it('only touches maxConditionalTopics when the body supplies it', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { maxConditionalTopics: 7, rules: [] },
+      conditionalTopics: { maxConditionalTopics: 7, rules: [] },
     });
 
     const withoutCap = await acceptTopicDraft('v-1', BODY);
@@ -288,7 +292,7 @@ describe('acceptTopicDraft', () => {
 
   it('only touches the two analyst-proposable settings when the body supplies them (F17.23)', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         fallbackTopicKeys: ['existing_fallback'],
         checkTopicPreference: ['existing_check'],
         rules: [],
@@ -312,7 +316,7 @@ describe('acceptTopicDraft', () => {
 
   it('never touches enabled — accepting a proposal is authoring, not activation', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { enabled: true, rules: [] },
+      conditionalTopics: { enabled: true, rules: [] },
     });
     const result = await acceptTopicDraft('v-1', BODY);
     expect(result.settings.enabled).toBe(true);
@@ -320,7 +324,7 @@ describe('acceptTopicDraft', () => {
 
   it('leaves an off version off when the body carries no enable (F17.22 Phase 4)', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { enabled: false, rules: [] },
+      conditionalTopics: { enabled: false, rules: [] },
     });
     const result = await acceptTopicDraft('v-1', BODY);
     expect(result.settings.enabled).toBe(false);
@@ -328,15 +332,15 @@ describe('acceptTopicDraft', () => {
 
   it('turns the feature on when the admin ticked the offer', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { enabled: false, rules: [] },
+      conditionalTopics: { enabled: false, rules: [] },
     });
     const result = await acceptTopicDraft('v-1', { ...BODY, enable: true });
 
     expect(result.settings.enabled).toBe(true);
     // Persisted, not merely returned: the whole point is that the next respondent gets a plan.
     const written = (prismaMock.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0];
-    expect(written.update.adaptiveScope.enabled).toBe(true);
-    expect(written.create.adaptiveScope.enabled).toBe(true);
+    expect(written.update.conditionalTopics.enabled).toBe(true);
+    expect(written.create.conditionalTopics.enabled).toBe(true);
   });
 
   it('clears the pending draft as part of the same transaction', async () => {
@@ -387,30 +391,30 @@ describe('buildRoutingAnalysisInput', () => {
     expect(await buildRoutingAnalysisInput('q-1', 'v-empty')).toBeNull();
   });
 
-  it('picks the newest source document, not the first one written', async () => {
-    // A faithful fake of what the real query does: `orderBy: { createdAt: 'desc' }, take: 1` on
-    // `sourceDocuments` means the DB — not this module — hands back only the newest row. If the
-    // real query ever regressed to `asc` or dropped `take: 1`, this fake reproduces exactly that
-    // regression, because it re-derives its answer from the query args on every call.
+  it('picks the newest PRIMARY document, not the first one written', async () => {
+    // A faithful fake of what the real query does: `orderBy: { createdAt: 'desc' }` on
+    // `sourceDocuments` means the DB — not this module — hands back the rows newest-first. If the
+    // real query ever regressed to `asc`, this fake reproduces exactly that regression, because it
+    // re-derives its answer from the query args on every call.
     const documents = [
       {
         id: 'doc-old',
+        role: 'primary',
         fileName: 'v1.docx',
         extractedText: 'OLD TEXT',
         createdAt: new Date('2024-01-01'),
       },
       {
         id: 'doc-new',
+        role: 'primary',
         fileName: 'v2.docx',
         extractedText: 'NEW TEXT',
         createdAt: new Date('2025-06-01'),
       },
     ];
     prismaMock.appQuestionnaireVersion.findFirst.mockImplementation(
-      async (args: {
-        select: { sourceDocuments: { orderBy: { createdAt: 'asc' | 'desc' }; take: number } };
-      }) => {
-        const { orderBy, take } = args.select.sourceDocuments;
+      async (args: { select: { sourceDocuments: { orderBy: { createdAt: 'asc' | 'desc' } } } }) => {
+        const { orderBy } = args.select.sourceDocuments;
         const sorted = [...documents].sort((a, b) =>
           orderBy.createdAt === 'desc'
             ? b.createdAt.getTime() - a.createdAt.getTime()
@@ -418,38 +422,135 @@ describe('buildRoutingAnalysisInput', () => {
         );
         return {
           ...baseVersionRow,
-          sourceDocuments: sorted
-            .slice(0, take)
-            .map((d) => ({ fileName: d.fileName, extractedText: d.extractedText })),
+          sourceDocuments: sorted.map((d) => ({
+            fileName: d.fileName,
+            extractedText: d.extractedText,
+            role: d.role,
+          })),
         };
       }
     );
 
     const input = await buildRoutingAnalysisInput('q-1', 'v-1');
 
-    expect(input?.documentText).toBe('NEW TEXT');
-    expect(input?.documentFileName).toBe('v2.docx');
+    expect(input?.documents).toEqual([{ role: 'primary', fileName: 'v2.docx', text: 'NEW TEXT' }]);
   });
 
-  it('queries sourceDocuments ordered newest-first, taking exactly one', async () => {
+  it('queries sourceDocuments ordered newest-first, and no longer takes only one', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(baseVersionRow);
     await buildRoutingAnalysisInput('q-1', 'v-1');
 
     const call = (prismaMock.appQuestionnaireVersion.findFirst as Mock).mock.calls[0]?.[0];
-    expect(call.select.sourceDocuments).toMatchObject({
-      orderBy: { createdAt: 'desc' },
-      take: 1,
-    });
+    expect(call.select.sourceDocuments).toMatchObject({ orderBy: { createdAt: 'desc' } });
+    // `take: 1` was the bug: the companions were on the row and the query threw them away.
+    expect(call.select.sourceDocuments).not.toHaveProperty('take');
   });
 
-  it('omits documentText/documentFileName when the version has no source document', async () => {
+  it('returns an empty document list when the version has no source document', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
       ...baseVersionRow,
       sourceDocuments: [],
     });
     const input = await buildRoutingAnalysisInput('q-1', 'v-1');
-    expect(input).not.toHaveProperty('documentText');
-    expect(input).not.toHaveProperty('documentFileName');
+    expect(input?.documents).toEqual([]);
+  });
+
+  it('carries supporting documents beside the instrument, oldest attachment first', async () => {
+    // The point of the feature: an instrument delivered as a question bank plus a routing memo.
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...baseVersionRow,
+      sourceDocuments: [
+        { role: 'supplementary', fileName: 'memo-2.md', extractedText: 'SECOND' },
+        { role: 'supplementary', fileName: 'memo-1.md', extractedText: 'FIRST' },
+        { role: 'primary', fileName: 'bank.md', extractedText: 'INSTRUMENT' },
+      ],
+    });
+
+    const input = await buildRoutingAnalysisInput('q-1', 'v-1');
+
+    expect(input?.documents.map((d) => [d.role, d.fileName, d.text])).toEqual([
+      ['primary', 'bank.md', 'INSTRUMENT'],
+      // Rows arrive newest-first; the companions are reversed so the one attached FIRST is read
+      // first — and keeps its text when the budget runs out.
+      ['supplementary', 'memo-1.md', 'FIRST'],
+      ['supplementary', 'memo-2.md', 'SECOND'],
+    ]);
+  });
+
+  it('truncates a supporting document that overruns the budget, and marks the seam', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...baseVersionRow,
+      sourceDocuments: [
+        {
+          role: 'supplementary',
+          fileName: 'huge.md',
+          extractedText: 'x'.repeat(MAX_SUPPLEMENTARY_DOCUMENT_CHARS + 500),
+        },
+      ],
+    });
+
+    const input = await buildRoutingAnalysisInput('q-1', 'v-1');
+
+    const document = input!.documents[0];
+    expect(document?.truncated).toBe(true);
+    expect(document?.text).toContain(SUPPLEMENTARY_TRUNCATION_MARKER);
+    expect(document?.text.length).toBe(
+      MAX_SUPPLEMENTARY_DOCUMENT_CHARS + SUPPLEMENTARY_TRUNCATION_MARKER.length
+    );
+  });
+
+  it('names a supporting document the budget could not reach rather than dropping it', async () => {
+    // Dropping it silently is the failure this whole feature exists to end: the analyst reports
+    // confidently on an instrument whose routing page it never saw.
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...baseVersionRow,
+      sourceDocuments: [
+        { role: 'supplementary', fileName: 'second.md', extractedText: 'still matters' },
+        {
+          role: 'supplementary',
+          fileName: 'first.md',
+          extractedText: 'x'.repeat(MAX_SUPPLEMENTARY_DOCUMENT_CHARS),
+        },
+      ],
+    });
+
+    const input = await buildRoutingAnalysisInput('q-1', 'v-1');
+
+    expect(input?.documents.map((d) => [d.fileName, d.omitted ?? false])).toEqual([
+      ['first.md', false],
+      ['second.md', true],
+    ]);
+    expect(input?.documents[1]?.text).toBe('');
+  });
+
+  it('does not budget the instrument — it is passed whole, as it always was', async () => {
+    // Shrinking the primary document here would change what the analyst proposes on versions
+    // nobody has touched, which is not a thing a new feature is allowed to do.
+    const long = 'y'.repeat(MAX_SUPPLEMENTARY_DOCUMENT_CHARS * 2);
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...baseVersionRow,
+      sourceDocuments: [{ role: 'primary', fileName: 'big.md', extractedText: long }],
+    });
+
+    const input = await buildRoutingAnalysisInput('q-1', 'v-1');
+
+    expect(input?.documents[0]?.text).toBe(long);
+    expect(input?.documents[0]?.truncated).toBeUndefined();
+  });
+
+  it('reads a row written before the role column as the instrument', async () => {
+    // Every legacy row defaults to `primary`; a version that has only those must read exactly as
+    // it did before the column existed.
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...baseVersionRow,
+      sourceDocuments: [{ role: 'primary', fileName: 'legacy.docx', extractedText: 'LEGACY' }],
+    });
+
+    const input = await buildRoutingAnalysisInput('q-1', 'v-1');
+
+    expect(input?.documents).toEqual([
+      { role: 'primary', fileName: 'legacy.docx', text: 'LEGACY' },
+    ]);
   });
 
   it('flattens sections into questions, carrying the sectionTitle', async () => {

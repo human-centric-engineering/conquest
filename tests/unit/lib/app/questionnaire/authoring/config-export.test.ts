@@ -106,7 +106,7 @@ describe('parseSettingsImport', () => {
   it('round-trips the whole houseRules block, triggers included', () => {
     // House rules are a client's own policy — losing them on an import would quietly hand the next
     // questionnaire a differently-behaved interviewer, which is exactly the class of bug the
-    // Adaptive Scope import/export regression was. Pinned end-to-end through the server validator.
+    // Conditional Topics import/export regression was. Pinned end-to-end through the server validator.
     const houseRules = {
       enabled: true,
       rules: [

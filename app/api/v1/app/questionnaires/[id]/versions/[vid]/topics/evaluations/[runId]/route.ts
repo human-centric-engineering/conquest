@@ -1,5 +1,5 @@
 /**
- * One persisted Adaptive Scope evaluation run (F17.21).
+ * One persisted Conditional Topics evaluation run (F17.21).
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/topics/evaluations/:runId
  *   Admin-only. Returns one run with its findings (ordered by dimension, then ordinal), scoped
@@ -29,7 +29,7 @@ const handleRunDetail = withAdminAuth<{ id: string; vid: string; runId: string }
       throw new NotFoundError('Scope evaluation run not found');
     }
 
-    log.info('Adaptive Scope evaluation run read', {
+    log.info('Conditional Topics evaluation run read', {
       versionId: vid,
       runId,
       findingCount: detail.findings.length,

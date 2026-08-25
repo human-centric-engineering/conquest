@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { checkScaleComparability } from '@/lib/app/questionnaire/scope/comparability';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -24,8 +24,8 @@ function topic(key: string, phase: TopicPhase, questionKeys: string[]): Topic {
   };
 }
 
-function settings(overrides: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
-  return { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...overrides };
+function settings(overrides: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
+  return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...overrides };
 }
 
 function item(ref: string, overrides: Partial<ScoringItem> = {}): ScoringItem {
@@ -102,7 +102,7 @@ describe('checkScaleComparability', () => {
       expect(issues[0].message).toContain('leave those respondents out');
     });
 
-    it('reports it even while Adaptive Scope is off — the question is asked before the switch', () => {
+    it('reports it even while Conditional Topics is off — the question is asked before the switch', () => {
       expect(
         codes({
           topics: [topic('spine', 'core', ['q1']), topic('cond_a', 'conditional', ['q2'])],

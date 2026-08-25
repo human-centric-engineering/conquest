@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-import { hasScopeErrors, validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { hasScopeErrors, validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
   type TopicPhase,
@@ -25,8 +25,8 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
   };
 }
 
-function settings(overrides: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
-  return { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...overrides };
+function settings(overrides: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
+  return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...overrides };
 }
 
 function rule(overrides: Partial<ScopeRule> = {}): ScopeRule {
@@ -58,18 +58,18 @@ function healthy() {
   };
 }
 
-function codes(input: Parameters<typeof validateAdaptiveScope>[0]): string[] {
-  return validateAdaptiveScope(input).map((i) => i.code);
+function codes(input: Parameters<typeof validateConditionalTopics>[0]): string[] {
+  return validateConditionalTopics(input).map((i) => i.code);
 }
 
-describe('validateAdaptiveScope', () => {
+describe('validateConditionalTopics', () => {
   it('says nothing about a coherent setup', () => {
-    expect(validateAdaptiveScope(healthy())).toEqual([]);
+    expect(validateConditionalTopics(healthy())).toEqual([]);
   });
 
   describe('orphaned questions — the check that matters', () => {
     it('is an ERROR when the feature is on, because the question can never be asked', () => {
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...healthy(),
         allQuestionKeys: [...healthy().allQuestionKeys, 'belongs_nowhere'],
       });
@@ -80,7 +80,7 @@ describe('validateAdaptiveScope', () => {
     });
 
     it('is a WARNING when the feature is off — the thing to see BEFORE flipping the switch', () => {
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...healthy(),
         settings: settings({ enabled: false }),
         allQuestionKeys: [...healthy().allQuestionKeys, 'belongs_nowhere'],
@@ -109,7 +109,7 @@ describe('validateAdaptiveScope', () => {
 
   describe('per-topic', () => {
     it('flags a conditional topic with no criteria as an error when enabled', () => {
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...healthy(),
         topics: [...healthy().topics, topic('cond_d', 'conditional', { criteria: '   ' })],
         allQuestionKeys: [...healthy().allQuestionKeys, 'cond_d_q'],
@@ -140,7 +140,7 @@ describe('validateAdaptiveScope', () => {
   describe('whole setup', () => {
     it('errors when nothing gathers the signal', () => {
       const base = healthy();
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...base,
         topics: base.topics.filter((t) => t.phase !== 'opening'),
         allQuestionKeys: base.allQuestionKeys.filter((k) => k !== 'open_q'),
@@ -261,7 +261,7 @@ describe('validateAdaptiveScope', () => {
     );
 
     it('names the rule’s direction, so the author can find which rule to fix', () => {
-      const issue = validateAdaptiveScope({
+      const issue = validateConditionalTopics({
         ...healthy(),
         settings: settings({
           maxConditionalTopics: 2,
@@ -350,7 +350,7 @@ describe('validateAdaptiveScope', () => {
     });
 
     it('ERRORS on a veto reading an ungathered slot — it excludes every respondent', () => {
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...reachable(),
         settings: settings({
           rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists', action: 'exclude' })],
@@ -365,7 +365,7 @@ describe('validateAdaptiveScope', () => {
     });
 
     it('downgrades the veto finding to a warning while the feature is off', () => {
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         ...reachable(),
         settings: settings({
           enabled: false,
@@ -402,7 +402,7 @@ describe('validateAdaptiveScope', () => {
   });
 
   it('orders errors before warnings', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       allQuestionKeys: [...healthy().allQuestionKeys, 'orphan'],
       settings: settings({ maxConditionalTopics: 3, fallbackTopicKeys: ['gone'] }),
@@ -421,7 +421,7 @@ describe('validateAdaptiveScope', () => {
  * planner has nothing to spend, so the instrument silently stops adapting and every respondent gets
  * the always-on questions alone. These are the findings that make that visible before launch.
  */
-describe('validateAdaptiveScope — time budget (C7)', () => {
+describe('validateConditionalTopics — time budget (C7)', () => {
   const topics: Topic[] = [
     topic('opening', 'opening', { members: { questionKeys: ['q0'], dataSlotKeys: [] } }),
     topic('data', 'conditional', { members: { questionKeys: ['q1'], dataSlotKeys: [] } }),
@@ -434,7 +434,7 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
   };
 
   it('says nothing about time when no budget is set', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: true, sessionBudgetSeconds: 0 }),
       seconds: { always: 500, cheapestConditional: 100 },
@@ -443,7 +443,7 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
   });
 
   it('errors when the always-on questions already exceed the budget', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: true, sessionBudgetSeconds: 200 }),
       seconds: { always: 260, cheapestConditional: 40 },
@@ -455,7 +455,7 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
 
   it('warns when the leftover cannot fit even the cheapest topic', () => {
     // Not an error: the configuration is coherent, it just never routes. An author may be mid-edit.
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: true, sessionBudgetSeconds: 300 }),
       seconds: { always: 280, cheapestConditional: 40 },
@@ -466,7 +466,7 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
   });
 
   it('is quiet when the budget comfortably admits topics', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: true, sessionBudgetSeconds: 600 }),
       seconds: { always: 260, cheapestConditional: 40 },
@@ -478,7 +478,7 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
   it('says nothing about time when the caller supplied no costs', () => {
     // The module is pure and cannot price questions itself; a caller without types still gets every
     // other finding rather than a wrong one.
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: true, sessionBudgetSeconds: 60 }),
     });
@@ -486,13 +486,13 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
   });
 });
 
-describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
+describe('validateConditionalTopics — duplicate membership (F17.15)', () => {
   it('says nothing when every member is claimed once', () => {
     expect(codes(healthy())).not.toContain('duplicate_membership');
   });
 
   it('names the two topics that claim a shared question, and what it costs', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       topics: [
         topic('open', 'opening'),
@@ -515,8 +515,8 @@ describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
     expect(dup?.message).toContain('priced higher than it costs');
   });
 
-  it('reports the duplicate even while Adaptive Scope is off — the time estimate is wrong today', () => {
-    const issues = validateAdaptiveScope({
+  it('reports the duplicate even while Conditional Topics is off — the time estimate is wrong today', () => {
+    const issues = validateConditionalTopics({
       ...healthy(),
       settings: settings({ enabled: false }),
       topics: [
@@ -531,7 +531,7 @@ describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
 
   it('aggregates rather than reporting forty findings for a copied topic', () => {
     const members = { dataSlotKeys: [], questionKeys: ['a', 'b', 'c'] };
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       topics: [topic('one', 'core', { members }), topic('two', 'core', { members })],
       allQuestionKeys: ['a', 'b', 'c'],
@@ -544,7 +544,7 @@ describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
 
   it('reports duplicated data slots separately from duplicated questions', () => {
     const members = { dataSlotKeys: ['s1'], questionKeys: ['a'] };
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       topics: [topic('one', 'core', { members }), topic('two', 'core', { members })],
       allQuestionKeys: ['a'],
@@ -557,7 +557,7 @@ describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
   });
 });
 
-describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
+describe('validateConditionalTopics — comparability passthrough (F17.15)', () => {
   const scoring = {
     scales: [{ key: 'trust', name: 'Trust' }],
     items: [
@@ -579,7 +579,7 @@ describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
   });
 
   it('merges the scale findings into the same sorted list', () => {
-    const issues = validateAdaptiveScope({ ...healthy(), scoring });
+    const issues = validateConditionalTopics({ ...healthy(), scoring });
 
     expect(issues.map((i) => i.code)).toContain('scale_split_by_scope');
     // Errors first is the contract the Topics tab and the launch gate both rely on.
@@ -590,7 +590,7 @@ describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
   });
 
   it('prices the scale against the routed allowance derived from the budget and the floor', () => {
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       settings: settings({ maxConditionalTopics: 3, sessionBudgetSeconds: 300 }),
       scoring: {
@@ -614,11 +614,11 @@ describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
  * Both findings exist for the same reason: the allowance can be switched on and change nothing,
  * and neither reason is visible from the tab it is switched on from.
  */
-describe('validateAdaptiveScope — the opening follow-up allowance', () => {
-  const codes = (issues: ReturnType<typeof validateAdaptiveScope>) => issues.map((i) => i.code);
+describe('validateConditionalTopics — the opening follow-up allowance', () => {
+  const codes = (issues: ReturnType<typeof validateConditionalTopics>) => issues.map((i) => i.code);
 
   it('says nothing while the allowance is off', () => {
-    const issues = validateAdaptiveScope({ ...healthy(), maxDataSlotAttempts: 1 });
+    const issues = validateConditionalTopics({ ...healthy(), maxDataSlotAttempts: 1 });
     expect(codes(issues)).not.toContain('opening_probe_limit_inert');
     expect(codes(issues)).not.toContain('opening_probe_limit_moot');
   });
@@ -626,7 +626,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
   it('flags an opening with no data slot — the limit rations conversational follow-ups', () => {
     // `healthy()`'s opening topic is built from a QUESTION. The interviewer re-asks data slots, not
     // form questions, so there is nothing here for the allowance to bound.
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...healthy(),
       settings: settings({ limitOpeningProbes: true }),
       maxDataSlotAttempts: 3,
@@ -638,7 +638,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
     // A topic may still name a slot an author deleted. A limit rationing a slot that does not exist
     // rations nothing, and reads on the tab exactly like one that does.
     const base = healthy();
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       topics: [
         topic('open', 'opening', { members: { dataSlotKeys: ['gone'], questionKeys: [] } }),
@@ -656,7 +656,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
     // The per-slot cap lives on a different tab and defaults to 1 — one ask, no follow-up ever. An
     // author rationing follow-ups there is rationing something that does not happen.
     const base = healthy();
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       topics: [
         topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
@@ -676,7 +676,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
     // A 0 in the column (an import, a direct write) would otherwise be reported as a 1, sending the
     // admin to look for a number that is not on their screen.
     const base = healthy();
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       topics: [
         topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
@@ -693,7 +693,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
 
   it('says nothing when the allowance can actually bind', () => {
     const base = healthy();
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       topics: [
         topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
@@ -707,9 +707,9 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
     expect(codes(issues).filter((c) => c.startsWith('opening_probe_'))).toHaveLength(0);
   });
 
-  it('stays silent about the follow-up allowance while Adaptive Scope itself is off', () => {
+  it('stays silent about the follow-up allowance while Conditional Topics itself is off', () => {
     const base = healthy();
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       ...base,
       settings: settings({ enabled: false, limitOpeningProbes: true }),
       maxDataSlotAttempts: 3,
@@ -718,7 +718,7 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
   });
 });
 
-describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)', () => {
+describe('validateConditionalTopics — light depth on an always-run topic (F17.23)', () => {
   /** An always-run topic big enough that `light` actually drops members. */
   function bigAlways(phase: TopicPhase, depth: 'full' | 'light') {
     return topic('open', phase, {
@@ -737,7 +737,7 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
   }
 
   it('is an error on the opening once the feature is on', () => {
-    const issues = validateAdaptiveScope(withTopic(bigAlways('opening', 'light'), true));
+    const issues = validateConditionalTopics(withTopic(bigAlways('opening', 'light'), true));
     const found = issues.find((i) => i.code === 'light_depth_on_always_topic');
     expect(found).toBeDefined();
     expect(found?.severity).toBe('error');
@@ -747,7 +747,7 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
   });
 
   it('is only a warning while the feature is off — the same shape as the orphan check', () => {
-    const issues = validateAdaptiveScope(withTopic(bigAlways('opening', 'light'), false));
+    const issues = validateConditionalTopics(withTopic(bigAlways('opening', 'light'), false));
     expect(issues.find((i) => i.code === 'light_depth_on_always_topic')?.severity).toBe('warning');
   });
 
@@ -764,7 +764,7 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
       depth: 'light',
       members: { dataSlotKeys: [], questionKeys: ['q1', 'q2', 'q3', 'q4'] },
     });
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       topics: [topic('open', 'opening'), cond],
       settings: settings(),
       allQuestionKeys: ['open_q', 'q1', 'q2', 'q3', 'q4'],
@@ -788,7 +788,7 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
       depth: 'light',
       members: { dataSlotKeys: ['s1', 's2', 's3'], questionKeys: ['q1'] },
     });
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       topics: [topic('open', 'opening'), slotHeavy, topic('cond_a', 'conditional')],
       settings: settings(),
       allQuestionKeys: ['open_q', 'q1', 'cond_a_q'],
@@ -805,7 +805,7 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
       depth: 'light',
       members: { dataSlotKeys: ['s1', 's2', 's3', 's4', 's5'], questionKeys: ['q1'] },
     });
-    const issues = validateAdaptiveScope({
+    const issues = validateConditionalTopics({
       topics: [slotHeavyOpening, topic('cond_a', 'conditional')],
       settings: settings(),
       allQuestionKeys: ['q1', 'cond_a_q'],

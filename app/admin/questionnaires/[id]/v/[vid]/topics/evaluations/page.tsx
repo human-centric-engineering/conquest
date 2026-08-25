@@ -1,5 +1,5 @@
 /**
- * Scope evaluations — run / review Adaptive Scope judge evaluations for the selected version
+ * Scope evaluations — run / review Conditional Topics judge evaluations for the selected version
  * (F17.21). Nested under the Topics tab, not a sibling workspace tab — the panel judges the
  * topics/rules/settings that tab already shows.
  */
@@ -15,7 +15,8 @@ import type { ScopeEvaluationRunListItem } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
   title: 'Past reviews · Questionnaire',
-  description: 'Run and review the Adaptive Scope judge evaluations for a questionnaire version.',
+  description:
+    'Run and review the Conditional Topics judge evaluations for a questionnaire version.',
 };
 
 interface PageProps {
@@ -47,8 +48,9 @@ export default async function ScopeEvaluationsTab({ params }: PageProps) {
   return (
     <div className="space-y-4">
       <p className="text-muted-foreground max-w-2xl text-sm">
-        Run four independent judges over this version’s Adaptive Scope configuration — topics, hard
-        rules, planner instructions, and the time budget — and review the changes each one proposes.
+        Run four independent judges over this version’s Conditional Topics configuration — topics,
+        hard rules, planner instructions, and the time budget — and review the changes each one
+        proposes.
       </p>
 
       <ScopeEvaluationRunsTable

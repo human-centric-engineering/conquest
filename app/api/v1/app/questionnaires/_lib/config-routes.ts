@@ -1,7 +1,7 @@
 /**
  * Transaction-aware read-modify-write for a version's config JSON blocks (F18.8).
  *
- * The one genuinely new helper the policy panel needed. `patchAdaptiveScopeSettings` covers exactly
+ * The one genuinely new helper the policy panel needed. `patchConditionalTopicsSettings` covers exactly
  * one block, and the config PATCH route does an inline upsert over a whole validated body — neither
  * gives an apply engine "change this one field of this one block, inside my transaction".
  *

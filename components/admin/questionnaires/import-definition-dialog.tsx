@@ -181,8 +181,8 @@ export function ImportDefinitionDialog({
               <p>
                 Pick a JSON file written by <strong>Export definition</strong> on a questionnaire’s
                 Structure tab. It carries the full design — sections, questions, tags, settings,
-                data slots, adaptive scope topics, and scoring — and is imported as a fresh draft
-                you own.
+                data slots, conditional topics topics, and scoring — and is imported as a fresh
+                draft you own.
               </p>
               <p className="mt-2">
                 Embeddings are regenerated after import, so the new questionnaire is ready to launch
@@ -231,7 +231,7 @@ export function ImportDefinitionDialog({
                 ? ` · ${preview.dataSlotCount} data slot${preview.dataSlotCount === 1 ? '' : 's'}`
                 : ''}
               {preview.topicCount > 0
-                ? ` · ${preview.topicCount} adaptive scope topic${preview.topicCount === 1 ? '' : 's'}`
+                ? ` · ${preview.topicCount} conditional topics topic${preview.topicCount === 1 ? '' : 's'}`
                 : ''}
               {preview.hasScoring ? ' · scoring schema' : ''}
             </p>

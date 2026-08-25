@@ -16,9 +16,9 @@
 import { prisma } from '@/lib/db/client';
 import { resolveScope, type ResolvedScope } from '@/lib/app/questionnaire/scope/resolve';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type InterviewPlan,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -31,13 +31,13 @@ type Db = Pick<typeof prisma, 'appQuestionnaireTopic' | 'appQuestionSlot' | 'app
 export interface SessionScope {
   scope: ResolvedScope;
   topics: Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   plan: InterviewPlan | null;
 }
 
 /** A scope that filters nothing — the answer for every version that never opted in. */
 export function inertScope(): SessionScope {
-  const settings = narrowAdaptiveScopeSettings({});
+  const settings = narrowConditionalTopicsSettings({});
   return {
     scope: resolveScope({ topics: [], plan: null, settings }),
     topics: [],
@@ -63,7 +63,7 @@ export async function buildSessionScope(
   db: Db,
   input: {
     versionId: string;
-    settings: AdaptiveScopeSettings;
+    settings: ConditionalTopicsSettings;
     interviewPlan: unknown;
     allQuestionKeys?: readonly string[];
     allDataSlotKeys?: readonly string[];
@@ -166,14 +166,14 @@ export async function loadSessionScope(
     select: {
       versionId: true,
       interviewPlan: true,
-      version: { select: { config: { select: { adaptiveScope: true } } } },
+      version: { select: { config: { select: { conditionalTopics: true } } } },
     },
   });
   if (!session) return inertScope();
 
   return buildSessionScope(prisma, {
     versionId: session.versionId,
-    settings: narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope),
+    settings: narrowConditionalTopicsSettings(session.version.config?.conditionalTopics),
     interviewPlan: session.interviewPlan,
     ...options,
   });

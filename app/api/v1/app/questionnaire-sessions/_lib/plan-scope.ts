@@ -57,7 +57,7 @@ import {
 } from '@/lib/app/questionnaire/scope/planner';
 import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   type InterviewPlan,
 } from '@/lib/app/questionnaire/scope/types';
@@ -86,7 +86,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
         version: {
           select: {
             goal: true,
-            config: { select: { adaptiveScope: true } },
+            config: { select: { conditionalTopics: true } },
           },
         },
         dataSlotFills: {
@@ -116,8 +116,8 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
     });
     if (!session) return { kind: 'skipped', reason: 'session not found' };
 
-    const settings = narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope);
-    if (!settings.enabled) return { kind: 'skipped', reason: 'adaptive scope is off' };
+    const settings = narrowConditionalTopicsSettings(session.version.config?.conditionalTopics);
+    if (!settings.enabled) return { kind: 'skipped', reason: 'conditional topics is off' };
 
     // A plan already exists: never re-plan. The interview has been acting on it.
     if (narrowInterviewPlan(session.interviewPlan)) {
@@ -188,6 +188,24 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
 
     const budget = await loadPlanBudget(session.versionId, settings, topics);
 
+    // What each candidate topic's questions ASK, so the planner can name a subset of one (C6).
+    // One query, and only when a conditional topic actually names questions — an instrument whose
+    // conditional topics are data-slot-only pays nothing for it.
+    const conditionalQuestionKeys = new Set(
+      topics.filter((t) => t.phase === 'conditional').flatMap((t) => t.members.questionKeys)
+    );
+    const itemPrompts =
+      conditionalQuestionKeys.size === 0
+        ? undefined
+        : new Map(
+            (
+              await prisma.appQuestionSlot.findMany({
+                where: { versionId: session.versionId, key: { in: [...conditionalQuestionKeys] } },
+                select: { key: true, prompt: true },
+              })
+            ).map((q) => [q.key, q.prompt] as const)
+          );
+
     const result = await planScope({
       sessionId,
       topics,
@@ -197,6 +215,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       settings,
       decidedAtTurn: session._count.turns,
       ...(budget ? { budget } : {}),
+      ...(itemPrompts ? { itemPrompts } : {}),
     });
 
     // Guarded write: `interviewPlan: null` in the WHERE is what makes a concurrent second call a
@@ -242,7 +261,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       },
     });
 
-    logger.info('adaptive scope: planned', {
+    logger.info('conditional topics: planned', {
       sessionId,
       source: result.plan.source,
       confidence: result.plan.confidence,
@@ -254,7 +273,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
   } catch (err) {
     // The session simply stays unplanned, which resolves to the always-run topics. A shorter
     // interview is recoverable; a failed turn is not.
-    logger.error('adaptive scope: planning failed; the interview continues unplanned', {
+    logger.error('conditional topics: planning failed; the interview continues unplanned', {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });

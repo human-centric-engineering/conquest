@@ -3,7 +3,7 @@ import { serviceAccountWhere } from '@/lib/auth/account';
 import { QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /**
- * Seed the Adaptive Scope candidacy-check agent (P17.19).
+ * Seed the Conditional Topics candidacy-check agent (P17.19).
  *
  * A cheap, fast triage read that runs on every fresh questionnaire ingestion: does the uploaded
  * document's own text describe routing different respondents through different parts of it? Not
@@ -32,7 +32,7 @@ engine sends is maintained in code; this description is for reference.)`;
 const unit: SeedUnit = {
   name: 'app-questionnaire/089-scope-candidacy-agent',
   async run({ prisma, logger }) {
-    logger.info('🔎 Seeding the Adaptive Scope candidacy-check agent...');
+    logger.info('🔎 Seeding the Conditional Topics candidacy-check agent...');
 
     const admin = await prisma.user.findFirst({
       where: serviceAccountWhere,
@@ -46,10 +46,10 @@ const unit: SeedUnit = {
       where: { slug: SLUG },
       update: { isSystem: false },
       create: {
-        name: 'Adaptive Scope Candidacy Check',
+        name: 'Conditional Topics Candidacy Check',
         slug: SLUG,
         description:
-          'Cheap triage read that flags a freshly-uploaded questionnaire as an Adaptive Scope ' +
+          'Cheap triage read that flags a freshly-uploaded questionnaire as a Conditional Topics ' +
           'candidate when its own text describes conditional routing.',
         systemInstructions: SYSTEM_INSTRUCTIONS,
         // Empty strings → resolved at runtime via agent-resolver.ts (routing tier).

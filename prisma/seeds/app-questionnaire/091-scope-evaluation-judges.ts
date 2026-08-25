@@ -6,7 +6,7 @@ import {
 } from '@/lib/app/questionnaire/scope-evaluation';
 
 /**
- * Seed the four Adaptive Scope evaluation judges (F17.21).
+ * Seed the four Conditional Topics evaluation judges (F17.21).
  *
  * Each is a `kind = 'judge'` `AiAgent`, the same shape as the design-evaluation judges
  * (`018-design-evaluation-judges.ts`) — editable, deletable, included in config backup/export,
@@ -26,8 +26,8 @@ import {
 
 /** Compose a self-describing instruction for a judge from its registry summary. */
 function judgeInstructions(label: string, summary: string): string {
-  return `You are the ${label} in the ConQuest Adaptive Scope evaluation panel. You review a \
-questionnaire version's ADAPTIVE SCOPE configuration — its topics, hard rules, planner instructions \
+  return `You are the ${label} in the ConQuest Conditional Topics evaluation panel. You review a \
+questionnaire version's CONDITIONAL TOPICS configuration — its topics, hard rules, planner instructions \
 and time budget — before launch and propose concrete edits. ${summary} You score only your own \
 dimension on a continuous 0.0–1.0 scale and emit actionable findings; a well-designed config yields \
 no findings. Where a fix maps cleanly to a concrete edit, you attach a structured "proposedEdit" the \
@@ -39,7 +39,7 @@ in code; this description is for reference.)`;
 const unit: SeedUnit = {
   name: 'app-questionnaire/091-scope-evaluation-judges',
   async run({ prisma, logger }) {
-    logger.info('⚖️  Seeding 4 Adaptive Scope evaluation judge agents...');
+    logger.info('⚖️  Seeding 4 Conditional Topics evaluation judge agents...');
 
     const admin = await prisma.user.findFirst({
       where: serviceAccountWhere,

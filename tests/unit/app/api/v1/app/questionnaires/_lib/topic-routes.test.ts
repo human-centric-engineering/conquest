@@ -4,7 +4,7 @@
  * Mocks prisma + executeTransaction at the boundary. Tests verify the real
  * transformations the module performs: projection via toTopic (enum
  * fallbacks), the replaceTopics delete-then-write-then-read transaction
- * (including the `source: 'manual'` stamp), and patchAdaptiveScopeSettings's
+ * (including the `source: 'manual'` stamp), and patchConditionalTopicsSettings's
  * read-narrow-merge-write (preserving untouched fields, defaulting rule ids).
  */
 
@@ -33,13 +33,16 @@ vi.mock('@/lib/db/utils', () => ({
 import {
   toTopic,
   loadTopics,
-  loadAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
   replaceTopics,
-  patchAdaptiveScopeSettings,
+  patchConditionalTopicsSettings,
   TOPIC_SELECT,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
-import { adaptiveScopeSettingsSchema } from '@/lib/app/questionnaire/scope/schemas';
-import type { TopicInput, AdaptiveScopeSettingsPatch } from '@/lib/app/questionnaire/scope/schemas';
+import { conditionalTopicsSettingsSchema } from '@/lib/app/questionnaire/scope/schemas';
+import type {
+  TopicInput,
+  ConditionalTopicsSettingsPatch,
+} from '@/lib/app/questionnaire/scope/schemas';
 import { executeTransaction } from '@/lib/db/utils';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -171,30 +174,30 @@ describe('loadTopics', () => {
   });
 });
 
-// ── loadAdaptiveScopeSettings ────────────────────────────────────────────────
+// ── loadConditionalTopicsSettings ────────────────────────────────────────────────
 
-describe('loadAdaptiveScopeSettings', () => {
+describe('loadConditionalTopicsSettings', () => {
   it('returns the defaults when no config row exists', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
-    const settings = await loadAdaptiveScopeSettings('v-1');
+    const settings = await loadConditionalTopicsSettings('v-1');
     expect(settings.enabled).toBe(false);
     expect(settings.maxConditionalTopics).toBe(3);
   });
 
-  it('queries by versionId selecting only adaptiveScope', async () => {
+  it('queries by versionId selecting only conditionalTopics', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
-    await loadAdaptiveScopeSettings('v-q');
+    await loadConditionalTopicsSettings('v-q');
     expect(prismaMock.appQuestionnaireConfig.findUnique).toHaveBeenCalledWith({
       where: { versionId: 'v-q' },
-      select: { adaptiveScope: true },
+      select: { conditionalTopics: true },
     });
   });
 
   it('narrows a stored blob rather than passing it through raw', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { enabled: true, maxConditionalTopics: 9999 },
+      conditionalTopics: { enabled: true, maxConditionalTopics: 9999 },
     });
-    const settings = await loadAdaptiveScopeSettings('v-1');
+    const settings = await loadConditionalTopicsSettings('v-1');
     expect(settings.enabled).toBe(true);
     // Clamped, not passed through raw.
     expect(settings.maxConditionalTopics).toBe(20);
@@ -310,12 +313,12 @@ describe('replaceTopics', () => {
   });
 });
 
-// ── patchAdaptiveScopeSettings ────────────────────────────────────────────────
+// ── patchConditionalTopicsSettings ────────────────────────────────────────────────
 
-describe('patchAdaptiveScopeSettings', () => {
+describe('patchConditionalTopicsSettings', () => {
   it('merges the patch onto the current settings, preserving fields the patch did not touch', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         enabled: false,
         maxConditionalTopics: 5,
         plannerInstructions: 'Existing guidance',
@@ -324,8 +327,8 @@ describe('patchAdaptiveScopeSettings', () => {
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    const patch: AdaptiveScopeSettingsPatch = { enabled: true };
-    const result = await patchAdaptiveScopeSettings('v-1', patch);
+    const patch: ConditionalTopicsSettingsPatch = { enabled: true };
+    const result = await patchConditionalTopicsSettings('v-1', patch);
 
     // The patched field changed...
     expect(result.enabled).toBe(true);
@@ -336,18 +339,18 @@ describe('patchAdaptiveScopeSettings', () => {
 
   it('survives a lone-field patch that came through the real Zod schema, not a hand-built object', async () => {
     // The test above proves the MERGE preserves siblings. This one proves the thing the merge
-    // depends on: that `adaptiveScopeSettingsSchema` omits absent optional keys from its output
+    // depends on: that `conditionalTopicsSettingsSchema` omits absent optional keys from its output
     // rather than emitting them as `undefined`. `{ ...current, ...patch }` would happily write
     // `undefined` over a sibling, and every field on this schema is optional — so a lone-field
     // PATCH is the shape most likely to silently wipe the rest.
     //
     // It is a real risk rather than a hypothetical: the persistent on/off switch this tab is
     // getting sends exactly `{ enabled }` and nothing else.
-    const parsed = adaptiveScopeSettingsSchema.parse({ enabled: true });
+    const parsed = conditionalTopicsSettingsSchema.parse({ enabled: true });
     expect(Object.keys(parsed)).toEqual(['enabled']);
 
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         enabled: false,
         maxConditionalTopics: 5,
         plannerInstructions: 'Existing guidance',
@@ -367,7 +370,7 @@ describe('patchAdaptiveScopeSettings', () => {
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    const result = await patchAdaptiveScopeSettings('v-1', parsed);
+    const result = await patchConditionalTopicsSettings('v-1', parsed);
 
     expect(result.enabled).toBe(true);
     expect(result.maxConditionalTopics).toBe(5);
@@ -379,20 +382,20 @@ describe('patchAdaptiveScopeSettings', () => {
 
   it('writes the merged blob through upsert, keyed by versionId', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: { enabled: false, maxConditionalTopics: 5, rules: [] },
+      conditionalTopics: { enabled: false, maxConditionalTopics: 5, rules: [] },
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    await patchAdaptiveScopeSettings('v-1', { enabled: true });
+    await patchConditionalTopicsSettings('v-1', { enabled: true });
 
     const call = (prismaMock.appQuestionnaireConfig.upsert as Mock).mock.calls[0]?.[0];
     expect(call.where).toEqual({ versionId: 'v-1' });
     // Both create and update carry the merged blob, so the upsert works whichever branch fires.
-    const updatePayload = call.update.adaptiveScope as {
+    const updatePayload = call.update.conditionalTopics as {
       enabled: boolean;
       maxConditionalTopics: number;
     };
-    const createPayload = call.create.adaptiveScope as { enabled: boolean };
+    const createPayload = call.create.conditionalTopics as { enabled: boolean };
     expect(updatePayload.enabled).toBe(true);
     expect(updatePayload.maxConditionalTopics).toBe(5);
     expect(createPayload.enabled).toBe(true);
@@ -403,7 +406,7 @@ describe('patchAdaptiveScopeSettings', () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    const patch: AdaptiveScopeSettingsPatch = {
+    const patch: ConditionalTopicsSettingsPatch = {
       rules: [
         { dataSlotKey: 'd1', operator: 'exists', value: null, action: 'include', topicKey: 't1' },
         {
@@ -416,7 +419,7 @@ describe('patchAdaptiveScopeSettings', () => {
         },
       ],
     };
-    const result = await patchAdaptiveScopeSettings('v-1', patch);
+    const result = await patchConditionalTopicsSettings('v-1', patch);
 
     expect(result.rules[0]?.id).toBe('rule-0');
     expect(result.rules[1]?.id).toBe('kept-id');
@@ -426,7 +429,7 @@ describe('patchAdaptiveScopeSettings', () => {
 
   it('keeps the current rules verbatim when the patch omits rules', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         rules: [
           {
             id: 'r-existing',
@@ -442,7 +445,7 @@ describe('patchAdaptiveScopeSettings', () => {
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    const result = await patchAdaptiveScopeSettings('v-1', { enabled: true });
+    const result = await patchConditionalTopicsSettings('v-1', { enabled: true });
 
     expect(result.rules).toHaveLength(1);
     expect(result.rules[0]?.id).toBe('r-existing');
@@ -450,7 +453,7 @@ describe('patchAdaptiveScopeSettings', () => {
 
   it('replaces the rules wholesale when the patch supplies rules, rather than appending', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      adaptiveScope: {
+      conditionalTopics: {
         rules: [
           {
             id: 'old-rule',
@@ -466,7 +469,7 @@ describe('patchAdaptiveScopeSettings', () => {
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
 
-    const patch: AdaptiveScopeSettingsPatch = {
+    const patch: ConditionalTopicsSettingsPatch = {
       rules: [
         {
           dataSlotKey: 'd-new',
@@ -477,7 +480,7 @@ describe('patchAdaptiveScopeSettings', () => {
         },
       ],
     };
-    const result = await patchAdaptiveScopeSettings('v-1', patch);
+    const result = await patchConditionalTopicsSettings('v-1', patch);
 
     expect(result.rules).toHaveLength(1);
     expect(result.rules[0]?.dataSlotKey).toBe('d-new');

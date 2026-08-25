@@ -1,9 +1,9 @@
 /**
- * The Adaptive Scope issue strip (F17.25) — the summary half of the two-level pattern
+ * The Conditional Topics issue strip (F17.25) — the summary half of the two-level pattern
  * `config-conflicts.tsx` established.
  *
  * What matters here is that it never becomes a SECOND opinion about what is wrong. It renders the
- * same `validateAdaptiveScope` output `ScopeIssues` does, so the assertions are about emphasis and
+ * same `validateConditionalTopics` output `ScopeIssues` does, so the assertions are about emphasis and
  * affordance — errors first, consequences named, and a row that can actually take you somewhere.
  */
 

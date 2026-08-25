@@ -1,8 +1,8 @@
 /**
- * Workflow diagram: Adaptive Scope evaluation (judge panel) (F17.21).
+ * Workflow diagram: Conditional Topics evaluation (judge panel) (F17.21).
  *
  * A second "panel of judges" — sibling to the design-evaluation panel (`design-evaluation.ts`) —
- * but scoring the AUTHORED ADAPTIVE-SCOPE CONFIG (topics, hard rules, planner instructions, budget)
+ * but scoring the AUTHORED CONDITIONAL-TOPICS CONFIG (topics, hard rules, planner instructions, budget)
  * rather than the question structure. One structured judge runs per dimension — criteria quality,
  * rule integrity, budget realism, coverage-and-burden — fanned out concurrently, each returning a
  * 0–1 score plus actionable findings. Each judge is its own seeded agent, so they render as
@@ -11,7 +11,7 @@
  *
  * Structural only, v1: the judges read the authored config exactly as an admin would on the Topics
  * tab — they do not read live session data or behavioural analytics. They are also told what the
- * deterministic `validateAdaptiveScope` checker already caught, so they focus on the judgement calls
+ * deterministic `validateConditionalTopics` checker already caught, so they focus on the judgement calls
  * no mechanical rule can make, not on re-finding what that checker already flags.
  *
  * No reconciler here, unlike the seven-dimension design-evaluation panel: the four scope dimensions
@@ -60,8 +60,8 @@ const judgeNodes: WorkflowStep[] = SCOPE_EVALUATION_DIMENSIONS.map((dimension, i
 
 export const scopeEvaluationWorkflow = diagram({
   slug: 'scope-evaluation',
-  title: 'Adaptive Scope evaluation (judge panel)',
-  description: 'A judge panel scores the authored Adaptive Scope configuration.',
+  title: 'Conditional Topics evaluation (judge panel)',
+  description: 'A judge panel scores the authored Conditional Topics configuration.',
   sourceModule: 'lib/app/questionnaire/scope-evaluation/run-panel.ts',
   entryStepId: 'structure',
   // Per-judge failure is fail-soft *inside* the panel (a diagnostic for that one dimension), so the
@@ -74,7 +74,7 @@ export const scopeEvaluationWorkflow = diagram({
       x: 0,
       y: 0,
       description:
-        "Flatten the version's authored topics, hard rules, planner settings and session budget into the judge input, alongside the issues the deterministic validateAdaptiveScope checker already caught — the single snapshot every judge reads.",
+        "Flatten the version's authored topics, hard rules, planner settings and session budget into the judge input, alongside the issues the deterministic validateConditionalTopics checker already caught — the single snapshot every judge reads.",
       meta: { note: 'buildScopeEvaluationStructure → the ScopeStructureInput every judge scores.' },
       // Fan out to all four judges concurrently.
       next: judgeNodes.map((j) => j.id),
@@ -100,12 +100,12 @@ export const scopeEvaluationWorkflow = diagram({
       x: 1140,
       y: 0,
       description:
-        "Persist the evaluation run and one finding row per judge finding. Each finding carries a proposed edit-op (rewrite a topic's criteria, change its depth, add a rule) that becomes a one-click applicable change to the Adaptive Scope config, reviewed from the Topics tab. The same panel is also exposed as a preview-only endpoint that scores without persisting, for quick tuning before a real run.",
+        "Persist the evaluation run and one finding row per judge finding. Each finding carries a proposed edit-op (rewrite a topic's criteria, change its depth, add a rule) that becomes a one-click applicable change to the Conditional Topics config, reviewed from the Topics tab. The same panel is also exposed as a preview-only endpoint that scores without persisting, for quick tuning before a real run.",
       meta: {
         note: 'persistScopeEvaluationRun() — the run + findings the Topics tab review queue and the Questionnaire Pack both read.',
       },
     }),
   ],
   applicability: () =>
-    applies('The judge panel can score this version’s authored Adaptive Scope configuration.'),
+    applies('The judge panel can score this version’s authored Conditional Topics configuration.'),
 });

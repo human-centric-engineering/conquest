@@ -4,7 +4,7 @@
  * A real end-to-end render — {@link PackPdfDocument} through `@react-pdf/renderer`'s
  * `renderToBuffer` — asserting a genuine PDF comes out (the `%PDF` magic header, non-empty body).
  * Exercises the model's seven optional sections (meta / setup / data slots / glossary / questions /
- * evaluations / adaptive scope) in both their present and `null`/empty states, plus the per-question
+ * evaluations / conditional topics) in both their present and `null`/empty states, plus the per-question
  * option/constraint/guidance branches, so the document never throws on any shape `buildPackModel`
  * can produce.
  *
@@ -34,7 +34,7 @@ import type {
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
-import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
+import type { ConditionalTopicsSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 function question(
   partial: Partial<QuestionSlotView> & Pick<QuestionSlotView, 'key' | 'type'>
@@ -134,7 +134,7 @@ const SCOPE_TOPICS: Topic[] = [
   },
 ];
 
-const SCOPE_SETTINGS: AdaptiveScopeSettings = {
+const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   enabled: true,
   maxConditionalTopics: 3,
   includeCheckTopic: true,
@@ -351,7 +351,7 @@ describe('renderPackPdf', () => {
       EVALUATION_RUN,
       { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: SCOPE_EVALUATION_RUN },
       null,
-      { ...DEFAULT_PACK_INCLUDE, evaluations: true, adaptiveScope: true },
+      { ...DEFAULT_PACK_INCLUDE, evaluations: true, conditionalTopics: true },
       '2026-08-10T00:00:00.000Z'
     );
 
@@ -369,7 +369,7 @@ describe('renderPackPdf', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
-      adaptiveScope: false,
+      conditionalTopics: false,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
@@ -481,7 +481,7 @@ describe('renderPackPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders "not enabled" for Adaptive scope when the version never turned it on', async () => {
+  it('renders "not enabled" for Conditional topics when the version never turned it on', async () => {
     const model = buildPackModel(
       'Unrouted Pack',
       graphOf([]),
@@ -494,17 +494,17 @@ describe('renderPackPdf', () => {
         scopeEvaluationRun: null,
       },
       null,
-      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
       '2026-08-10T00:00:00.000Z'
     );
 
-    expect(model.adaptiveScope?.enabled).toBe(false);
+    expect(model.conditionalTopics?.enabled).toBe(false);
 
     const pdf = await renderPackPdf(model);
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the "none defined" state for Adaptive scope with no topics or rules', async () => {
+  it('renders the "none defined" state for Conditional topics with no topics or rules', async () => {
     const model = buildPackModel(
       'Enabled But Empty Pack',
       graphOf([]),
@@ -513,14 +513,14 @@ describe('renderPackPdf', () => {
       null,
       { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
       null,
-      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
       '2026-08-10T00:00:00.000Z'
     );
 
-    expect(model.adaptiveScope).toMatchObject({
+    expect(model.conditionalTopics).toMatchObject({
       enabled: true,
-      alwaysAskedTopics: [],
-      conditionalTopics: [],
+      alwaysAsked: [],
+      conditional: [],
       rules: [],
     });
 
@@ -528,7 +528,7 @@ describe('renderPackPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the "no scope evaluation run yet" state when adaptiveScope is included but no run exists', async () => {
+  it('renders the "no scope evaluation run yet" state when conditionalTopics is included but no run exists', async () => {
     const model = buildPackModel(
       'Unscored Pack',
       graphOf([]),
@@ -537,11 +537,11 @@ describe('renderPackPdf', () => {
       null,
       { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
       null,
-      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
       '2026-08-10T00:00:00.000Z'
     );
 
-    expect(model.adaptiveScope?.evaluation).toEqual({
+    expect(model.conditionalTopics?.evaluation).toEqual({
       hasRun: false,
       runAt: null,
       totalFindings: 0,

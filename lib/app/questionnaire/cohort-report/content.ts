@@ -245,7 +245,7 @@ export function buildCohortDatasetDigest(dataset: CohortDataset): string {
   if (dataset.scoring && dataset.scoring.scales.length > 0) {
     lines.push('', 'SCORING (deterministic scales):');
     for (const scale of dataset.scoring.scales) {
-      // Adaptive Scope (P17): the excluded respondents are stated, never silently dropped. A writer
+      // Conditional Topics (P17): the excluded respondents are stated, never silently dropped. A writer
       // told only the mean would describe it as the cohort's, and for a narrowed instrument it is
       // the mean of the part of the cohort that was asked the whole scale.
       const excluded =

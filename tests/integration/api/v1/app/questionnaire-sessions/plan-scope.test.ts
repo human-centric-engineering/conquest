@@ -68,7 +68,7 @@ function session(over: { answers?: string[]; fills?: string[] } = {}) {
   return {
     versionId: 'v1',
     interviewPlan: null,
-    version: { goal: 'find the constraint', config: { adaptiveScope: { enabled: true } } },
+    version: { goal: 'find the constraint', config: { conditionalTopics: { enabled: true } } },
     dataSlotFills: (over.fills ?? []).map((key) => ({
       confidence: 0.9,
       value: 'said something',
@@ -185,7 +185,52 @@ describe('maybePlanScope — the opening gate', () => {
     );
 
     expect((await maybePlanScope('s1')).kind).toBe('planned');
+
+    // The opening-gate lookup reads the WHOLE version's keys. The other question query on this path
+    // (F17.29's item prompts, keyed `in` the conditional topics' members) runs once, after the gate
+    // has passed — so it is matched out here rather than asserting "no query at all", which would
+    // have made this test fail for the wrong reason.
+    const gateLookups = mocks.prisma.appQuestionSlot.findMany.mock.calls.filter((call) => {
+      const args = call[0] as { where?: { key?: unknown } } | undefined;
+      return args?.where?.key === undefined;
+    });
+    expect(gateLookups).toHaveLength(0);
+  });
+
+  it('does not price the planner’s item prompts until the opening gate has passed', async () => {
+    // This trigger runs on EVERY turn until it plans. Reading what each conditional topic's
+    // questions ask is worth one query per session and nothing per turn.
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { dataSlotKeys: ['situation'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(session({ fills: [] }));
+
+    expect(await maybePlanScope('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'opening still in progress',
+    });
     expect(mocks.prisma.appQuestionSlot.findMany).not.toHaveBeenCalled();
+  });
+
+  it('hands the planner what each conditional topic’s questions ask', async () => {
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { dataSlotKeys: ['situation'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ fills: ['situation'] })
+    );
+    mocks.prisma.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'p1', prompt: 'How long does approval take?' },
+    ]);
+
+    await maybePlanScope('s1');
+
+    const passed = mocks.planScope.mock.calls[0][0] as {
+      itemPrompts?: ReadonlyMap<string, string>;
+    };
+    expect(passed.itemPrompts?.get('p1')).toBe('How long does approval take?');
   });
 });
 
@@ -252,7 +297,7 @@ describe('maybePlanScope — the time budget', () => {
       ...session({ answers: ['q1', 'q2'] }),
       version: {
         goal: 'find the constraint',
-        config: { adaptiveScope: { enabled: true, sessionBudgetSeconds: seconds } },
+        config: { conditionalTopics: { enabled: true, sessionBudgetSeconds: seconds } },
       },
     };
   }

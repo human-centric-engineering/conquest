@@ -1,5 +1,5 @@
 /**
- * The Adaptive Scope sub-tab registry (F17.26).
+ * The Conditional Topics sub-tab registry (F17.26).
  *
  * The load-bearing property is the ISSUE→TAB mapping: the issue strip sits above the tab bar and
  * every row has to land somewhere real. A code that fell through to nowhere would give an admin a
@@ -10,43 +10,43 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 import {
-  ADAPTIVE_SCOPE_TABS,
-  ADAPTIVE_SCOPE_TAB_HINTS,
-  ADAPTIVE_SCOPE_TAB_LABELS,
-  DEFAULT_ADAPTIVE_SCOPE_TAB,
-  narrowAdaptiveScopeTab,
+  CONDITIONAL_TOPICS_TABS,
+  CONDITIONAL_TOPICS_TAB_HINTS,
+  CONDITIONAL_TOPICS_TAB_LABELS,
+  DEFAULT_CONDITIONAL_TOPICS_TAB,
+  narrowConditionalTopicsTab,
   tabForScopeIssue,
-} from '@/lib/constants/adaptive-scope-tabs';
+} from '@/lib/constants/conditional-topics-tabs';
 
 describe('the tab set', () => {
   it('labels and hints every tab', () => {
-    for (const tab of ADAPTIVE_SCOPE_TABS) {
-      expect(ADAPTIVE_SCOPE_TAB_LABELS[tab]).toBeTruthy();
-      expect(ADAPTIVE_SCOPE_TAB_HINTS[tab]).toBeTruthy();
+    for (const tab of CONDITIONAL_TOPICS_TABS) {
+      expect(CONDITIONAL_TOPICS_TAB_LABELS[tab]).toBeTruthy();
+      expect(CONDITIONAL_TOPICS_TAB_HINTS[tab]).toBeTruthy();
     }
   });
 
   it('defaults to the tab that owns the topic set', () => {
     // Topics is where an admin arriving with no particular intent should land: it is the thing
     // they edit most, and it is what the other two tabs are about.
-    expect(DEFAULT_ADAPTIVE_SCOPE_TAB).toBe('topics');
+    expect(DEFAULT_CONDITIONAL_TOPICS_TAB).toBe('topics');
   });
 
   it('does not call a tab "Settings" — the workspace already has one', () => {
     // Two things called Settings on one screen is a collision an admin resolves by clicking both.
-    expect(Object.values(ADAPTIVE_SCOPE_TAB_LABELS)).not.toContain('Settings');
+    expect(Object.values(CONDITIONAL_TOPICS_TAB_LABELS)).not.toContain('Settings');
   });
 });
 
-describe('narrowAdaptiveScopeTab', () => {
+describe('narrowConditionalTopicsTab', () => {
   it('accepts a real tab id', () => {
-    expect(narrowAdaptiveScopeTab('rules')).toBe('rules');
+    expect(narrowConditionalTopicsTab('rules')).toBe('rules');
   });
 
   it.each([null, undefined, '', 'nonsense', 'TOPICS'])('falls back on %p', (input) => {
     // `?tab=` is user-supplied and survives being pasted, bookmarked and hand-edited, so it can
     // be anything. Falling back beats throwing on a surface an admin is mid-task on.
-    expect(narrowAdaptiveScopeTab(input)).toBe(DEFAULT_ADAPTIVE_SCOPE_TAB);
+    expect(narrowConditionalTopicsTab(input)).toBe(DEFAULT_CONDITIONAL_TOPICS_TAB);
   });
 });
 
@@ -80,7 +80,9 @@ describe('tabForScopeIssue', () => {
     // a file the author of that finding has no reason to open. The cost of the default is a row
     // that lands on Topics instead of Rules; the cost of the record is a wrong-file compile error
     // that gets fixed by guessing.
-    expect(tabForScopeIssue({ code: 'a_code_added_next_year' })).toBe(DEFAULT_ADAPTIVE_SCOPE_TAB);
+    expect(tabForScopeIssue({ code: 'a_code_added_next_year' })).toBe(
+      DEFAULT_CONDITIONAL_TOPICS_TAB
+    );
   });
 
   it('maps every code the validator can actually emit', () => {
@@ -95,7 +97,7 @@ describe('tabForScopeIssue', () => {
       // A mapped code resolves to something; an unmapped one resolves to the default. Only the
       // codes the map genuinely lists should ever be indistinguishable from the fallback.
       const tab = tabForScopeIssue({ code });
-      return tab === DEFAULT_ADAPTIVE_SCOPE_TAB && !TOPICS_CODES.has(code);
+      return tab === DEFAULT_CONDITIONAL_TOPICS_TAB && !TOPICS_CODES.has(code);
     });
     expect(unmapped).toEqual([]);
   });

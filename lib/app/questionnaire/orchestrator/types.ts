@@ -202,7 +202,7 @@ export interface TurnState {
    */
   dataSlotAttempts?: Record<string, number>;
   /**
-   * Adaptive Scope (G03): the opening's SHARED follow-up allowance and what it has already spent.
+   * Conditional Topics (G03): the opening's SHARED follow-up allowance and what it has already spent.
    *
    * Present only while it governs something — the version opted in to `limitOpeningProbes`, the
    * interview plan is not yet decided, and at least one data slot belongs to an `opening` topic.
@@ -362,7 +362,7 @@ export interface CapabilityInvokers {
    * the call and acts on the verdict. Fail-soft (returns `verdict: null` + a diagnostic).
    */
   /**
-   * Adaptive Scope (G03): would a follow-up buy anything? Called at most **once per turn**, and
+   * Conditional Topics (G03): would a follow-up buy anything? Called at most **once per turn**, and
    * only at the moment a probe from {@link TurnState.openingProbe} is about to be spent — so a
    * version that never opted in, and every turn after the opening, pays nothing for it.
    *

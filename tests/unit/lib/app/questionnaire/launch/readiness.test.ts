@@ -48,23 +48,23 @@ describe('hasAudience', () => {
   });
 });
 
-describe('launchReadinessChecks — adaptive scope', () => {
+describe('launchReadinessChecks — conditional topics', () => {
   it('adds no row while the version has not opted in', () => {
-    // The overwhelming majority of questionnaires never turn Adaptive Scope on. A permanently-green
+    // The overwhelming majority of questionnaires never turn Conditional Topics on. A permanently-green
     // row for a feature nobody enabled is noise on every one of them.
-    const checks = launchReadinessChecks({ ...READY, adaptiveScopeErrorCount: 3 });
-    expect(checks.map((c) => c.key)).not.toContain('adaptiveScope');
+    const checks = launchReadinessChecks({ ...READY, conditionalTopicsErrorCount: 3 });
+    expect(checks.map((c) => c.key)).not.toContain('conditionalTopics');
   });
 
   it('blocks launch when an enabled version has error-severity findings', () => {
     const checks = launchReadinessChecks({
       ...READY,
-      adaptiveScopeEnabled: true,
-      adaptiveScopeErrorCount: 1,
+      conditionalTopicsEnabled: true,
+      conditionalTopicsErrorCount: 1,
     });
-    expect(checks.find((c) => c.key === 'adaptiveScope')?.ok).toBe(false);
+    expect(checks.find((c) => c.key === 'conditionalTopics')?.ok).toBe(false);
     expect(
-      isLaunchReady({ ...READY, adaptiveScopeEnabled: true, adaptiveScopeErrorCount: 1 })
+      isLaunchReady({ ...READY, conditionalTopicsEnabled: true, conditionalTopicsErrorCount: 1 })
     ).toBe(false);
   });
 
@@ -72,23 +72,23 @@ describe('launchReadinessChecks — adaptive scope', () => {
     // Warnings mean "it will run, just not as you probably intend" — advisory, never a gate.
     const checks = launchReadinessChecks({
       ...READY,
-      adaptiveScopeEnabled: true,
-      adaptiveScopeErrorCount: 0,
+      conditionalTopicsEnabled: true,
+      conditionalTopicsErrorCount: 0,
     });
-    expect(checks.find((c) => c.key === 'adaptiveScope')?.ok).toBe(true);
+    expect(checks.find((c) => c.key === 'conditionalTopics')?.ok).toBe(true);
   });
 });
 
-describe('launchReadinessChecks — adaptive scope is off but conditional topics exist', () => {
+describe('launchReadinessChecks — conditional topics is off but conditional topics exist', () => {
   const OFF_WITH_CONDITIONALS: LaunchReadinessInput = {
     ...READY,
-    adaptiveScopeEnabled: false,
-    adaptiveScopeConditionalCount: 4,
+    conditionalTopicsEnabled: false,
+    conditionalTopicsConditionalCount: 4,
   };
 
   it('raises a warning row naming how many topics everybody is being asked', () => {
     const row = launchReadinessChecks(OFF_WITH_CONDITIONALS).find(
-      (c) => c.key === 'adaptiveScopeOff'
+      (c) => c.key === 'conditionalTopicsOff'
     );
     expect(row?.ok).toBe(false);
     expect(row?.severity).toBe('warning');
@@ -98,8 +98,8 @@ describe('launchReadinessChecks — adaptive scope is off but conditional topics
   it('says "its 1 conditional topic is" for a single topic', () => {
     const row = launchReadinessChecks({
       ...OFF_WITH_CONDITIONALS,
-      adaptiveScopeConditionalCount: 1,
-    }).find((c) => c.key === 'adaptiveScopeOff');
+      conditionalTopicsConditionalCount: 1,
+    }).find((c) => c.key === 'conditionalTopicsOff');
     expect(row?.label).toContain('its 1 conditional topic is asked to everyone');
   });
 
@@ -107,7 +107,7 @@ describe('launchReadinessChecks — adaptive scope is off but conditional topics
     // The whole point of the row: it reports a state the product used to keep silent about, and a
     // version whose author meant to ask everyone everything must still be launchable.
     const row = launchReadinessChecks(OFF_WITH_CONDITIONALS).find(
-      (c) => c.key === 'adaptiveScopeOff'
+      (c) => c.key === 'conditionalTopicsOff'
     );
     expect(row).toBeDefined();
     expect(blocksLaunch(row!)).toBe(false);
@@ -117,17 +117,17 @@ describe('launchReadinessChecks — adaptive scope is off but conditional topics
   it('is silent when the feature is on — the coherence row covers that version instead', () => {
     const checks = launchReadinessChecks({
       ...OFF_WITH_CONDITIONALS,
-      adaptiveScopeEnabled: true,
+      conditionalTopicsEnabled: true,
     });
-    expect(checks.map((c) => c.key)).not.toContain('adaptiveScopeOff');
-    expect(checks.map((c) => c.key)).toContain('adaptiveScope');
+    expect(checks.map((c) => c.key)).not.toContain('conditionalTopicsOff');
+    expect(checks.map((c) => c.key)).toContain('conditionalTopics');
   });
 
   it('is silent when the version has no conditional topics', () => {
     // Every topic `core`/`opening`/`closing` means the plan is the whole instrument either way, so
     // the feature being off changes nothing and the row would be noise.
-    const checks = launchReadinessChecks({ ...READY, adaptiveScopeConditionalCount: 0 });
-    expect(checks.map((c) => c.key)).not.toContain('adaptiveScopeOff');
+    const checks = launchReadinessChecks({ ...READY, conditionalTopicsConditionalCount: 0 });
+    expect(checks.map((c) => c.key)).not.toContain('conditionalTopicsOff');
   });
 });
 
@@ -136,10 +136,10 @@ describe('blocksLaunch', () => {
     const checks = launchReadinessChecks({
       ...READY,
       goal: null,
-      adaptiveScopeConditionalCount: 2,
+      conditionalTopicsConditionalCount: 2,
     });
     const failedBlocker = checks.find((c) => c.key === 'goal')!;
-    const warning = checks.find((c) => c.key === 'adaptiveScopeOff')!;
+    const warning = checks.find((c) => c.key === 'conditionalTopicsOff')!;
     const passing = checks.find((c) => c.key === 'sections')!;
 
     expect(blocksLaunch(failedBlocker)).toBe(true);
@@ -156,7 +156,7 @@ describe('blocksLaunch', () => {
       dataSlotsRequired: true,
       embeddingsRequired: true,
       dataSlotEmbeddingsRequired: true,
-      adaptiveScopeEnabled: true,
+      conditionalTopicsEnabled: true,
     });
     expect(checks.filter((c) => c.severity !== 'blocker')).toEqual([]);
   });

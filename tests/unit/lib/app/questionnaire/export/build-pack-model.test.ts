@@ -31,7 +31,7 @@ import type {
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
-import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
+import type { ConditionalTopicsSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 function question(
   partial: Partial<QuestionSlotView> & Pick<QuestionSlotView, 'key' | 'type'>
@@ -256,7 +256,7 @@ const SCOPE_TOPICS: Topic[] = [
   },
 ];
 
-const SCOPE_SETTINGS: AdaptiveScopeSettings = {
+const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   enabled: true,
   maxConditionalTopics: 3,
   includeCheckTopic: true,
@@ -403,7 +403,7 @@ describe('buildPackModel', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
-      adaptiveScope: false,
+      conditionalTopics: false,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
@@ -928,7 +928,7 @@ describe('buildPackModel', () => {
     });
   });
 
-  describe('adaptive scope appendix', () => {
+  describe('conditional topics appendix', () => {
     it('is null when excluded, even if topics/settings were passed in', () => {
       const model = buildPackModel(
         'T',
@@ -938,10 +938,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: false },
         'now'
       );
-      expect(model.adaptiveScope).toBeNull();
+      expect(model.conditionalTopics).toBeNull();
     });
 
     it('is null when included but no source was passed in', () => {
@@ -953,10 +953,10 @@ describe('buildPackModel', () => {
         null,
         null,
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope).toBeNull();
+      expect(model.conditionalTopics).toBeNull();
     });
 
     it('carries enabled/maxConditionalTopics/includeCheckTopic/sessionBudgetSeconds straight off the settings', () => {
@@ -968,10 +968,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope).toMatchObject({
+      expect(model.conditionalTopics).toMatchObject({
         enabled: true,
         maxConditionalTopics: 3,
         includeCheckTopic: true,
@@ -992,12 +992,12 @@ describe('buildPackModel', () => {
           scopeEvaluationRun: null,
         },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.enabled).toBe(false);
-      expect(model.adaptiveScope?.alwaysAskedTopics).toHaveLength(1);
-      expect(model.adaptiveScope?.conditionalTopics).toHaveLength(2);
+      expect(model.conditionalTopics?.enabled).toBe(false);
+      expect(model.conditionalTopics?.alwaysAsked).toHaveLength(1);
+      expect(model.conditionalTopics?.conditional).toHaveLength(2);
     });
 
     it('splits topics into always-asked (opening/core/closing) vs conditional, in authored order', () => {
@@ -1009,11 +1009,11 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.alwaysAskedTopics.map((t) => t.key)).toEqual(['background']);
-      expect(model.adaptiveScope?.conditionalTopics.map((t) => t.key)).toEqual([
+      expect(model.conditionalTopics?.alwaysAsked.map((t) => t.key)).toEqual(['background']);
+      expect(model.conditionalTopics?.conditional.map((t) => t.key)).toEqual([
         'talent',
         'compliance-check',
       ]);
@@ -1028,11 +1028,11 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.alwaysAskedTopics[0].criteria).toBeNull();
-      expect(model.adaptiveScope?.conditionalTopics[0].criteria).toBe(
+      expect(model.conditionalTopics?.alwaysAsked[0].criteria).toBeNull();
+      expect(model.conditionalTopics?.conditional[0].criteria).toBe(
         'The respondent mentions hiring difficulty or turnover.'
       );
     });
@@ -1046,13 +1046,11 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      const talent = model.adaptiveScope?.conditionalTopics.find((t) => t.key === 'talent');
-      const check = model.adaptiveScope?.conditionalTopics.find(
-        (t) => t.key === 'compliance-check'
-      );
+      const talent = model.conditionalTopics?.conditional.find((t) => t.key === 'talent');
+      const check = model.conditionalTopics?.conditional.find((t) => t.key === 'compliance-check');
       expect(talent?.sampledOnly).toBe(false);
       expect(check?.sampledOnly).toBe(true);
     });
@@ -1066,10 +1064,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.rules[0].sentence).toBe(
+      expect(model.conditionalTopics?.rules[0].sentence).toBe(
         'Always include "Talent & culture" when "Engagement" is greater than "50".'
       );
     });
@@ -1083,10 +1081,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.rules[1].sentence).toBe(
+      expect(model.conditionalTopics?.rules[1].sentence).toBe(
         'Never include "Compliance blind-spot check" when "Engagement" was never answered.'
       );
     });
@@ -1100,10 +1098,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.rules[2].sentence).toBe(
+      expect(model.conditionalTopics?.rules[2].sentence).toBe(
         'Always include "deleted-topic" when "deleted-slot" has any answer.'
       );
     });
@@ -1117,18 +1115,18 @@ describe('buildPackModel', () => {
         null,
         { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope).toMatchObject({
-        alwaysAskedTopics: [],
-        conditionalTopics: [],
+      expect(model.conditionalTopics).toMatchObject({
+        alwaysAsked: [],
+        conditional: [],
         rules: [],
       });
     });
   });
 
-  describe('scope evaluation appendix (nested under adaptive scope)', () => {
+  describe('scope evaluation appendix (nested under conditional topics)', () => {
     it('reports hasRun: false with no scores/targets when included but no run was passed in', () => {
       const model = buildPackModel(
         'T',
@@ -1138,10 +1136,10 @@ describe('buildPackModel', () => {
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.evaluation).toEqual({
+      expect(model.conditionalTopics?.evaluation).toEqual({
         hasRun: false,
         runAt: null,
         totalFindings: 0,
@@ -1150,7 +1148,7 @@ describe('buildPackModel', () => {
       });
     });
 
-    it('is absent (adaptiveScope itself is null) when the section is excluded, even with a run passed in', () => {
+    it('is absent (conditionalTopics itself is null) when the section is excluded, even with a run passed in', () => {
       const model = buildPackModel(
         'T',
         graphOf(SECTIONS),
@@ -1163,10 +1161,10 @@ describe('buildPackModel', () => {
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: false },
         'now'
       );
-      expect(model.adaptiveScope).toBeNull();
+      expect(model.conditionalTopics).toBeNull();
     });
 
     it('carries all four judge scores, in SCOPE_EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
@@ -1182,17 +1180,17 @@ describe('buildPackModel', () => {
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.adaptiveScope?.evaluation.scores.map((d) => d.dimension)).toEqual([
+      expect(model.conditionalTopics?.evaluation.scores.map((d) => d.dimension)).toEqual([
         'criteria_quality',
         'rule_integrity',
         'budget_realism',
         'coverage_and_burden',
       ]);
       const byDimension = new Map(
-        model.adaptiveScope?.evaluation.scores.map((d) => [d.dimension, d])
+        model.conditionalTopics?.evaluation.scores.map((d) => [d.dimension, d])
       );
       expect(byDimension.get('criteria_quality')).toMatchObject({
         label: 'Criteria-Quality Judge',
@@ -1221,10 +1219,10 @@ describe('buildPackModel', () => {
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
         null,
-        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      const targets = model.adaptiveScope?.evaluation.targets ?? [];
+      const targets = model.conditionalTopics?.evaluation.targets ?? [];
       expect(targets).toHaveLength(1);
       expect(targets[0]).toMatchObject({
         key: 'talent',

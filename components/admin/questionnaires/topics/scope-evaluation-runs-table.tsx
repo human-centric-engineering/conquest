@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ScopeEvaluationRunsTable (F17.21) — the Adaptive Scope evaluation run history for one version.
+ * ScopeEvaluationRunsTable (F17.21) — the Conditional Topics evaluation run history for one version.
  *
  * Mirrors `EvaluationRunsTable` (F5.2) exactly, over the scope panel's own endpoints and view
  * types: lists persisted runs newest-first, "Run evaluation" POSTs a fresh run and navigates

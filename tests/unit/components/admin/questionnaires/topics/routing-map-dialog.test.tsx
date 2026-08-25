@@ -1,5 +1,5 @@
 /**
- * Unit tests: `RoutingMapDialog` — the Adaptive scope routing map.
+ * Unit tests: `RoutingMapDialog` — the Conditional topics routing map.
  *
  * The graph itself is asserted in `tests/unit/lib/app/questionnaire/scope/graph.test.ts`; what is tested
  * here is the shell around it — the two states an author can misread (a map of a switched-off version,
@@ -44,8 +44,8 @@ vi.mock('@/hooks/use-theme', () => ({
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ALWAYS_BAND_NODE_ID } from '@/lib/app/questionnaire/scope/graph';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
@@ -67,11 +67,14 @@ function topic(key: string, phase: Topic['phase'], label = `Topic ${key}`): Topi
   };
 }
 
-function payload(topics: Topic[], settings: Partial<AdaptiveScopeSettings> = {}): TopicsPayload {
+function payload(
+  topics: Topic[],
+  settings: Partial<ConditionalTopicsSettings> = {}
+): TopicsPayload {
   return {
     ...EMPTY_TOPICS_PAYLOAD,
     topics,
-    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...settings },
+    settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings },
   };
 }
 
@@ -123,7 +126,7 @@ describe('RoutingMapDialog', () => {
   });
 
   describe('the states an author could misread', () => {
-    it('says so when adaptive scope is off', () => {
+    it('says so when conditional topics is off', () => {
       render(
         <RoutingMapDialog payload={payload(FULL, { enabled: false })} onEditTopic={vi.fn()} />
       );
@@ -245,6 +248,69 @@ describe('RoutingMapDialog', () => {
  * Wrapped in `act` because this is a bare callback rather than a DOM event — without it the selection
  * state update is scheduled and never flushed, and the detail panel still shows its empty prompt.
  */
+describe('RoutingMapDialog — the overlays (F17.29)', () => {
+  const DRY_RUN = {
+    selectedKeys: ['pricing'],
+    excluded: [],
+    proposedKeys: ['pricing'],
+  };
+
+  it('offers no overlay row when there is nothing to lay over the map', () => {
+    // An empty toggle row reads as "the overlays found nothing", which is not the same statement as
+    // "nobody has pressed Try it and this version has no interviews behind it".
+    open();
+    expect(screen.queryByTestId('routing-map-overlays')).not.toBeInTheDocument();
+  });
+
+  it('offers only the overlays whose data is loaded', () => {
+    open({ overlays: { dryRun: DRY_RUN } });
+
+    const row = within(screen.getByTestId('routing-map-overlays'));
+    expect(row.getByRole('switch', { name: 'Last try-it run' })).toBeInTheDocument();
+    expect(row.queryByRole('switch', { name: 'How often it is chosen' })).not.toBeInTheDocument();
+  });
+
+  it('offers the problems overlay off the payload’s own findings', () => {
+    render(
+      <RoutingMapDialog
+        payload={{
+          ...payload(FULL),
+          issues: [
+            {
+              severity: 'error',
+              code: 'no_criteria',
+              message: 'No criteria.',
+              topicKey: 'pricing',
+            },
+          ],
+        }}
+        onEditTopic={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
+
+    expect(
+      within(screen.getByTestId('routing-map-overlays')).getByRole('switch', { name: 'Problems' })
+    ).toBeInTheDocument();
+  });
+
+  it('starts every overlay off, and annotates only once one is switched on', () => {
+    // The map's first sight must be the structure. An overlay is a question asked OF it.
+    open({ overlays: { dryRun: DRY_RUN } });
+    selectNode('conditional:pricing');
+
+    expect(
+      within(screen.getByTestId('routing-map-detail')).queryByText(/Last try-it run/)
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Last try-it run' }));
+
+    const detail = within(screen.getByTestId('routing-map-detail'));
+    expect(detail.getByText('Last try-it run')).toBeInTheDocument();
+    expect(detail.getByText(/it was asked/i)).toBeInTheDocument();
+  });
+});
+
 function selectNode(id: string): void {
   const props = ReactFlowMock.mock.calls[ReactFlowMock.mock.calls.length - 1]?.[0] as {
     onNodeClick: (event: unknown, node: { id: string }) => void;

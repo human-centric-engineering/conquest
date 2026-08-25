@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The Adaptive Scope judge panel — a second, structural review alongside the design-evaluation
+ * The Conditional Topics judge panel — a second, structural review alongside the design-evaluation
  * panel, scoring the SCOPE CONFIG (topics, hard rules, planner instructions, budget) rather than
  * the question structure.
  *
@@ -94,7 +94,7 @@ export function ScopeEvaluationCard({
 
   /** Resolve a finding's `targetKey` (`topic:<key>` | `rule:<id>` | `settings`) into a readable label. */
   function resolveTarget(targetKey: string): string {
-    if (targetKey === 'settings') return 'Adaptive scope settings';
+    if (targetKey === 'settings') return 'Conditional topics settings';
     if (targetKey.startsWith('topic:')) {
       const key = targetKey.slice('topic:'.length);
       return topicLabelByKey.get(key) ?? key;

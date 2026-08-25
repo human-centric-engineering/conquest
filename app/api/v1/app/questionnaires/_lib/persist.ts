@@ -311,10 +311,10 @@ export async function persistIngestion(
     const counts = await writeGraph(tx, versionId, extraction, input.requiredness ?? 'all');
     await writeSourceDocument(tx, versionId, source);
 
-    // Adaptive Scope (P17): give the fresh version a complete topic set — one `core` (always-asked)
+    // Conditional Topics (P17): give the fresh version a complete topic set — one `core` (always-asked)
     // topic per section. Inside the transaction because a half-seeded brand-new version is worth
     // rolling back, and changes nothing about how the questionnaire runs: every seeded topic is
-    // always-asked and `adaptiveScope.enabled` defaults false. Authoring conditionality later is
+    // always-asked and `conditionalTopics.enabled` defaults false. Authoring conditionality later is
     // then editing, not building a parallel structure from nothing.
     await seedTopicsForVersion(tx, versionId);
 
@@ -405,7 +405,7 @@ export async function replaceVersionStructure(
 
     const counts = await writeGraph(tx, versionId, extraction);
 
-    // Adaptive Scope (P17): the rewrite replaced every question key, so topic membership may now
+    // Conditional Topics (P17): the rewrite replaced every question key, so topic membership may now
     // point at rows that no longer exist. Prune, drop the emptied, seed what is uncovered — rather
     // than delete-and-reseed, which would throw away the admin's criteria prose.
     await reconcileTopicsForVersion(tx, versionId);

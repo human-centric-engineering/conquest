@@ -1,5 +1,5 @@
 /**
- * Routing Analyst capability — Adaptive Scope (P17.4).
+ * Routing Analyst capability — Conditional Topics (P17.4).
  *
  * A `BaseCapability` that runs ONE structured LLM call over an uploaded instrument and returns the
  * TOPIC SET it implies: which groups of questions always run, which are conditional, the author's
@@ -24,6 +24,7 @@ import { CostOperation } from '@/types/orchestration';
 import { z } from 'zod';
 
 import { redactedString } from '@/lib/security/redact';
+import { SOURCE_DOCUMENT_ROLES } from '@/lib/app/questionnaire/constants';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
 import type { CapabilityContext, CapabilityResult } from '@/lib/orchestration/capabilities/types';
 import {
@@ -98,13 +99,21 @@ const existingTopicSchema = z.object({
   source: z.enum(TOPIC_SOURCES),
 });
 
+/** One document the analyst reads — the instrument, or a companion attached beside it. */
+const documentSchema = z.object({
+  role: z.enum(SOURCE_DOCUMENT_ROLES),
+  fileName: z.string().optional(),
+  text: z.string(),
+  truncated: z.boolean().optional(),
+  omitted: z.boolean().optional(),
+});
+
 const argsSchema = z.object({
   questions: z.array(questionViewSchema).min(1),
   goal: z.string().nullish(),
   audience: z.unknown().optional(),
   dataSlots: z.array(dataSlotViewSchema).optional(),
-  documentText: z.string().optional(),
-  documentFileName: z.string().optional(),
+  documents: z.array(documentSchema).optional(),
   existingTopics: z.array(existingTopicSchema).optional(),
   instructions: z.string().optional(),
   versionId: z.string().optional(),
@@ -160,8 +169,20 @@ export class AppAnalyseRoutingCapability extends BaseCapability<
       questionCount: args.questions.length,
       dataSlotCount: args.dataSlots?.length ?? 0,
       existingTopicCount: args.existingTopics?.length ?? 0,
-      ...(args.documentFileName !== undefined ? { documentFileName: args.documentFileName } : {}),
-      ...(args.documentText !== undefined ? { documentText: redactedString('documentText') } : {}),
+      // Document TEXT is the instrument itself — never in provenance. The shape of the set is,
+      // because "which documents did this run actually read" is the first question asked of a
+      // proposal that missed something.
+      ...(args.documents !== undefined
+        ? {
+            documents: args.documents.map((document) => ({
+              role: document.role,
+              ...(document.fileName !== undefined ? { fileName: document.fileName } : {}),
+              ...(document.truncated ? { truncated: true } : {}),
+              ...(document.omitted ? { omitted: true } : {}),
+              text: redactedString('text'),
+            })),
+          }
+        : {}),
       ...(args.instructions !== undefined ? { instructions: redactedString('instructions') } : {}),
     };
     const preview =
@@ -219,8 +240,7 @@ export class AppAnalyseRoutingCapability extends BaseCapability<
       ...(args.goal !== undefined ? { goal: args.goal } : {}),
       ...(args.audience !== undefined ? { audience: args.audience } : {}),
       ...(args.dataSlots ? { dataSlots: args.dataSlots } : {}),
-      ...(args.documentText ? { documentText: args.documentText } : {}),
-      ...(args.documentFileName ? { documentFileName: args.documentFileName } : {}),
+      ...(args.documents ? { documents: args.documents } : {}),
       ...(args.existingTopics ? { existingTopics: args.existingTopics as Topic[] } : {}),
       ...(args.instructions ? { instructions: args.instructions } : {}),
     });

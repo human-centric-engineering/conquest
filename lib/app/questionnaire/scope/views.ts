@@ -1,5 +1,5 @@
 /**
- * Adaptive Scope (P17) — the shapes the admin surfaces read.
+ * Conditional Topics (P17) — the shapes the admin surfaces read.
  *
  * One declaration of what `GET …/versions/:vid/topics` returns, shared by the server fetcher
  * (`workspace-data.ts`), the Topics tab page, and the client panel. Without it the payload would be
@@ -12,12 +12,13 @@ import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
 import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
   NEGATIVE_SCOPE_OPERATOR,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type InterviewPlan,
   type ProposedTopicSet,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
+import type { SourceDocumentView } from '@/lib/app/questionnaire/ingestion/source-documents';
 
 /** One question the membership picker can offer, with the section it sits in. */
 export interface TopicQuestionRef {
@@ -73,12 +74,12 @@ export interface TopicsCostView {
  * findings computed server-side, and the key inventory the membership pickers offer.
  *
  * The findings are computed on the server rather than in the browser because the launch gate runs
- * the same `validateAdaptiveScope` — one evaluation, so the page and the gate can never disagree
+ * the same `validateConditionalTopics` — one evaluation, so the page and the gate can never disagree
  * about whether a version is coherent.
  */
 export interface TopicsPayload {
   topics: Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   issues: ScopeIssue[];
   inventory: {
     questions: TopicQuestionRef[];
@@ -125,6 +126,15 @@ export interface TopicsPayload {
    * would report orphans on a version whose issue list is deliberately silent.
    */
   coverage: TopicsCoverage;
+  /**
+   * Every source document on the version — the instrument it was extracted from, and any
+   * supporting documents attached beside it (F17.29).
+   *
+   * In this payload rather than behind its own fetch, for the reason the list surfaces already
+   * follow: the card that lists them sits on this tab, and a per-card `useEffect` fetch would put
+   * a second round-trip in front of a list of at most six filenames.
+   */
+  documents: SourceDocumentView[];
 }
 
 /** The `coverage` block of {@link TopicsPayload}. Counts only — the keys stay server-side. */
@@ -151,6 +161,7 @@ export const EMPTY_TOPICS_PAYLOAD: Omit<TopicsPayload, 'settings'> = {
     totalDataSlots: 0,
     uncoveredDataSlots: 0,
   },
+  documents: [],
 };
 
 /* -------------------------------------------------------------------------- */
@@ -222,7 +233,7 @@ export interface PlanPreviewResult {
  */
 export function buildPlanPreviewForm(
   topics: readonly Topic[],
-  settings: AdaptiveScopeSettings,
+  settings: ConditionalTopicsSettings,
   dataSlots: readonly TopicDataSlotRef[],
   questionPrompts: ReadonlyMap<string, string>
 ): PlanPreviewForm {

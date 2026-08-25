@@ -1,5 +1,5 @@
 /**
- * Workflow diagram: Adaptive Scope routing analysis (F17.4, F17.19).
+ * Workflow diagram: Conditional Topics routing analysis (F17.4, F17.19).
  *
  * Structure extraction reads an uploaded document for its questions and discards everything else.
  * Real instruments carry pages it throws away — "Routing", "Guardrails", "How to use this",
@@ -33,7 +33,7 @@ import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types'
 
 export const scopeRoutingAnalysisWorkflow = diagram({
   slug: 'scope-routing-analysis',
-  title: 'Adaptive Scope routing analysis',
+  title: 'Conditional Topics routing analysis',
   description: 'Read an uploaded document for routing instructions and propose topics and rules.',
   sourceModule: 'app/api/v1/app/questionnaires/_lib/topic-draft.ts',
   entryStepId: 'candidacy-check',

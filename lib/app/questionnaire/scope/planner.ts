@@ -33,6 +33,9 @@ import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import {
   MAX_ANSWERS_IN_PLANNER_PROMPT,
   MAX_FILLS_IN_PLANNER_PROMPT,
+  MAX_PLANNER_ITEM_CHARS,
+  MAX_PLANNER_ITEMS_PER_TOPIC,
+  MAX_PLANNER_RENDERED_ITEMS,
   PLANNER_ANSWER_CHARS,
   PLANNER_FILL_CHARS,
   SCOPE_PLANNER_AGENT_SLUG,
@@ -48,13 +51,23 @@ import {
   type ProposedTopic,
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type {
-  AdaptiveScopeSettings,
+  ConditionalTopicsSettings,
   InterviewPlan,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
 
 const plannerSchema = z.object({
-  selected: z.array(z.object({ topicKey: z.string(), rationale: z.string() })),
+  selected: z.array(
+    z.object({
+      topicKey: z.string(),
+      rationale: z.string(),
+      /**
+       * The items to ask, when only part of the topic applies (C6). Optional and rare — omitting it
+       * is the normal answer, and means "all of it, at the topic's own depth".
+       */
+      questionKeys: z.array(z.string()).optional(),
+    })
+  ),
   confidence: z.number(),
   respondentMessage: z.string(),
 });
@@ -94,7 +107,16 @@ export interface PlanScopeParams {
   briefing?: string | null;
   /** The questionnaire's stated goal, for framing. */
   goal?: string | null;
-  settings: AdaptiveScopeSettings;
+  /**
+   * Question key → what that question asks, for the candidate topics (C6, F17.29).
+   *
+   * Optional, and everything works without it: absent, the prompt lists no items and the planner
+   * chooses whole topics exactly as it did before. Present, a candidate's questions are listed and
+   * the planner may name a SUBSET of one — "three of these ten apply to this respondent" — which
+   * `depth` cannot express, being a dial with two stops and no way to say which items.
+   */
+  itemPrompts?: ReadonlyMap<string, string>;
+  settings: ConditionalTopicsSettings;
   /** Turn ordinal the plan is being decided at. */
   decidedAtTurn: number;
   /**
@@ -174,11 +196,45 @@ function renderConveyed(
   return parts.join('\n\n');
 }
 
-function renderCandidates(candidates: readonly Topic[]): string {
+/**
+ * Render the candidates, with each topic's questions when the caller supplied their wording.
+ *
+ * Bounded three ways, because this is the part of the prompt that grows with the instrument: a
+ * per-question character cap, a per-topic item cap, and a whole-prompt item budget spent in
+ * candidate order (best first, which is the order the planner reads them in anyway). A topic whose
+ * items were not rendered simply cannot be partially selected — which is why the line saying so is
+ * printed rather than the items being dropped in silence.
+ */
+function renderCandidates(
+  candidates: readonly Topic[],
+  itemPrompts: ReadonlyMap<string, string> | undefined
+): string {
+  let budget = MAX_PLANNER_RENDERED_ITEMS;
+
   return candidates
     .map((t) => {
       const lines = [`- key: ${t.key}`, `  name: ${t.label}`];
       if (t.criteria) lines.push(`  choose when: ${t.criteria}`);
+
+      if (itemPrompts && t.members.questionKeys.length > 0) {
+        const known = t.members.questionKeys.filter((key) => itemPrompts.has(key));
+        const room = Math.min(known.length, MAX_PLANNER_ITEMS_PER_TOPIC, Math.max(0, budget));
+        if (room < known.length) {
+          lines.push('  questions: not listed — choose this topic whole or not at all');
+        } else if (room > 0) {
+          budget -= room;
+          lines.push('  questions:');
+          for (const key of known.slice(0, room)) {
+            const prompt = (itemPrompts.get(key) ?? '').replace(/\s+/g, ' ').trim();
+            const text =
+              prompt.length > MAX_PLANNER_ITEM_CHARS
+                ? `${prompt.slice(0, MAX_PLANNER_ITEM_CHARS)}…`
+                : prompt;
+            lines.push(`    - ${key}: ${text}`);
+          }
+        }
+      }
+
       return lines.join('\n');
     })
     .join('\n\n');
@@ -262,22 +318,29 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
           'opening that drove this choice.',
         '`respondentMessage` is spoken to the respondent before the chosen topics run: one or two ' +
           'warm, plain sentences naming the areas you want to go deeper on, in their language. ' +
-          'Never mention keys, scores, confidence, criteria, or that a decision was made about them.'
+          'Never mention keys, scores, confidence, criteria, or that a decision was made about them.',
+        'Where a candidate lists its questions, you MAY name a few of them in `questionKeys` when ' +
+          'only part of the topic fits what this respondent described — three of ten, or one. ' +
+          'Omitting `questionKeys` is the normal answer and means the whole topic. Name a subset ' +
+          'only when the rest would plainly waste their time; a half-asked topic scores worse than ' +
+          'a whole one, so the bar is "these questions are the reason I chose this topic", not ' +
+          '"these look most interesting". Every key must be one this topic listed.'
       )
     ),
     section(
       'what_the_respondent_conveyed',
       renderConveyed(params.fills, params.answers ?? [], params.briefing)
     ),
-    section('candidate_topics', renderCandidates(candidates)),
+    section('candidate_topics', renderCandidates(candidates, params.itemPrompts)),
     ...(params.goal ? [section('questionnaire_goal', params.goal)] : []),
     ...(params.settings.plannerInstructions
       ? [section('additional_guidance_from_the_administrator', params.settings.plannerInstructions)]
       : []),
     section(
       'output_format',
-      'Reply with ONLY JSON: {"selected":[{"topicKey":string,"rationale":string}],' +
-        '"confidence":number,"respondentMessage":string}. No prose, no markdown fences.'
+      'Reply with ONLY JSON: {"selected":[{"topicKey":string,"rationale":string,' +
+        '"questionKeys"?:string[]}],"confidence":number,"respondentMessage":string}. ' +
+        'No prose, no markdown fences.'
     )
   );
 
@@ -439,6 +502,12 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   const proposed: ProposedTopic[] = asked.value.selected.map((s) => ({
     key: s.topicKey,
     rationale: s.rationale,
+    // Only ever a NARROWING: `applyGuardrails` intersects it with the topic's own members and
+    // discards it entirely when nothing survives, so a model listing keys from the wrong topic
+    // leaves the plan exactly as it would have been without the field.
+    ...(s.questionKeys && s.questionKeys.length > 0
+      ? { members: { questionKeys: s.questionKeys } }
+      : {}),
   }));
 
   return {

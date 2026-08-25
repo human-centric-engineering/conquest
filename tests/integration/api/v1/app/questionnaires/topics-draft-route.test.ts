@@ -1,5 +1,5 @@
 /**
- * Integration tests: the Routing Analyst's pending proposal — Adaptive Scope (P17.4).
+ * Integration tests: the Routing Analyst's pending proposal — Conditional Topics (P17.4).
  *
  *   POST   /api/v1/app/questionnaires/:id/versions/:vid/topics/draft  → accept the proposal
  *   DELETE /api/v1/app/questionnaires/:id/versions/:vid/topics/draft  → discard the proposal
@@ -66,7 +66,7 @@ import {
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -126,7 +126,7 @@ function sampleTopic(overrides: Partial<Record<string, unknown>> = {}) {
 function acceptResult(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     topics: [sampleTopic()],
-    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, rules: [] },
+    settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, rules: [] },
     ...overrides,
   };
 }
@@ -254,14 +254,14 @@ describe('POST /api/v1/app/questionnaires/:id/versions/:vid/topics/draft', () =>
     (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
     (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
     (acceptTopicDraft as Mock).mockResolvedValue(
-      acceptResult({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true } })
+      acceptResult({ settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true } })
     );
 
     const res = await POST(jsonReq({ ...validAcceptBody(), enable: true }), ctx(PARAMS));
     expect(res.status).toBe(200);
     expect((acceptTopicDraft as Mock).mock.calls[0][1].enable).toBe(true);
 
-    // Audited: this accept is the moment adaptive scope started deciding what respondents are
+    // Audited: this accept is the moment conditional topics started deciding what respondents are
     // asked, which the audit log had no way to show while `enabled` moved only from the settings
     // PATCH.
     expect(logAdminAction).toHaveBeenCalledWith(

@@ -6,10 +6,10 @@
  * brand-free {@link file://./instrument-pdf-document.tsx}: same question-block styling, but this one
  * carries the ConQuest wordmark/tagline/website in the header and a closing "About ConQuest" page —
  * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of
- * meta / experience-setup / data-slots / questions / definitions / evaluations / adaptive scope the
- * model includes (`null` fields are simply skipped). Evaluations and adaptive scope render last,
+ * meta / experience-setup / data-slots / questions / definitions / evaluations / conditional topics the
+ * model includes (`null` fields are simply skipped). Evaluations and conditional topics render last,
  * right before the closing page — the appendix position. The F17.21 scope-evaluation judge panel's
- * verdict renders as the last subsection of adaptive scope, after the hard rules — a judgement about
+ * verdict renders as the last subsection of conditional topics, after the hard rules — a judgement about
  * the routing design above it, not a section of its own.
  *
  * No font is registered — `@react-pdf/renderer` ships Helvetica by default and no other document in
@@ -21,7 +21,7 @@ import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/rendere
 
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
-  PackAdaptiveScopeTopic,
+  PackConditionalTopicsTopic,
   PackModel,
   PackSetupItem,
 } from '@/lib/app/questionnaire/export/build-pack-model';
@@ -433,9 +433,9 @@ function QuestionBlock({ q }: { q: InstrumentQuestion }) {
   );
 }
 
-/** One Adaptive scope topic — label, an optional description, and (for a conditional topic) its
+/** One Conditional topics topic — label, an optional description, and (for a conditional topic) its
  *  plain-English inclusion criteria. */
-function ScopeTopicBlock({ topic }: { topic: PackAdaptiveScopeTopic }) {
+function ScopeTopicBlock({ topic }: { topic: PackConditionalTopicsTopic }) {
   return (
     <View style={styles.scopeTopic} wrap={false}>
       <Text style={styles.scopeTopicLabel}>{topic.label}</Text>
@@ -641,28 +641,28 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
           </View>
         )}
 
-        {model.adaptiveScope && (
+        {model.conditionalTopics && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Adaptive scope</Text>
+            <Text style={styles.sectionTitle}>Conditional topics</Text>
             <Text style={styles.scopeIntro}>
               How this questionnaire adapts to each respondent — which parts everyone gets, which
               parts depend on what they say, and the rules that decide.
             </Text>
-            {!model.adaptiveScope.enabled ? (
+            {!model.conditionalTopics.enabled ? (
               <Text style={styles.empty}>
-                Adaptive scope is not enabled for this version — every respondent is asked the full
-                instrument.
+                Conditional topics is not enabled for this version — every respondent is asked the
+                full instrument.
               </Text>
             ) : (
               <>
                 <Text style={styles.scopeFacts}>
                   {[
-                    `Up to ${model.adaptiveScope.maxConditionalTopics} conditional topic(s) per interview`,
-                    model.adaptiveScope.includeCheckTopic
+                    `Up to ${model.conditionalTopics.maxConditionalTopics} conditional topic(s) per interview`,
+                    model.conditionalTopics.includeCheckTopic
                       ? 'one additional, unselected topic is sampled lightly to check for blind spots'
                       : null,
-                    model.adaptiveScope.sessionBudgetSeconds > 0
-                      ? `interviews are budgeted to about ${Math.round(model.adaptiveScope.sessionBudgetSeconds / 60)} minute(s)`
+                    model.conditionalTopics.sessionBudgetSeconds > 0
+                      ? `interviews are budgeted to about ${Math.round(model.conditionalTopics.sessionBudgetSeconds / 60)} minute(s)`
                       : null,
                   ]
                     .filter(Boolean)
@@ -670,27 +670,27 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                 </Text>
 
                 <Text style={styles.scopeSubheading}>Always asked</Text>
-                {model.adaptiveScope.alwaysAskedTopics.length === 0 ? (
+                {model.conditionalTopics.alwaysAsked.length === 0 ? (
                   <Text style={styles.empty}>None defined.</Text>
                 ) : (
-                  model.adaptiveScope.alwaysAskedTopics.map((topic) => (
+                  model.conditionalTopics.alwaysAsked.map((topic) => (
                     <ScopeTopicBlock key={topic.key} topic={topic} />
                   ))
                 )}
 
                 <Text style={styles.scopeSubheading}>Asked when it fits</Text>
-                {model.adaptiveScope.conditionalTopics.length === 0 ? (
+                {model.conditionalTopics.conditional.length === 0 ? (
                   <Text style={styles.empty}>None defined.</Text>
                 ) : (
-                  model.adaptiveScope.conditionalTopics.map((topic) => (
+                  model.conditionalTopics.conditional.map((topic) => (
                     <ScopeTopicBlock key={topic.key} topic={topic} />
                   ))
                 )}
 
-                {model.adaptiveScope.rules.length > 0 && (
+                {model.conditionalTopics.rules.length > 0 && (
                   <>
                     <Text style={styles.scopeSubheading}>Hard rules</Text>
-                    {model.adaptiveScope.rules.map((rule, i) => (
+                    {model.conditionalTopics.rules.map((rule, i) => (
                       <Text key={i} style={styles.scopeRule}>{`•  ${rule.sentence}`}</Text>
                     ))}
                   </>
@@ -701,13 +701,13 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   AI judge panel over the routing design above — includes findings not yet reviewed;
                   treat as suggestions, not conclusions.
                 </Text>
-                {!model.adaptiveScope.evaluation.hasRun ? (
+                {!model.conditionalTopics.evaluation.hasRun ? (
                   <Text style={styles.empty}>
                     No scope evaluation has been run for this version yet.
                   </Text>
                 ) : (
                   <>
-                    {model.adaptiveScope.evaluation.scores.map((judge) => (
+                    {model.conditionalTopics.evaluation.scores.map((judge) => (
                       <Text key={judge.dimension} style={styles.evaluationScore}>
                         {judge.diagnostic
                           ? `${judge.label} — unavailable: ${judge.diagnostic}`
@@ -715,10 +715,10 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                       </Text>
                     ))}
 
-                    {model.adaptiveScope.evaluation.targets.length === 0 ? (
+                    {model.conditionalTopics.evaluation.targets.length === 0 ? (
                       <Text style={styles.empty}>No findings raised.</Text>
                     ) : (
-                      model.adaptiveScope.evaluation.targets.map((target) => (
+                      model.conditionalTopics.evaluation.targets.map((target) => (
                         <View key={target.key} style={styles.evaluationTarget}>
                           <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
                           <Text style={styles.evaluationTargetMeta}>

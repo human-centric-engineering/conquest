@@ -40,7 +40,7 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/form-answers', () => seamM
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
-// Adaptive Scope (P17): the route refuses a write to a question outside this interview. Mocked to
+// Conditional Topics (P17): the route refuses a write to a question outside this interview. Mocked to
 // an inert scope here — the enforcement itself is covered in `scope/` and by its own case below.
 const scopeMock = vi.hoisted(() => ({
   loadSessionScope: vi.fn(),
@@ -254,7 +254,7 @@ describe('persistence', () => {
   });
 });
 
-describe('adaptive scope (P17)', () => {
+describe('conditional topics (P17)', () => {
   it('refuses a write to a question this interview never asked', async () => {
     // The form only RENDERS in-scope questions, so an out-of-scope key is a crafted or stale
     // request. Storing it would put data in the report that the instrument itself reports as

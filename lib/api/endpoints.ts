@@ -502,11 +502,20 @@ export const API = {
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,
       /**
-       * Adaptive Scope topics for a version (GET topics + settings + coherence findings +
+       * Conditional Topics topics for a version (GET topics + settings + coherence findings +
        * key inventory, PUT replace-set the reviewed topics, PATCH the settings blob).
        */
       versionTopics: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics`,
+      /**
+       * A version's source documents (GET list, POST attach a supporting one). The instrument
+       * itself is written by ingest / re-ingest and cannot be posted here.
+       */
+      versionDocuments: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/documents`,
+      /** One attached supporting document (DELETE detaches it; the instrument is refused). */
+      versionDocument: (id: string, versionId: string, documentId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/documents/${documentId}`,
       /** Run the Routing Analyst over a version (POST → SSE: reading → analysing → saving → done). */
       versionTopicsAnalyseStream: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/analyse/stream`,
@@ -520,7 +529,7 @@ export const API = {
       versionTopicsPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/preview`,
       /**
-       * Run the Adaptive Scope evaluation judge panel over a version (POST — F17.21). Ephemeral:
+       * Run the Conditional Topics evaluation judge panel over a version (POST — F17.21). Ephemeral:
        * writes nothing, returns each judge's score + findings.
        */
       versionScopeEvaluatePreview: (id: string, versionId: string): string =>

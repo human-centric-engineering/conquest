@@ -1,5 +1,5 @@
 /**
- * Workflow diagram: Adaptive Scope session planning (P17).
+ * Workflow diagram: Conditional Topics session planning (P17).
  *
  * Runs ONCE per session, right after the turn that completes the opening topics —
  * `maybePlanScope` (`app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`), which triggers
@@ -24,7 +24,7 @@ import { SCOPE_PLANNER_AGENT_SLUG } from '@/lib/app/questionnaire/scope/constant
 
 export const scopePlanningWorkflow = diagram({
   slug: 'scope-planning',
-  title: 'Adaptive Scope session planning',
+  title: 'Conditional Topics session planning',
   description: "Decide which conditional topics this session's interview will cover, once.",
   sourceModule: 'app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts',
   entryStepId: 'opening-gate',
@@ -82,7 +82,7 @@ export const scopePlanningWorkflow = diagram({
         note: 'A deterministic scalar comparison (settings.minConfidence). A planner call that failed outright is treated the same as confidence 0.',
         settings: [
           {
-            key: 'adaptiveScope.minConfidence',
+            key: 'conditionalTopics.minConfidence',
             label: 'Minimum planner confidence',
             effect: "Below this, the planner's picks are discarded in favour of the fallback plan.",
           },
@@ -120,13 +120,13 @@ export const scopePlanningWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.config.adaptiveScope.enabled) {
+    if (!ctx.config.conditionalTopics.enabled) {
       return inactive(
-        'Adaptive Scope is off for this version — every topic runs, and this planner never fires.'
+        'Conditional Topics is off for this version — every topic runs, and this planner never fires.'
       );
     }
     return applies(
-      "Adaptive Scope is on — this planner decides each session's conditional topics once the opening is answered."
+      "Conditional Topics is on — this planner decides each session's conditional topics once the opening is answered."
     );
   },
 });

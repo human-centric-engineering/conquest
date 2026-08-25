@@ -1,9 +1,9 @@
 /**
- * Adaptive Scope × scoring — the comparability checks (P17, F17.15). Pure.
+ * Conditional Topics × scoring — the comparability checks (P17, F17.15). Pure.
  *
  * ## The question this answers
  *
- * Adaptive Scope decides which parts of an instrument a respondent is asked. Scoring combines
+ * Conditional Topics decides which parts of an instrument a respondent is asked. Scoring combines
  * answers into a scale. Put the two together and a scale can be computed from a different subset of
  * its own items for every respondent — and `scoreSession` will return a number either way.
  *
@@ -39,7 +39,7 @@
 
 import {
   ALWAYS_PHASES,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
@@ -47,7 +47,7 @@ import type { ScoringItem, ScoringSchemaContent } from '@/lib/app/questionnaire/
 
 export interface ComparabilityInput {
   topics: readonly Topic[];
-  settings: AdaptiveScopeSettings;
+  settings: ConditionalTopicsSettings;
   /** The version's scoring schema. An empty one produces no findings — there is nothing to compare. */
   scoring: ScoringSchemaContent;
   /**
@@ -100,7 +100,7 @@ function ownersOf(item: ScoringItem, topics: readonly Topic[]): Topic[] {
  *
  * Runs whether or not `enabled` is set: "what would routing do to my scores" is precisely the
  * question an author needs answered BEFORE they flip the switch, and afterwards the symptom is a
- * cohort report with an empty column. The messages say "while Adaptive Scope is on" so a finding
+ * cohort report with an empty column. The messages say "while Conditional Topics is on" so a finding
  * read against a switched-off version is not mistaken for a live one.
  */
 export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[] {
@@ -151,7 +151,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
       issues.push({
         severity: settings.enabled ? 'error' : 'warning',
         code: 'scale_item_unowned',
-        message: `"${scale.name}" scores ${formatKeys(unowned)}, which belong${unowned.length === 1 ? 's' : ''} to no topic — so while Adaptive Scope is on ${unowned.length === 1 ? 'it is' : 'they are'} never asked and never contribute${unowned.length === 1 ? 's' : ''} to the scale.`,
+        message: `"${scale.name}" scores ${formatKeys(unowned)}, which belong${unowned.length === 1 ? 's' : ''} to no topic — so while Conditional Topics is on ${unowned.length === 1 ? 'it is' : 'they are'} never asked and never contribute${unowned.length === 1 ? 's' : ''} to the scale.`,
       });
     }
 
@@ -182,7 +182,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
       issues.push({
         severity: 'warning',
         code: 'scale_never_whole',
-        message: `"${scale.name}" draws on ${capBound.length} conditional topics your criteria must choose between, but at most ${cap} of them are ever asked. With Adaptive Scope on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${capBound.length}.`,
+        message: `"${scale.name}" draws on ${capBound.length} conditional topics your criteria must choose between, but at most ${cap} of them are ever asked. With Conditional Topics on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${capBound.length}.`,
       });
       continue;
     }
@@ -195,7 +195,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
         issues.push({
           severity: 'warning',
           code: 'scale_never_whole',
-          message: `"${scale.name}" draws on conditional topics costing about ${needed}s together, but only ${seconds.routedAllowance}s is left for the topics the agent chooses. They can never all be asked, so with Adaptive Scope on no respondent is ever asked the whole scale.`,
+          message: `"${scale.name}" draws on conditional topics costing about ${needed}s together, but only ${seconds.routedAllowance}s is left for the topics the agent chooses. They can never all be asked, so with Conditional Topics on no respondent is ever asked the whole scale.`,
         });
         continue;
       }
@@ -204,7 +204,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
     issues.push({
       severity: 'warning',
       code: 'scale_split_by_scope',
-      message: `"${scale.name}" draws on ${touched.size === 1 ? 'a conditional topic' : `${touched.size} conditional topics`}, so while Adaptive Scope is on a respondent who is not asked ${touched.size === 1 ? 'it' : 'all of them'} is scored on only part of the scale. Cohort averages and score-band breakdowns leave those respondents out.`,
+      message: `"${scale.name}" draws on ${touched.size === 1 ? 'a conditional topic' : `${touched.size} conditional topics`}, so while Conditional Topics is on a respondent who is not asked ${touched.size === 1 ? 'it' : 'all of them'} is scored on only part of the scale. Cohort averages and score-band breakdowns leave those respondents out.`,
     });
   }
 

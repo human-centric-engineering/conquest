@@ -104,7 +104,7 @@ describe('allowedNumbers', () => {
   it('admits every count the record actually observed', () => {
     const allowed = allowedNumbers(record());
     // answered, total, completionPct, gaps, docs in scope, docs used, snippets, searches, sources —
-    // plus 0 for the two Adaptive Scope counts, which a non-adaptive record observed as zero.
+    // plus 0 for the two Conditional Topics counts, which a non-adaptive record observed as zero.
     expect([...allowed].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 6, 9, 34, 40, 85]);
   });
 

@@ -1,5 +1,5 @@
 /**
- * Unit tests for `checkAdaptiveScopeCandidacy` (P17.19) — the ingestion-time fail-soft
+ * Unit tests for `checkConditionalTopicsCandidacy` (P17.19) — the ingestion-time fail-soft
  * orchestration seam invoked by all four ingest/reingest routes (streaming and non-streaming).
  *
  * This is the highest-value item in this batch: a prior version of this function had an
@@ -39,7 +39,7 @@ vi.mock('@/lib/app/questionnaire/ai-run/store', () => ({ recordAiRun: vi.fn() })
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
-  checkAdaptiveScopeCandidacy,
+  checkConditionalTopicsCandidacy,
   loadCachedCandidacyVerdict,
   resolveAutoTriggerPending,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
@@ -108,12 +108,12 @@ beforeEach(() => {
 
 // ─── Eligibility gate ───────────────────────────────────────────────────────
 
-describe('checkAdaptiveScopeCandidacy — eligibility gate (ineligible, no dispatch)', () => {
+describe('checkConditionalTopicsCandidacy — eligibility gate (ineligible, no dispatch)', () => {
   it('returns null and never dispatches when a topic draft already exists', async () => {
     (prisma.appQuestionnaireTopicDraft.findUnique as Mock).mockResolvedValue({ id: 'draft-1' });
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
@@ -123,59 +123,59 @@ describe('checkAdaptiveScopeCandidacy — eligibility gate (ineligible, no dispa
     (prisma.appQuestionnaireTopic.findFirst as Mock).mockResolvedValue({ id: 'topic-1' });
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
   });
 
-  it('returns null and never dispatches when Adaptive Scope is already enabled', async () => {
+  it('returns null and never dispatches when Conditional Topics is already enabled', async () => {
     (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue({
-      adaptiveScope: { enabled: true },
+      conditionalTopics: { enabled: true },
     });
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
   });
 });
 
-describe('checkAdaptiveScopeCandidacy — eligible', () => {
+describe('checkConditionalTopicsCandidacy — eligible', () => {
   it('proceeds to the agent lookup when all three eligibility queries come back empty/disabled', async () => {
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(prisma.aiAgent.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { slug: QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG } })
     );
   });
 
-  it('proceeds when a config row exists but Adaptive Scope is disabled on it', async () => {
+  it('proceeds when a config row exists but Conditional Topics is disabled on it', async () => {
     // A config row existing is not the same claim as scope having been decided — reachable on the
     // re-ingest routes, where a target version may already carry a config row an admin saved via
-    // the Settings tab with Adaptive Scope left off. Only `.enabled` gates eligibility.
+    // the Settings tab with Conditional Topics left off. Only `.enabled` gates eligibility.
     (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue({
-      adaptiveScope: { enabled: false },
+      conditionalTopics: { enabled: false },
     });
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(capabilityDispatcher.dispatch).toHaveBeenCalled();
   });
 });
 
-describe('checkAdaptiveScopeCandidacy — regression: unguarded calls must fail soft', () => {
+describe('checkConditionalTopicsCandidacy — regression: unguarded calls must fail soft', () => {
   it('returns null, warns, and never dispatches when the eligibility check throws (Promise.all member rejects)', async () => {
     // This is the regression test for the bug found during /pre-pr gating: an unguarded
     // eligibility read previously turned a 500 into every ingest route's happy path.
     (prisma.appQuestionnaireConfig.findUnique as Mock).mockRejectedValue(new Error('db down'));
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(log.warn).toHaveBeenCalled();
@@ -186,7 +186,7 @@ describe('checkAdaptiveScopeCandidacy — regression: unguarded calls must fail 
     (prisma.aiAgent.findUnique as Mock).mockRejectedValue(new Error('db down'));
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(log.warn).toHaveBeenCalled();
@@ -194,19 +194,19 @@ describe('checkAdaptiveScopeCandidacy — regression: unguarded calls must fail 
   });
 });
 
-describe('checkAdaptiveScopeCandidacy — agent not seeded', () => {
+describe('checkConditionalTopicsCandidacy — agent not seeded', () => {
   it('returns null and never dispatches when the agent row is not seeded', async () => {
     (prisma.aiAgent.findUnique as Mock).mockResolvedValue(null);
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
   });
 });
 
-describe('checkAdaptiveScopeCandidacy — dispatch outcomes', () => {
+describe('checkConditionalTopicsCandidacy — dispatch outcomes', () => {
   it('returns null and records no AppAiRun when dispatch resolves { success: false }', async () => {
     (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
       success: false,
@@ -214,7 +214,7 @@ describe('checkAdaptiveScopeCandidacy — dispatch outcomes', () => {
     });
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(recordAiRun).not.toHaveBeenCalled();
@@ -228,7 +228,7 @@ describe('checkAdaptiveScopeCandidacy — dispatch outcomes', () => {
     });
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(recordAiRun).not.toHaveBeenCalled();
@@ -239,18 +239,18 @@ describe('checkAdaptiveScopeCandidacy — dispatch outcomes', () => {
     (capabilityDispatcher.dispatch as Mock).mockRejectedValue(new Error('provider timed out'));
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toBeNull();
     expect(log.warn).toHaveBeenCalled();
   });
 });
 
-describe('checkAdaptiveScopeCandidacy — happy path', () => {
+describe('checkConditionalTopicsCandidacy — happy path', () => {
   it('returns the trimmed verdict, omitting signals from the returned shape', async () => {
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toEqual({
       isCandidate: VERDICT_RESULT.isCandidate,
@@ -264,7 +264,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
   it('records one AppAiRun with kind scope_candidacy, subjectKind version, and the full result as outputSnapshot', async () => {
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(recordAiRun).toHaveBeenCalledTimes(1);
     expect(recordAiRun).toHaveBeenCalledWith(
@@ -278,15 +278,15 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     );
   });
 
-  it('caches the full result under adaptiveScopeCandidate on the version', async () => {
+  it('caches the full result under conditionalTopicsCandidate on the version', async () => {
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(prisma.appQuestionnaireVersion.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'ver-1' },
-        data: expect.objectContaining({ adaptiveScopeCandidate: VERDICT_RESULT }),
+        data: expect.objectContaining({ conditionalTopicsCandidate: VERDICT_RESULT }),
       })
     );
   });
@@ -295,7 +295,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     (prisma.appQuestionnaireVersion.update as Mock).mockRejectedValue(new Error('write conflict'));
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toEqual({
       isCandidate: VERDICT_RESULT.isCandidate,
@@ -312,10 +312,10 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     // current authoring state), but nothing durable is written on top of the real authoring effort.
     (prisma.appQuestionnaireConfig.findUnique as Mock)
       .mockResolvedValueOnce(null) // pre-check: eligible
-      .mockResolvedValueOnce({ adaptiveScope: { enabled: true } }); // post-check: no longer eligible
+      .mockResolvedValueOnce({ conditionalTopics: { enabled: true } }); // post-check: no longer eligible
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toEqual({
       isCandidate: VERDICT_RESULT.isCandidate,
@@ -334,7 +334,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
       .mockRejectedValueOnce(new Error('connection reset')); // post-check: throws
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).toEqual({
       isCandidate: VERDICT_RESULT.isCandidate,
@@ -352,7 +352,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     const routingPage = 'ROUTING: only ask Section 6 of franchise owners.';
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({
+    await checkConditionalTopicsCandidacy({
       ...BASE_PARAMS,
       documentText: `${'x '.repeat(30_000)}${routingPage}`,
       log: log as never,
@@ -378,7 +378,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     ]);
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
       sectionTitles?: string[];
@@ -404,7 +404,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     ]);
     const log = makeLog();
 
-    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
       sectionTitles: string[];
@@ -423,7 +423,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     (prisma.appQuestionnaireSection.findMany as Mock).mockRejectedValue(new Error('conn reset'));
     const log = makeLog();
 
-    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+    const result = await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
 
     expect(result).not.toBeNull();
     const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
@@ -440,14 +440,14 @@ const ELIGIBLE_CURRENT = { hasAuthoredTopic: false, hasDraft: false, enabled: fa
 
 function seedCandidateVersion(overrides: Partial<typeof VERDICT_RESULT> = {}) {
   (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-    adaptiveScopeCandidate: { ...VERDICT_RESULT, ...overrides },
+    conditionalTopicsCandidate: { ...VERDICT_RESULT, ...overrides },
   });
 }
 
 describe('loadCachedCandidacyVerdict', () => {
   it('returns null when the version was never checked', async () => {
     (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-      adaptiveScopeCandidate: null,
+      conditionalTopicsCandidate: null,
     });
 
     const result = await loadCachedCandidacyVerdict('ver-1');
@@ -457,7 +457,7 @@ describe('loadCachedCandidacyVerdict', () => {
 
   it('returns null when the cached verdict is malformed', async () => {
     (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
-      adaptiveScopeCandidate: { isCandidate: 'yes' /* not a boolean */ },
+      conditionalTopicsCandidate: { isCandidate: 'yes' /* not a boolean */ },
     });
 
     const result = await loadCachedCandidacyVerdict('ver-1');

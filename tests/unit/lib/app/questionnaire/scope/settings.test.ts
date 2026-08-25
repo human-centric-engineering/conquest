@@ -1,70 +1,74 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   DEFAULT_SECONDS_PER_DATA_SLOT,
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_SESSION_BUDGET_SECONDS,
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   narrowProposedTopicSet,
   narrowTopicMembers,
 } from '@/lib/app/questionnaire/scope/types';
 
-describe('narrowAdaptiveScopeSettings', () => {
+describe('narrowConditionalTopicsSettings', () => {
   it('resolves an empty blob to the defaults, which are OFF', () => {
-    const s = narrowAdaptiveScopeSettings({});
+    const s = narrowConditionalTopicsSettings({});
 
-    expect(s).toEqual(DEFAULT_ADAPTIVE_SCOPE_SETTINGS);
+    expect(s).toEqual(DEFAULT_CONDITIONAL_TOPICS_SETTINGS);
     // The load-bearing default: a version that never opts in behaves exactly as it did pre-P17.
     expect(s.enabled).toBe(false);
   });
 
   it.each([null, undefined, 'nonsense', 42, []])('resolves %p to the defaults', (input) => {
-    expect(narrowAdaptiveScopeSettings(input).enabled).toBe(false);
+    expect(narrowConditionalTopicsSettings(input).enabled).toBe(false);
   });
 
   it('keeps the blind-spot check on by default', () => {
     // A diagnostic that only asks about the problem the respondent named can only confirm what
     // they already believed — so sampling one unraised area is the default, not an opt-in.
-    expect(narrowAdaptiveScopeSettings({}).includeCheckTopic).toBe(true);
+    expect(narrowConditionalTopicsSettings({}).includeCheckTopic).toBe(true);
   });
 
   it('announces the plan by default', () => {
-    expect(narrowAdaptiveScopeSettings({}).announce).toBe(true);
+    expect(narrowConditionalTopicsSettings({}).announce).toBe(true);
   });
 
   it('clamps maxConditionalTopics rather than rejecting it', () => {
-    expect(narrowAdaptiveScopeSettings({ maxConditionalTopics: 0 }).maxConditionalTopics).toBe(1);
-    expect(narrowAdaptiveScopeSettings({ maxConditionalTopics: 9999 }).maxConditionalTopics).toBe(
-      MAX_CONDITIONAL_TOPICS_CEILING
+    expect(narrowConditionalTopicsSettings({ maxConditionalTopics: 0 }).maxConditionalTopics).toBe(
+      1
     );
-    expect(narrowAdaptiveScopeSettings({ maxConditionalTopics: 3.6 }).maxConditionalTopics).toBe(4);
+    expect(
+      narrowConditionalTopicsSettings({ maxConditionalTopics: 9999 }).maxConditionalTopics
+    ).toBe(MAX_CONDITIONAL_TOPICS_CEILING);
+    expect(
+      narrowConditionalTopicsSettings({ maxConditionalTopics: 3.6 }).maxConditionalTopics
+    ).toBe(4);
   });
 
   it('clamps minConfidence into 0..1', () => {
-    expect(narrowAdaptiveScopeSettings({ minConfidence: -2 }).minConfidence).toBe(0);
-    expect(narrowAdaptiveScopeSettings({ minConfidence: 7 }).minConfidence).toBe(1);
+    expect(narrowConditionalTopicsSettings({ minConfidence: -2 }).minConfidence).toBe(0);
+    expect(narrowConditionalTopicsSettings({ minConfidence: 7 }).minConfidence).toBe(1);
   });
 
   it('drops blank and duplicate keys from key lists', () => {
-    const s = narrowAdaptiveScopeSettings({
+    const s = narrowConditionalTopicsSettings({
       fallbackTopicKeys: ['a', '  a  ', '', '   ', 'b', 7],
     });
     expect(s.fallbackTopicKeys).toEqual(['a', 'b']);
   });
 
   it('trims and caps free text', () => {
-    const s = narrowAdaptiveScopeSettings({ plannerInstructions: `  ${'x'.repeat(5_000)}  ` });
+    const s = narrowConditionalTopicsSettings({ plannerInstructions: `  ${'x'.repeat(5_000)}  ` });
     expect(s.plannerInstructions.length).toBe(4_000);
   });
 
   describe('rules', () => {
     it('drops a rule that names no data slot or no topic', () => {
-      const s = narrowAdaptiveScopeSettings({
+      const s = narrowConditionalTopicsSettings({
         rules: [
           { dataSlotKey: '', topicKey: 'x', operator: 'exists', action: 'include' },
           { dataSlotKey: 'y', topicKey: '', operator: 'exists', action: 'include' },
@@ -77,14 +81,14 @@ describe('narrowAdaptiveScopeSettings', () => {
     });
 
     it('falls back to safe operator and action on unknown values', () => {
-      const s = narrowAdaptiveScopeSettings({
+      const s = narrowConditionalTopicsSettings({
         rules: [{ dataSlotKey: 'y', topicKey: 'x', operator: 'wat', action: 'destroy' }],
       });
       expect(s.rules[0]).toMatchObject({ operator: 'exists', action: 'include' });
     });
 
     it('nulls a blank operand so `exists` never compares against an empty string', () => {
-      const s = narrowAdaptiveScopeSettings({
+      const s = narrowConditionalTopicsSettings({
         rules: [
           { dataSlotKey: 'y', topicKey: 'x', operator: 'exists', action: 'include', value: '   ' },
         ],
@@ -93,7 +97,7 @@ describe('narrowAdaptiveScopeSettings', () => {
     });
 
     it('sorts by ordinal and back-fills a missing one from position', () => {
-      const s = narrowAdaptiveScopeSettings({
+      const s = narrowConditionalTopicsSettings({
         rules: [
           { dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include', ordinal: 5 },
           { dataSlotKey: 'b', topicKey: 't', operator: 'exists', action: 'include', ordinal: 1 },
@@ -103,7 +107,7 @@ describe('narrowAdaptiveScopeSettings', () => {
     });
 
     it('gives every rule a stable id even when none was stored', () => {
-      const s = narrowAdaptiveScopeSettings({
+      const s = narrowConditionalTopicsSettings({
         rules: [{ dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include' }],
       });
       expect(s.rules[0]?.id).toBeTruthy();
@@ -128,9 +132,9 @@ describe('narrowTopicMembers', () => {
   });
 });
 
-describe('narrowAdaptiveScopeSettings — the opening follow-up allowance (G03)', () => {
+describe('narrowConditionalTopicsSettings — the opening follow-up allowance (G03)', () => {
   it('is off by default, so the opening probes exactly as it always has', () => {
-    const s = narrowAdaptiveScopeSettings({});
+    const s = narrowConditionalTopicsSettings({});
     expect(s.limitOpeningProbes).toBe(false);
     // The number is what an author gets when they turn it ON — never what they run today.
     expect(s.maxOpeningProbes).toBe(1);
@@ -139,20 +143,20 @@ describe('narrowAdaptiveScopeSettings — the opening follow-up allowance (G03)'
   it('keeps zero, because "never follow up" is a real setting here', () => {
     // Unlike `sessionBudgetSeconds`, 0 is not how this is turned off — the switch beside it is.
     // Clamping 0 up to 1 would silently reinstate the probe the author just removed.
-    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 0 }).maxOpeningProbes).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningProbes: 0 }).maxOpeningProbes).toBe(0);
   });
 
   it('clamps to the ceiling and rounds a fractional allowance', () => {
-    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 99 }).maxOpeningProbes).toBe(
+    expect(narrowConditionalTopicsSettings({ maxOpeningProbes: 99 }).maxOpeningProbes).toBe(
       MAX_OPENING_PROBES_CEILING
     );
-    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: -2 }).maxOpeningProbes).toBe(0);
-    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 1.6 }).maxOpeningProbes).toBe(2);
+    expect(narrowConditionalTopicsSettings({ maxOpeningProbes: -2 }).maxOpeningProbes).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningProbes: 1.6 }).maxOpeningProbes).toBe(2);
   });
 
   it('falls back to the default for anything that is not a number', () => {
-    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 'one' }).maxOpeningProbes).toBe(1);
-    expect(narrowAdaptiveScopeSettings({ limitOpeningProbes: 'yes' }).limitOpeningProbes).toBe(
+    expect(narrowConditionalTopicsSettings({ maxOpeningProbes: 'one' }).maxOpeningProbes).toBe(1);
+    expect(narrowConditionalTopicsSettings({ limitOpeningProbes: 'yes' }).limitOpeningProbes).toBe(
       false
     );
   });
@@ -396,9 +400,9 @@ describe('narrowProposedTopicSet', () => {
  * validates on the way in. The narrowing is the only thing between a fat-fingered value and an
  * interview that silently stops adapting.
  */
-describe('narrowAdaptiveScopeSettings — time budget (C7)', () => {
+describe('narrowConditionalTopicsSettings — time budget (C7)', () => {
   it('defaults to no budget, so nothing changes for a version that predates it', () => {
-    const s = narrowAdaptiveScopeSettings({});
+    const s = narrowConditionalTopicsSettings({});
     expect(s.sessionBudgetSeconds).toBe(0);
     expect(s.secondsPerQuestionType).toEqual({});
     expect(s.secondsPerDataSlot).toBe(DEFAULT_SECONDS_PER_DATA_SLOT);
@@ -407,39 +411,43 @@ describe('narrowAdaptiveScopeSettings — time budget (C7)', () => {
   it('reads 0 as OFF rather than clamping it up to the floor', () => {
     // The distinction the whole setting turns on. Clamping 0 up to 30s would invent a budget the
     // author never asked for and start dropping topics.
-    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 0 }).sessionBudgetSeconds).toBe(0);
-    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: -5 }).sessionBudgetSeconds).toBe(0);
+    expect(narrowConditionalTopicsSettings({ sessionBudgetSeconds: 0 }).sessionBudgetSeconds).toBe(
+      0
+    );
+    expect(narrowConditionalTopicsSettings({ sessionBudgetSeconds: -5 }).sessionBudgetSeconds).toBe(
+      0
+    );
   });
 
   it('clamps a real budget into the legal range', () => {
-    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 5 }).sessionBudgetSeconds).toBe(
+    expect(narrowConditionalTopicsSettings({ sessionBudgetSeconds: 5 }).sessionBudgetSeconds).toBe(
       MIN_SESSION_BUDGET_SECONDS
     );
     expect(
-      narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 999_999 }).sessionBudgetSeconds
+      narrowConditionalTopicsSettings({ sessionBudgetSeconds: 999_999 }).sessionBudgetSeconds
     ).toBe(MAX_SESSION_BUDGET_SECONDS);
-    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 600.4 }).sessionBudgetSeconds).toBe(
-      600
-    );
+    expect(
+      narrowConditionalTopicsSettings({ sessionBudgetSeconds: 600.4 }).sessionBudgetSeconds
+    ).toBe(600);
   });
 
   it('falls back to no budget for a value that is not a number at all', () => {
-    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 'ten' }).sessionBudgetSeconds).toBe(
-      0
-    );
+    expect(
+      narrowConditionalTopicsSettings({ sessionBudgetSeconds: 'ten' }).sessionBudgetSeconds
+    ).toBe(0);
   });
 
   it('DROPS an unusable per-type override rather than costing that type at nothing', () => {
     // A type costed at zero makes every topic using it look free, which is the one failure a time
     // budget cannot survive.
-    const s = narrowAdaptiveScopeSettings({
+    const s = narrowConditionalTopicsSettings({
       secondsPerQuestionType: { likert: 0, free_text: -3, numeric: 'x', matrix: 12 },
     });
     expect(s.secondsPerQuestionType).toEqual({ matrix: 12 });
   });
 
   it('clamps and rounds the per-type overrides it keeps', () => {
-    const s = narrowAdaptiveScopeSettings({
+    const s = narrowConditionalTopicsSettings({
       secondsPerQuestionType: { likert: 8.6, free_text: 99_999 },
     });
     expect(s.secondsPerQuestionType.likert).toBe(9);
@@ -448,7 +456,7 @@ describe('narrowAdaptiveScopeSettings — time budget (C7)', () => {
 
   it('ignores a non-object override map', () => {
     expect(
-      narrowAdaptiveScopeSettings({ secondsPerQuestionType: [1, 2] }).secondsPerQuestionType
+      narrowConditionalTopicsSettings({ secondsPerQuestionType: [1, 2] }).secondsPerQuestionType
     ).toEqual({});
   });
 });

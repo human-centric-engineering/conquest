@@ -26,10 +26,15 @@ const args: AnalyseRoutingArgs = {
     { key: 'q2', prompt: 'Describe an incident with a channel conflict at Acme Corp.' },
   ],
   goal: 'Assess channel readiness',
-  documentText:
-    'CONFIDENTIAL INSTRUMENT: internal routing notes for respondent Jane Doe, case ref 90210. ' +
-    'Only ask the Partner Channel section if the respondent sells through resellers.',
-  documentFileName: 'channel-instrument.pdf',
+  documents: [
+    {
+      role: 'primary',
+      fileName: 'channel-instrument.pdf',
+      text:
+        'CONFIDENTIAL INSTRUMENT: internal routing notes for respondent Jane Doe, case ref 90210. ' +
+        'Only ask the Partner Channel section if the respondent sells through resellers.',
+    },
+  ],
   instructions: 'The routing rules are on page 4, under "Guardrails" — read that first.',
   existingTopics: [
     {
@@ -59,12 +64,35 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
     expect(serialised).toContain('"questionCount":2');
     expect(serialised).toContain('"existingTopicCount":1');
     // The redaction placeholder must be present — proof the field was processed, not dropped.
-    expect(serialised).toContain('<redacted: documentText>');
+    expect(serialised).toContain('<redacted: text>');
+    // The SHAPE of the document set survives: "which documents did this run read" is the first
+    // question asked of a proposal that missed something.
+    expect(serialised).toContain('"role":"primary"');
     // The uploaded document is an arbitrary admin file — it must never land in an audit row.
     expect(serialised).not.toContain('CONFIDENTIAL');
     expect(serialised).not.toContain('Jane Doe');
     expect(serialised).not.toContain('90210');
     expect(serialised).not.toContain('Only ask the Partner Channel section');
+  });
+
+  it('records every document it read, text redacted, truncation flagged', () => {
+    // A proposal that missed the routing rules is investigated from this row: whether the memo was
+    // attached at all, and whether the analyst was shown the whole of it, are the two questions.
+    const { args: safeArgs } = capability.redactProvenance(
+      {
+        questions: args.questions,
+        documents: [
+          { role: 'primary', fileName: 'bank.md', text: 'Q1…' },
+          { role: 'supplementary', fileName: 'memo.md', text: 'Secret rules', truncated: true },
+        ],
+      },
+      { success: true, data: undefined }
+    );
+    const serialised = JSON.stringify(safeArgs);
+
+    expect(serialised).toContain('memo.md');
+    expect(serialised).toContain('"truncated":true');
+    expect(serialised).not.toContain('Secret rules');
   });
 
   it('records the instructions field as a redaction placeholder, never the admin note', () => {
@@ -164,8 +192,7 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
     );
     const serialised = JSON.stringify(safeArgs);
 
-    expect(serialised).not.toContain('documentFileName');
-    expect(serialised).not.toContain('documentText');
+    expect(serialised).not.toContain('documents');
     expect(serialised).not.toContain('instructions');
     expect(serialised).toContain('"dataSlotCount":0');
     expect(serialised).toContain('"existingTopicCount":0');

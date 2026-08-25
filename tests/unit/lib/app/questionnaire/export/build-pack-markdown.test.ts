@@ -21,7 +21,7 @@ import type {
   InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
 
-/** The empty scope-evaluation state — reused by every adaptive-scope fixture that isn't testing
+/** The empty scope-evaluation state — reused by every conditional-topics fixture that isn't testing
  *  the evaluation block itself. */
 const EMPTY_SCOPE_EVALUATION: PackScopeEvaluation = {
   hasRun: false,
@@ -74,7 +74,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
-      adaptiveScope: false,
+      conditionalTopics: false,
       interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -100,7 +100,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     },
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
-    adaptiveScope: null,
+    conditionalTopics: null,
     interviewerPolicy: null,
     ...over,
   };
@@ -571,18 +571,18 @@ describe('buildPackMarkdown', () => {
     });
   });
 
-  describe('adaptive scope section', () => {
+  describe('conditional topics section', () => {
     it('omits the section entirely when the model field is null', () => {
-      const md = buildPackMarkdown(model({ adaptiveScope: null }));
-      expect(md).not.toContain('## Adaptive scope');
+      const md = buildPackMarkdown(model({ conditionalTopics: null }));
+      expect(md).not.toContain('## Conditional topics');
     });
 
     it('states plainly that scope is not enabled, without listing topics', () => {
       const md = buildPackMarkdown(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: false,
-            alwaysAskedTopics: [
+            alwaysAsked: [
               {
                 key: 'background',
                 label: 'Background',
@@ -592,7 +592,7 @@ describe('buildPackMarkdown', () => {
                 sampledOnly: false,
               },
             ],
-            conditionalTopics: [],
+            conditional: [],
             rules: [],
             maxConditionalTopics: 3,
             includeCheckTopic: true,
@@ -601,9 +601,9 @@ describe('buildPackMarkdown', () => {
           },
         })
       );
-      expect(md).toContain('## Adaptive scope');
+      expect(md).toContain('## Conditional topics');
       expect(md).toContain(
-        'Adaptive scope is not enabled for this version — every respondent is asked the full instrument.'
+        'Conditional topics is not enabled for this version — every respondent is asked the full instrument.'
       );
       expect(md).not.toContain('### Always asked');
       expect(md).not.toContain('Background');
@@ -612,9 +612,9 @@ describe('buildPackMarkdown', () => {
     it('lists always-asked and conditional topics under their own headings, with criteria on the conditional ones', () => {
       const md = buildPackMarkdown(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: true,
-            alwaysAskedTopics: [
+            alwaysAsked: [
               {
                 key: 'background',
                 label: 'Background',
@@ -624,7 +624,7 @@ describe('buildPackMarkdown', () => {
                 sampledOnly: false,
               },
             ],
-            conditionalTopics: [
+            conditional: [
               {
                 key: 'talent',
                 label: 'Talent & culture',
@@ -668,10 +668,10 @@ describe('buildPackMarkdown', () => {
     it('renders hard rules under their own heading, and omits it when there are none', () => {
       const withRules = buildPackMarkdown(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: true,
-            alwaysAskedTopics: [],
-            conditionalTopics: [],
+            alwaysAsked: [],
+            conditional: [],
             rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
             maxConditionalTopics: 3,
             includeCheckTopic: false,
@@ -685,10 +685,10 @@ describe('buildPackMarkdown', () => {
 
       const withoutRules = buildPackMarkdown(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: true,
-            alwaysAskedTopics: [],
-            conditionalTopics: [],
+            alwaysAsked: [],
+            conditional: [],
             rules: [],
             maxConditionalTopics: 3,
             includeCheckTopic: false,
@@ -703,10 +703,10 @@ describe('buildPackMarkdown', () => {
     it('renders "None defined." under each heading when a version has no topics at all', () => {
       const md = buildPackMarkdown(
         model({
-          adaptiveScope: {
+          conditionalTopics: {
             enabled: true,
-            alwaysAskedTopics: [],
-            conditionalTopics: [],
+            alwaysAsked: [],
+            conditional: [],
             rules: [],
             maxConditionalTopics: 3,
             includeCheckTopic: false,
@@ -725,8 +725,8 @@ describe('buildPackMarkdown', () => {
   describe('scope evaluation subsection', () => {
     const baseScope = {
       enabled: true,
-      alwaysAskedTopics: [],
-      conditionalTopics: [],
+      alwaysAsked: [],
+      conditional: [],
       rules: [],
       maxConditionalTopics: 3,
       includeCheckTopic: false,
@@ -735,7 +735,7 @@ describe('buildPackMarkdown', () => {
 
     it('renders the "no run yet" fallback under its own heading when hasRun is false', () => {
       const md = buildPackMarkdown(
-        model({ adaptiveScope: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
+        model({ conditionalTopics: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
       );
       expect(md).toContain('### Scope evaluation');
       expect(md).toContain('_No scope evaluation has been run for this version yet._');
@@ -784,7 +784,7 @@ describe('buildPackMarkdown', () => {
           },
         ],
       };
-      const md = buildPackMarkdown(model({ adaptiveScope: { ...baseScope, evaluation } }));
+      const md = buildPackMarkdown(model({ conditionalTopics: { ...baseScope, evaluation } }));
       expect(md).toContain('### Scope evaluation');
       expect(md).toContain('Criteria-Quality Judge');
       expect(md).toContain('70%');

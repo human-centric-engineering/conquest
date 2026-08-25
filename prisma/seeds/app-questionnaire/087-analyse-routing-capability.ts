@@ -7,7 +7,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 
 /**
- * Seed the analyse-routing `AiCapability` row — the Routing Analyst (Adaptive Scope, P17.4).
+ * Seed the analyse-routing `AiCapability` row — the Routing Analyst (Conditional Topics, P17.4).
  *
  * `executionType: 'internal'` + `executionHandler` points the dispatcher at the in-memory
  * `AppAnalyseRoutingCapability` registered via `initAppCapabilities()`.

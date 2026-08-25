@@ -87,7 +87,7 @@ export interface ScaleScore {
   /** How many items contributed (answered). */
   itemCount: number;
   /**
-   * How many of the scale's items this respondent was actually ASKED — Adaptive Scope (P17).
+   * How many of the scale's items this respondent was actually ASKED — Conditional Topics (P17).
    *
    * Equal to {@link totalItemCount} for every non-adaptive session, and for an adaptive one whose
    * plan happened to cover the whole scale. Lower when the interview deliberately skipped part of
@@ -102,7 +102,7 @@ export interface ScaleScore {
 }
 
 /**
- * Whether a scale score was computed over a NARROWED instrument — Adaptive Scope (P17).
+ * Whether a scale score was computed over a NARROWED instrument — Conditional Topics (P17).
  *
  * The load-bearing distinction for any comparison. A band derived from three of a scale's eight
  * items is not the same measurement as one derived from all eight, and a cohort chart that puts

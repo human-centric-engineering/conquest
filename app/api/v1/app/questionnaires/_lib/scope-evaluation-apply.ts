@@ -9,7 +9,7 @@
  * orphan draft.
  *
  * Reuses the authoring leaf helpers — `forkVersionIfLaunched`, and the Topics tab's own
- * `patchAdaptiveScopeSettings` for every rule/settings op (never the wholesale `replaceTopics`,
+ * `patchConditionalTopicsSettings` for every rule/settings op (never the wholesale `replaceTopics`,
  * which would rewrite the whole topic set for a one-field change). A topic-field op writes
  * directly via `appQuestionnaireTopic.update` keyed on `(versionId, key)` — no per-topic writer
  * existed before this; adding one to `topic-routes.ts` would have coupled the bulk-save contract
@@ -32,8 +32,8 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import type { ScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
-  loadAdaptiveScopeSettings,
-  patchAdaptiveScopeSettings,
+  loadConditionalTopicsSettings,
+  patchConditionalTopicsSettings,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { deriveScopeFindingState } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-staleness';
 
@@ -118,7 +118,7 @@ async function validateScopeOpAgainst(
   if (targetKey.startsWith(RULE_PREFIX)) {
     if (op.op !== 'edit_rule' && op.op !== 'delete_rule') return null;
     const id = targetKey.slice(RULE_PREFIX.length);
-    const settings = await loadAdaptiveScopeSettings(versionId);
+    const settings = await loadConditionalTopicsSettings(versionId);
     return settings.rules.some((r) => r.id === id) ? null : 'target_gone';
   }
   return null;
@@ -264,8 +264,8 @@ async function writeScopeOp(
     }
 
     case 'add_rule': {
-      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
-      await patchAdaptiveScopeSettings(
+      const settings = await loadConditionalTopicsSettings(editVersionId, tx);
+      await patchConditionalTopicsSettings(
         editVersionId,
         {
           rules: [
@@ -287,7 +287,7 @@ async function writeScopeOp(
     case 'edit_rule':
     case 'delete_rule': {
       const id = targetKey.slice(RULE_PREFIX.length);
-      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
+      const settings = await loadConditionalTopicsSettings(editVersionId, tx);
       const exists = settings.rules.some((r) => r.id === id);
       if (!exists) return 'target_gone';
       const rules =
@@ -305,12 +305,12 @@ async function writeScopeOp(
                   }
                 : r
             );
-      await patchAdaptiveScopeSettings(editVersionId, { rules }, tx);
+      await patchConditionalTopicsSettings(editVersionId, { rules }, tx);
       return null;
     }
 
     case 'adjust_budget': {
-      await patchAdaptiveScopeSettings(
+      await patchConditionalTopicsSettings(
         editVersionId,
         {
           ...(op.sessionBudgetSeconds !== undefined
@@ -327,7 +327,7 @@ async function writeScopeOp(
     }
 
     case 'edit_planner_instructions': {
-      await patchAdaptiveScopeSettings(
+      await patchConditionalTopicsSettings(
         editVersionId,
         { plannerInstructions: op.plannerInstructions },
         tx
@@ -336,9 +336,9 @@ async function writeScopeOp(
     }
 
     case 'add_fallback_topic': {
-      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
+      const settings = await loadConditionalTopicsSettings(editVersionId, tx);
       if (settings.fallbackTopicKeys.includes(op.topicKey)) return null; // already there
-      await patchAdaptiveScopeSettings(
+      await patchConditionalTopicsSettings(
         editVersionId,
         { fallbackTopicKeys: [...settings.fallbackTopicKeys, op.topicKey] },
         tx

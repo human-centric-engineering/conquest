@@ -3,7 +3,7 @@
  *
  * Pins what the component DOES:
  *  - Picking a valid file parses it client-side and previews section/question/data-slot/topic
- *    counts (Adaptive Scope topics only shown when the file carries any — the bug this dialog's
+ *    counts (Conditional Topics topics only shown when the file carries any — the bug this dialog's
  *    preview was extended to surface, see lib/app/questionnaire/authoring/definition-export.ts)
  *  - Picking an invalid file surfaces a parse error and leaves no preview
  *  - Confirming POSTs the raw file text to the import endpoint (optionally with a demoClientId
@@ -130,10 +130,10 @@ describe('ImportDefinitionDialog — file preview', () => {
     expect(await screen.findByText('Staff Morale')).toBeInTheDocument();
     expect(screen.getByText(/1 section · 1 question/)).toBeInTheDocument();
     expect(screen.queryByText(/\d+ data slot/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/\d+ adaptive scope topic/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ conditional topics topic/)).not.toBeInTheDocument();
   });
 
-  it('includes the Adaptive Scope topic count in the preview when the file carries topics', async () => {
+  it('includes the Conditional Topics topic count in the preview when the file carries topics', async () => {
     render(<ImportDefinitionDialog open onOpenChange={vi.fn()} />);
     fireEvent.change(fileInput(), {
       target: {
@@ -172,7 +172,7 @@ describe('ImportDefinitionDialog — file preview', () => {
     });
 
     expect(await screen.findByText(/1 data slot/)).toBeInTheDocument();
-    expect(screen.getByText(/1 adaptive scope topic/)).toBeInTheDocument();
+    expect(screen.getByText(/1 conditional topics topic/)).toBeInTheDocument();
   });
 
   it('pluralises the topic count for more than one topic', async () => {
@@ -191,7 +191,7 @@ describe('ImportDefinitionDialog — file preview', () => {
     render(<ImportDefinitionDialog open onOpenChange={vi.fn()} />);
     fireEvent.change(fileInput(), { target: { files: [file(envelope({ topics: twoTopics }))] } });
 
-    expect(await screen.findByText(/2 adaptive scope topics/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 conditional topics topics/)).toBeInTheDocument();
   });
 
   it('surfaces a parse error and does not show a preview for an invalid file', async () => {

@@ -40,11 +40,13 @@ import {
 import {
   amendableTopics,
   applyAmendment,
+  candidateLabelHits,
+  isEnglishLocale,
   looksLikeTopicRequest,
   matchTopicByLabel,
 } from '@/lib/app/questionnaire/scope/amendment';
 import {
-  narrowAdaptiveScopeSettings,
+  narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   type PlanAmendment,
   type Topic,
@@ -69,6 +71,11 @@ export interface MaybeAmendPlanInput {
   message: string;
   /** Turn ordinal the request arrived on, so the acknowledgement gets exactly one outing. */
   atTurn: number;
+  /**
+   * The version's `audience.locale`, when it has one. Decides which gate runs — see
+   * {@link isEnglishLocale}. Passed in rather than queried so the English path still costs nothing.
+   */
+  locale?: string | undefined;
 }
 
 /**
@@ -78,24 +85,29 @@ export interface MaybeAmendPlanInput {
  * message that is plainly just an answer.
  */
 export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendPlanResult> {
-  const { sessionId, message, atTurn } = input;
+  const { sessionId, message, atTurn, locale } = input;
   try {
+    const cued = looksLikeTopicRequest(message);
+    const english = isEnglishLocale(locale);
+
     // The cheapest possible rejection, before any query at all: nearly every respondent turn is an
-    // answer, not a request.
-    if (!looksLikeTopicRequest(message)) return { kind: 'skipped', reason: 'no request cue' };
+    // answer, not a request. Only sound where the cue list speaks the language — on a non-English
+    // version the gate below runs instead, over the topic labels, which are in the instrument's own
+    // language.
+    if (!cued && english) return { kind: 'skipped', reason: 'no request cue' };
 
     const session = await prisma.appQuestionnaireSession.findUnique({
       where: { id: sessionId },
       select: {
         versionId: true,
         interviewPlan: true,
-        version: { select: { goal: true, config: { select: { adaptiveScope: true } } } },
+        version: { select: { goal: true, config: { select: { conditionalTopics: true } } } },
       },
     });
     if (!session) return { kind: 'skipped', reason: 'session not found' };
 
-    const settings = narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope);
-    if (!settings.enabled) return { kind: 'skipped', reason: 'adaptive scope is off' };
+    const settings = narrowConditionalTopicsSettings(session.version.config?.conditionalTopics);
+    if (!settings.enabled) return { kind: 'skipped', reason: 'conditional topics is off' };
     if (!settings.allowRespondentAmendment) {
       return { kind: 'skipped', reason: 'amendment is not allowed on this version' };
     }
@@ -113,8 +125,21 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
     const candidates = amendableTopics(plan, rows.map(toTopic));
     if (candidates.length === 0) return { kind: 'skipped', reason: 'nothing excluded to add' };
 
+    // The non-English gate, and the reason it is here rather than at the top: it needs the topic
+    // labels, which need this query. A message naming none of the excluded topics is not a request
+    // for one in any language.
+    const named = cued ? null : candidateLabelHits(message, candidates);
+    if (named !== null && named.length === 0) {
+      return { kind: 'skipped', reason: 'no request cue' };
+    }
+
     // Tier 2: the free resolution. "Ask me about talent" against a topic named "Talent".
-    let topic = matchTopicByLabel(message, candidates);
+    //
+    // Reachable only behind a CUE. A label match without one means the respondent named the
+    // subject, not that they asked for it ("we sorted talent last year"), and the cue list is what
+    // tells those apart — so on the non-English path the naming goes to the agent, whose whole job
+    // is deciding whether this is a request at all.
+    let topic = cued ? matchTopicByLabel(message, candidates) : null;
     let resolvedBy: 'label' | 'agent' = 'label';
     let costUsd = 0;
 
@@ -167,7 +192,7 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
       },
     });
 
-    logger.info('adaptive scope: plan amended at the respondent’s request', {
+    logger.info('conditional topics: plan amended at the respondent’s request', {
       sessionId,
       topicKey: topic.key,
       resolvedBy,
@@ -176,7 +201,7 @@ export async function maybeAmendPlan(input: MaybeAmendPlanInput): Promise<AmendP
 
     return { kind: 'amended', amendment };
   } catch (err) {
-    logger.error('adaptive scope: amendment failed; the plan is unchanged', {
+    logger.error('conditional topics: amendment failed; the plan is unchanged', {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -230,6 +255,9 @@ async function resolveWithAgent(params: {
       joinSections(
         'Match on MEANING, not wording. "Can we cover hiring?" means a topic called "People & ' +
           'capability".',
+        'The message may be in a different language from the topic labels — the respondent writes ' +
+          'in their own, the labels are in the language the instrument was written in. Match ' +
+          'across that.',
         'Return an empty string when the message does not clearly ask for any of these topics. That ' +
           'is the right answer far more often than not — an interview widened on a misread wastes ' +
           "the respondent's time on something they did not ask for.",

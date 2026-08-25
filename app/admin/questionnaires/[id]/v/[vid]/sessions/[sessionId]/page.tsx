@@ -164,7 +164,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
         </div>
       </div>
 
-      {/* Adaptive Scope (P17): why this respondent got these topics. Above the transcript, because
+      {/* Conditional Topics (P17): why this respondent got these topics. Above the transcript, because
           it is the frame the transcript has to be read in — a conversation that never touched an
           area reads as an oversight until you know it was a decision. */}
       {view.plan && <InterviewPlanCard plan={view.plan} />}

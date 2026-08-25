@@ -213,7 +213,7 @@ export async function buildTurnInvokers(opts: {
    */
   glossaryEntries?: readonly GlossaryEntry[];
   /**
-   * Adaptive Scope (G03): the conditional topics the plan will choose between, supplied by the
+   * Conditional Topics (G03): the conditional topics the plan will choose between, supplied by the
    * route only when the opening's follow-up allowance actually governs this turn. Their criteria
    * ARE the routability test — without them there is nothing to be routable against, so an absent
    * (or empty) list omits the invoker entirely and the interview probes as it always has.
@@ -594,7 +594,7 @@ export async function buildTurnInvokers(opts: {
       });
     },
 
-    // Adaptive Scope (G03): would one more follow-up buy anything? Wired only when the route
+    // Conditional Topics (G03): would one more follow-up buy anything? Wired only when the route
     // resolved candidate topics for it; the orchestrator calls it at most once per TURN, at the
     // moment a probe is about to be spent (a routable verdict spends no probe, so a later slot can
     // ask again). Fail-soft inside — a null verdict spends the probe.

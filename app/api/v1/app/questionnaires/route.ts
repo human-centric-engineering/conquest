@@ -21,7 +21,7 @@
  *   withAdminAuth → per-admin sub-cap → content-length guard → multipart parse →
  *   extension allowlist → admin-metadata parse → demo-client existence check →
  *   SHA-256 dedup → document parse → scanned/empty detection → capability dispatch →
- *   coherence check → transactional persist → Adaptive Scope candidacy check (P17.19,
+ *   coherence check → transactional persist → Conditional Topics candidacy check (P17.19,
  *   fail-soft) → admin audit → 201.
  *
  * Auth: admin only. Rate limit: inherits the 100/min `api` section cap automatically;
@@ -46,7 +46,7 @@ import {
   parseAndGuardUpload,
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
-import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { checkConditionalTopicsCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   listQuestionnaires,
   listQuestionnairesQuerySchema,
@@ -116,10 +116,10 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
     },
   });
 
-  // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-persisted version. Runs
+  // Conditional Topics (P17.19): a cheap, fail-soft triage read over the just-persisted version. Runs
   // AFTER persist (it needs a real versionId to cache the verdict against and record an AppAiRun
   // for) and never throws — a failed/skipped check must not fail a completed ingest.
-  const candidacy = await checkAdaptiveScopeCandidacy({
+  const candidacy = await checkConditionalTopicsCandidacy({
     versionId: result.versionId,
     documentText: parsed.fullText,
     fileName: file.name,
@@ -165,7 +165,7 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
       goal: result.goal,
       audience: result.audience,
       fieldProvenance: result.fieldProvenance,
-      ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
+      ...(candidacy ? { conditionalTopicsCandidate: candidacy } : {}),
     },
     undefined,
     { status: 201 }

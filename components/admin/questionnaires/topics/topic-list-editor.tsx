@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The topic set editor — the authoring surface for Adaptive Scope's conditional unit.
+ * The topic set editor — the authoring surface for Conditional Topics' conditional unit.
  *
  * The whole set is edited locally and saved with one PUT (`replaceTopics` deletes and rewrites),
  * matching `data-slots-review.tsx`. A per-row PATCH surface would buy nothing here: ordinals come
@@ -17,8 +17,10 @@
  * attention (a conditional topic with no criteria, a duplicate key, a member that no longer exists)
  * are marked in the collapsed line, so nothing hides behind a chevron.
  *
- * Reordering is disabled while a filter is applied: "move up" means "swap with the row above", and
- * with rows hidden the row above on screen is not the row above in the set.
+ * Rows drag to reorder, and the up/down buttons stay: a drag is faster over forty topics, and the
+ * buttons are what a keyboard reaches without learning dnd-kit's chord. Both are disabled while a
+ * filter is applied — "move up" means "swap with the row above", and with rows hidden the row above
+ * on screen is not the row above in the set.
  *
  * Two things about this editor carry weight beyond the pixels:
  *
@@ -30,11 +32,29 @@
  *   lets a topic survive a version fork with no re-linking at all.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  GripVertical,
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -174,6 +194,73 @@ function blankDraftTopic(
     dataSlotKeys: [],
     source: 'new',
   };
+}
+
+/**
+ * Move `activeId` to `overId`'s position, or `null` when the drop changes nothing.
+ *
+ * Pure and exported because the drop itself cannot be simulated in a jsdom-class environment —
+ * dnd-kit reads element geometry, and happy-dom reports every rect as zero — so this is where the
+ * behaviour is actually pinned. Dropping outside the list (`overId === null`), onto itself, or onto
+ * a row that is no longer in the set are all no-ops rather than reorders to index -1.
+ *
+ * Only correct on an UNFILTERED list, which is why dragging is disabled while a filter is applied:
+ * the row a drop landed on is identified by id, but the positions between them are not the set's.
+ */
+export function reorderDrafts<T extends { clientId: string }>(
+  drafts: readonly T[],
+  activeId: string,
+  overId: string | null
+): T[] | null {
+  if (overId === null || activeId === overId) return null;
+  const oldIndex = drafts.findIndex((d) => d.clientId === activeId);
+  const newIndex = drafts.findIndex((d) => d.clientId === overId);
+  if (oldIndex < 0 || newIndex < 0) return null;
+  return arrayMove([...drafts], oldIndex, newIndex);
+}
+
+/**
+ * One draggable row.
+ *
+ * A wrapper rather than a whole-card drag, and a HANDLE rather than a draggable card: the collapsed
+ * line is itself a button that expands the row, and the open row is full of inputs. Making the card
+ * the drag source would mean every click on a text field started a drag gesture.
+ *
+ * `containerRef` is the list's own row registry (the focus handoff scrolls to a topic by clientId),
+ * so both refs have to reach the same `<li>`.
+ */
+function SortableTopicRow({
+  id,
+  disabled,
+  containerRef,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  containerRef: (el: HTMLLIElement | null) => void;
+  children: (handle: {
+    handleProps: Record<string, unknown>;
+    isDragging: boolean;
+    disabled: boolean;
+  }) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled,
+  });
+
+  return (
+    <li
+      ref={(el) => {
+        setNodeRef(el);
+        containerRef(el);
+      }}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? 'relative z-10 opacity-70' : undefined}
+    >
+      {children({ handleProps: { ...attributes, ...listeners }, isDragging, disabled })}
+    </li>
+  );
 }
 
 export interface TopicListEditorProps {
@@ -410,6 +497,19 @@ export function TopicListEditor({
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    const reordered = reorderDrafts(drafts, String(active.id), over ? String(over.id) : null);
+    if (!reordered) return;
+    setDirty(true);
+    setDrafts(reordered);
+  };
+
   const move = (index: number, delta: number) => {
     const target = index + delta;
     if (target < 0 || target >= drafts.length) return;
@@ -601,351 +701,388 @@ export function TopicListEditor({
           .
         </p>
       ) : (
-        <ul className="space-y-2">
-          {visible.map(({ draft, index }) => {
-            const badge = SOURCE_BADGE[draft.source];
-            const problems = problemsFor(draft);
-            const open = expanded.has(draft.clientId);
-            const name = draft.label.trim().length > 0 ? draft.label : 'Untitled topic';
-            return (
-              <li key={draft.clientId} ref={registerRow(draft.clientId)}>
-                <Card
-                  className={cn(
-                    'overflow-hidden transition-shadow',
-                    open && 'shadow-sm',
-                    problems.length > 0 && 'border-amber-400/60'
-                  )}
-                >
-                  {/* The collapsed line: name, when it runs, how big it is, and what is wrong. */}
-                  <div className="flex items-start gap-2 p-3">
-                    <button
-                      type="button"
-                      onClick={() => setOpen(draft.clientId, !open)}
-                      aria-expanded={open}
-                      className="hover:bg-muted/50 focus-visible:ring-ring -m-1 flex min-w-0 flex-1 items-start gap-2 rounded p-1 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      <ChevronDown
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext
+            items={visible.map(({ draft }) => draft.clientId)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="space-y-2">
+              {visible.map(({ draft, index }) => {
+                const badge = SOURCE_BADGE[draft.source];
+                const problems = problemsFor(draft);
+                const open = expanded.has(draft.clientId);
+                const name = draft.label.trim().length > 0 ? draft.label : 'Untitled topic';
+                return (
+                  <SortableTopicRow
+                    key={draft.clientId}
+                    id={draft.clientId}
+                    disabled={busy || filtering}
+                    containerRef={registerRow(draft.clientId)}
+                  >
+                    {({ handleProps, disabled: dragDisabled }) => (
+                      <Card
                         className={cn(
-                          'text-muted-foreground mt-0.5 h-4 w-4 shrink-0 transition-transform duration-200',
-                          open && 'rotate-180'
+                          'overflow-hidden transition-shadow',
+                          open && 'shadow-sm',
+                          problems.length > 0 && 'border-amber-400/60'
                         )}
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 space-y-1">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span
+                      >
+                        {/* The collapsed line: drag handle, name, when it runs, how big it is, what is wrong. */}
+                        <div className="flex items-start gap-2 p-3">
+                          <button
+                            type="button"
+                            {...handleProps}
+                            aria-label={`Reorder ${name}`}
+                            title={
+                              dragDisabled
+                                ? 'Clear the filter to reorder — the row above on screen is not the row above in the set'
+                                : 'Drag to reorder'
+                            }
+                            disabled={dragDisabled}
                             className={cn(
-                              'text-sm font-medium',
-                              draft.label.trim().length === 0 && 'text-muted-foreground italic'
+                              'text-muted-foreground hover:text-foreground focus-visible:ring-ring mt-0.5 shrink-0 rounded focus-visible:ring-2 focus-visible:outline-none',
+                              dragDisabled ? 'cursor-not-allowed opacity-40' : 'cursor-grab'
                             )}
                           >
-                            {name}
-                          </span>
-                          <Badge
-                            variant={draft.phase === 'conditional' ? 'default' : 'secondary'}
-                            className="text-[10px] font-normal"
+                            <GripVertical className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOpen(draft.clientId, !open)}
+                            aria-expanded={open}
+                            className="hover:bg-muted/50 focus-visible:ring-ring -m-1 flex min-w-0 flex-1 items-start gap-2 rounded p-1 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
                           >
-                            {PHASE_CHIP[draft.phase]}
-                          </Badge>
-                          {draft.depth === 'light' && (
-                            <Badge variant="outline" className="text-[10px] font-normal">
-                              Light
-                            </Badge>
-                          )}
-                        </span>
-                        <span className="text-muted-foreground block text-xs">
-                          {draft.questionKeys.length}{' '}
-                          {draft.questionKeys.length === 1 ? 'question' : 'questions'} ·{' '}
-                          {draft.dataSlotKeys.length}{' '}
-                          {draft.dataSlotKeys.length === 1 ? 'data slot' : 'data slots'}
-                          {' · ~'}
-                          {formatSeconds(draftSeconds(draft, itemCost))}
-                          {draft.phase === 'conditional' && draft.criteria.trim().length > 0 && (
-                            <> · when {draft.criteria.trim()}</>
-                          )}
-                        </span>
-                        {problems.length > 0 && (
-                          <span className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                            <AlertCircle className="h-3 w-3 shrink-0" aria-hidden="true" />
-                            {problems.join(' · ')}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <Badge variant="outline" title={badge.hint} className="text-[10px]">
-                        {badge.label}
-                      </Badge>
-                      <div className="flex items-center">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label={`Move ${name} up`}
-                          title={
-                            filtering
-                              ? 'Clear the filter to reorder — “up” means the row above in the full set'
-                              : 'Move up'
-                          }
-                          onClick={() => move(index, -1)}
-                          disabled={busy || filtering || index === 0}
-                        >
-                          <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label={`Move ${name} down`}
-                          title={
-                            filtering
-                              ? 'Clear the filter to reorder — “down” means the row below in the full set'
-                              : 'Move down'
-                          }
-                          onClick={() => move(index, 1)}
-                          disabled={busy || filtering || index === drafts.length - 1}
-                        >
-                          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive h-7 w-7"
-                          aria-label={`Remove ${name}`}
-                          onClick={() => remove(index)}
-                          disabled={busy}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {open && (
-                    <CardContent className="space-y-4 border-t p-4">
-                      <div className="grid gap-4 sm:grid-cols-[1fr_14rem]">
-                        <div className="space-y-1.5">
-                          <Label className="text-sm font-medium">
-                            Name{' '}
-                            <FieldHelp title="Topic name">
-                              What this group of questions is about, in the words you would use to
-                              describe it. The agent reads it alongside your criteria when deciding,
-                              and the respondent may hear it in the interviewer&rsquo;s announcement
-                              — so name the subject, not the rule (“Site access”, not “Optional
-                              section 4”).
-                            </FieldHelp>
-                          </Label>
-                          <Input
-                            value={draft.label}
-                            onChange={(e) => renameFromLabel(index, e.target.value)}
-                            placeholder="Site access"
-                            disabled={busy}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-sm font-medium">
-                            Key{' '}
-                            <FieldHelp title="Topic key">
-                              The stable slug rules, plans and the blind-spot preference use to
-                              address this topic. Lowercase letters, numbers and underscores. It is
-                              filled in from the name and you rarely need to touch it. Changing it
-                              on a topic that rules already name will silently stop those rules
-                              matching — the findings at the top of the page will say so.
-                            </FieldHelp>
-                          </Label>
-                          <Input
-                            value={draft.key}
-                            onChange={(e) => mutate(index, { key: e.target.value })}
-                            className={cn(
-                              'font-mono text-xs',
-                              duplicateKeys.has(draft.key) && 'border-destructive'
-                            )}
-                            disabled={busy}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <Label className="text-sm font-medium">
-                            When it runs{' '}
-                            <FieldHelp title="When it runs">
-                              <p>
-                                Only <strong>conditional</strong> topics are ever chosen between —
-                                everything else on this page exists to decide those.
-                              </p>
-                              <p className="mt-2">
-                                <strong>Opening</strong> runs first, and its answers are what the
-                                agent reads when deciding. <strong>Always ask</strong> and{' '}
-                                <strong>Closing</strong> run for everyone, whatever they say.
-                              </p>
-                            </FieldHelp>
-                          </Label>
-                          <Select
-                            value={draft.phase}
-                            onValueChange={(v) => mutate(index, { phase: v as TopicPhase })}
-                            disabled={busy}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {TOPIC_PHASES.map((phase) => (
-                                <SelectItem key={phase} value={phase}>
-                                  {TOPIC_PHASE_LABELS[phase]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-muted-foreground text-xs">
-                            {TOPIC_PHASE_DESCRIPTIONS[draft.phase]}
-                          </p>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-sm font-medium">
-                            How much of it{' '}
-                            <FieldHelp title="How much of it">
-                              <strong>Light</strong> includes only the highest-weight members — a
-                              sample, not a score, and every report that mentions the topic says so.
-                              The blind-spot check forces light regardless of what you set here,
-                              because in that interview its job is to sample.
-                            </FieldHelp>
-                          </Label>
-                          <Select
-                            value={draft.depth}
-                            onValueChange={(v) => mutate(index, { depth: v as TopicDepth })}
-                            disabled={busy}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {TOPIC_DEPTHS.map((depth) => (
-                                <SelectItem key={depth} value={depth}>
-                                  {TOPIC_DEPTH_LABELS[depth]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-sm font-medium">
-                          Include this when…{' '}
-                          <FieldHelp title="When this applies">
-                            <p>
-                              Your own words about when this topic applies, judged against what the
-                              respondent actually said in the opening.
-                            </p>
-                            <p className="mt-2">
-                              <strong>Write the condition, not the instruction.</strong> “They work
-                              on client premises” reads better to the agent than “ask this if
-                              relevant”. Name what would have to be true, and the agent decides
-                              whether it is.
-                            </p>
-                            <p className="mt-2">
-                              If you are certain rather than judging — a fact the opening captures
-                              in a data slot — write a hard rule above instead, and it is applied
-                              before the agent gets a say.
-                            </p>
-                          </FieldHelp>
-                        </Label>
-                        <AutoTextarea
-                          value={draft.criteria}
-                          onChange={(e) => mutate(index, { criteria: e.target.value })}
-                          placeholder="They told us they operate across more than one region."
-                          disabled={busy}
-                          rows={2}
-                        />
-                        {draft.phase !== 'conditional' ? (
-                          <p className="text-muted-foreground text-xs">
-                            Kept, but not used — {PHASE_CHIP[draft.phase].toLowerCase()} topics are
-                            never chosen between.
-                          </p>
-                        ) : (
-                          draft.criteria.trim().length === 0 && (
-                            <p
+                            <ChevronDown
                               className={cn(
-                                'text-xs',
-                                enabled ? 'text-destructive' : 'text-amber-600'
+                                'text-muted-foreground mt-0.5 h-4 w-4 shrink-0 transition-transform duration-200',
+                                open && 'rotate-180'
                               )}
-                            >
-                              A conditional topic with no criteria gives the agent nothing to judge
-                              it on.
-                            </p>
-                          )
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0 flex-1 space-y-1">
+                              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span
+                                  className={cn(
+                                    'text-sm font-medium',
+                                    draft.label.trim().length === 0 &&
+                                      'text-muted-foreground italic'
+                                  )}
+                                >
+                                  {name}
+                                </span>
+                                <Badge
+                                  variant={draft.phase === 'conditional' ? 'default' : 'secondary'}
+                                  className="text-[10px] font-normal"
+                                >
+                                  {PHASE_CHIP[draft.phase]}
+                                </Badge>
+                                {draft.depth === 'light' && (
+                                  <Badge variant="outline" className="text-[10px] font-normal">
+                                    Light
+                                  </Badge>
+                                )}
+                              </span>
+                              <span className="text-muted-foreground block text-xs">
+                                {draft.questionKeys.length}{' '}
+                                {draft.questionKeys.length === 1 ? 'question' : 'questions'} ·{' '}
+                                {draft.dataSlotKeys.length}{' '}
+                                {draft.dataSlotKeys.length === 1 ? 'data slot' : 'data slots'}
+                                {' · ~'}
+                                {formatSeconds(draftSeconds(draft, itemCost))}
+                                {draft.phase === 'conditional' &&
+                                  draft.criteria.trim().length > 0 && (
+                                    <> · when {draft.criteria.trim()}</>
+                                  )}
+                              </span>
+                              {problems.length > 0 && (
+                                <span className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                  <AlertCircle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                  {problems.join(' · ')}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            <Badge variant="outline" title={badge.hint} className="text-[10px]">
+                              {badge.label}
+                            </Badge>
+                            <div className="flex items-center">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                aria-label={`Move ${name} up`}
+                                title={
+                                  filtering
+                                    ? 'Clear the filter to reorder — “up” means the row above in the full set'
+                                    : 'Move up'
+                                }
+                                onClick={() => move(index, -1)}
+                                disabled={busy || filtering || index === 0}
+                              >
+                                <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                aria-label={`Move ${name} down`}
+                                title={
+                                  filtering
+                                    ? 'Clear the filter to reorder — “down” means the row below in the full set'
+                                    : 'Move down'
+                                }
+                                onClick={() => move(index, 1)}
+                                disabled={busy || filtering || index === drafts.length - 1}
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive h-7 w-7"
+                                aria-label={`Remove ${name}`}
+                                onClick={() => remove(index)}
+                                disabled={busy}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {open && (
+                          <CardContent className="space-y-4 border-t p-4">
+                            <div className="grid gap-4 sm:grid-cols-[1fr_14rem]">
+                              <div className="space-y-1.5">
+                                <Label className="text-sm font-medium">
+                                  Name{' '}
+                                  <FieldHelp title="Topic name">
+                                    What this group of questions is about, in the words you would
+                                    use to describe it. The agent reads it alongside your criteria
+                                    when deciding, and the respondent may hear it in the
+                                    interviewer&rsquo;s announcement — so name the subject, not the
+                                    rule (“Site access”, not “Optional section 4”).
+                                  </FieldHelp>
+                                </Label>
+                                <Input
+                                  value={draft.label}
+                                  onChange={(e) => renameFromLabel(index, e.target.value)}
+                                  placeholder="Site access"
+                                  disabled={busy}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-sm font-medium">
+                                  Key{' '}
+                                  <FieldHelp title="Topic key">
+                                    The stable slug rules, plans and the blind-spot preference use
+                                    to address this topic. Lowercase letters, numbers and
+                                    underscores. It is filled in from the name and you rarely need
+                                    to touch it. Changing it on a topic that rules already name will
+                                    silently stop those rules matching — the findings at the top of
+                                    the page will say so.
+                                  </FieldHelp>
+                                </Label>
+                                <Input
+                                  value={draft.key}
+                                  onChange={(e) => mutate(index, { key: e.target.value })}
+                                  className={cn(
+                                    'font-mono text-xs',
+                                    duplicateKeys.has(draft.key) && 'border-destructive'
+                                  )}
+                                  disabled={busy}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <div className="space-y-1.5">
+                                <Label className="text-sm font-medium">
+                                  When it runs{' '}
+                                  <FieldHelp title="When it runs">
+                                    <p>
+                                      Only <strong>conditional</strong> topics are ever chosen
+                                      between — everything else on this page exists to decide those.
+                                    </p>
+                                    <p className="mt-2">
+                                      <strong>Opening</strong> runs first, and its answers are what
+                                      the agent reads when deciding. <strong>Always ask</strong> and{' '}
+                                      <strong>Closing</strong> run for everyone, whatever they say.
+                                    </p>
+                                  </FieldHelp>
+                                </Label>
+                                <Select
+                                  value={draft.phase}
+                                  onValueChange={(v) => mutate(index, { phase: v as TopicPhase })}
+                                  disabled={busy}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {TOPIC_PHASES.map((phase) => (
+                                      <SelectItem key={phase} value={phase}>
+                                        {TOPIC_PHASE_LABELS[phase]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-muted-foreground text-xs">
+                                  {TOPIC_PHASE_DESCRIPTIONS[draft.phase]}
+                                </p>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-sm font-medium">
+                                  How much of it{' '}
+                                  <FieldHelp title="How much of it">
+                                    <strong>Light</strong> includes only the highest-weight members
+                                    — a sample, not a score, and every report that mentions the
+                                    topic says so. The blind-spot check forces light regardless of
+                                    what you set here, because in that interview its job is to
+                                    sample.
+                                  </FieldHelp>
+                                </Label>
+                                <Select
+                                  value={draft.depth}
+                                  onValueChange={(v) => mutate(index, { depth: v as TopicDepth })}
+                                  disabled={busy}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {TOPIC_DEPTHS.map((depth) => (
+                                      <SelectItem key={depth} value={depth}>
+                                        {TOPIC_DEPTH_LABELS[depth]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-sm font-medium">
+                                Include this when…{' '}
+                                <FieldHelp title="When this applies">
+                                  <p>
+                                    Your own words about when this topic applies, judged against
+                                    what the respondent actually said in the opening.
+                                  </p>
+                                  <p className="mt-2">
+                                    <strong>Write the condition, not the instruction.</strong> “They
+                                    work on client premises” reads better to the agent than “ask
+                                    this if relevant”. Name what would have to be true, and the
+                                    agent decides whether it is.
+                                  </p>
+                                  <p className="mt-2">
+                                    If you are certain rather than judging — a fact the opening
+                                    captures in a data slot — write a hard rule above instead, and
+                                    it is applied before the agent gets a say.
+                                  </p>
+                                </FieldHelp>
+                              </Label>
+                              <AutoTextarea
+                                value={draft.criteria}
+                                onChange={(e) => mutate(index, { criteria: e.target.value })}
+                                placeholder="They told us they operate across more than one region."
+                                disabled={busy}
+                                rows={2}
+                              />
+                              {draft.phase !== 'conditional' ? (
+                                <p className="text-muted-foreground text-xs">
+                                  Kept, but not used — {PHASE_CHIP[draft.phase].toLowerCase()}{' '}
+                                  topics are never chosen between.
+                                </p>
+                              ) : (
+                                draft.criteria.trim().length === 0 && (
+                                  <p
+                                    className={cn(
+                                      'text-xs',
+                                      enabled ? 'text-destructive' : 'text-amber-600'
+                                    )}
+                                  >
+                                    A conditional topic with no criteria gives the agent nothing to
+                                    judge it on.
+                                  </p>
+                                )
+                              )}
+                            </div>
+
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <KeyPicker
+                                label="Questions"
+                                options={questionOptions}
+                                selected={draft.questionKeys}
+                                onChange={(next) => mutate(index, { questionKeys: next })}
+                                disabled={busy}
+                                emptyText="This version has no questions yet."
+                                help={
+                                  <>
+                                    <p>
+                                      The questions this topic covers. When the topic is not part of
+                                      this respondent&rsquo;s interview, these are not asked and the
+                                      report records them as <em>not asked</em> rather than
+                                      unanswered.
+                                    </p>
+                                    <p className="mt-2">
+                                      Each question should sit in exactly one topic. A question in
+                                      none can never be asked once conditional topics is on.
+                                    </p>
+                                  </>
+                                }
+                              />
+                              <KeyPicker
+                                label="Data slots"
+                                options={dataSlotOptions}
+                                selected={draft.dataSlotKeys}
+                                onChange={(next) => mutate(index, { dataSlotKeys: next })}
+                                disabled={busy}
+                                emptyText="This version has no data slots yet."
+                                help={
+                                  <>
+                                    <p>
+                                      The data slots this topic is responsible for filling. Add them
+                                      when the conversation is driven by slots rather than by
+                                      literal questions; otherwise the questions alone are enough.
+                                    </p>
+                                    <p className="mt-2">
+                                      Slots an <em>opening</em> topic fills are what your hard rules
+                                      read.
+                                    </p>
+                                  </>
+                                }
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-muted-foreground text-xs">
+                                Note to yourself{' '}
+                                <FieldHelp title="Internal note">
+                                  Never shown to the respondent and never sent to the agent — this
+                                  is for whoever edits the questionnaire next.
+                                </FieldHelp>
+                              </Label>
+                              <AutoTextarea
+                                value={draft.description}
+                                onChange={(e) => mutate(index, { description: e.target.value })}
+                                placeholder="Optional"
+                                disabled={busy}
+                                rows={1}
+                              />
+                            </div>
+                          </CardContent>
                         )}
-                      </div>
-
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <KeyPicker
-                          label="Questions"
-                          options={questionOptions}
-                          selected={draft.questionKeys}
-                          onChange={(next) => mutate(index, { questionKeys: next })}
-                          disabled={busy}
-                          emptyText="This version has no questions yet."
-                          help={
-                            <>
-                              <p>
-                                The questions this topic covers. When the topic is not part of this
-                                respondent&rsquo;s interview, these are not asked and the report
-                                records them as <em>not asked</em> rather than unanswered.
-                              </p>
-                              <p className="mt-2">
-                                Each question should sit in exactly one topic. A question in none
-                                can never be asked once adaptive scope is on.
-                              </p>
-                            </>
-                          }
-                        />
-                        <KeyPicker
-                          label="Data slots"
-                          options={dataSlotOptions}
-                          selected={draft.dataSlotKeys}
-                          onChange={(next) => mutate(index, { dataSlotKeys: next })}
-                          disabled={busy}
-                          emptyText="This version has no data slots yet."
-                          help={
-                            <>
-                              <p>
-                                The data slots this topic is responsible for filling. Add them when
-                                the conversation is driven by slots rather than by literal
-                                questions; otherwise the questions alone are enough.
-                              </p>
-                              <p className="mt-2">
-                                Slots an <em>opening</em> topic fills are what your hard rules read.
-                              </p>
-                            </>
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-muted-foreground text-xs">
-                          Note to yourself{' '}
-                          <FieldHelp title="Internal note">
-                            Never shown to the respondent and never sent to the agent — this is for
-                            whoever edits the questionnaire next.
-                          </FieldHelp>
-                        </Label>
-                        <AutoTextarea
-                          value={draft.description}
-                          onChange={(e) => mutate(index, { description: e.target.value })}
-                          placeholder="Optional"
-                          disabled={busy}
-                          rows={1}
-                        />
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
-              </li>
-            );
-          })}
-        </ul>
+                      </Card>
+                    )}
+                  </SortableTopicRow>
+                );
+              })}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
     </div>
   );

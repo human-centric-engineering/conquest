@@ -20,7 +20,7 @@ import type {
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 // ─── Navigation mocks ────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ const workspaceDataMock = vi.hoisted(() => ({
   getVersionDataSlotCountCached: vi.fn<() => Promise<number>>(),
   getVersionEmbeddingCoverageCached: vi.fn(),
   getVersionDataSlotEmbeddingCoverageCached: vi.fn(),
-  // Adaptive Scope (P17): the Overview reads the topics payload for the draft launch row.
+  // Conditional Topics (P17): the Overview reads the topics payload for the draft launch row.
   getVersionTopicsCached: vi.fn(),
 }));
 
@@ -64,18 +64,18 @@ vi.mock('@/components/admin/cq-stat-tiles', () => ({
 }));
 
 vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
-  // The two adaptive-scope counts are rendered rather than dropped: the page is the only place
+  // The two conditional-topics counts are rendered rather than dropped: the page is the only place
   // that derives them from the topics payload, and the checklist decides an admin-facing warning
   // from them (F17.22 Phase 4).
   LaunchChecklist: (props: {
     versionNumber: number;
-    adaptiveScopeErrorCount?: number;
-    adaptiveScopeConditionalCount?: number;
+    conditionalTopicsErrorCount?: number;
+    conditionalTopicsConditionalCount?: number;
   }) => (
     <div
       data-testid="launch-checklist"
-      data-scope-errors={props.adaptiveScopeErrorCount}
-      data-scope-conditionals={props.adaptiveScopeConditionalCount}
+      data-scope-errors={props.conditionalTopicsErrorCount}
+      data-scope-conditionals={props.conditionalTopicsConditionalCount}
     >
       launch v{props.versionNumber}
     </div>
@@ -185,11 +185,11 @@ beforeEach(() => {
   // resolved" so the launch checklist mounts without depending on embedding readiness here.
   workspaceDataMock.getVersionEmbeddingCoverageCached.mockResolvedValue(null);
   workspaceDataMock.getVersionDataSlotEmbeddingCoverageCached.mockResolvedValue(null);
-  // Adaptive Scope off — the state of every questionnaire that never opted in, and the one under
+  // Conditional Topics off — the state of every questionnaire that never opted in, and the one under
   // which the Overview must render exactly as it did before P17.
   workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
     topics: [],
-    settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     issues: [],
     inventory: { questions: [], dataSlots: [] },
     draft: null,
@@ -267,7 +267,7 @@ describe('OverviewTab', () => {
           { key: 'b', phase: 'core' },
           { key: 'c', phase: 'conditional' },
         ],
-        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
         issues: [{ severity: 'error' }, { severity: 'warning' }],
         inventory: { questions: [], dataSlots: [] },
         draft: null,

@@ -327,7 +327,7 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
 
 /**
  * What a scope-evaluation finding's `targetKey` refers to (F17.21) — the sibling of
- * {@link FindingTargetKind} for the Adaptive Scope judge panel. `topic:<key>` / `rule:<id>` /
+ * {@link FindingTargetKind} for the Conditional Topics judge panel. `topic:<key>` / `rule:<id>` /
  * `settings` rather than question/section/goal/audience, since the panel judges the scope config,
  * not the question structure.
  */
@@ -338,7 +338,7 @@ export interface ScopeFindingTargetView {
   kind: ScopeFindingTargetKind;
   /** The raw `targetKey`, unchanged — still the handle apply reconciles against. */
   key: string;
-  /** Human label: the topic's label, the rule's rendered sentence, or "Adaptive scope settings". */
+  /** Human label: the topic's label, the rule's rendered sentence, or "Conditional topics settings". */
   label: string;
   /** The target exists only in the run's snapshot — it was removed from the live config since. */
   removed: boolean;

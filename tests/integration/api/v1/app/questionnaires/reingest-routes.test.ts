@@ -64,11 +64,11 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
-// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// Conditional Topics candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the re-ingest route wires the result into the 200 response.
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
-  checkAdaptiveScopeCandidacy: vi.fn(),
+  checkConditionalTopicsCandidacy: vi.fn(),
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ import {
   ReingestNotDraftError,
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
-import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { checkConditionalTopicsCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -202,8 +202,8 @@ beforeEach(() => {
   });
   (reingestVersion as Mock).mockResolvedValue(REINGEST_RESULT);
   // Default: not a candidate / check skipped — keeps every pre-existing test's response body
-  // shape unchanged (no `adaptiveScopeCandidate` key) without touching those tests.
-  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
+  // shape unchanged (no `conditionalTopicsCandidate` key) without touching those tests.
+  (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(null);
 });
 
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
@@ -609,32 +609,32 @@ describe('POST …/reingest — rate limit', () => {
   });
 });
 
-// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
-// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// ─── Conditional Topics candidacy wiring (P17.19) ───────────────────────────────────
+// `checkConditionalTopicsCandidacy` itself is mocked at the module boundary — its Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These tests only prove this route
 // wires the result into the 200 response, scoped to the non-deduped success path (the
 // deduped short-circuit returns before the candidacy check ever runs, so it needs no
 // coverage here — see the dedup describe block above).
 
-describe('POST …/reingest — adaptive scope candidacy wiring', () => {
-  it('includes adaptiveScopeCandidate in the 200 body when the check resolves a verdict', async () => {
+describe('POST …/reingest — conditional topics candidacy wiring', () => {
+  it('includes conditionalTopicsCandidate in the 200 body when the check resolves a verdict', async () => {
     const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
-    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(verdict);
 
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data.adaptiveScopeCandidate).toEqual(verdict);
+    expect(body.data.conditionalTopicsCandidate).toEqual(verdict);
   });
 
-  it('omits the adaptiveScopeCandidate key entirely when the check resolves null', async () => {
+  it('omits the conditionalTopicsCandidate key entirely when the check resolves null', async () => {
     // beforeEach already defaults the mock to null — this pins the omission (not
     // present-and-undefined) via the `in` operator against the raw JSON body.
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect('adaptiveScopeCandidate' in body.data).toBe(false);
+    expect('conditionalTopicsCandidate' in body.data).toBe(false);
   });
 });

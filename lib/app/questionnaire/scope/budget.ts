@@ -25,13 +25,14 @@
 
 import { QUESTION_TYPES, type QuestionType } from '@/lib/app/questionnaire/types';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
-import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
+import { membersAtDepth, plannedMembers } from '@/lib/app/questionnaire/scope/resolve';
 import {
   ALWAYS_PHASES,
   DEFAULT_SECONDS_PER_DATA_SLOT,
-  type AdaptiveScopeSettings,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicDepth,
+  type TopicMembers,
 } from '@/lib/app/questionnaire/scope/types';
 
 /**
@@ -84,7 +85,7 @@ export interface PricedQuestion {
 export function itemSeconds(
   questions: readonly PricedQuestion[],
   dataSlotKeys: readonly string[],
-  settings: AdaptiveScopeSettings
+  settings: ConditionalTopicsSettings
 ): ItemSeconds {
   const byQuestionKey = new Map<string, number>();
   for (const q of questions) {
@@ -97,7 +98,7 @@ export function itemSeconds(
 }
 
 /** Seconds for one question: the version override, else the default for its type, times its rows. */
-function secondsForQuestion(question: PricedQuestion, settings: AdaptiveScopeSettings): number {
+function secondsForQuestion(question: PricedQuestion, settings: ConditionalTopicsSettings): number {
   const type = asQuestionType(question.type);
   const perItem = settings.secondsPerQuestionType[type] ?? DEFAULT_SECONDS_PER_TYPE[type];
   if (type !== 'matrix') return perItem;
@@ -183,11 +184,46 @@ export function estimateTopicCosts(
  * make room for an imaginary one.
  */
 export function plannedSeconds(
-  planned: readonly { key: string; depth: TopicDepth }[],
-  costs: ReadonlyMap<string, TopicCost>
+  planned: readonly { key: string; depth: TopicDepth; members?: TopicMembers }[],
+  costs: ReadonlyMap<string, TopicCost>,
+  /**
+   * What a topic actually contains, so a plan that names a SUBSET of one (C6) is priced on the
+   * items it names rather than on the whole topic. Optional: without it a subset is charged at its
+   * depth, which over-states rather than under-states — the safe direction for a budget, since it
+   * drops a topic rather than overrunning the respondent's time.
+   */
+  exact?: {
+    topicsByKey: ReadonlyMap<string, Topic>;
+    seconds: ItemSeconds;
+    weights?: {
+      byQuestionKey?: ReadonlyMap<string, number>;
+      byDataSlotKey?: ReadonlyMap<string, number>;
+    };
+  }
 ): number {
   let total = 0;
   for (const topic of planned) {
+    const authored = exact?.topicsByKey.get(topic.key);
+    if (topic.members && exact && authored) {
+      // Priced through the SAME resolver the interview uses — see `topicSeconds` for why that
+      // matters more than it looks.
+      const questionKeys = plannedMembers(
+        authored.members.questionKeys,
+        topic.members.questionKeys,
+        topic.depth,
+        exact.weights?.byQuestionKey
+      );
+      const dataSlotKeys = plannedMembers(
+        authored.members.dataSlotKeys,
+        topic.members.dataSlotKeys,
+        topic.depth,
+        exact.weights?.byDataSlotKey
+      );
+      total +=
+        sumKeys(questionKeys, exact.seconds.byQuestionKey) +
+        sumKeys(dataSlotKeys, exact.seconds.byDataSlotKey);
+      continue;
+    }
     const cost = costs.get(topic.key);
     if (!cost) continue;
     total += topic.depth === 'light' ? cost.light : cost.full;

@@ -1,5 +1,5 @@
 /**
- * Integration test for the Adaptive Scope evaluation capability (F17.21).
+ * Integration test for the Conditional Topics evaluation capability (F17.21).
  *
  * Exercises the capability through the REAL `capabilityDispatcher` and the REAL
  * `runStructuredCompletion`, with only the provider (and the DB-backed registry / binding
@@ -73,11 +73,11 @@ function registryRow() {
   return {
     id: 'cap-1',
     slug: SLUG,
-    name: 'Evaluate Adaptive Scope',
+    name: 'Evaluate Conditional Topics',
     category: 'app',
     functionDefinition: {
       name: SLUG,
-      description: 'Evaluate an Adaptive Scope configuration.',
+      description: 'Evaluate a Conditional Topics configuration.',
       parameters: { type: 'object', properties: {} },
     },
     requiresApproval: false,

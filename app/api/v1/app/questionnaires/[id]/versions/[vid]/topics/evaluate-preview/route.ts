@@ -1,10 +1,10 @@
 /**
- * Adaptive Scope evaluation preview (F17.21).
+ * Conditional Topics evaluation preview (F17.21).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/evaluate-preview
  *   body: { dimensions?: ScopeEvaluationDimension[] }   // default: all four
  *
- *   Admin-only. Runs the scope-evaluation judge panel over a version's authored Adaptive Scope
+ *   Admin-only. Runs the scope-evaluation judge panel over a version's authored Conditional Topics
  *   configuration — one structured LLM call per dimension — and returns each judge's verdict (a
  *   score in [0, 1] plus actionable findings). A read-only *preview*, mirroring F5.1's
  *   `evaluate-preview`: it persists nothing, because the run + finding tables are a later phase of
@@ -94,7 +94,7 @@ const handleEvaluateScopePreview = withAdminAuth<{ id: string; vid: string }>(
     // subset missing is fail-soft per dimension below.
     if (wantedSlugs.every((slug) => !agentBySlug.has(slug))) {
       log.error('No scope-evaluation judge agents found; run db:seed', { wantedSlugs });
-      throw new NotFoundError('Adaptive Scope evaluation is not configured');
+      throw new NotFoundError('Conditional Topics evaluation is not configured');
     }
 
     const { results, summary } = await runScopeEvaluationPanel({
@@ -107,7 +107,7 @@ const handleEvaluateScopePreview = withAdminAuth<{ id: string; vid: string }>(
       log,
     });
 
-    log.info('Adaptive Scope evaluation preview', {
+    log.info('Conditional Topics evaluation preview', {
       questionnaireId: id,
       versionId: vid,
       ...summary,

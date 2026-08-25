@@ -1,5 +1,5 @@
 /**
- * Prompt builder for the ingestion-time Adaptive Scope candidacy check — unit tests (P17.19).
+ * Prompt builder for the ingestion-time Conditional Topics candidacy check — unit tests (P17.19).
  *
  * Pure and provider-agnostic, so tests focus on the message shape and the one behavioural rule
  * worth pinning: the rubric must keep telling the model not to infer routing from question variety

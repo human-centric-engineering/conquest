@@ -56,6 +56,8 @@ const AMENDMENT_CUES: readonly RegExp[] = [
  *
  * The gate that keeps this feature free on ordinary turns. Returns false for an empty message, and
  * only scans the opening {@link AMENDMENT_SCAN_CHARS}.
+ *
+ * **English only, by construction** — see {@link isEnglishLocale} for what happens elsewhere.
  */
 export function looksLikeTopicRequest(message: string): boolean {
   const text = message.trim().slice(0, AMENDMENT_SCAN_CHARS);
@@ -63,11 +65,45 @@ export function looksLikeTopicRequest(message: string): boolean {
   return AMENDMENT_CUES.some((cue) => cue.test(text));
 }
 
-/** Split a label into lowercase content tokens, dropping the joining words that match anything. */
+/**
+ * Is this version's respondent-facing language English?
+ *
+ * {@link AMENDMENT_CUES} is a list of English phrasings, so on a version whose `audience.locale`
+ * says the interview is conducted in another language the gate can only ever return false —
+ * silently, on every turn, for the whole feature. The interviewer already honours that locale
+ * (`question-stream.ts` instructs it to respond in the respondent's language), so this is a
+ * configuration the product supports and the gate did not.
+ *
+ * The answer is NOT a translated cue list. Authoring cue phrasings for every language the product
+ * might be run in is work nobody here can check, and a bad cue list fails the same silent way. What
+ * is language-neutral is the **topic labels**: they are written in the instrument's own language by
+ * the person who wrote the instrument. So a non-English version gates on "does this message name an
+ * excluded topic" and hands the request-or-not judgement to the agent tier, which reads meaning
+ * rather than wording. It costs one indexed query per turn instead of nothing, and only on versions
+ * that are not in English.
+ *
+ * Unset counts as English: `locale` is optional, most versions have none, and the pre-P17 behaviour
+ * of every one of them was the English gate.
+ */
+export function isEnglishLocale(locale: string | null | undefined): boolean {
+  const tag = locale?.trim().toLowerCase();
+  if (!tag) return true;
+  return tag === 'en' || tag.startsWith('en-') || tag.startsWith('en_');
+}
+
+/**
+ * Split a label into lowercase content tokens, dropping the joining words that match anything.
+ *
+ * Splits on non-letter/non-digit rather than on `[^a-z0-9]`, so an accented or non-Latin label
+ * tokenises into its own words instead of being shredded into fragments — the label match is the
+ * whole gate on a non-English version, and a gate that cannot see the alphabet it is reading is no
+ * gate. The dropped joining words stay English-only on purpose: they are a precision tweak for
+ * labels this build can read, and guessing another language's stopwords would cost recall.
+ */
 function labelTokens(label: string): string[] {
   return label
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .filter((word) => word.length >= 4 && !['and', 'the', 'for', 'with', 'your'].includes(word));
 }
 
@@ -79,8 +115,23 @@ function labelTokens(label: string): string[] {
  * toss dressed as a decision.
  */
 export function matchTopicByLabel(message: string, candidates: readonly Topic[]): Topic | null {
+  const hits = candidateLabelHits(message, candidates);
+  return hits.length === 1 ? (hits[0] ?? null) : null;
+}
+
+/**
+ * Every candidate whose label appears in the message — including the ambiguous case
+ * {@link matchTopicByLabel} refuses to resolve.
+ *
+ * This is the non-English gate: a message that names none of the excluded topics is not a request
+ * to cover one, in any language. A message that names one still might not be ("we sorted talent
+ * last year"), which is why a hit here leads to the agent tier rather than straight to an
+ * amendment — the difference between naming a subject and asking for it is exactly the judgement
+ * the English cue list encodes and a label match does not.
+ */
+export function candidateLabelHits(message: string, candidates: readonly Topic[]): Topic[] {
   const text = message.toLowerCase().slice(0, AMENDMENT_SCAN_CHARS);
-  const hits = candidates.filter((topic) => {
+  return candidates.filter((topic) => {
     const label = topic.label.toLowerCase().trim();
     if (label.length >= 4 && text.includes(label)) return true;
     const tokens = labelTokens(topic.label);
@@ -88,7 +139,6 @@ export function matchTopicByLabel(message: string, candidates: readonly Topic[])
     // which is a word an interview about staffing will contain constantly.
     return tokens.length > 0 && tokens.every((token) => text.includes(token));
   });
-  return hits.length === 1 ? (hits[0] ?? null) : null;
 }
 
 /**

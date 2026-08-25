@@ -1,5 +1,5 @@
 /**
- * The Adaptive Scope tab's three sub-tabs (F17.26).
+ * The Conditional Topics tab's three sub-tabs (F17.26).
  *
  * The surface is ~5,700 lines across 18 components and was rendered as one unbroken vertical
  * stack **ordered by the runtime pipeline** — proposer, then verification, then the topic list an
@@ -12,10 +12,10 @@
 
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
 
-export const ADAPTIVE_SCOPE_TABS = ['topics', 'rules', 'check'] as const;
-export type AdaptiveScopeTab = (typeof ADAPTIVE_SCOPE_TABS)[number];
+export const CONDITIONAL_TOPICS_TABS = ['topics', 'rules', 'check'] as const;
+export type ConditionalTopicsTab = (typeof CONDITIONAL_TOPICS_TABS)[number];
 
-export const DEFAULT_ADAPTIVE_SCOPE_TAB: AdaptiveScopeTab = 'topics';
+export const DEFAULT_CONDITIONAL_TOPICS_TAB: ConditionalTopicsTab = 'topics';
 
 /**
  * Visible labels.
@@ -24,14 +24,14 @@ export const DEFAULT_ADAPTIVE_SCOPE_TAB: AdaptiveScopeTab = 'topics';
  * whole version, and two things called Settings on one screen is the kind of collision an admin
  * resolves by clicking both.
  */
-export const ADAPTIVE_SCOPE_TAB_LABELS: Record<AdaptiveScopeTab, string> = {
+export const CONDITIONAL_TOPICS_TAB_LABELS: Record<ConditionalTopicsTab, string> = {
   topics: 'Topics',
   rules: 'Rules & limits',
   check: 'Check',
 };
 
 /** One line under each tab's heading, saying what the tab is for. */
-export const ADAPTIVE_SCOPE_TAB_HINTS: Record<AdaptiveScopeTab, string> = {
+export const CONDITIONAL_TOPICS_TAB_HINTS: Record<ConditionalTopicsTab, string> = {
   topics: 'Group the questions, then decide which groups are conditional.',
   rules: 'Pin the certainties, and set how much one interview may cover.',
   check: 'Try the decision before anyone answers, and see what it did afterwards.',
@@ -44,12 +44,12 @@ export const ADAPTIVE_SCOPE_TAB_HINTS: Record<AdaptiveScopeTab, string> = {
  * no anchor — only a `code` and an optional `topicKey` — so this is the mapping, written once here
  * rather than inferred from the code string at the call site.
  *
- * **`DEFAULT_ADAPTIVE_SCOPE_TAB` is the fallback on purpose.** `validateAdaptiveScope` has 23 codes
+ * **`DEFAULT_CONDITIONAL_TOPICS_TAB` is the fallback on purpose.** `validateConditionalTopics` has 23 codes
  * today and gains more; a `Record<Code, Tab>` would make every new finding a compile error in a
  * file the author of that finding has no reason to open, and the honest default — the tab that owns
  * the topic set — is right for most of them.
  */
-const TAB_BY_ISSUE_CODE: Readonly<Record<string, AdaptiveScopeTab>> = {
+const TAB_BY_ISSUE_CODE: Readonly<Record<string, ConditionalTopicsTab>> = {
   // Fixed by editing a topic: its members, its phase, its criteria, its depth.
   orphaned_questions: 'topics',
   orphaned_data_slots: 'topics',
@@ -79,13 +79,13 @@ const TAB_BY_ISSUE_CODE: Readonly<Record<string, AdaptiveScopeTab>> = {
 };
 
 /** The tab that owns a finding. Unknown codes land on the topic set — see the note above. */
-export function tabForScopeIssue(issue: Pick<ScopeIssue, 'code'>): AdaptiveScopeTab {
-  return TAB_BY_ISSUE_CODE[issue.code] ?? DEFAULT_ADAPTIVE_SCOPE_TAB;
+export function tabForScopeIssue(issue: Pick<ScopeIssue, 'code'>): ConditionalTopicsTab {
+  return TAB_BY_ISSUE_CODE[issue.code] ?? DEFAULT_CONDITIONAL_TOPICS_TAB;
 }
 
 /** Narrow an untrusted `?tab=` value. Anything unrecognised falls back rather than throwing. */
-export function narrowAdaptiveScopeTab(value: string | null | undefined): AdaptiveScopeTab {
-  return (ADAPTIVE_SCOPE_TABS as readonly string[]).includes(value ?? '')
-    ? (value as AdaptiveScopeTab)
-    : DEFAULT_ADAPTIVE_SCOPE_TAB;
+export function narrowConditionalTopicsTab(value: string | null | undefined): ConditionalTopicsTab {
+  return (CONDITIONAL_TOPICS_TABS as readonly string[]).includes(value ?? '')
+    ? (value as ConditionalTopicsTab)
+    : DEFAULT_CONDITIONAL_TOPICS_TAB;
 }

@@ -1,5 +1,5 @@
 /**
- * Unit tests: `ScopeExplainer` — the "How adaptive scope works" panel at the top of the tab.
+ * Unit tests: `ScopeExplainer` — the "How conditional topics works" panel at the top of the tab.
  *
  * Three of its properties are decisions rather than styling, and each has been got wrong at least
  * once, so each is asserted here:
@@ -28,7 +28,7 @@ const STEP_TITLES = [
 ];
 
 function toggle() {
-  return screen.getByRole('button', { name: /How adaptive scope works/ });
+  return screen.getByRole('button', { name: /How conditional topics works/ });
 }
 
 describe('ScopeExplainer', () => {
@@ -36,7 +36,7 @@ describe('ScopeExplainer', () => {
     render(<ScopeExplainer />);
 
     expect(toggle()).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByText('How adaptive scope works')).toBeInTheDocument();
+    expect(screen.getByText('How conditional topics works')).toBeInTheDocument();
     expect(screen.getByText(/Ask each respondent only the parts/)).toBeInTheDocument();
     expect(screen.queryByText(STEP_TITLES[0])).not.toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe('ScopeExplainer', () => {
     render(<ScopeExplainer />);
 
     expect(toggle()).toHaveAttribute('aria-controls', 'scope-explainer-body');
-    expect(screen.getByLabelText('How adaptive scope works')).toBeInTheDocument();
+    expect(screen.getByLabelText('How conditional topics works')).toBeInTheDocument();
   });
 
   it('passes a caller’s className through to the section', () => {

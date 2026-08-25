@@ -8,11 +8,13 @@ import {
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  LIGHT_DEPTH_MEMBER_COUNT,
+  type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
+import { resolveScope } from '@/lib/app/questionnaire/scope/resolve';
 
 function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Topic> = {}): Topic {
   return {
@@ -30,9 +32,9 @@ function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Top
   };
 }
 
-function settings(over: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
+function settings(over: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
   return {
-    ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     enabled: true,
     maxConditionalTopics: 3,
     includeCheckTopic: false,
@@ -575,5 +577,142 @@ describe('applyGuardrails — the time budget', () => {
     );
 
     expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast', 'talent']);
+  });
+});
+
+describe('applyGuardrails — a proposal that names only part of a topic (C6 / F17.29)', () => {
+  const wide = topic('wide', 'conditional', {
+    members: { dataSlotKeys: ['wide_ds'], questionKeys: ['wide_q1', 'wide_q2', 'wide_q3'] },
+  });
+  const topics = [topic('open', 'opening'), wide];
+
+  it('seats the named items, in the instrument’s order', () => {
+    const plan = applyGuardrails(
+      input({
+        topics,
+        proposed: [
+          {
+            key: 'wide',
+            rationale: 'two of these',
+            members: { questionKeys: ['wide_q3', 'wide_q1'] },
+          },
+        ],
+      })
+    );
+
+    expect(plan.topics[0]?.members).toEqual({
+      questionKeys: ['wide_q1', 'wide_q3'],
+      // Naming questions says nothing about the topic's data slots, so the un-named half is left
+      // EMPTY — which `plannedMembers` reads as "the depth decides", not as "ask none of them".
+      dataSlotKeys: [],
+    });
+  });
+
+  it('never widens the un-named half past the topic’s own depth', () => {
+    // The failure this guards: filling the un-named half with the whole authored list would take a
+    // `light` topic from the two items it samples to every one it has — so narrowing the questions
+    // would silently WIDEN the data slots, which is the one thing a subset must never do.
+    const sampled = topic('sampled', 'conditional', {
+      depth: 'light',
+      members: {
+        questionKeys: ['s_q1', 's_q2', 's_q3'],
+        dataSlotKeys: ['s_ds1', 's_ds2', 's_ds3', 's_ds4'],
+      },
+    });
+
+    const plan = applyGuardrails(
+      input({
+        topics: [topic('open', 'opening'), sampled],
+        proposed: [{ key: 'sampled', rationale: 'these two', members: { questionKeys: ['s_q1'] } }],
+      })
+    );
+
+    const scope = resolveScope({
+      topics: [topic('open', 'opening'), sampled],
+      plan,
+      settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true },
+    });
+
+    expect([...scope.questionKeys].filter((k) => k.startsWith('s_q'))).toEqual(['s_q1']);
+    // Two, because `light` samples two — not four, and not zero.
+    expect([...scope.dataSlotKeys].filter((k) => k.startsWith('s_ds'))).toHaveLength(
+      LIGHT_DEPTH_MEMBER_COUNT
+    );
+  });
+
+  it('discards a key the topic does not contain', () => {
+    const plan = applyGuardrails(
+      input({
+        topics,
+        proposed: [
+          {
+            key: 'wide',
+            rationale: 'x',
+            members: { questionKeys: ['wide_q1', 'someone_elses_q'] },
+          },
+        ],
+      })
+    );
+
+    expect(plan.topics[0]?.members?.questionKeys).toEqual(['wide_q1']);
+  });
+
+  it('leaves the topic whole when nothing named survives — the depth decides again', () => {
+    // Same treatment as a planner naming a topic that does not exist: this layer exists to make
+    // any input coherent, and routing into nothing is not coherent.
+    const plan = applyGuardrails(
+      input({
+        topics,
+        proposed: [{ key: 'wide', rationale: 'x', members: { questionKeys: ['nope'] } }],
+      })
+    );
+
+    expect(plan.topics[0]?.members).toBeUndefined();
+  });
+
+  it('carries no members at all for an ordinary whole-topic pick', () => {
+    const plan = applyGuardrails(
+      input({ topics, proposed: [{ key: 'wide', rationale: 'all of it' }] })
+    );
+    expect(plan.topics[0]).not.toHaveProperty('members');
+  });
+
+  it('prices the subset, so the fit keeps a topic the whole one would have lost', () => {
+    // The point of threading per-item seconds through the budget: charging `full` for a
+    // three-of-ten subset drops a topic that fits, and the admin sees a budget that lies.
+    const seconds = {
+      byQuestionKey: new Map([
+        ['open_q', 10],
+        ['wide_q1', 10],
+        ['wide_q2', 100],
+        ['wide_q3', 100],
+      ]),
+      byDataSlotKey: new Map([['wide_ds', 0]]),
+    };
+    const costs = new Map([
+      ['open', { full: 10, light: 10 }],
+      ['wide', { full: 210, light: 110 }],
+    ]);
+
+    const shared = {
+      topics,
+      proposed: [
+        { key: 'wide', rationale: 'one of these', members: { questionKeys: ['wide_q1'] } },
+      ],
+      settings: settings({ includeCheckTopic: false }),
+    };
+
+    // Allowance = 60 - 10 (the always-run opening) = 50. The whole topic costs 210; the named item
+    // costs 10.
+    const priced = applyGuardrails(
+      input({ ...shared, budget: { budgetSeconds: 60, costs, seconds, weights: undefined } })
+    );
+    expect(priced.topics.map((t) => t.key)).toEqual(['wide']);
+    expect(priced.estimatedSeconds).toBe(20);
+
+    // Without the per-item prices the subset is charged at its depth — an over-estimate, which
+    // drops the topic rather than overrunning the respondent's time.
+    const unpriced = applyGuardrails(input({ ...shared, budget: { budgetSeconds: 60, costs } }));
+    expect(unpriced.topics).toEqual([]);
   });
 });

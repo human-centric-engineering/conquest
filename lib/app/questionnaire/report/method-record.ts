@@ -79,7 +79,7 @@ export interface ReportMethodAnswers {
   /** True when contextual data-slot understanding fed the report. */
   usedDataSlots: boolean;
   /**
-   * Adaptive Scope (P17): the topics this interview never asked about, and the ones it only
+   * Conditional Topics (P17): the topics this interview never asked about, and the ones it only
    * sampled. Absent for every non-adaptive session.
    *
    * Recorded on the method record — not merely fed to the writer — because "how this report was
@@ -360,7 +360,7 @@ export function renderMethodSummaryTemplate(record: ReportMethodRecord): string 
     }
   }
 
-  // Adaptive Scope (P17), stated before the sources and the checks: what the assessment covered is
+  // Conditional Topics (P17), stated before the sources and the checks: what the assessment covered is
   // more load-bearing to a reader than how it was written, and burying it under the method detail
   // would let a narrowed interview read as a full one for the whole first paragraph.
   const notAssessed = answers.notAssessed ?? [];
@@ -481,7 +481,7 @@ export function narrowMethodRecord(value: unknown): ReportMethodRecord | null {
       unansweredListed: asInt(answers.unansweredListed),
       confidenceWeighted: asBool(answers.confidenceWeighted),
       usedDataSlots: asBool(answers.usedDataSlots),
-      // Adaptive Scope (P17). Absent on every record written before this shipped, and on every
+      // Conditional Topics (P17). Absent on every record written before this shipped, and on every
       // non-adaptive session — the field is left off entirely in that case rather than defaulted to
       // `[]`, so a surface can tell "nothing was skipped" from "we did not record it".
       ...(Array.isArray(answers.notAssessed) && answers.notAssessed.length > 0

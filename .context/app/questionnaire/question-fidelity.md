@@ -235,7 +235,7 @@ as they are going to.
 - **Not `weight`** — weight is how strongly the _weighted_ strategy favours a question and how much
   it counts toward coverage. Fidelity says nothing about whether to ask, only how.
 - **Not `required`** — required is whether it must be answered at all.
-- **Not Adaptive Scope.** [Scope](./adaptive-scope.md) decides _whether_ a question applies to this
+- **Not Conditional Topics.** [Scope](./conditional-topics.md) decides _whether_ a question applies to this
   respondent; fidelity decides only _how_ it is asked. Scope wins by construction: `buildTurnContext`
   filters questions through `buildSessionScope` before anything downstream sees them, so an
   out-of-scope must-ask is simply absent. A must-ask question is never a reason to widen scope.
@@ -311,7 +311,7 @@ landed: a score is only comparable to another score under the same rubric.
 
 - **Don't** read `slot.fidelity` directly in runtime code — use `resolveQuestionFidelity`, or you
   will apply a dial the admin never switched on.
-- **Don't** let a must-ask question override Adaptive Scope. Out of scope means not asked, full stop.
+- **Don't** let a must-ask question override Conditional Topics. Out of scope means not asked, full stop.
 - **Don't** add a stop between the five. Each stop is a distinct prompt clause; a sixth value that
   behaves like its neighbour is a lie told to the admin.
 - **Don't** emit an answer-control card for `free_text` at Must ask. There is nothing to render; the

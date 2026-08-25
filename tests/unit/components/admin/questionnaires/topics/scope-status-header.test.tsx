@@ -1,5 +1,5 @@
 /**
- * The Adaptive Scope status header (F17.25).
+ * The Conditional Topics status header (F17.25).
  *
  * Two properties carry real weight here and the rest is layout:
  *

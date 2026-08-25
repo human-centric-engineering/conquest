@@ -1,5 +1,5 @@
 /**
- * Unit tests: `PlanPreviewCard` — the Adaptive scope dry-run (F17.14).
+ * Unit tests: `PlanPreviewCard` — the Conditional topics dry-run (F17.14).
  *
  * The card's job is to turn a plan into a **diagnosis**. A rendering that shows which topics were
  * chosen but not which layer chose them sends the author to edit the wrong thing — criteria when the
@@ -111,9 +111,9 @@ describe('PlanPreviewCard — the form', () => {
     expect(screen.queryByRole('button', { name: /run/i })).not.toBeInTheDocument();
   });
 
-  it('says the preview still runs when adaptive scope is switched off', () => {
+  it('says the preview still runs when conditional topics is switched off', () => {
     renderCard({ enabled: false });
-    expect(screen.getByText(/Adaptive scope is off/i)).toBeInTheDocument();
+    expect(screen.getByText(/Conditional topics is off/i)).toBeInTheDocument();
   });
 });
 

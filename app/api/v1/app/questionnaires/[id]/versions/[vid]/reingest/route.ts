@@ -42,7 +42,7 @@ import {
   ReingestNotDraftError,
   reingestVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
-import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { checkConditionalTopicsCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 
 const handleReingest = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -159,10 +159,10 @@ const handleReingest = withAdminAuth<{ id: string; vid: string }>(
       throw err;
     }
 
-    // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-replaced draft.
+    // Conditional Topics (P17.19): a cheap, fail-soft triage read over the just-replaced draft.
     // `isEligible` inside the check skips a version that already has scope on or authored topics,
     // so a re-ingest onto an already-routed draft is a no-op here.
-    const candidacy = await checkAdaptiveScopeCandidacy({
+    const candidacy = await checkConditionalTopicsCandidacy({
       versionId: vid,
       documentText: parsed.fullText,
       fileName: file.name,
@@ -200,7 +200,7 @@ const handleReingest = withAdminAuth<{ id: string; vid: string }>(
       questionnaireId: id,
       ...result,
       deduped: false,
-      ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
+      ...(candidacy ? { conditionalTopicsCandidate: candidacy } : {}),
     });
   }
 );

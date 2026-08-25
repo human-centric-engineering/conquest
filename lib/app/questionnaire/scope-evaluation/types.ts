@@ -1,10 +1,10 @@
 /**
- * Adaptive Scope evaluation contract and in-memory shapes (F17.21).
+ * Conditional Topics evaluation contract and in-memory shapes (F17.21).
  *
  * A second "panel of judges" — sibling to the design-evaluation panel (`evaluation/**`, F5.1–F5.3)
- * — but scoring the AUTHORED ADAPTIVE-SCOPE CONFIG (topics, hard rules, planner instructions,
- * budget) rather than the question structure. Adaptive Scope has no single stated objective; the
- * implicit one, read off `.context/app/questionnaire/adaptive-scope.md`, is what these judges score
+ * — but scoring the AUTHORED CONDITIONAL-TOPICS CONFIG (topics, hard rules, planner instructions,
+ * budget) rather than the question structure. Conditional Topics has no single stated objective; the
+ * implicit one, read off `.context/app/questionnaire/conditional-topics.md`, is what these judges score
  * toward: minimise respondent burden (skip topics that genuinely do not apply) while never silently
  * dropping a topic that does (hard rules always win, "when in doubt, ask", exclude beats include).
  *
@@ -33,7 +33,7 @@ import type { FindingSeverity } from '@/lib/app/questionnaire/evaluation/types';
 
 /**
  * The four scope-evaluation dimensions, as a `const` tuple — the single source of truth. Each maps
- * to a mechanical check `scope/validate.ts` (`validateAdaptiveScope`) already runs; the judges are
+ * to a mechanical check `scope/validate.ts` (`validateConditionalTopics`) already runs; the judges are
  * told what that checker already caught (via {@link ScopeStructureInput.knownIssues}) and prompted
  * to leave it alone, focusing on the judgement calls no deterministic rule can make.
  */
@@ -187,7 +187,7 @@ export interface ScopeStructureCosts {
   perTopic: { key: string; fullSeconds: number; lightSeconds: number }[];
 }
 
-/** One finding `validateAdaptiveScope` already raised — context, not a target for the judges to repeat. */
+/** One finding `validateConditionalTopics` already raised — context, not a target for the judges to repeat. */
 export interface ScopeStructureIssue {
   severity: 'error' | 'warning';
   code: string;
@@ -205,6 +205,6 @@ export interface ScopeStructureInput {
   rules: ScopeStructureRule[];
   settings: ScopeStructureSettings;
   costs: ScopeStructureCosts;
-  /** `validateAdaptiveScope`'s output — "already caught, don't repeat this" context for the judges. */
+  /** `validateConditionalTopics`'s output — "already caught, don't repeat this" context for the judges. */
   knownIssues: ScopeStructureIssue[];
 }

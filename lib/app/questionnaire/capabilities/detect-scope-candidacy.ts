@@ -1,8 +1,8 @@
 /**
- * Adaptive Scope ingestion-time candidacy check (P17.19).
+ * Conditional Topics ingestion-time candidacy check (P17.19).
  *
  * A `BaseCapability` that runs ONE cheap, fast structured LLM call over a freshly-uploaded
- * document and decides whether it is worth flagging as an Adaptive Scope candidate — NOT the
+ * document and decides whether it is worth flagging as a Conditional Topics candidate — NOT the
  * Routing Analyst (`analyse-routing.ts`), which does the actual topic/rule proposal and only runs
  * automatically once this check fires.
  *

@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   prisma: {
     appQuestionnaireSession: { findUnique: vi.fn() },
-    // Adaptive Scope (P17): only queried when a version has opted in — see the parity test below.
+    // Conditional Topics (P17): only queried when a version has opted in — see the parity test below.
     appQuestionnaireTopic: { findMany: vi.fn(async () => []) },
     // G03: only queried when the opening's follow-up allowance actually governs the turn.
     appQuestionnaireTurn: { findMany: vi.fn(async () => []) },
@@ -734,11 +734,11 @@ describe('buildTurnContext', () => {
   });
 });
 
-describe('buildTurnContext — Adaptive Scope (P17)', () => {
-  /** A version config blob with Adaptive Scope on. `null` config = feature off (the default). */
+describe('buildTurnContext — Conditional Topics (P17)', () => {
+  /** A version config blob with Conditional Topics on. `null` config = feature off (the default). */
   function scopedConfig(over: Record<string, unknown> = {}) {
     return {
-      adaptiveScope: { enabled: true, maxConditionalTopics: 1, ...over },
+      conditionalTopics: { enabled: true, maxConditionalTopics: 1, ...over },
     };
   }
 
@@ -1006,12 +1006,12 @@ describe('buildTurnContext — the opening follow-up allowance (G03)', () => {
     return (sessionGraph() as unknown as { version: Record<string, unknown> }).version;
   }
 
-  /** A version with one opening data slot and Adaptive Scope on. */
+  /** A version with one opening data slot and Conditional Topics on. */
   function probeVersion(scopeOver: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       ...baseVersion(),
       config: {
-        adaptiveScope: {
+        conditionalTopics: {
           enabled: true,
           limitOpeningProbes: true,
           maxOpeningProbes: 1,

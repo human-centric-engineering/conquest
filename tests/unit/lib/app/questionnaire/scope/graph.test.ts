@@ -1,14 +1,14 @@
 /**
  * Unit tests: the routing map's graph builder.
  *
- * The map is the only Adaptive Scope surface whose claims are made by *shape* rather than by prose, so
+ * The map is the only Conditional Topics surface whose claims are made by *shape* rather than by prose, so
  * the assertions here are mostly about which edges exist and where they come from. Two families matter
  * most:
  *
  * 1. **Rule edges bypass the planner and the guardrails.** That is not decoration — it is the picture of
  *    `applyGuardrails` seating rule includes before the cap and never truncating them. An edge routed
  *    through the guardrails node would draw a limit that does not apply.
- * 2. **A rule's evidence is classified exactly as `validateAdaptiveScope` classifies it** — opening,
+ * 2. **A rule's evidence is classified exactly as `validateConditionalTopics` classifies it** — opening,
  *    `core`, or neither. The map is rendered directly beneath that validator's warnings, so a
  *    disagreement between the two would be visible on one screen.
  */
@@ -27,10 +27,10 @@ import {
   type BuildScopeGraphInput,
   type ScopeGraph,
 } from '@/lib/app/questionnaire/scope/graph';
-import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import {
-  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
-  type AdaptiveScopeSettings,
+  DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
   type TopicPhase,
@@ -79,8 +79,8 @@ function rule(overrides: Partial<ScopeRule> = {}): ScopeRule {
   };
 }
 
-function settings(overrides: Partial<AdaptiveScopeSettings> = {}): AdaptiveScopeSettings {
-  return { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...overrides };
+function settings(overrides: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
+  return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...overrides };
 }
 
 function costs(overrides: Partial<TopicsCostView> = {}): TopicsCostView {
@@ -404,7 +404,7 @@ describe('buildScopeGraph', () => {
     });
 
     it('treats a conditional topic gathering the slot as no better than nothing', () => {
-      // Matching `validateAdaptiveScope`, which buckets conditional and closing with "never gathered":
+      // Matching `validateConditionalTopics`, which buckets conditional and closing with "never gathered":
       // neither is in scope until after the decision that would have read it has been taken.
       const graph = build({
         topics: [
@@ -611,7 +611,7 @@ describe('buildScopeGraph', () => {
     });
   });
 
-  // The map is rendered on the same screen as `validateAdaptiveScope`'s findings, so the two must agree
+  // The map is rendered on the same screen as `validateConditionalTopics`'s findings, so the two must agree
   // about whether a rule can read what it tests. They compute it independently — the validator to word a
   // warning, the builder to choose an edge — which is exactly the pair that drifts silently.
   describe('it agrees with the validator about a rule’s reachability', () => {
@@ -625,7 +625,7 @@ describe('buildScopeGraph', () => {
     function verdicts(topics: Topic[], r: ScopeRule) {
       const s = settings({ rules: [r] });
       const graph = build({ topics, settings: s, dataSlots: [slot('headcount')] });
-      const issues = validateAdaptiveScope({
+      const issues = validateConditionalTopics({
         topics,
         settings: s,
         allQuestionKeys: topics.flatMap((t) => t.members.questionKeys),

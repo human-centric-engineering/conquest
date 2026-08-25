@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The React Flow surface for the Adaptive scope routing map.
+ * The React Flow surface for the Conditional topics routing map.
  *
  * A sibling of `behind-the-scenes/read-only-canvas.tsx` rather than a reuse of it: that one is typed to a
  * `WorkflowDefinition` and drives its nodes off the orchestration step registry, which has nothing to say
@@ -146,7 +146,7 @@ function CanvasInner({ graph, onSelectNode }: RoutingMapCanvasProps) {
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, node) => onSelectNode(node.id)}
       onPaneClick={() => onSelectNode(null)}
-      aria-label="Adaptive scope routing map"
+      aria-label="Conditional topics routing map"
     >
       <Background />
       <Controls showInteractive={false} />

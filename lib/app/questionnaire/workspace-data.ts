@@ -20,7 +20,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 import type {
   EvaluationRunDetail,
@@ -87,7 +87,7 @@ export const getVersionDataSlotCountCached = cache(
 );
 
 /**
- * Adaptive Scope topics + settings + coherence findings + key inventory for the selected version.
+ * Conditional Topics topics + settings + coherence findings + key inventory for the selected version.
  *
  * `cache()`-wrapped so the Overview tab (which needs only the error count for its launch row) and
  * the Topics tab (which needs all of it) share one fetch. Degrades to "feature off, nothing to
@@ -98,7 +98,7 @@ export const getVersionTopicsCached = cache(
   async (id: string, versionId: string): Promise<TopicsPayload> => {
     const empty: TopicsPayload = {
       ...EMPTY_TOPICS_PAYLOAD,
-      settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
     };
     try {
       const res = await serverFetch(API.APP.QUESTIONNAIRES.versionTopics(id, versionId));
