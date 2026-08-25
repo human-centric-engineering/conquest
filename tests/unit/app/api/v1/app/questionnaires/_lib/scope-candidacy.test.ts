@@ -25,7 +25,6 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireVersion: { update: vi.fn(), findUnique: vi.fn() },
     appAiRun: { findFirst: vi.fn(), count: vi.fn() },
     appQuestionnaireSection: { findMany: vi.fn() },
-    appQuestionSlot: { findMany: vi.fn() },
   },
 }));
 
@@ -105,7 +104,6 @@ beforeEach(() => {
   (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
   (prisma.appAiRun.count as Mock).mockResolvedValue(0);
   (prisma.appQuestionnaireSection.findMany as Mock).mockResolvedValue([]);
-  (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([]);
 });
 
 // ─── Eligibility gate ───────────────────────────────────────────────────────
@@ -367,13 +365,16 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     expect(dispatchArgs.documentText.length).toBeLessThanOrEqual(21_000);
   });
 
-  it('sends the extracted structure alongside the text', async () => {
+  it('sends the extracted structure alongside the text, in document order', async () => {
+    // Read THROUGH sections rather than version-wide: `AppQuestionSlot.ordinal` is only globally
+    // ordered because ingestion happens to assign it that way, and the prompt tells the model
+    // these are in document order.
     (prisma.appQuestionnaireSection.findMany as Mock).mockResolvedValue([
-      { title: 'Section 6 — franchise owners only' },
-      { title: '   ' },
-    ]);
-    (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
-      { prompt: 'Which best describes your organisation?' },
+      {
+        title: 'Section 6 — franchise owners only',
+        questions: [{ prompt: 'Which best describes your organisation?' }],
+      },
+      { title: '   ', questions: [{ prompt: 'And how many sites?' }] },
     ]);
     const log = makeLog();
 
@@ -383,9 +384,37 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
       sectionTitles?: string[];
       questionPrompts?: string[];
     };
-    // Blank titles are dropped rather than sent as empty numbered rows.
+    // Blank titles are dropped rather than sent as empty numbered rows; their questions are not.
     expect(dispatchArgs.sectionTitles).toEqual(['Section 6 — franchise owners only']);
-    expect(dispatchArgs.questionPrompts).toEqual(['Which best describes your organisation?']);
+    expect(dispatchArgs.questionPrompts).toEqual([
+      'Which best describes your organisation?',
+      'And how many sites?',
+    ]);
+  });
+
+  it('bounds the structure by characters, not just by item count', async () => {
+    // Counts alone let 300 long prompts quadruple a prompt that already carries a 20k excerpt —
+    // on a 20s check whose timeout fail-softs to NO verdict, landing the failure on exactly the
+    // large routing-shaped instruments this is for.
+    (prisma.appQuestionnaireSection.findMany as Mock).mockResolvedValue([
+      {
+        title: 'T'.repeat(400),
+        questions: Array.from({ length: 300 }, () => ({ prompt: 'Q'.repeat(600) })),
+      },
+    ]);
+    const log = makeLog();
+
+    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+
+    const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
+      sectionTitles: string[];
+      questionPrompts: string[];
+    };
+    expect(dispatchArgs.sectionTitles[0].length).toBe(120);
+    expect(dispatchArgs.questionPrompts.every((p) => p.length <= 200)).toBe(true);
+    const total =
+      dispatchArgs.sectionTitles.join('').length + dispatchArgs.questionPrompts.join('').length;
+    expect(total).toBeLessThanOrEqual(8_000);
   });
 
   it('checks on the document text alone when the structure read throws', async () => {

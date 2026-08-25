@@ -72,9 +72,12 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
 // Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
-vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', () => ({
-  proposeScopeDuringIngest: vi.fn(),
-}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/routing-analysis')>();
+  // `canProposeDuringIngest` stays REAL — the elapsed-time gate is what this route depends on.
+  return { ...real, proposeScopeDuringIngest: vi.fn() };
+});
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
   checkAdaptiveScopeCandidacy: vi.fn(),
@@ -589,6 +592,23 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
     await drainSse(res);
 
     expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+  });
+
+  it('skips the proposal when the re-ingest has already spent the wall-clock budget', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    const realNow = Date.now;
+    let ticks = 0;
+    Date.now = () => ticks++ * 90_000;
+
+    try {
+      const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+      const frames = await drainSse(res);
+
+      expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+      expect(frames[frames.length - 1].type).toBe('done');
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it('completes the re-ingest when the proposal fails', async () => {

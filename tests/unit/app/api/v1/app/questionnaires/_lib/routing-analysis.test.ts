@@ -28,6 +28,10 @@ vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/ai-run/store', () => ({ recordAiRun: vi.fn() }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
+  isEligibleForScopeCandidacy: vi.fn(),
+}));
+
 vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-draft', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/topic-draft')>();
@@ -37,7 +41,9 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-draft', async (importOrigina
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
+  canProposeDuringIngest,
   dispatchRoutingAnalysis,
+  MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS,
   persistRoutingAnalysis,
   proposeScopeDuringIngest,
 } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
@@ -49,6 +55,7 @@ import {
   buildRoutingAnalysisInput,
   saveTopicDraft,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import { isEligibleForScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -97,6 +104,7 @@ beforeEach(() => {
   (saveTopicDraft as Mock).mockImplementation((_versionId: string, draft: unknown) => draft);
   (buildRoutingAnalysisInput as Mock).mockResolvedValue(INPUT);
   (prisma.aiAgent.findUnique as Mock).mockResolvedValue(AGENT);
+  (isEligibleForScopeCandidacy as Mock).mockResolvedValue(true);
 });
 
 describe('dispatchRoutingAnalysis', () => {
@@ -428,6 +436,18 @@ describe('proposeScopeDuringIngest', () => {
     );
   });
 
+  it('leaves an admin draft alone when the version was authored during the upload', async () => {
+    // The candidacy check RETURNS its verdict while SKIPPING persistence when the version stopped
+    // being untouched mid-call, so a `true` verdict is not on its own a licence to write. Without
+    // this re-check, `saveTopicDraft` upserts over the proposal the admin is part-way reviewing.
+    (isEligibleForScopeCandidacy as Mock).mockResolvedValue(false);
+    const log = makeLog();
+
+    expect(await proposeScopeDuringIngest({ ...PARAMS, log: log as never })).toBeNull();
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+    expect(saveTopicDraft).not.toHaveBeenCalled();
+  });
+
   it('never throws, whatever the analyst does', async () => {
     // The property the upload depends on: an ingest that completed must not be reported as failed
     // because an optional proposal blew up.
@@ -436,5 +456,28 @@ describe('proposeScopeDuringIngest', () => {
 
     await expect(proposeScopeDuringIngest({ ...PARAMS, log: log as never })).resolves.toBeNull();
     expect(log.warn).toHaveBeenCalled();
+  });
+});
+
+describe('canProposeDuringIngest', () => {
+  it('allows a proposal early in the stream and refuses one late', () => {
+    // The analyst is bounded at 180s under a 300s `maxDuration`, so a stream that is already 90
+    // seconds in cannot finish one. Running it anyway is worse than skipping: the function is
+    // killed mid-`proposing_scope`, the stream dies without `done`, and the dialog reports a
+    // failed upload for a questionnaire that was persisted minutes earlier.
+    expect(canProposeDuringIngest(0)).toBe(true);
+    expect(canProposeDuringIngest(MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS - 1)).toBe(true);
+    expect(canProposeDuringIngest(MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS)).toBe(false);
+    expect(canProposeDuringIngest(240_000)).toBe(false);
+  });
+
+  it('leaves room for the analyst inside the route ceiling', () => {
+    // Pinned as arithmetic rather than a magic number: the budget only works while the threshold
+    // plus the analyst's own bound stay under `maxDuration`.
+    const ANALYST_TIMEOUT_MS = 180_000;
+    const ROUTE_MAX_DURATION_MS = 300_000;
+    expect(MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS + ANALYST_TIMEOUT_MS).toBeLessThan(
+      ROUTE_MAX_DURATION_MS
+    );
   });
 });

@@ -80,6 +80,34 @@ describe('selectCandidacyExcerpt', () => {
     );
   });
 
+  it('spends the budget on strong routing language before ordinary words', () => {
+    // The allocation bug the review caught: the budget affords about three windows, so a scoring
+    // rubric early in the document could take them all and elide the routing appendix later —
+    // exactly the miss this module exists to prevent.
+    const weakEarly = 'Scoring guidance: total the ratings for each area. ';
+    const strongLate = 'ROUTING: only ask Section 6 of franchise owners.';
+    const doc = `${filler(12_000)}${weakEarly.repeat(40)}${filler(40_000)}${strongLate}${filler(40_000)}`;
+
+    const excerpt = selectCandidacyExcerpt(doc);
+
+    expect(excerpt.text).toContain(strongLate);
+  });
+
+  it('reports weak terms it saw even when they never earned a window', () => {
+    const doc = `${filler(12_000)}Scoring guidance follows.${filler(60_000)}`;
+    expect(selectCandidacyExcerpt(doc).matchedTerms).toContain('scoring');
+  });
+
+  it('honours a budget smaller than the head and tail together', () => {
+    // A budget that is quietly ignored is worse than no option at all — the composition must never
+    // return more than it was asked for.
+    const doc = filler(60_000);
+    const excerpt = selectCandidacyExcerpt(doc, { maxChars: 6_000 });
+    const elisions = excerpt.text.split(CANDIDACY_ELISION).length - 1;
+
+    expect(excerpt.text.length).toBeLessThanOrEqual(6_000 + elisions * CANDIDACY_ELISION.length);
+  });
+
   it('does not shred the excerpt when a term appears on every page', () => {
     // "scoring" 200 times must not produce 200 fragments — a confetti excerpt reads worse and
     // quotes worse, and the check is graded on quoting.

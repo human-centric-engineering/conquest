@@ -51,6 +51,25 @@ interface ReingestResult {
   questionCount: number;
   changeCount: number;
   deduped: boolean;
+  /**
+   * What the Routing Analyst proposed during this upload (F17.22 Phase 2), when the candidacy
+   * check flagged the document and the run succeeded. Reported here because this dialog is the
+   * only place the admin is still standing when it finishes — otherwise a proposal that cost a
+   * real model call would be waiting on a tab nothing told them to open.
+   */
+  scopeProposal?: { topicCount: number; conditionalCount: number };
+}
+
+/** Narrow the `done` frame's optional proposal block — SSE data is `unknown` at this seam. */
+function isScopeProposal(
+  value: unknown
+): value is { topicCount: number; conditionalCount: number } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { topicCount?: unknown }).topicCount === 'number' &&
+    typeof (value as { conditionalCount?: unknown }).conditionalCount === 'number'
+  );
 }
 
 export interface ReingestDialogProps {
@@ -164,6 +183,9 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 questionCount: Number(parsed.data.questionCount ?? 0),
                 changeCount: Number(parsed.data.changeCount ?? 0),
                 deduped: parsed.data.deduped === true,
+                ...(isScopeProposal(parsed.data.adaptiveScopeProposal)
+                  ? { scopeProposal: parsed.data.adaptiveScopeProposal }
+                  : {}),
               };
             } else if (parsed.type === 'error') {
               streamError =
@@ -227,6 +249,19 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 question{result.questionCount === 1 ? '' : 's'},{' '}
                 <strong>{result.changeCount}</strong> extraction change
                 {result.changeCount === 1 ? '' : 's'}.
+              </p>
+            )}
+            {result.scopeProposal && (
+              <p className="text-muted-foreground">
+                The document describes routing, so AI proposed{' '}
+                <strong>{result.scopeProposal.topicCount}</strong> topic
+                {result.scopeProposal.topicCount === 1 ? '' : 's'}
+                {result.scopeProposal.conditionalCount > 0 ? (
+                  <>
+                    , <strong>{result.scopeProposal.conditionalCount}</strong> of them conditional
+                  </>
+                ) : null}
+                . Nothing is live — review them on the <strong>Adaptive scope</strong> tab.
               </p>
             )}
             <DialogFooter>

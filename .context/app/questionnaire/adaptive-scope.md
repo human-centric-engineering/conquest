@@ -16,7 +16,8 @@ several, which costs cross-section scoring and cohort analysis.
 >
 > The tab simplification is complete: F17.24 de-risked it, F17.25 added the status header and
 > moved the master switch out of the tenth card, F17.26 split it into three sub-tabs, F17.27 swept
-> the remaining implementation vocabulary off the screen.
+> the remaining implementation vocabulary off the screen, and F17.28 mirrored the master switch
+> onto the Settings tab.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
 
@@ -598,18 +599,35 @@ in the one check whose whole value is that its evidence is quoted.
 The term list is routing VOCABULARY (`eligib`, `screener`, `guardrail`, `skip logic`, `only if`,
 `who answers`, `scoring`, …), deliberately not domain vocabulary: the same instrument shape turns up
 in clinical screeners, procurement questionnaires and staff surveys, and a list tuned to one would
-silently fail the others. Windows are capped at 8, because an excerpt shredded into forty fragments
-reads worse and quotes worse than a contiguous one. `matchedTerms` is logged, which is what lets an
-operator tell **"it read the routing page and still said no"** from **"it never reached the routing
-page"** — previously unanswerable.
+silently fail the others. `matchedTerms` is logged, which is what lets an operator tell **"it read
+the routing page and still said no"** from **"it never reached the routing page"** — previously
+unanswerable.
+
+**The terms are in two tiers, and that is load-bearing.** The budget affords about three windows
+(8,000 spare ÷ ~2,100 each), not the eight the window cap suggests. Allocating them
+first-come-first-served over one flat list meant a scoring rubric or a "branch office" at character
+11,000 could spend the lot and elide the routing appendix at 60% depth — precisely the miss this
+module exists to prevent. STRONG terms (`routing`, `only ask`, `skip logic`, `inclusion criteria`,
+`eligib`, …) can only be an instruction about who is asked what, and take windows first, wherever
+in the document they sit; WEAK terms (`scoring`, `branch`, `facilitator`, `how to use`, …) are real
+signals that are also ordinary words, and get what is left. A weak term still lands in
+`matchedTerms` whether or not it won a window.
 
 **It read only prose.** A role- or segment-shaped instrument states its routing in its TITLES —
 "Section 6 — franchise owners only" — and a screener question ("Which best describes your
 organisation?") is the other half of the same statement. Both now travel with the excerpt as the
-extracted section titles and question wordings, capped (120 / 300, prompts truncated at 200 chars)
-so a triage read stays a triage read. The rubric treats them as the document's own words **and
-keeps its bias**: a title that addresses a kind of respondent is stated routing; a long list of
-varied titles is still not.
+extracted section titles and question wordings. The rubric treats them as the document's own words
+**and keeps its bias**: a title that addresses a kind of respondent is stated routing; a long list
+of varied titles is still not.
+
+Counts are not a budget: item counts (120 titles / 300 prompts) are bounded, each item is truncated
+(120 / 200 chars), **and** the two lists share an 8,000-character ceiling. Without the ceiling, 300
+long prompts could quadruple a prompt that already carries a 20k excerpt — on a check whose whole
+constraint is being cheap enough to run on every upload and whose 20-second timeout fail-softs to
+_no verdict at all_, landing the failure on exactly the large routing-shaped instruments this is
+for. Questions are read through their sections rather than version-wide, because
+`AppQuestionSlot.ordinal` is only globally ordered by ingestion's own convention — the Structure
+editor counts within a section — and the prompt tells the model these are in document order.
 
 **One failure disabled it forever.** `resolveAutoTriggerPending` treated any prior
 `routing_analysis` `AppAiRun` as "already tried" — including one the analyse route itself logged as
@@ -632,8 +650,23 @@ waiting when they do.
 
 **Only the streaming routes.** The plain (non-streaming) ingest and re-ingest keep the lazy
 tab-visit trigger: there is no job queue in this repo to hand a 180-second run to, and no ordinary
-request should be held open for one. Both streaming routes now declare `maxDuration = 300`, since
-the worst case is extraction (120s) + candidacy (20s) + analyst (180s).
+request should be held open for one.
+
+**And only when there is still room for it.** Both streaming routes declare `maxDuration = 300` —
+this deployment's ceiling — while the stages are bounded at 300s (extraction), 60s (verify), 90s
+(repair), 20s (candidacy) and 180s (the analyst). Those worst cases do not co-occur on a real
+upload, but the inline proposal is the one stage that can be skipped without failing anything, so
+it checks the elapsed time first (`canProposeDuringIngest`, 90s) and leaves the work to the Topics
+tab's auto-trigger when the stream has already spent the budget. Being killed mid-stream is the
+failure worth avoiding: the version is already persisted, but the client never sees `done`, so the
+upload dialog reports a failed upload for a questionnaire that exists — and the admin retries,
+paying for the whole pipeline again.
+
+**It re-checks eligibility before it writes.** The candidacy check deliberately returns its verdict
+while _skipping_ persistence when the version stopped being untouched during its call, so a `true`
+verdict is not on its own a licence to write. `proposeScopeDuringIngest` re-checks, or the race that
+check protects against ends with the ingest upserting over the draft an admin is part-way through
+reviewing.
 
 **Fail-soft, absolutely.** `proposeScopeDuringIngest` never throws: a missing agent, a provider
 outage, an unusable reply and a thrown query all resolve to "no proposal". An upload that completed
@@ -641,8 +674,10 @@ is never reported as failed because an optional proposal could not be made — a
 still press the button on the tab, which reports failures properly, unlike a silent run.
 
 The `done` event carries `adaptiveScopeProposal: { topicCount, conditionalCount }` when a proposal
-was made. Nothing is live: it is a pending draft, and `adaptiveScope.enabled` is untouched, exactly
-as with a button-triggered run.
+was made, and a second `proposing_scope` phase message names the counts in prose. Nothing is live:
+it is a pending draft, and `adaptiveScope.enabled` is untouched, exactly as with a button-triggered
+run. The **re-ingest dialog** reports it on its result screen — that dialog is the only place the
+admin is still standing when the run finishes, since the upload dialog navigates to the new draft.
 
 **One implementation, two callers.** The analyst run moved into
 `app/api/v1/app/questionnaires/_lib/routing-analysis.ts` — `dispatchRoutingAnalysis` (which records
@@ -1510,6 +1545,38 @@ same `validateAdaptiveScope` output, so they cannot disagree. Rows are **buttons
 `ScopeIssue` carries no `sectionId`, and what fixes a finding is a topic row whose DOM id is a
 client-side detail — and a topic-scoped row reuses the routing map's existing focus handoff rather
 than growing a second mechanism that behaves almost the same.
+
+### The switch is mirrored on the Settings tab (F17.28)
+
+`enabled` is editable in two places now: the status header above, and an **Adaptive scope** group
+on the workspace's Settings tab. The reason is the header's own question — "is this even on?" —
+asked from the other end. An admin auditing how a version behaves at run time reads the Settings
+tab, and the one switch deciding whether half the instrument gets asked was the only run-time
+switch not on it.
+
+**Only the switch is mirrored.** Topics, criteria, the budget and the planner's settings stay here,
+where the surface that explains them is. The Settings group carries the switch, a sentence saying
+what its current position means, an ⓘ that says what the feature is for, and a link back to this
+tab.
+
+**This does not reopen the two-writer race the section above closed.** That race was between two
+controls in one render, decided by whichever rendered last. These are two tabs, each seeded and
+resynced from the server's value, and the Settings tab sends `adaptiveScope` **only when its own
+switch differs from the config it loaded**. The PATCH is partial by contract — an omitted key
+leaves the stored value alone — so a Settings tab opened before someone flipped the switch here
+saves everything else it holds and leaves `enabled` where it found it. The version of this change
+that sends the key unconditionally is the version that silently reverts the header.
+
+The route needed no change: `…/config` has accepted `adaptiveScope` since the settings
+export/import round-trip required it, merging through `patchAdaptiveScopeSettings` — the same
+helper this tab's PATCH uses — inside the same fork decision, so an edit to a launched version
+forks exactly once.
+
+The three conflicts that only fire when scope is on (`adaptive-scope-targeted-opening`,
+`-no-probes`, `-guided-openings`) now read the Settings tab's **live** switch rather than the saved
+config, so turning scope on there raises them while the admin is still deciding rather than after a
+save and a reload. They stay anchored to `interviewer-strategy`: turning the feature off is not the
+fix any of the three is asking for.
 
 ### Three sub-tabs, named after the job (F17.26)
 

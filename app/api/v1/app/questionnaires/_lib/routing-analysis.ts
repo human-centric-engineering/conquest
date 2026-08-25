@@ -39,6 +39,7 @@ import {
   saveTopicDraft,
   type RoutingAnalysisRouteInput,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import { isEligibleForScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 
 type RouteLogger = Awaited<ReturnType<typeof getRouteLogger>>;
 
@@ -325,6 +326,26 @@ export async function persistRoutingAnalysis(
   return { draft, replacedCount, uncoveredQuestionCount };
 }
 
+/**
+ * How long an ingest may already have run and still afford to propose inline.
+ *
+ * The routes declare `maxDuration = 300`, which is this deployment's ceiling (seven other routes
+ * use it). The analyst is bounded at 180s, so a stream that is already 90 seconds in cannot finish
+ * one inside the ceiling — and running it anyway is worse than not running it, because the function
+ * is killed mid-`proposing_scope`, the SSE stream dies without a `done` event, and the upload
+ * dialog reports "Upload failed" for a questionnaire that was persisted minutes earlier. The admin
+ * then retries, paying for the whole pipeline again.
+ *
+ * Skipping costs nothing but latency: the candidacy verdict is cached on the version, so the Topics
+ * tab's auto-trigger proposes on the first visit instead.
+ */
+export const MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS = 90_000;
+
+/** Whether an ingest that has run this long can still afford an inline proposal. */
+export function canProposeDuringIngest(elapsedMs: number): boolean {
+  return elapsedMs < MAX_INGEST_ELAPSED_BEFORE_PROPOSAL_MS;
+}
+
 export interface ProposeScopeDuringIngestParams {
   questionnaireId: string;
   versionId: string;
@@ -359,6 +380,18 @@ export async function proposeScopeDuringIngest(
   const startedAt = Date.now();
 
   try {
+    // Re-check before proposing, not just before the candidacy call. The candidacy check runs for
+    // up to 20 seconds and deliberately RETURNS its verdict while SKIPPING persistence when the
+    // version stopped being untouched mid-call — so a `true` verdict is not on its own a licence to
+    // write. Without this, the exact race that check protects against (an admin's own analyst draft
+    // landing on this version during the upload) ends with `saveTopicDraft` upserting over it.
+    if (!(await isEligibleForScopeCandidacy(versionId))) {
+      log.info('scope proposal: version was authored while ingesting; leaving it alone', {
+        versionId,
+      });
+      return null;
+    }
+
     const input = await buildRoutingAnalysisInput(questionnaireId, versionId);
     if (!input) {
       log.warn('scope proposal: no analysable version; skipping', { versionId });

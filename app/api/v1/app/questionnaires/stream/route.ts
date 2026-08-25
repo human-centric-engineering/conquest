@@ -36,6 +36,7 @@ import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orch
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
+  canProposeDuringIngest,
   proposeScopeDuringIngest,
   type IngestScopeProposal,
 } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
@@ -72,10 +73,17 @@ async function errorEventFromResponse(response: Response): Promise<ExtractionStr
 }
 
 /**
- * Wall-clock ceiling. Extraction is bounded at 120s and the candidacy check at 20s; since F17.22
- * Phase 2 a flagged document also runs the Routing Analyst inline (its own 180s bound), so the
- * worst case needs materially more than the platform default. The stream keeps the connection
- * alive throughout — this is the ceiling on the work, not on the idle time.
+ * Wall-clock ceiling — and it is a real ceiling, not a budget that fits.
+ *
+ * The stages are bounded at 300s (extraction), 60s (verify), 90s (repair) and 20s (the candidacy
+ * check), and since F17.22 Phase 2 a flagged document also runs the Routing Analyst inline (180s).
+ * Serially that is far more than 300, which is this deployment's ceiling — seven other routes use
+ * the same number. Those bounds are worst cases that do not co-occur on a real upload, but the
+ * inline proposal is the one stage that can be SKIPPED without failing anything, so it checks the
+ * elapsed time first (`canProposeDuringIngest`) and leaves the work to the Topics tab's
+ * auto-trigger when the stream has already spent the budget. Being killed mid-stream is the
+ * failure worth avoiding: the version is already persisted, but the client never sees `done`, so
+ * it reports a failed upload for a questionnaire that exists.
  */
 export const maxDuration = 300;
 
@@ -116,6 +124,9 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
   }
 
   async function* drive(): AsyncGenerator<ExtractionStreamEvent> {
+    // When the work started, so the optional inline scope proposal can tell whether there is still
+    // room for it inside `maxDuration` — see `canProposeDuringIngest`.
+    const streamStartedAt = Date.now();
     // The orchestrator runs extract → verify → repair → coherence,
     // yielding real phase events (extracting / verifying / repairing) as it goes. Drain it,
     // re-yielding each event over the stream, then take its returned PipelineResult.
@@ -202,7 +213,8 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
       // tab they may not know exists — the added time is visible progress rather than a mystery.
       // Fail-soft: `proposeScopeDuringIngest` never throws and never fails the upload.
       let scopeProposal: IngestScopeProposal | null = null;
-      if (candidacy?.isCandidate) {
+      const elapsedMs = Date.now() - streamStartedAt;
+      if (candidacy?.isCandidate && canProposeDuringIngest(elapsedMs)) {
         yield {
           type: 'phase',
           phase: 'proposing_scope',
@@ -215,6 +227,26 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
           clientIp: clientIP,
           log,
         });
+        if (scopeProposal) {
+          yield {
+            type: 'phase',
+            phase: 'proposing_scope',
+            message:
+              scopeProposal.conditionalCount > 0
+                ? `Proposed ${scopeProposal.topicCount} topics, ${scopeProposal.conditionalCount} of them conditional — review them on the Adaptive scope tab.`
+                : `Proposed ${scopeProposal.topicCount} topics — review them on the Adaptive scope tab.`,
+          };
+        }
+      } else if (candidacy?.isCandidate) {
+        // Skipped, not failed: the verdict is cached on the version, so the Topics tab proposes on
+        // the first visit instead. Better than being killed mid-run inside `maxDuration`.
+        log.info(
+          'scope proposal: ingest already spent the wall-clock budget; leaving it to the tab',
+          {
+            versionId: result.versionId,
+            elapsedMs,
+          }
+        );
       }
 
       logAdminAction({

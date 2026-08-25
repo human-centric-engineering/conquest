@@ -8,7 +8,7 @@
  * behind the questions. A workbook whose Routing sheet is flattened last would be read as though
  * it said nothing about routing at all.
  *
- * So the excerpt is composed rather than sliced: the head, the tail, and a window around every
+ * So the excerpt is composed rather than sliced: the head, the tail, and a window around each
  * place the document uses routing language, in document order, with elisions marked. The total
  * stays inside the same budget — this is about spending it better, not spending more.
  *
@@ -20,30 +20,36 @@ export const CANDIDACY_MAX_CHARS = 20_000;
 
 /**
  * Front of the document. Larger than the tail because a preamble, a "how to use this" page and a
- * respondent-eligibility note are all front-matter conventions, and because a document short
- * enough to fit head+tail is returned whole anyway.
+ * respondent-eligibility note are all front-matter conventions — but deliberately smaller than the
+ * half of the budget it started at, because every character spent here is one the windows cannot
+ * spend on the routing page this module exists to reach.
  */
-export const CANDIDACY_HEAD_CHARS = 10_000;
+export const CANDIDACY_HEAD_CHARS = 8_000;
 
 /** Back of the document — appendices, guardrail tables, scoring notes, a flattened routing sheet. */
 export const CANDIDACY_TAIL_CHARS = 4_000;
 
 /** How much to keep after a routing term, and how much of the line leading up to it. */
-export const CANDIDACY_WINDOW_CHARS = 2_000;
-const CANDIDACY_WINDOW_LEAD_CHARS = 400;
+export const CANDIDACY_WINDOW_CHARS = 1_800;
+const CANDIDACY_WINDOW_LEAD_CHARS = 300;
 
 /**
  * A cap on windows, so a document that says "score" on every page cannot turn the excerpt into
- * confetti of 40 disconnected fragments — which reads worse than a contiguous slice and quotes
+ * confetti of forty disconnected fragments — which reads worse than a contiguous slice and quotes
  * worse, and quoting is what the check is graded on.
+ *
+ * The character budget usually binds first (8,000 spare ÷ ~2,100 per window ≈ 3), so this is the
+ * backstop rather than the working limit. It is set where it is so that a document whose windows
+ * overlap heavily — several routing mentions in one passage, costing almost nothing after the
+ * merge — can still pick up a few more without shredding.
  */
-const MAX_WINDOWS = 8;
+const MAX_WINDOWS = 6;
 
 /** Marks where text was dropped, so the model never reads two distant spans as adjacent. */
 export const CANDIDACY_ELISION = '\n\n[…]\n\n';
 
 /**
- * The language a document uses when it is telling you who gets asked what.
+ * The language a document uses when it is telling you who gets asked what, in two tiers.
  *
  * Deliberately about ROUTING VOCABULARY, not about any subject matter: the same instrument shape
  * turns up in clinical screeners, procurement questionnaires and staff surveys, and a term list
@@ -51,40 +57,52 @@ export const CANDIDACY_ELISION = '\n\n[…]\n\n';
  * the end (`branch` catches `branching`, `eligib` catches `eligible`/`eligibility`), because the
  * cost of one extra window is a few hundred characters and the cost of a miss is the whole point
  * of the check.
+ *
+ * **The tiers exist because the budget affords about three windows, not eight.** Allocating them
+ * first-come-first-served over one flat list meant a scoring rubric or a "branch office" at
+ * character 11,000 could spend the lot, eliding the routing appendix at 60% depth — precisely the
+ * miss this module was written to fix. STRONG terms are ones that can only be an instruction about
+ * who is asked what; WEAK terms are real signals that are also ordinary words. Strong wins a
+ * window first, wherever in the document it sits.
  */
-const ROUTING_TERMS = [
+const STRONG_ROUTING_TERMS = [
   'routing',
-  'route ',
   'eligib',
   'ineligib',
   'screener',
-  'screening',
   'guardrail',
-  'how to use',
   'skip logic',
   'skip to',
-  'branch',
-  'qualif',
-  'disqualif',
-  'applicab',
   'only ask',
   'only complete',
   'only if',
-  'if applicable',
-  'not applicable',
   'inclusion criteria',
   'exclusion criteria',
   'who answers',
   'who should answer',
+  'disqualif',
+  'qualif',
+] as const;
+
+const WEAK_ROUTING_TERMS = [
+  'route ',
+  'screening',
+  'branch',
+  'applicab',
+  'if applicable',
+  'not applicable',
+  'how to use',
   'facilitator',
   'interviewer note',
   'scoring',
 ] as const;
 
-const ROUTING_PATTERN = new RegExp(
-  ROUTING_TERMS.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
-  'gi'
-);
+function toPattern(terms: readonly string[]): RegExp {
+  return new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+}
+
+const STRONG_PATTERN = toPattern(STRONG_ROUTING_TERMS);
+const WEAK_PATTERN = toPattern(WEAK_ROUTING_TERMS);
 
 interface Range {
   start: number;
@@ -97,9 +115,9 @@ export interface CandidacyExcerpt {
   /** How many characters of the source were left out (0 when the document fits). */
   omittedChars: number;
   /**
-   * Which routing terms earned a window, lower-cased and deduplicated. Logged rather than shown:
-   * it is what lets an operator tell "the check read the routing page and still said no" from
-   * "the check never saw it", which was previously unanswerable.
+   * Which routing terms were found, lower-cased and deduplicated — whether or not one earned a
+   * window. Logged rather than shown: it is what lets an operator tell "the check read the routing
+   * page and still said no" from "the check never saw it", which was previously unanswerable.
    */
   matchedTerms: string[];
 }
@@ -145,9 +163,17 @@ export function selectCandidacyExcerpt(
     return { text: documentText, omittedChars: 0, matchedTerms: [] };
   }
 
-  const head: Range = { start: 0, end: Math.min(CANDIDACY_HEAD_CHARS, documentText.length) };
+  // Head and tail scale down together when a caller asks for a smaller budget than they occupy —
+  // otherwise a tighter `maxChars` would be silently ignored and the composition would return more
+  // than it was asked for, which is the one thing a budget must never do.
+  const fixed = CANDIDACY_HEAD_CHARS + CANDIDACY_TAIL_CHARS;
+  const scale = maxChars < fixed ? maxChars / fixed : 1;
+  const headChars = Math.floor(CANDIDACY_HEAD_CHARS * scale);
+  const tailChars = Math.floor(CANDIDACY_TAIL_CHARS * scale);
+
+  const head: Range = { start: 0, end: Math.min(headChars, documentText.length) };
   const tail: Range = {
-    start: Math.max(head.end, documentText.length - CANDIDACY_TAIL_CHARS),
+    start: Math.max(head.end, documentText.length - tailChars),
     end: documentText.length,
   };
   const ranges: Range[] = [head, tail];
@@ -155,30 +181,34 @@ export function selectCandidacyExcerpt(
   // Whatever the head and tail did not already spend is what the windows have to work with.
   const windowBudget = Math.max(0, maxChars - (head.end - head.start) - (tail.end - tail.start));
   let spent = 0;
+  let windows = 0;
   const matchedTerms = new Set<string>();
 
-  ROUTING_PATTERN.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let windows = 0;
-  while (windows < MAX_WINDOWS && (match = ROUTING_PATTERN.exec(documentText)) !== null) {
-    const candidate: Range = {
-      start: Math.max(0, match.index - CANDIDACY_WINDOW_LEAD_CHARS),
-      end: Math.min(documentText.length, match.index + CANDIDACY_WINDOW_CHARS),
-    };
-    const cost = uncoveredChars(candidate, ranges);
-    // A term already inside the head or tail costs nothing and still counts as read — recording it
-    // keeps `matchedTerms` an answer to "did the check see routing language", not "did composing
-    // the excerpt need extra room for it".
-    if (cost === 0) {
+  /** Spend the remaining budget on one tier's matches, in document order. */
+  const takeWindows = (pattern: RegExp) => {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(documentText)) !== null) {
+      // Recorded whether or not it earns a window: `matchedTerms` answers "did the check see
+      // routing language", not "did composing the excerpt need extra room for it".
       matchedTerms.add(match[0].toLowerCase().trim());
-      continue;
+      if (windows >= MAX_WINDOWS) continue;
+      const candidate: Range = {
+        start: Math.max(0, match.index - CANDIDACY_WINDOW_LEAD_CHARS),
+        end: Math.min(documentText.length, match.index + CANDIDACY_WINDOW_CHARS),
+      };
+      const cost = uncoveredChars(candidate, ranges);
+      if (cost === 0) continue; // already inside the head, the tail, or a window we took
+      if (spent + cost > windowBudget) continue;
+      ranges.push(candidate);
+      spent += cost;
+      windows += 1;
     }
-    if (spent + cost > windowBudget) continue;
-    ranges.push(candidate);
-    spent += cost;
-    windows += 1;
-    matchedTerms.add(match[0].toLowerCase().trim());
-  }
+  };
+
+  // Strong terms first, across the WHOLE document, before any weak term gets a look at the budget.
+  takeWindows(STRONG_PATTERN);
+  takeWindows(WEAK_PATTERN);
 
   const merged = mergeRanges(ranges);
   const included = merged.reduce((sum, r) => sum + (r.end - r.start), 0);

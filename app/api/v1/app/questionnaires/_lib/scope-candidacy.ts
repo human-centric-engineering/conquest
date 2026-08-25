@@ -40,13 +40,43 @@ type RouteLogger = Awaited<ReturnType<typeof getRouteLogger>>;
  * How much of the extracted structure travels with the excerpt (F17.22 Phase 3).
  *
  * Section titles are the cheap half and the valuable half — a role- or segment-shaped instrument
- * says who a section is for in its TITLE — so they are capped generously. Question wordings are
- * capped harder and truncated: they exist here so a screener question ("Which best describes your
- * organisation?") registers, not so the check can read the instrument.
+ * says who a section is for in its TITLE — so more of them are carried. Question wordings exist
+ * here so a screener question ("Which best describes your organisation?") registers, not so the
+ * check can read the instrument.
+ *
+ * **Counts are not a budget.** The first version capped item COUNTS only, so 300 prompts of
+ * arbitrary length could quadruple a prompt that already carries a 20k excerpt — on a check whose
+ * whole design constraint is being cheap enough to run on every upload, and whose 20s timeout
+ * fail-softs to NO verdict. That failure would land on precisely the large routing-shaped
+ * instruments this exists to catch. So each item is truncated AND the two lists share a character
+ * ceiling; whatever does not fit is dropped, because a truncated list is still evidence.
  */
 const MAX_STRUCTURE_SECTION_TITLES = 120;
 const MAX_STRUCTURE_QUESTION_PROMPTS = 300;
+const MAX_STRUCTURE_TITLE_CHARS = 120;
 const MAX_STRUCTURE_PROMPT_CHARS = 200;
+const MAX_STRUCTURE_TOTAL_CHARS = 8_000;
+
+/**
+ * Truncate each item, then take as many as the character ceiling allows — titles first, since a
+ * section title is the strongest structural signal per character in the whole payload.
+ */
+function withinCharBudget(
+  items: string[],
+  perItemChars: number,
+  budget: number
+): [string[], number] {
+  const kept: string[] = [];
+  let spent = 0;
+  for (const item of items) {
+    const trimmed = item.slice(0, perItemChars).trim();
+    if (trimmed.length === 0) continue;
+    if (spent + trimmed.length > budget) break;
+    kept.push(trimmed);
+    spent += trimmed.length;
+  }
+  return [kept, spent];
+}
 
 /**
  * The extracted structure for the candidacy check, or empty lists when it cannot be read.
@@ -61,26 +91,37 @@ async function loadCandidacyStructure(
   log: RouteLogger
 ): Promise<{ sectionTitles: string[]; questionPrompts: string[] }> {
   try {
-    const [sections, questions] = await Promise.all([
-      prisma.appQuestionnaireSection.findMany({
-        where: { versionId },
-        select: { title: true },
-        orderBy: { ordinal: 'asc' },
-        take: MAX_STRUCTURE_SECTION_TITLES,
-      }),
-      prisma.appQuestionSlot.findMany({
-        where: { versionId },
-        select: { prompt: true },
-        orderBy: { ordinal: 'asc' },
-        take: MAX_STRUCTURE_QUESTION_PROMPTS,
-      }),
-    ]);
-    return {
-      sectionTitles: sections.map((s) => s.title).filter((t) => t.trim().length > 0),
-      questionPrompts: questions
-        .map((q) => q.prompt.slice(0, MAX_STRUCTURE_PROMPT_CHARS))
-        .filter((p) => p.trim().length > 0),
-    };
+    // Read questions THROUGH their sections rather than version-wide. The prompt tells the model
+    // these are "in document order", and `AppQuestionSlot.ordinal` is only globally ordered because
+    // ingestion happens to assign it that way — the Structure editor's add-question route counts
+    // within the section, so a version-wide `orderBy: { ordinal }` has ties and both the order and
+    // the `take` cut point become arbitrary. This is the shape `buildRoutingAnalysisInput` uses.
+    const sections = await prisma.appQuestionnaireSection.findMany({
+      where: { versionId },
+      select: {
+        title: true,
+        questions: {
+          select: { prompt: true },
+          orderBy: { ordinal: 'asc' },
+        },
+      },
+      orderBy: { ordinal: 'asc' },
+      take: MAX_STRUCTURE_SECTION_TITLES,
+    });
+
+    const [sectionTitles, titleChars] = withinCharBudget(
+      sections.map((s) => s.title),
+      MAX_STRUCTURE_TITLE_CHARS,
+      MAX_STRUCTURE_TOTAL_CHARS
+    );
+    const [questionPrompts] = withinCharBudget(
+      sections
+        .flatMap((s) => s.questions.map((q) => q.prompt))
+        .slice(0, MAX_STRUCTURE_QUESTION_PROMPTS),
+      MAX_STRUCTURE_PROMPT_CHARS,
+      MAX_STRUCTURE_TOTAL_CHARS - titleChars
+    );
+    return { sectionTitles, questionPrompts };
   } catch (err) {
     log.warn('scope candidacy: structure read threw; checking on the document text alone', {
       versionId,

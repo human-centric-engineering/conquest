@@ -66,9 +66,13 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
 // Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
-vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', () => ({
-  proposeScopeDuringIngest: vi.fn(),
-}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/routing-analysis')>();
+  // `canProposeDuringIngest` stays REAL — it is the elapsed-time gate this route depends on, and
+  // stubbing it would make the "skips when the budget is spent" test assert nothing.
+  return { ...real, proposeScopeDuringIngest: vi.fn() };
+});
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
   checkAdaptiveScopeCandidacy: vi.fn(),
@@ -526,6 +530,42 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
     expect(frames.filter((f) => f.type === 'phase').map((f) => f.data.phase)).not.toContain(
       'proposing_scope'
     );
+  });
+
+  it('skips the proposal when the ingest has already spent the wall-clock budget', async () => {
+    // Being killed mid-`proposing_scope` is the failure worth avoiding: the version is persisted
+    // but the client never sees `done`, so the dialog reports a failed upload for a questionnaire
+    // that exists. Skipping costs only latency — the cached verdict makes the Topics tab propose.
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    const realNow = Date.now;
+    // A clock that jumps a minute and a half per read: whatever else in the pipeline reads it, the
+    // gap between the stream's start and the pre-proposal check is past the threshold.
+    let ticks = 0;
+    Date.now = () => ticks++ * 90_000;
+
+    try {
+      const res = await POST(makeRequest('onboarding.md'));
+      const frames = await drainSse(res);
+
+      expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+      expect(frames.filter((f) => f.type === 'phase').map((f) => f.data.phase)).not.toContain(
+        'proposing_scope'
+      );
+      expect(frames[frames.length - 1].type).toBe('done');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('reports what it proposed as a second phase message', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 6, conditionalCount: 3 });
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const messages = frames.filter((f) => f.type === 'phase').map((f) => f.data.message);
+    expect(messages.some((m) => String(m).includes('6 topics, 3 of them conditional'))).toBe(true);
   });
 
   it('completes the upload when the proposal fails', async () => {
