@@ -143,6 +143,39 @@ describe('dispatchRoutingAnalysis', () => {
     );
   });
 
+  it('analyses a version with no source document attached', async () => {
+    // The analyst is allowed to propose from the questions alone — it reports that as
+    // `fromDocument: false` — so the document keys must be omitted rather than sent empty.
+    const log = makeLog();
+
+    await dispatchRoutingAnalysis({
+      ...BASE,
+      input: { goal: INPUT.goal, questions: INPUT.questions, dataSlots: [], existingTopics: [] },
+      log: log as never,
+    });
+
+    const args = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1];
+    expect(args).not.toHaveProperty('documentText');
+    expect(args).not.toHaveProperty('documentFileName');
+  });
+
+  it('falls back to a generic code and message when the dispatch reports neither', async () => {
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({ success: false });
+    const log = makeLog();
+
+    const outcome = await dispatchRoutingAnalysis({
+      ...BASE,
+      agent: { ...AGENT, provider: '', model: '' },
+      log: log as never,
+    });
+
+    expect(outcome).toMatchObject({ ok: false, code: 'ROUTING_ANALYSIS_FAILED' });
+    // Still recorded, and still attributable: an unbound agent resolves its provider at runtime.
+    expect(recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed', provider: 'resolved-at-runtime' })
+    );
+  });
+
   it('forwards the admin steer only when there is one', async () => {
     const log = makeLog();
 
@@ -210,6 +243,97 @@ describe('persistRoutingAnalysis', () => {
     expect(persisted.uncoveredQuestionCount).toBe(1);
   });
 
+  it('carries the rule quotes and the three settings the analyst may propose', async () => {
+    // These ride the same proposal an admin reviews and accepts (F17.23), so the projection has to
+    // carry them through untouched — a dropped `maxConditionalTopics` silently widens the plan.
+    const log = makeLog();
+
+    await persistRoutingAnalysis({
+      ...PERSIST,
+      result: {
+        ...RESULT,
+        rules: [
+          {
+            dataSlotKey: 'headcount',
+            operator: 'gt' as const,
+            value: '50',
+            action: 'include' as const,
+            topicKey: 'pipeline',
+            rationale: 'Stated on the guardrails tab.',
+            sourceQuote: 'Always include Pipeline when headcount is over 50.',
+          },
+        ],
+        maxConditionalTopics: 3,
+        fallbackTopicKeys: ['pipeline'],
+        checkTopicPreference: ['pipeline'],
+      },
+      log: log as never,
+    });
+
+    const draft = (saveTopicDraft as Mock).mock.calls[0][1];
+    expect(draft.rules[0].sourceQuote).toBe('Always include Pipeline when headcount is over 50.');
+    expect(draft.maxConditionalTopics).toBe(3);
+    expect(draft.fallbackTopicKeys).toEqual(['pipeline']);
+    expect(draft.checkTopicPreference).toEqual(['pipeline']);
+  });
+
+  it('records the run even when the agent resolves its provider at runtime', async () => {
+    // An agent row may carry empty provider/model and let the resolver pick — the run must still
+    // be recorded, because its existence (not its provider) is the "already tried" signal.
+    const log = makeLog();
+
+    await persistRoutingAnalysis({
+      ...PERSIST,
+      agent: { ...AGENT, provider: '', model: '' },
+      input: { ...INPUT, audience: { who: 'Founders' } },
+      log: log as never,
+    });
+
+    expect(recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'resolved-at-runtime', model: 'resolved-at-runtime' })
+    );
+    // The audience travels with the dispatch input, not the run — pinned here because the spread
+    // that carries it is the kind of line a refactor drops without any test noticing.
+    expect((saveTopicDraft as Mock).mock.calls[0][1].topics).toHaveLength(1);
+  });
+
+  it('stamps replacesExisting from the database, never from the model, and keeps the gaps', async () => {
+    // `replacesExisting` is what the review card uses to say "this replaces what you have". It is a
+    // fact about the version's live topics, so a model that self-reported it would sometimes be
+    // wrong about the one thing an admin decides on. A quote-less topic and a quote-less rule ride
+    // along here too — the analyst omits `sourceQuote` when it inferred rather than read.
+    const log = makeLog();
+
+    await persistRoutingAnalysis({
+      ...PERSIST,
+      input: { ...INPUT, existingTopics: [{ key: 'pipeline' }] as never },
+      result: {
+        ...RESULT,
+        topics: [{ ...RESULT.topics[0], sourceQuote: undefined }],
+        rules: [
+          {
+            dataSlotKey: 'headcount',
+            operator: 'gt' as const,
+            value: '50',
+            action: 'include' as const,
+            topicKey: 'pipeline',
+            rationale: 'Inferred from the question set.',
+          },
+        ],
+        gaps: [{ sourceQuote: 'Use judgement elsewhere.', explanation: 'Nothing to test on.' }],
+      },
+      log: log as never,
+    });
+
+    const draft = (saveTopicDraft as Mock).mock.calls[0][1];
+    expect(draft.topics[0].replacesExisting).toBe(true);
+    expect(draft.topics[0]).not.toHaveProperty('sourceQuote');
+    expect(draft.rules[0]).not.toHaveProperty('sourceQuote');
+    expect(draft.gaps).toEqual([
+      { sourceQuote: 'Use judgement elsewhere.', explanation: 'Nothing to test on.' },
+    ]);
+  });
+
   it('audits which trigger asked for the run', async () => {
     const log = makeLog();
 
@@ -275,6 +399,33 @@ describe('proposeScopeDuringIngest', () => {
     expect(await proposeScopeDuringIngest({ ...PARAMS, log: log as never })).toBeNull();
     expect(recordAiRun).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
     expect(saveTopicDraft).not.toHaveBeenCalled();
+  });
+
+  it('forwards the audience when the version describes one', async () => {
+    const log = makeLog();
+    (buildRoutingAnalysisInput as Mock).mockResolvedValue({
+      ...INPUT,
+      audience: { who: 'Founders of 10–50 person firms' },
+    });
+
+    await proposeScopeDuringIngest({ ...PARAMS, log: log as never });
+
+    expect((capabilityDispatcher.dispatch as Mock).mock.calls[0][1].audience).toEqual({
+      who: 'Founders of 10–50 person firms',
+    });
+  });
+
+  it('survives a rejection that is not an Error', async () => {
+    // A provider SDK can reject with a string or a plain object; the fail-soft path must render
+    // that into the log rather than throwing on `.message` and taking the upload down with it.
+    (capabilityDispatcher.dispatch as Mock).mockRejectedValue('socket hang up');
+    const log = makeLog();
+
+    await expect(proposeScopeDuringIngest({ ...PARAMS, log: log as never })).resolves.toBeNull();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ error: 'socket hang up' })
+    );
   });
 
   it('never throws, whatever the analyst does', async () => {

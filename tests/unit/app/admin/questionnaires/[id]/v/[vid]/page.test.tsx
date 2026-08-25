@@ -64,8 +64,21 @@ vi.mock('@/components/admin/cq-stat-tiles', () => ({
 }));
 
 vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
-  LaunchChecklist: (props: { versionNumber: number }) => (
-    <div data-testid="launch-checklist">launch v{props.versionNumber}</div>
+  // The two adaptive-scope counts are rendered rather than dropped: the page is the only place
+  // that derives them from the topics payload, and the checklist decides an admin-facing warning
+  // from them (F17.22 Phase 4).
+  LaunchChecklist: (props: {
+    versionNumber: number;
+    adaptiveScopeErrorCount?: number;
+    adaptiveScopeConditionalCount?: number;
+  }) => (
+    <div
+      data-testid="launch-checklist"
+      data-scope-errors={props.adaptiveScopeErrorCount}
+      data-scope-conditionals={props.adaptiveScopeConditionalCount}
+    >
+      launch v{props.versionNumber}
+    </div>
   ),
 }));
 
@@ -238,6 +251,33 @@ describe('OverviewTab', () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
       render(await renderPage());
       expect(screen.getByTestId('launch-checklist')).toHaveTextContent('launch v1');
+    });
+
+    it('counts the conditional topics and error findings for the checklist', async () => {
+      // Both counts are derived here and nowhere else. The conditional count drives the "adaptive
+      // scope is off, so everyone is asked everything" warning, which only appears when the page
+      // actually reads the topic phases — a payload it silently ignored would show nothing.
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
+      );
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+        topics: [
+          { key: 'a', phase: 'conditional' },
+          { key: 'b', phase: 'core' },
+          { key: 'c', phase: 'conditional' },
+        ],
+        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+        issues: [{ severity: 'error' }, { severity: 'warning' }],
+        inventory: { questions: [], dataSlots: [] },
+        draft: null,
+      });
+
+      render(await renderPage());
+
+      const checklist = screen.getByTestId('launch-checklist');
+      expect(checklist).toHaveAttribute('data-scope-conditionals', '2');
+      expect(checklist).toHaveAttribute('data-scope-errors', '1');
     });
 
     it('does not render the LaunchChecklist when the version is launched', async () => {
