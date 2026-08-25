@@ -23,7 +23,9 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireTopic: { findFirst: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
     appQuestionnaireVersion: { update: vi.fn(), findUnique: vi.fn() },
-    appAiRun: { findFirst: vi.fn() },
+    appAiRun: { findFirst: vi.fn(), count: vi.fn() },
+    appQuestionnaireSection: { findMany: vi.fn() },
+    appQuestionSlot: { findMany: vi.fn() },
   },
 }));
 
@@ -72,7 +74,7 @@ const VERDICT_RESULT = {
  * module would pull in unrelated request-context machinery this unit test has no need to stand up.
  */
 function makeLog() {
-  return { warn: vi.fn(), error: vi.fn() };
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
 /** Default all three eligibility queries to "eligible" (empty/disabled). */
@@ -101,6 +103,9 @@ beforeEach(() => {
   (recordAiRun as Mock).mockResolvedValue('run-1');
   (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(null);
   (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
+  (prisma.appAiRun.count as Mock).mockResolvedValue(0);
+  (prisma.appQuestionnaireSection.findMany as Mock).mockResolvedValue([]);
+  (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([]);
 });
 
 // ─── Eligibility gate ───────────────────────────────────────────────────────
@@ -343,21 +348,60 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
     expect(log.warn).toHaveBeenCalled();
   });
 
-  it('truncates documentText to the cap before dispatching', async () => {
-    const longText = 'x'.repeat(25_000);
+  it('composes an excerpt that reaches routing language at the back of a long document', async () => {
+    // The Phase 3 fix, at the seam: a head-slice would have stopped 40,000 characters short of the
+    // sentence this whole check exists to find.
+    const routingPage = 'ROUTING: only ask Section 6 of franchise owners.';
     const log = makeLog();
 
     await checkAdaptiveScopeCandidacy({
       ...BASE_PARAMS,
-      documentText: longText,
+      documentText: `${'x '.repeat(30_000)}${routingPage}`,
       log: log as never,
     });
 
     const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
       documentText: string;
     };
-    expect(dispatchArgs.documentText.length).toBe(20_000);
-    expect(dispatchArgs.documentText.length).not.toBe(longText.length);
+    expect(dispatchArgs.documentText).toContain(routingPage);
+    expect(dispatchArgs.documentText.length).toBeLessThanOrEqual(21_000);
+  });
+
+  it('sends the extracted structure alongside the text', async () => {
+    (prisma.appQuestionnaireSection.findMany as Mock).mockResolvedValue([
+      { title: 'Section 6 — franchise owners only' },
+      { title: '   ' },
+    ]);
+    (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
+      { prompt: 'Which best describes your organisation?' },
+    ]);
+    const log = makeLog();
+
+    await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+
+    const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
+      sectionTitles?: string[];
+      questionPrompts?: string[];
+    };
+    // Blank titles are dropped rather than sent as empty numbered rows.
+    expect(dispatchArgs.sectionTitles).toEqual(['Section 6 — franchise owners only']);
+    expect(dispatchArgs.questionPrompts).toEqual(['Which best describes your organisation?']);
+  });
+
+  it('checks on the document text alone when the structure read throws', async () => {
+    // Fail-soft, like everything else here: structure is corroborating evidence, and losing it is a
+    // reason to check with less rather than not to check.
+    (prisma.appQuestionnaireSection.findMany as Mock).mockRejectedValue(new Error('conn reset'));
+    const log = makeLog();
+
+    const result = await checkAdaptiveScopeCandidacy({ ...BASE_PARAMS, log: log as never });
+
+    expect(result).not.toBeNull();
+    const dispatchArgs = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
+      sectionTitles?: string[];
+    };
+    expect(dispatchArgs.sectionTitles).toBeUndefined();
+    expect(log.warn).toHaveBeenCalled();
   });
 });
 
@@ -436,8 +480,10 @@ describe('resolveAutoTriggerPending', () => {
     const result = await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT);
 
     expect(result).toBe(true);
+    // Only a SUCCEEDED run is conclusive (F17.22 Phase 3) — the query must say so, or a failed run
+    // suppresses the automation for the life of the version.
     expect(prisma.appAiRun.findFirst).toHaveBeenCalledWith({
-      where: { versionId: 'ver-1', kind: 'routing_analysis' },
+      where: { versionId: 'ver-1', kind: 'routing_analysis', status: 'succeeded' },
       select: { id: true },
     });
   });
@@ -459,5 +505,31 @@ describe('resolveAutoTriggerPending', () => {
     const result = await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT);
 
     expect(result).toBe(false);
+  });
+
+  it('still fires after ONE failed run — a provider blip must not disable the automation', async () => {
+    // The F17.22 Phase 3 defect: any prior run counted as "already tried", including one the route
+    // itself logged as failed. Nothing on screen said the automation had been switched off.
+    (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
+    (prisma.appAiRun.count as Mock).mockResolvedValue(1);
+
+    expect(await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT)).toBe(true);
+    expect(prisma.appAiRun.count).toHaveBeenCalledWith({
+      where: { versionId: 'ver-1', kind: 'routing_analysis', status: 'failed' },
+    });
+  });
+
+  it('gives up after two failures — retrying a misconfigured provider is a bill, not a recovery', async () => {
+    (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
+    (prisma.appAiRun.count as Mock).mockResolvedValue(2);
+
+    expect(await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT)).toBe(false);
+  });
+
+  it('a success outranks any number of failures', async () => {
+    (prisma.appAiRun.findFirst as Mock).mockResolvedValue({ id: 'run-1' });
+    (prisma.appAiRun.count as Mock).mockResolvedValue(0);
+
+    expect(await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT)).toBe(false);
   });
 });

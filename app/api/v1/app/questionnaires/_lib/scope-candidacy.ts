@@ -22,6 +22,7 @@ import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import type { getRouteLogger } from '@/lib/api/context';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { selectCandidacyExcerpt } from '@/lib/app/questionnaire/scope/candidacy-excerpt';
 import {
   validateScopeCandidacy,
   type ScopeCandidacyResult,
@@ -36,13 +37,58 @@ import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 type RouteLogger = Awaited<ReturnType<typeof getRouteLogger>>;
 
 /**
- * Cap on how much of the source document the cheap candidacy check reads. Detecting a routing
- * signal needs far less than the Routing Analyst's exhaustive read — the sections that announce
- * conditionality (an intro, a "how to use this" page, a routing tab) are concentrated, not spread
- * evenly across a long instrument. Keeping this well below the analyst's uncapped read is what
- * keeps the check cheap enough to run unconditionally on every upload.
+ * How much of the extracted structure travels with the excerpt (F17.22 Phase 3).
+ *
+ * Section titles are the cheap half and the valuable half — a role- or segment-shaped instrument
+ * says who a section is for in its TITLE — so they are capped generously. Question wordings are
+ * capped harder and truncated: they exist here so a screener question ("Which best describes your
+ * organisation?") registers, not so the check can read the instrument.
  */
-const MAX_CANDIDACY_DOCUMENT_CHARS = 20_000;
+const MAX_STRUCTURE_SECTION_TITLES = 120;
+const MAX_STRUCTURE_QUESTION_PROMPTS = 300;
+const MAX_STRUCTURE_PROMPT_CHARS = 200;
+
+/**
+ * The extracted structure for the candidacy check, or empty lists when it cannot be read.
+ *
+ * Fail-soft like everything else here: structure is corroborating evidence, and a failed read is a
+ * reason to check with less rather than not to check. Deliberately queried from the just-persisted
+ * version rather than threaded through every ingest caller — the graph is written before the check
+ * runs in all four paths (fresh/re-ingest × streaming/non-streaming).
+ */
+async function loadCandidacyStructure(
+  versionId: string,
+  log: RouteLogger
+): Promise<{ sectionTitles: string[]; questionPrompts: string[] }> {
+  try {
+    const [sections, questions] = await Promise.all([
+      prisma.appQuestionnaireSection.findMany({
+        where: { versionId },
+        select: { title: true },
+        orderBy: { ordinal: 'asc' },
+        take: MAX_STRUCTURE_SECTION_TITLES,
+      }),
+      prisma.appQuestionSlot.findMany({
+        where: { versionId },
+        select: { prompt: true },
+        orderBy: { ordinal: 'asc' },
+        take: MAX_STRUCTURE_QUESTION_PROMPTS,
+      }),
+    ]);
+    return {
+      sectionTitles: sections.map((s) => s.title).filter((t) => t.trim().length > 0),
+      questionPrompts: questions
+        .map((q) => q.prompt.slice(0, MAX_STRUCTURE_PROMPT_CHARS))
+        .filter((p) => p.trim().length > 0),
+    };
+  } catch (err) {
+    log.warn('scope candidacy: structure read threw; checking on the document text alone', {
+      versionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { sectionTitles: [], questionPrompts: [] };
+  }
+}
 
 /**
  * Trim a validated candidacy result to the {@link ScopeCandidacyVerdict} shape carried across the
@@ -166,17 +212,37 @@ export async function checkAdaptiveScopeCandidacy(
   // capability touch on a fresh server process (same one-shot, idempotent flush the extractor uses).
   registerBuiltInCapabilities();
 
-  const truncatedText =
-    documentText.length > MAX_CANDIDACY_DOCUMENT_CHARS
-      ? documentText.slice(0, MAX_CANDIDACY_DOCUMENT_CHARS)
-      : documentText;
+  // Composed, not sliced (F17.22 Phase 3): the head, the tail, and a window around every passage
+  // that uses routing language. The old head-slice read the wrong 20,000 characters of exactly the
+  // documents this check exists to catch — a routing page or guardrails tab usually sits behind the
+  // questions, and a workbook's Routing sheet flattens last of all.
+  const excerpt = selectCandidacyExcerpt(documentText);
+  const structure = await loadCandidacyStructure(versionId, log);
+  if (excerpt.omittedChars > 0) {
+    log.info('scope candidacy: reading a composed excerpt', {
+      versionId,
+      documentChars: documentText.length,
+      excerptChars: excerpt.text.length,
+      // What lets an operator tell "it read the routing page and still said no" from "it never
+      // reached the routing page" — previously unanswerable from the logs.
+      matchedTerms: excerpt.matchedTerms,
+    });
+  }
 
   const startedAt = Date.now();
   let result: ScopeCandidacyResult;
   try {
     const dispatch = await capabilityDispatcher.dispatch(
       DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG,
-      { documentText: truncatedText, documentFileName: fileName, versionId },
+      {
+        documentText: excerpt.text,
+        documentFileName: fileName,
+        versionId,
+        ...(structure.sectionTitles.length > 0 ? { sectionTitles: structure.sectionTitles } : {}),
+        ...(structure.questionPrompts.length > 0
+          ? { questionPrompts: structure.questionPrompts }
+          : {}),
+      },
       {
         userId: adminId,
         agentId: agent.id,
@@ -266,6 +332,13 @@ export async function checkAdaptiveScopeCandidacy(
 /* -------------------------------------------------------------------------- */
 
 /**
+ * How many failed `routing_analysis` runs the auto-trigger will tolerate before it stops offering
+ * to fire itself. Two: one transient failure is worth retrying on the next tab visit; two in a row
+ * is a configuration problem that retrying cannot fix.
+ */
+const MAX_AUTO_TRIGGER_ATTEMPTS = 2;
+
+/**
  * Read the cached candidacy verdict (Phase 1), trimmed for client display. Null if never checked,
  * ineligible at check time, or malformed.
  *
@@ -319,15 +392,27 @@ export async function resolveAutoTriggerPending(
 
   // The durable "already tried" signal. Unlike the draft — which a discard deletes — this survives
   // a rejected proposal, so declining what the analyst proposed never re-fires the same auto-run
-  // just because the admin revisits the tab. Recorded for both a successful AND a failed real run
-  // (the analyse/stream route logs `status: 'failed'` from inside its dispatch), but NOT for the
-  // early-return paths ahead of any model call (rate limited, no questions, agent unseeded) — those
-  // stay eligible to retry on a later visit, which is the correct behaviour for "nothing was
-  // actually attempted yet".
-  const priorRun = await prisma.appAiRun.findFirst({
-    where: { versionId, kind: 'routing_analysis' },
-    select: { id: true },
-  });
+  // just because the admin revisits the tab. It is NOT recorded for the early-return paths ahead of
+  // any model call (rate limited, no questions, agent unseeded) — those stay eligible to retry on a
+  // later visit, which is the correct behaviour for "nothing was actually attempted yet".
+  //
+  // A FAILED run used to count the same as a succeeded one (F17.22 Phase 3), which meant one
+  // provider blip during the first tab visit disabled the automation permanently for that version,
+  // silently and with nothing on screen to say so. Only a success is now conclusive.
+  const [succeeded, failures] = await Promise.all([
+    prisma.appAiRun.findFirst({
+      where: { versionId, kind: 'routing_analysis', status: 'succeeded' },
+      select: { id: true },
+    }),
+    prisma.appAiRun.count({ where: { versionId, kind: 'routing_analysis', status: 'failed' } }),
+  ]);
 
-  return priorRun === null;
+  if (succeeded !== null) return false;
+
+  // Bounded, because "retry until it works" over a paid model call with a misconfigured provider is
+  // a bill, not a recovery: the automation gets one more attempt, and after that the admin's own
+  // button is the way back in (it reports its errors, which the silent auto-run deliberately does
+  // not). Legacy rows are unaffected — `status` defaults to `succeeded`, so anything written before
+  // failures were recorded still reads as conclusive.
+  return failures < MAX_AUTO_TRIGGER_ATTEMPTS;
 }

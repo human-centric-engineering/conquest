@@ -581,6 +581,46 @@ be asked to everyone until you turn it on"), and off with none ("adaptive scope 
 turn it on yourself" — the sentence that used to be shown unconditionally, including, wrongly, to
 versions where the feature was already on).
 
+### What the check reads, and how long it stays suppressed (F17.22 Phase 3)
+
+The gate above was also swallowing documents that _do_ say it, in three separate ways.
+
+**It read the wrong 20,000 characters.** The check took the head of the document and nothing else.
+Routing pages, guardrail tables, eligibility appendices and "how to use this" notes are very often
+at the BACK — and a workbook's Routing sheet flattens last of all — so the check answered "found
+nothing" on evidence it never saw. `selectCandidacyExcerpt` (`scope/candidacy-excerpt.ts`) now
+composes the same budget instead of slicing it: the head, the tail, and a ~2k window around every
+passage that uses routing vocabulary, in document order, joined with a `[…]` elision marker. The
+rubric is told the text may be an excerpt and told never to quote across an elision — two distant
+spans joined at a seam would otherwise produce a `sourceQuote` that does not exist in the document,
+in the one check whose whole value is that its evidence is quoted.
+
+The term list is routing VOCABULARY (`eligib`, `screener`, `guardrail`, `skip logic`, `only if`,
+`who answers`, `scoring`, …), deliberately not domain vocabulary: the same instrument shape turns up
+in clinical screeners, procurement questionnaires and staff surveys, and a list tuned to one would
+silently fail the others. Windows are capped at 8, because an excerpt shredded into forty fragments
+reads worse and quotes worse than a contiguous one. `matchedTerms` is logged, which is what lets an
+operator tell **"it read the routing page and still said no"** from **"it never reached the routing
+page"** — previously unanswerable.
+
+**It read only prose.** A role- or segment-shaped instrument states its routing in its TITLES —
+"Section 6 — franchise owners only" — and a screener question ("Which best describes your
+organisation?") is the other half of the same statement. Both now travel with the excerpt as the
+extracted section titles and question wordings, capped (120 / 300, prompts truncated at 200 chars)
+so a triage read stays a triage read. The rubric treats them as the document's own words **and
+keeps its bias**: a title that addresses a kind of respondent is stated routing; a long list of
+varied titles is still not.
+
+**One failure disabled it forever.** `resolveAutoTriggerPending` treated any prior
+`routing_analysis` `AppAiRun` as "already tried" — including one the analyse route itself logged as
+`status: 'failed'`. A single provider blip during the first tab visit switched the automation off
+for the life of that version, silently, with nothing on screen to say so. Only a **succeeded** run
+is conclusive now; failures are counted and tolerated up to two, because "retry until it works"
+over a paid model call with a misconfigured provider is a bill, not a recovery. After that the
+admin's own button is the way back in — it reports its errors, which the silent auto-run
+deliberately does not. Legacy rows are unaffected: `AppAiRun.status` defaults to `succeeded`, so
+anything written before failures were recorded still reads as conclusive.
+
 ## Reports and scoring (F17.5)
 
 The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.
