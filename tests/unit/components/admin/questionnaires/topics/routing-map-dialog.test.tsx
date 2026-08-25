@@ -85,7 +85,7 @@ const FULL = [
 function open(props: Partial<React.ComponentProps<typeof RoutingMapDialog>> = {}) {
   const onEditTopic = vi.fn();
   render(<RoutingMapDialog payload={payload(FULL)} onEditTopic={onEditTopic} {...props} />);
-  fireEvent.click(screen.getByRole('button', { name: /routing map/i }));
+  fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
   return { onEditTopic };
 }
 
@@ -101,7 +101,7 @@ describe('RoutingMapDialog', () => {
   it('renders a trigger and nothing else until it is opened', () => {
     render(<RoutingMapDialog payload={payload(FULL)} onEditTopic={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: /routing map/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /decision flow/i })).toBeInTheDocument();
     // A canvas mounted behind a closed dialog would measure and lay out for nothing on every render of
     // a tab the map is only occasionally wanted on.
     expect(screen.queryByTestId('rf-canvas')).not.toBeInTheDocument();
@@ -119,7 +119,7 @@ describe('RoutingMapDialog', () => {
   it('is disabled while the tab is saving', () => {
     render(<RoutingMapDialog payload={payload(FULL)} onEditTopic={vi.fn()} disabled />);
 
-    expect(screen.getByRole('button', { name: /routing map/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /decision flow/i })).toBeDisabled();
   });
 
   describe('the states an author could misread', () => {
@@ -127,7 +127,7 @@ describe('RoutingMapDialog', () => {
       render(
         <RoutingMapDialog payload={payload(FULL, { enabled: false })} onEditTopic={vi.fn()} />
       );
-      fireEvent.click(screen.getByRole('button', { name: /routing map/i }));
+      fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
 
       expect(screen.getByTestId('routing-map-off-banner')).toHaveTextContent(/would happen/i);
     });
@@ -145,7 +145,7 @@ describe('RoutingMapDialog', () => {
           onEditTopic={vi.fn()}
         />
       );
-      fireEvent.click(screen.getByRole('button', { name: /routing map/i }));
+      fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
 
       expect(screen.getByTestId('routing-map-nothing-conditional')).toHaveTextContent(
         /nothing to decide/i
@@ -198,7 +198,7 @@ describe('RoutingMapDialog', () => {
           onEditTopic={vi.fn()}
         />
       );
-      fireEvent.click(screen.getByRole('button', { name: /routing map/i }));
+      fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
 
       expect(screen.getByRole('switch')).toBeDisabled();
     });

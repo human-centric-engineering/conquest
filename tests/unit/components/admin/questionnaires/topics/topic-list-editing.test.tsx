@@ -358,7 +358,10 @@ describe('TopicListEditor — reordering', () => {
   it('locks reordering while a filter is on, because "up" no longer means the row above', () => {
     renderEditor();
 
-    fireEvent.click(screen.getByRole('button', { name: /Conditional/ }));
+    // `aria-pressed` picks the FILTER chip specifically. Since F17.27 the phase badge on a
+    // conditional row reads "Conditional" too — deliberately, so the filter and the thing it
+    // filters finally use the same word — which makes a bare name match ambiguous.
+    fireEvent.click(screen.getByRole('button', { name: /Conditional/, pressed: false }));
 
     const up = screen.getByRole('button', { name: 'Move Hiring and capability up' });
     expect(up).toBeDisabled();

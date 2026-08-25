@@ -101,7 +101,7 @@ vi.mock('@/components/admin/questionnaires/topics/routing-map-dialog', () => ({
       disabled={disabled}
       onClick={() => onEditTopic('pricing')}
     >
-      Routing map
+      Decision flow
     </button>
   ),
 }));
@@ -131,6 +131,7 @@ vi.mock('@/components/admin/questionnaires/topics/topic-list-editor', () => ({
     onFocusHandled,
     seedTopic,
     onSeedHandled,
+    active,
   }: {
     onSave: (t: unknown[]) => Promise<boolean>;
     busy: boolean;
@@ -138,8 +139,9 @@ vi.mock('@/components/admin/questionnaires/topics/topic-list-editor', () => ({
     onFocusHandled?: () => void;
     seedTopic?: { description: string; criteria: string; nonce: number } | null;
     onSeedHandled?: () => void;
+    active?: boolean;
   }) => (
-    <div>
+    <div data-testid="topic-list" data-active={String(active ?? true)}>
       <div
         data-testid="focus"
         data-key={focusTopic?.key ?? ''}
@@ -279,6 +281,11 @@ function lastMutation() {
 beforeEach(() => {
   vi.clearAllMocks();
   authoringMutateMock.mockResolvedValue({ data: {}, meta: null });
+  // The sub-tabs write `?tab=` with `history.replaceState`, which is GLOBAL — jsdom keeps one URL
+  // for the whole file, so without this a test that switched tabs leaks its query into every test
+  // after it. Found the hard way: the fork-redirect assertion started seeing a `?tab=` it never
+  // set, from a click three describes earlier.
+  window.history.replaceState(null, '', '/admin/questionnaires/q1/v/v1/topics');
 });
 
 /* -------------------------------------------------------------------------- */
@@ -384,6 +391,66 @@ describe('TopicsPanel — the status header owns the master switch', () => {
   });
 });
 
+describe('TopicsPanel — the three sub-tabs', () => {
+  it('opens on Topics', () => {
+    renderPanel();
+    expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('opens on the tab named by `?tab=`', () => {
+    window.history.replaceState(null, '', '/admin/questionnaires/q1/v/v1/topics?tab=check');
+    renderPanel();
+    expect(screen.getByRole('tab', { name: 'Check' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('falls back to Topics on a `?tab=` nobody recognises', () => {
+    // The query survives being pasted, bookmarked and hand-edited, so it can be anything.
+    window.history.replaceState(null, '', '/admin/questionnaires/q1/v/v1/topics?tab=nonsense');
+    renderPanel();
+    expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('writes the tab to the URL without a router navigation', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+
+    expect(new URL(window.location.href).searchParams.get('tab')).toBe('rules');
+    // The whole reason this hook exists rather than `useUrlTabs`: `router.replace` here would be
+    // a full RSC round-trip re-running the loaders to render markup that did not change, and
+    // could drop the subtree into the parent segment's Suspense fallback — unmounting the
+    // in-flight analyst run and every unsaved draft the split exists to preserve.
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it('keeps every panel mounted so a switch cannot discard work in progress', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole('tab', { name: 'Check' }));
+
+    // The topic editor is on the Topics tab and is now hidden — but still in the DOM. Radix would
+    // unmount it without `forceMount`, taking the admin's unsaved topic drafts with it.
+    expect(screen.getByTestId('topic-list')).toBeInTheDocument();
+    expect(screen.getByTestId('analyst-card')).toBeInTheDocument();
+  });
+
+  it('tells the topic editor when its own tab is not the one showing', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    expect(screen.getByTestId('topic-list')).toHaveAttribute('data-active', 'true');
+
+    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+
+    // A mounted-but-hidden editor still commits effects. Without this the focus and seed handoffs
+    // would be spent against a node with no layout — see F17.24.
+    expect(screen.getByTestId('topic-list')).toHaveAttribute('data-active', 'false');
+  });
+});
+
 describe('TopicsPanel — the issue strip', () => {
   it("drives the topic-list focus handoff, reusing the map's mechanism", async () => {
     const user = userEvent.setup();
@@ -406,6 +473,31 @@ describe('TopicsPanel — the issue strip', () => {
     // topic want the identical thing to happen, so they ask for it the identical way.
     expect(screen.getByTestId('focus')).toHaveAttribute('data-key', 'pricing');
     expect(screen.getByTestId('focus')).toHaveAttribute('data-nonce', '1');
+    // And it lands on the tab that owns the fix, not just anywhere.
+    expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('sends a rule-shaped finding to Rules & limits', async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      payload({
+        issues: [
+          {
+            severity: 'error',
+            code: 'rule_unknown_topic',
+            topicKey: 'gone',
+            message: 'A rule points at a topic that no longer exists.',
+          },
+        ],
+      })
+    );
+
+    await user.click(screen.getByRole('button', { name: /A rule points at a topic/i }));
+
+    expect(screen.getByRole('tab', { name: 'Rules & limits' })).toHaveAttribute(
+      'data-state',
+      'active'
+    );
   });
 
   it('renders nothing when the setup is coherent', () => {
@@ -497,31 +589,24 @@ describe('TopicsPanel — fork on launch', () => {
     expect(routerMock.replace).toHaveBeenCalledWith('/admin/questionnaires/q1/v/v2/topics');
   });
 
-  it('carries the current query across the fork redirect', async () => {
-    // Today this preserves nothing in particular. Once the tab is split into sub-tabs (`?tab=`),
-    // dropping it would silently return the admin to the first sub-tab after every fork — on the
-    // version they have just been moved to, which is the worst moment to lose their place.
+  it('carries the active sub-tab across the fork redirect', async () => {
+    // Dropping the query would return the admin to the first sub-tab after every fork — on the
+    // version they have just been moved to, which is the worst moment to lose their place. Driven
+    // through the real tab control rather than by stubbing `window.location`, so it exercises the
+    // same `history.replaceState` path production uses.
     const user = userEvent.setup();
-    const original = window.location.search;
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, search: '?tab=rules' },
-      writable: true,
-    });
     authoringMutateMock.mockResolvedValue({
       data: {},
       meta: { forked: true, versionId: 'v2', versionNumber: 4 },
     });
     renderPanel();
 
+    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
     await user.click(screen.getByTestId('save-topics'));
 
     expect(routerMock.replace).toHaveBeenCalledWith(
       '/admin/questionnaires/q1/v/v2/topics?tab=rules'
     );
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, search: original },
-      writable: true,
-    });
   });
 
   it('does not redirect or announce when the save did not fork', async () => {

@@ -14,7 +14,7 @@ import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { ScopeEvaluationRunDetail as ScopeEvaluationRunDetailView } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
-  title: 'Scope evaluation run · Questionnaire',
+  title: 'Review of this setup · Questionnaire',
   description: 'Findings from one Adaptive Scope evaluation run.',
 };
 
@@ -52,7 +52,7 @@ export default async function ScopeEvaluationRunTab({ params }: PageProps) {
           href={`${workspaceVersionBase(id, vid)}/topics/evaluations`}
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
         >
-          <ChevronLeft className="h-4 w-4" /> Scope evaluations
+          <ChevronLeft className="h-4 w-4" /> Past reviews
         </Link>
       </div>
 

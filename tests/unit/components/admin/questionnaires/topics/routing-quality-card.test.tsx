@@ -80,15 +80,19 @@ describe('RoutingQualityCard', () => {
     await waitFor(() => expect(apiClient.get).toHaveBeenCalledTimes(1));
   });
 
-  it('renders nothing at all when the feature is off — no plan was ever written', () => {
-    const { container } = renderCard({ enabled: false });
-    expect(container).toBeEmptyDOMElement();
+  it('explains itself rather than vanishing when the feature is off', () => {
+    renderCard({ enabled: false });
+
+    // Same reason as the preview card: on a tab of its own, silence reads as a broken page. What
+    // must NOT change is the fetch — there is no plan to report on, so it still asks for nothing.
+    expect(screen.getByText(/No interviews to report on yet/i)).toBeInTheDocument();
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 
-  it('renders nothing when there is no conditional topic to decide about', () => {
-    const { container } = renderCard({ conditionalCount: 0 });
-    expect(container).toBeEmptyDOMElement();
+  it('says the same when there is no conditional topic to decide about', () => {
+    renderCard({ conditionalCount: 0 });
+
+    expect(screen.getByText(/No interviews to report on yet/i)).toBeInTheDocument();
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 

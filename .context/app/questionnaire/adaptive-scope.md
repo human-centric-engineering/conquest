@@ -14,9 +14,9 @@ several, which costs cross-section scoring and cohort analysis.
 > routing-quality analytics, the opening's follow-up allowance, the scope judge panel (F17.21),
 > and the defect fixes the first real imported instrument exposed (F17.23).
 >
-> Remaining: the tab is being split in phases — F17.24 de-risked it, F17.25 added the status
-> header and moved the master switch out of the tenth card. The sub-tabs and the plain-English
-> sweep are still to come.
+> The tab simplification is complete: F17.24 de-risked it, F17.25 added the status header and
+> moved the master switch out of the tenth card, F17.26 split it into three sub-tabs, F17.27 swept
+> the remaining implementation vocabulary off the screen.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
 
@@ -1152,6 +1152,33 @@ The replacements, which are the vocabulary to keep using:
 | the instrument     | the questionnaire                       |
 | the pipeline       | the flow above (on the map)             |
 
+And the second pass (F17.27), over card titles, buttons and ⓘ popover headings:
+
+| Was                       | Is                                     |
+| ------------------------- | -------------------------------------- |
+| Routing Analyst           | Suggest topics from your document      |
+| Routing map               | Decision flow                          |
+| What routing actually did | What happened in real interviews       |
+| Scope evaluation(s)       | AI review of this setup / Past reviews |
+| Run the planner           | Preview the decision                   |
+| Phase                     | When it runs                           |
+| Depth                     | How much of it                         |
+| Criteria (popover title)  | When this applies                      |
+| Fallback topics           | Ask these instead                      |
+| Confidence floor / needed | How sure the AI must be                |
+| Planner instructions      | Extra guidance                         |
+| Topic limit               | How many topics                        |
+| Blind-spot preference     | Which topic to sample                  |
+| Session length budget     | How long an interview may take         |
+| Ration follow-ups         | Limit follow-up questions              |
+
+**One vocabulary collision fixed deliberately.** The settings said "Most _conditional_ topics per
+interview" while the phase chip said "Ask when it fits" — one concept, two names. `conditional` is
+the word the product teaches everywhere else, so the chip now agrees with it; the phase _selector_
+keeps "Conditional — ask when it fits", because the selector is where the word is taught. Renaming
+`conditional` to "optional" was rejected: it would desync from the docs, the issue messages and the
+report vocabulary at once.
+
 Domain words an admin _is_ taught by the UI stay: **topic**, **data slot**, **opening**, **conditional**,
 **hard rule**, **guardrails**, **blind-spot check**, **Full / Light depth**. The test is not whether a
 word is technical, it is whether the product ever teaches it — `Light depth` is a labelled control on
@@ -1358,6 +1385,32 @@ same `validateAdaptiveScope` output, so they cannot disagree. Rows are **buttons
 `ScopeIssue` carries no `sectionId`, and what fixes a finding is a topic row whose DOM id is a
 client-side detail — and a topic-scoped row reuses the routing map's existing focus handoff rather
 than growing a second mechanism that behaves almost the same.
+
+### Three sub-tabs, named after the job (F17.26)
+
+**Topics** (group the questions, mark the conditional ones) · **Rules & limits** (pin the
+certainties, set how much one interview may cover) · **Check** (try the decision, then see what it
+did). Not "Settings" for the middle one — the workspace tab bar above already has a Settings tab,
+and two things called Settings on one screen is a collision an admin resolves by clicking both.
+
+`ScopeExplainer`'s four steps deep-link into it: steps 1–2 → Topics, step 3 → Rules & limits, step
+4 stays plain text because it is the header switch a few pixels above. That mapping is the argument
+the split was worth making — the sequence the panel always described finally has somewhere to point.
+
+**The tab state is local, and the URL is written with `history.replaceState`.** `useUrlTabs` writes
+with `router.replace`, which on this route is a full RSC round-trip (`next.config.js` sets no
+`staleTimes`), re-running four loaders to render markup that did not change — and a query-only
+navigation that fell into the parent segment's `loading.tsx` would unmount the subtree entirely.
+`lib/app/questionnaire/use-scope-tabs.ts` keeps the `?tab=` addressability with none of that.
+
+**`forceMount` on all three panels** is load-bearing rather than tidy. Radix unmounts an inactive
+panel, and five things hold state that must survive a switch — most sharply the Routing Analyst's
+in-flight SSE run, which has no `AbortController`, so unmounting does not stop the paid model call.
+It only orphans the result.
+
+The `RoutingAnalystCard` and the `TopicListEditor` **must stay on the same tab**: "Turn into topic"
+appends an unsaved row to the editor, and firing that across a tab boundary would leave work the
+admin never sees. Both are on Topics.
 
 Three more things about the tab are load-bearing rather than cosmetic.
 

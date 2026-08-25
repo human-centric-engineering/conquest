@@ -218,7 +218,7 @@ export function ScopeSettingsCard({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-limit-probes" className="text-sm font-medium">
-                Ration follow-ups in the opening{' '}
+                Limit follow-up questions in the opening{' '}
                 <FieldHelp title="Opening follow-ups">
                   <p>
                     A <strong>follow-up</strong> is the interview circling back on something it has
@@ -307,8 +307,8 @@ export function ScopeSettingsCard({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
-                Session length budget{' '}
-                <FieldHelp title="Session length budget">
+                How long an interview may take{' '}
+                <FieldHelp title="How long an interview may take">
                   <p>
                     Duration control: roughly how long one interview may take. Leave at 0 for no
                     limit.
@@ -355,7 +355,7 @@ export function ScopeSettingsCard({
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
                 Most conditional topics per interview{' '}
-                <FieldHelp title="Topic limit">
+                <FieldHelp title="How many topics">
                   Breadth control: how many conditional topics one interview may cover. The agent
                   proposes; this limit is applied in code afterwards, not asked of the AI — a limit
                   obeyed “most of the time” is the worst kind. Length and cost are governed
@@ -390,8 +390,8 @@ export function ScopeSettingsCard({
 
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
-                Confidence needed{' '}
-                <FieldHelp title="Confidence floor">
+                How sure the AI must be{' '}
+                <FieldHelp title="How sure the AI must be">
                   Below this, the agent’s plan is discarded and the fallback set applies instead. 0
                   accepts any answer; 1 accepts only certainty.
                 </FieldHelp>
@@ -446,7 +446,7 @@ export function ScopeSettingsCard({
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">
                 Prefer these topics for the check, best first{' '}
-                <FieldHelp title="Blind-spot preference">
+                <FieldHelp title="Which topic to sample">
                   Leave empty for “whichever unchosen topic matters most”, which is the more
                   informative default. Naming topics makes it predictable instead.
                 </FieldHelp>
@@ -467,7 +467,7 @@ export function ScopeSettingsCard({
           <SectionLabel step={5}>When the agent cannot decide</SectionLabel>
           <Label className="text-sm font-medium">
             Ask these instead{' '}
-            <FieldHelp title="Fallback topics">
+            <FieldHelp title="Ask these instead">
               Used when the planner errored, returned nothing usable, or came in under the
               confidence floor. Empty means “the always-run topics only” — always coherent, if thin.
               The planner never throws: every failure resolves to a plan, because a respondent has
@@ -539,7 +539,7 @@ export function ScopeSettingsCard({
           <SectionLabel>Extra guidance (optional)</SectionLabel>
           <Label className="text-sm font-medium">
             Guidance that applies across all topics{' '}
-            <FieldHelp title="Planner instructions">
+            <FieldHelp title="Extra guidance">
               Appended to the planner prompt. Each topic’s criteria say when that one topic applies;
               this says how to judge the plan as a whole — “prefer breadth over depth for first-time
               respondents”. It cannot override the limit, the rules, or the fallback: those are

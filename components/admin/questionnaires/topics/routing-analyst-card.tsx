@@ -385,7 +385,7 @@ export function RoutingAnalystCard({
           <FileSearch className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1 space-y-0.5">
-          <CardTitle className="text-sm font-semibold">Routing Analyst</CardTitle>
+          <CardTitle className="text-sm font-semibold">Suggest topics from your document</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
             Reads your uploaded document — including the guidance extraction ignores, wherever it
             sits: routing notes, eligibility rules, instructions about who answers what — and
@@ -444,7 +444,7 @@ export function RoutingAnalystCard({
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">
                 Where are the routing rules? (optional){' '}
-                <FieldHelp title="Steering the analyst">
+                <FieldHelp title="Steering the suggestions">
                   A one-line pointer saves the analyst hunting: “the routing rules are in the notes
                   before the questions”, or “sections 4–7 only apply to some respondents”. It is
                   used for this run only and is not saved.
@@ -636,7 +636,7 @@ export function RoutingAnalystCard({
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   <HelpCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   Recognized but not formalized
-                  <FieldHelp title="What a gap means">
+                  <FieldHelp title="Things it could not turn into a topic">
                     The document plainly states a routing or eligibility instruction here, but the
                     analyst could not turn it into a topic or a hard rule — often because it names
                     something not modeled as a data slot, or is too vague to check mechanically.
