@@ -104,7 +104,7 @@ export function ScopeIssueStrip({ issues, onSelectIssue, className }: ScopeIssue
                   : 'text-amber-800 dark:text-amber-300';
               const jumpable = onSelectIssue !== undefined && issue.topicKey !== undefined;
               return (
-                <li key={`${issue.code}-${issue.topicKey ?? i}`} className={cn('text-xs', tone)}>
+                <li key={`${issue.code}-${i}`} className={cn('text-xs', tone)}>
                   {jumpable ? (
                     <button
                       type="button"
@@ -128,7 +128,7 @@ export function ScopeIssueStrip({ issues, onSelectIssue, className }: ScopeIssue
                 hasErrors ? 'text-destructive' : 'text-amber-800 dark:text-amber-300'
               )}
             >
-              …and {hidden} more below.
+              …and {hidden} more.
             </p>
           )}
         </div>

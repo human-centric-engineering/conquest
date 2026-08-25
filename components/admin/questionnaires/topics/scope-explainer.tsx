@@ -113,10 +113,15 @@ export function ScopeExplainer({ className, onGoToTab }: ScopeExplainerProps) {
                   {i + 1}
                 </span>
                 <div className="min-w-0 space-y-1">
-                  {step.tab && onGoToTab ? (
+                  {step.tab !== null && onGoToTab ? (
                     <button
                       type="button"
-                      onClick={() => onGoToTab(step.tab as AdaptiveScopeTab)}
+                      // `tab` is captured rather than read off `step` inside the handler, so the
+                      // narrowing above survives into the closure and no cast is needed.
+                      onClick={(
+                        (tab) => () =>
+                          onGoToTab(tab)
+                      )(step.tab)}
                       className="text-left text-sm leading-snug font-medium underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:ring-2 focus-visible:outline-none"
                     >
                       {step.title}

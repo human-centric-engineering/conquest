@@ -13,7 +13,7 @@
  *   "instrument" was replaced with "questionnaire" here, and a regression would be invisible to types.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -117,5 +117,52 @@ describe('ScopeExplainer', () => {
     const { container } = render(<ScopeExplainer className="mt-8" />);
 
     expect(container.querySelector('section')?.className).toContain('mt-8');
+  });
+});
+
+describe('ScopeExplainer — the steps deep-link into the sub-tabs (F17.26)', () => {
+  it('sends the two grouping steps to Topics', async () => {
+    const user = userEvent.setup();
+    const onGoToTab = vi.fn();
+    render(<ScopeExplainer onGoToTab={onGoToTab} />);
+    await user.click(toggle());
+
+    await user.click(screen.getByRole('button', { name: STEP_TITLES[0] }));
+    expect(onGoToTab).toHaveBeenLastCalledWith('topics');
+
+    await user.click(screen.getByRole('button', { name: STEP_TITLES[1] }));
+    expect(onGoToTab).toHaveBeenLastCalledWith('topics');
+  });
+
+  it('sends the hard-rules step to Rules & limits', async () => {
+    const user = userEvent.setup();
+    const onGoToTab = vi.fn();
+    render(<ScopeExplainer onGoToTab={onGoToTab} />);
+    await user.click(toggle());
+
+    await user.click(screen.getByRole('button', { name: STEP_TITLES[2] }));
+
+    expect(onGoToTab).toHaveBeenCalledWith('rules');
+  });
+
+  it('leaves "Switch it on" as plain text — it is the header a few pixels above', async () => {
+    // A jump would be theatre: the switch is already on screen, above this panel.
+    const user = userEvent.setup();
+    render(<ScopeExplainer onGoToTab={vi.fn()} />);
+    await user.click(toggle());
+
+    expect(screen.queryByRole('button', { name: STEP_TITLES[3] })).not.toBeInTheDocument();
+    expect(screen.getByText(STEP_TITLES[3])).toBeInTheDocument();
+  });
+
+  it('renders every step as plain text when there is nowhere to send them', async () => {
+    const user = userEvent.setup();
+    render(<ScopeExplainer />);
+    await user.click(toggle());
+
+    for (const title of STEP_TITLES) {
+      expect(screen.queryByRole('button', { name: title })).not.toBeInTheDocument();
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
   });
 });

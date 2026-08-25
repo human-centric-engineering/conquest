@@ -33,7 +33,14 @@ const { routerMock, authoringMutateMock } = vi.hoisted(() => ({
   authoringMutateMock: vi.fn(),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => routerMock,
+  // `useScopeTabs` reads the initial tab through this rather than `window.location`, so that the
+  // server render and the first client render agree — the panel IS server-rendered, and a
+  // `window`-based read would hydrate a different tab than it shipped. Backed by the live URL so
+  // the deep-link tests can drive it with `history.replaceState` exactly as a real link would.
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 
 vi.mock('@/components/admin/questionnaires/authoring-mutate', async () => {
   const actual = await vi.importActual<
@@ -391,6 +398,24 @@ describe('TopicsPanel — the status header owns the master switch', () => {
   });
 });
 
+describe('TopicsPanel — the routing map reaches the editor from any tab', () => {
+  it('switches to Topics as part of opening a topic', async () => {
+    // The map trigger sits above the tabs and is reachable from all three. Between the sub-tabs
+    // landing and this being fixed, "Edit this topic" from the Rules tab did nothing visible —
+    // and left a request that fired later, as an unexplained jump.
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+    await user.click(screen.getByTestId('routing-map'));
+
+    expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
+    expect(screen.getByTestId('focus')).toHaveAttribute('data-key', 'pricing');
+    // And the editor is live, so the request is acted on rather than parked.
+    expect(screen.getByTestId('topic-list')).toHaveAttribute('data-active', 'true');
+  });
+});
+
 describe('TopicsPanel — the three sub-tabs', () => {
   it('opens on Topics', () => {
     renderPanel();
@@ -498,6 +523,34 @@ describe('TopicsPanel — the issue strip', () => {
       'data-state',
       'active'
     );
+  });
+
+  it('does NOT queue a topic focus for a finding fixed on the Rules tab', async () => {
+    // `always_topic_named_as_choice` and `rule_names_always_topic` both carry a `topicKey`, but
+    // what is wrong is the rule or the list pointing AT that topic, not the topic. Focusing it
+    // would park a request the hidden editor cannot act on, which then fires unprompted the next
+    // time the admin opens Topics for an unrelated reason.
+    const user = userEvent.setup();
+    renderPanel(
+      payload({
+        issues: [
+          {
+            severity: 'warning',
+            code: 'rule_names_always_topic',
+            topicKey: 'spine',
+            message: 'A rule includes "spine", but that topic is asked in every interview.',
+          },
+        ],
+      })
+    );
+
+    await user.click(screen.getByRole('button', { name: /A rule includes/i }));
+
+    expect(screen.getByRole('tab', { name: 'Rules & limits' })).toHaveAttribute(
+      'data-state',
+      'active'
+    );
+    expect(screen.getByTestId('focus')).toHaveAttribute('data-key', '');
   });
 
   it('renders nothing when the setup is coherent', () => {

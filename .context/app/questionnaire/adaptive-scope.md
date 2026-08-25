@@ -1401,7 +1401,7 @@ the split was worth making — the sequence the panel always described finally h
 with `router.replace`, which on this route is a full RSC round-trip (`next.config.js` sets no
 `staleTimes`), re-running four loaders to render markup that did not change — and a query-only
 navigation that fell into the parent segment's `loading.tsx` would unmount the subtree entirely.
-`lib/app/questionnaire/use-scope-tabs.ts` keeps the `?tab=` addressability with none of that.
+`components/admin/questionnaires/topics/use-scope-tabs.ts` keeps the `?tab=` addressability with none of that.
 
 **`forceMount` on all three panels** is load-bearing rather than tidy. Radix unmounts an inactive
 panel, and five things hold state that must survive a switch — most sharply the Routing Analyst's

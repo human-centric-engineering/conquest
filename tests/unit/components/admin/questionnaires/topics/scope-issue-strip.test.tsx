@@ -78,7 +78,7 @@ describe('ScopeIssueStrip', () => {
     render(<ScopeIssueStrip issues={many} />);
 
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
-    expect(screen.getByText(/and 3 more below/i)).toBeInTheDocument();
+    expect(screen.getByText(/and 3 more/i)).toBeInTheDocument();
   });
 });
 

@@ -40,7 +40,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
-import { useScopeTabs } from '@/lib/app/questionnaire/use-scope-tabs';
+import { useScopeTabs } from '@/components/admin/questionnaires/topics/use-scope-tabs';
 import {
   ADAPTIVE_SCOPE_TABS,
   ADAPTIVE_SCOPE_TAB_HINTS,
@@ -214,13 +214,31 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
    * topic want the identical thing to happen, so they ask for it the identical way rather than
    * growing a second mechanism that behaves almost the same.
    */
+  /**
+   * Open a topic in the editor, from anywhere on the tab.
+   *
+   * Switching to Topics is part of the act, not a caller's responsibility. The editor's `active`
+   * gate makes a request arriving while hidden WAIT rather than be spent (F17.24) — which is the
+   * right behaviour, and also means a caller that forgets the tab switch produces no visible
+   * effect now and an unexplained jump the next time the admin opens Topics for another reason.
+   * That is exactly what the routing map did between the sub-tabs landing and this being fixed.
+   */
+  const openTopic = (key: string) => {
+    setActiveTab('topics');
+    setFocusTopic((prev) => ({ key, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+
   const goToIssue = (issue: ScopeIssue) => {
-    setActiveTab(tabForScopeIssue(issue));
-    // The focus request is made whether or not the Topics tab is the one being shown: the editor
-    // is mounted-but-hidden under `forceMount`, and its `active` gate makes the request WAIT
-    // rather than be spent on a panel with no layout. Switching the tab is what releases it.
-    if (!issue.topicKey) return;
-    setFocusTopic((prev) => ({ key: issue.topicKey as string, nonce: (prev?.nonce ?? 0) + 1 }));
+    const tab = tabForScopeIssue(issue);
+    // Only queue a topic focus when the fix actually lives on the Topics tab. Two findings carry a
+    // `topicKey` and are fixed in the settings — `always_topic_named_as_choice` and
+    // `rule_names_always_topic` both name a topic, but what is wrong is the rule or the list that
+    // points AT it. Focusing the topic there would park a request that fires later, out of context.
+    if (tab === 'topics' && issue.topicKey) {
+      openTopic(issue.topicKey);
+      return;
+    }
+    setActiveTab(tab);
   };
 
   return (
@@ -254,7 +272,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           // button after a save would be a picture of a version that no longer exists.
           key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
           payload={payload}
-          onEditTopic={(key) => setFocusTopic((prev) => ({ key, nonce: (prev?.nonce ?? 0) + 1 }))}
+          onEditTopic={openTopic}
           disabled={busy}
         />
       </div>
@@ -291,9 +309,9 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             result, the topic editor's unsaved drafts, and the settings draft. Radix applies
             `hidden` itself, so the panels are invisible but alive.
 
-            The cost is that everything renders on first paint: this buys scannability, not render
-            time. `RoutingQualityCard` fetches on mount and holds no user state, so it is the one
-            card left to mount lazily. */}
+            The cost is that everything renders on first paint, `RoutingQualityCard`'s analytics
+            fetch included: this buys scannability, not render time. That was already true before
+            the split, when every card was on one page. */}
         <TabsContent
           value="topics"
           forceMount
