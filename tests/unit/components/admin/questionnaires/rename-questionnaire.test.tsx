@@ -15,16 +15,12 @@ import userEvent from '@testing-library/user-event';
 
 const mockRefresh = vi.fn();
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: mockRefresh,
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: () => createMockRouter({ refresh: mockRefresh }),
+  };
+});
 
 vi.mock('@/lib/api/client', () => ({
   apiClient: { patch: vi.fn() },

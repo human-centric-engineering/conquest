@@ -20,16 +20,12 @@ import userEvent from '@testing-library/user-event';
 // Stable router references so assertions can track calls across renders.
 const mockRefresh = vi.fn();
 
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: mockRefresh,
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter({ refresh: mockRefresh })),
+  };
+});
 
 // apiPatch is referenced inside the factory via closure — works because the
 // factory runs lazily (on first import of @/lib/api/client) after apiPatch is

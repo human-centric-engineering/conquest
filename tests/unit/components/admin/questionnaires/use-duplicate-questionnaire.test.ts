@@ -25,16 +25,12 @@ vi.mock('@/lib/api/client', () => ({
   APIClientError: class APIClientError extends Error {},
 }));
 
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: mockPush,
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter({ push: mockPush })),
+  };
+});
 
 import { useDuplicateQuestionnaire } from '@/components/admin/questionnaires/use-duplicate-questionnaire';
 

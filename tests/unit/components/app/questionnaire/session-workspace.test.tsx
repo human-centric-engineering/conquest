@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { useRouter } from 'next/navigation';
+import { createMockRouter } from '@/tests/types/mocks';
 
 import type { PanelSlotView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
 import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
@@ -402,15 +403,7 @@ beforeEach(() => {
   // resetting this here, a router assertion set by one test (the onContinue suite) would silently
   // leak into every later test. Fresh spies every test; the onContinue tests override with their
   // own push/refresh so they can assert on them.
-  vi.mocked(useRouter).mockReturnValue({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-    bfcacheId: '',
-  });
+  vi.mocked(useRouter).mockReturnValue(createMockRouter());
 });
 
 describe('SessionWorkspace', () => {
@@ -1365,15 +1358,7 @@ describe('SessionWorkspace', () => {
     it('on the no-login stable address (publicRef + accessToken), continuing REFRESHES rather than navigates', () => {
       const push = vi.fn();
       const refresh = vi.fn();
-      vi.mocked(useRouter).mockReturnValue({
-        push,
-        refresh,
-        replace: vi.fn(),
-        back: vi.fn(),
-        forward: vi.fn(),
-        prefetch: vi.fn(),
-        bfcacheId: '',
-      });
+      vi.mocked(useRouter).mockReturnValue(createMockRouter({ push, refresh }));
 
       renderCompletedLeg({ publicRef: 'ABC123' }, 'tok-9');
       expect(screen.getByTestId('handoff-card')).toBeInTheDocument();
@@ -1389,15 +1374,7 @@ describe('SessionWorkspace', () => {
     it('on the authenticated surface (no accessToken), continuing NAVIGATES to the next session', () => {
       const push = vi.fn();
       const refresh = vi.fn();
-      vi.mocked(useRouter).mockReturnValue({
-        push,
-        refresh,
-        replace: vi.fn(),
-        back: vi.fn(),
-        forward: vi.fn(),
-        prefetch: vi.fn(),
-        bfcacheId: '',
-      });
+      vi.mocked(useRouter).mockReturnValue(createMockRouter({ push, refresh }));
 
       // No accessToken — the authenticated surface — regardless of publicRef.
       renderCompletedLeg({ publicRef: null });

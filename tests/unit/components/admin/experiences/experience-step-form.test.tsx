@@ -41,16 +41,12 @@ vi.mock('@/lib/api/client', () => ({
   },
 }));
 
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter()),
+  };
+});
 
 /** An existing breakout step with an 8-minute (480s) clock — the fixture the bug report used. */
 const existingBreakoutStep: ExperienceStepView = {
