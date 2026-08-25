@@ -98,7 +98,7 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm" disabled={disabled}>
           <Network className="mr-2 h-4 w-4" />
-          Routing map
+          Decision flow
         </Button>
       </DialogTrigger>
 
@@ -110,7 +110,7 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
       >
         <div className="flex items-start justify-between gap-4 border-b px-5 py-3">
           <div className="min-w-0">
-            <DialogTitle className="text-base">Routing map</DialogTitle>
+            <DialogTitle className="text-base">Decision flow</DialogTitle>
             <DialogDescription className="mt-0.5 text-xs">
               What this version <em>can</em> do, drawn from the settings on this tab. It is the
               structure, not a prediction — nothing here knows what a respondent will say. Use{' '}

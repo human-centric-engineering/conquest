@@ -64,7 +64,7 @@ export type TopicPhase = (typeof TOPIC_PHASES)[number];
 export const TOPIC_PHASE_LABELS: Record<TopicPhase, string> = {
   opening: 'Opening — gathers the signal',
   core: 'Always ask',
-  conditional: 'Ask when it fits',
+  conditional: 'Conditional — ask when it fits',
   closing: 'Closing — always ask, last',
 };
 

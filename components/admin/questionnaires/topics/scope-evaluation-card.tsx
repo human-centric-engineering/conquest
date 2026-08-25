@@ -133,7 +133,7 @@ export function ScopeEvaluationCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Gavel className="text-muted-foreground h-4 w-4" aria-hidden="true" />
-          Scope evaluation
+          AI review of this setup
           <FieldHelp title="What this does">
             <p>
               Runs four judges over your topics, hard rules, budget and planner instructions —

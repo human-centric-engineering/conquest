@@ -25,32 +25,46 @@ import { ChevronDown, Route } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import type { AdaptiveScopeTab } from '@/lib/constants/adaptive-scope-tabs';
 
-/** The four authoring steps, in the order they must actually happen. */
-const STEPS: ReadonlyArray<{ title: string; body: string }> = [
+/**
+ * The four authoring steps, in the order they must actually happen — and, since F17.26, which
+ * sub-tab each one is done on.
+ *
+ * The mapping is why the split was worth doing: the sequence this panel has always described now
+ * has somewhere to point. `tab: null` is step four, which is the header switch a few pixels above
+ * this panel rather than a tab, so a jump would be theatre.
+ */
+const STEPS: ReadonlyArray<{ title: string; body: string; tab: AdaptiveScopeTab | null }> = [
   {
     title: 'Group every question into a topic',
     body: 'A topic is the unit this page decides about. Uploading a document does this for you — one topic per section, all set to “Always ask”, so nothing changes yet. A question in no topic can never be asked once you switch on.',
+    tab: 'topics',
   },
   {
     title: 'Mark the ones that are conditional',
     body: 'Change a topic to “Ask when it fits” and write, in your own words, when it applies. Size does not matter: a thirty-question section and a single question are both just topics.',
+    tab: 'topics',
   },
   {
     title: 'Pin anything you are certain about',
     body: 'Hard rules read the answers your opening captured and decide before the agent does — “when they are not a licence holder, never include the audit questions”. Use them for certainties; leave the judgement calls to the criteria.',
+    tab: 'rules',
   },
   {
     title: 'Switch it on',
     body: 'When the opening finishes, the plan is decided once: your rules, then the agent judging your criteria, then your limits. The respondent is told what was chosen, and every report says which topics were never covered.',
+    tab: null,
   },
 ];
 
 export interface ScopeExplainerProps {
   className?: string;
+  /** Go to the sub-tab a step is done on. Omitted renders the steps as plain text. */
+  onGoToTab?: (tab: AdaptiveScopeTab) => void;
 }
 
-export function ScopeExplainer({ className }: ScopeExplainerProps) {
+export function ScopeExplainer({ className, onGoToTab }: ScopeExplainerProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -99,7 +113,22 @@ export function ScopeExplainer({ className }: ScopeExplainerProps) {
                   {i + 1}
                 </span>
                 <div className="min-w-0 space-y-1">
-                  <p className="text-sm leading-snug font-medium">{step.title}</p>
+                  {step.tab !== null && onGoToTab ? (
+                    <button
+                      type="button"
+                      // `tab` is captured rather than read off `step` inside the handler, so the
+                      // narrowing above survives into the closure and no cast is needed.
+                      onClick={(
+                        (tab) => () =>
+                          onGoToTab(tab)
+                      )(step.tab)}
+                      className="text-left text-sm leading-snug font-medium underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      {step.title}
+                    </button>
+                  ) : (
+                    <p className="text-sm leading-snug font-medium">{step.title}</p>
+                  )}
                   <p className="text-muted-foreground text-xs leading-relaxed">{step.body}</p>
                 </div>
               </li>

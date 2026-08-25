@@ -14,7 +14,7 @@ import { getQuestionnaireDetailCached } from '@/lib/app/questionnaire/workspace-
 import type { ScopeEvaluationRunListItem } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
-  title: 'Scope evaluations · Questionnaire',
+  title: 'Past reviews · Questionnaire',
   description: 'Run and review the Adaptive Scope judge evaluations for a questionnaire version.',
 };
 

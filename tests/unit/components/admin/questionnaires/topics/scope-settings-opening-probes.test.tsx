@@ -75,7 +75,7 @@ function renderCard(settings: Partial<AdaptiveScopeSettings> = {}) {
   return { onSave };
 }
 
-const probeSwitch = () => screen.getByLabelText(/Ration follow-ups in the opening/);
+const probeSwitch = () => screen.getByLabelText(/Limit follow-up questions in the opening/);
 
 describe('ScopeSettingsCard — the opening follow-up allowance (G03)', () => {
   it('shows no allowance field while the limit is off', () => {

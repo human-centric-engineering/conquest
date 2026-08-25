@@ -99,10 +99,16 @@ describe('PlanPreviewCard — the form', () => {
     expect(screen.getByText('a rule watches this')).toBeInTheDocument();
   });
 
-  it('renders nothing at all when no topic is conditional', () => {
-    const { container } = renderCard({ topics: [topic('spine', 'Spine', 'core')] });
-    // There is no decision to preview, so the card would be an invitation to a dead end.
-    expect(container).toBeEmptyDOMElement();
+  it('explains itself rather than vanishing when no topic is conditional', () => {
+    renderCard({ topics: [topic('spine', 'Spine', 'core')] });
+
+    // It used to render nothing, which was fine when this was one of a dozen cards on a long
+    // page. On the Check tab of its own it would be most of what the tab has to show, and silence
+    // there reads as a page that failed to load. The copy names the one thing that would fill it.
+    expect(screen.getByText(/Nothing to preview yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/Mark at least one topic as conditional/i)).toBeInTheDocument();
+    // Still no form: there is genuinely no decision to try.
+    expect(screen.queryByRole('button', { name: /run/i })).not.toBeInTheDocument();
   });
 
   it('says the preview still runs when adaptive scope is switched off', () => {
@@ -118,7 +124,7 @@ describe('PlanPreviewCard — what it sends', () => {
     fireEvent.change(screen.getByLabelText('What brought you here?'), {
       target: { value: '  Deals keep slipping  ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     await waitFor(() => expect(apiClient.post).toHaveBeenCalled());
     const body = (apiClient.post as Mock).mock.calls[0]?.[1] as {
@@ -138,7 +144,7 @@ describe('PlanPreviewCard — what it sends', () => {
     fireEvent.change(screen.getByLabelText(/Situation/), {
       target: { value: '  40 reps, direct only  ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     await waitFor(() => expect(apiClient.post).toHaveBeenCalled());
     const body = (apiClient.post as Mock).mock.calls[0]?.[1] as {
@@ -154,7 +160,7 @@ describe('PlanPreviewCard — what it sends', () => {
 describe('PlanPreviewCard — the decision trace', () => {
   it('names the layer that chose each selected topic', async () => {
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     expect(await screen.findByText('Growth')).toBeInTheDocument();
     expect(screen.getAllByText('Chosen by the agent').length).toBeGreaterThan(0);
@@ -175,7 +181,7 @@ describe('PlanPreviewCard — the decision trace', () => {
     );
 
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     await screen.findByText('Talent');
     // The whole reason `proposedKeys` is returned: this points the author at the limit rather than
@@ -206,7 +212,7 @@ describe('PlanPreviewCard — the decision trace', () => {
     );
 
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     await screen.findByText('Talent');
     expect(screen.getByText('Removed by a limit you set')).toBeInTheDocument();
@@ -225,7 +231,7 @@ describe('PlanPreviewCard — the decision trace', () => {
     );
 
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     await screen.findByText('Data');
     // `llm` on a SEATED topic means "chosen by the agent"; on an excluded one it means the exact
@@ -241,7 +247,7 @@ describe('PlanPreviewCard — the decision trace', () => {
     );
 
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     expect(await screen.findByText('There was nothing to decide.')).toBeInTheDocument();
   });
@@ -250,7 +256,7 @@ describe('PlanPreviewCard — the decision trace', () => {
     (apiClient.post as Mock).mockRejectedValue(new Error('Rate limit exceeded'));
 
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /run the planner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview the decision/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Rate limit exceeded');
     expect(screen.queryByText('Growth')).not.toBeInTheDocument();

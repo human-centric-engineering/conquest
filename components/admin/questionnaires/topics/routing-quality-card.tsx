@@ -30,6 +30,7 @@ import { AlertTriangle, BarChart3, Loader2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScopeEmptyState } from '@/components/admin/questionnaires/topics/scope-empty-state';
 import { API } from '@/lib/api/endpoints';
 import { apiClient } from '@/lib/api/client';
 import { K_ANONYMITY_THRESHOLD } from '@/lib/app/questionnaire/analytics/privacy';
@@ -91,14 +92,22 @@ export function RoutingQualityCard({
     };
   }, [active, questionnaireId, versionId]);
 
-  if (!active) return null;
+  // Same reason as the preview card: on a tab of its own, silence reads as a broken page.
+  if (!active) {
+    return (
+      <ScopeEmptyState
+        title="No interviews to report on yet"
+        body="Once adaptive scope is on and respondents have completed interviews, this is where you see which topics were actually chosen, how often the fallback ran, and what respondents asked to change."
+      />
+    );
+  }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BarChart3 className="h-4 w-4" aria-hidden="true" />
-          What routing actually did
+          What happened in real interviews
         </CardTitle>
         <CardDescription>
           The plans this version produced over the last 30 days — which topics your criteria chose,

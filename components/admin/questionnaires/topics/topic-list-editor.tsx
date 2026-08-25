@@ -115,7 +115,7 @@ function draftSeconds(draft: DraftTopic, itemCost: ReadonlyMap<string, number>):
 const SOURCE_BADGE: Record<DraftTopic['source'], { label: string; hint: string }> = {
   seeded: { label: 'Auto-seeded', hint: 'Created from a section when the document was ingested.' },
   manual: { label: 'Authored', hint: 'Reviewed or written by an admin.' },
-  analyst: { label: 'From the analyst', hint: 'Proposed by the Routing Analyst and accepted.' },
+  analyst: { label: 'From the analyst', hint: 'Suggested from your document and accepted.' },
   new: { label: 'New', hint: 'Not saved yet.' },
 };
 
@@ -123,7 +123,7 @@ const SOURCE_BADGE: Record<DraftTopic['source'], { label: string; hint: string }
 const PHASE_CHIP: Record<TopicPhase, string> = {
   opening: 'Opening',
   core: 'Always ask',
-  conditional: 'Ask when it fits',
+  conditional: 'Conditional',
   closing: 'Closing',
 };
 
@@ -770,7 +770,7 @@ export function TopicListEditor({
                         <div className="space-y-1.5">
                           <Label className="text-sm font-medium">
                             When it runs{' '}
-                            <FieldHelp title="Phase">
+                            <FieldHelp title="When it runs">
                               <p>
                                 Only <strong>conditional</strong> topics are ever chosen between —
                                 everything else on this page exists to decide those.
@@ -805,7 +805,7 @@ export function TopicListEditor({
                         <div className="space-y-1.5">
                           <Label className="text-sm font-medium">
                             How much of it{' '}
-                            <FieldHelp title="Depth">
+                            <FieldHelp title="How much of it">
                               <strong>Light</strong> includes only the highest-weight members — a
                               sample, not a score, and every report that mentions the topic says so.
                               The blind-spot check forces light regardless of what you set here,
@@ -834,7 +834,7 @@ export function TopicListEditor({
                       <div className="space-y-1.5">
                         <Label className="text-sm font-medium">
                           Include this when…{' '}
-                          <FieldHelp title="Criteria">
+                          <FieldHelp title="When this applies">
                             <p>
                               Your own words about when this topic applies, judged against what the
                               respondent actually said in the opening.

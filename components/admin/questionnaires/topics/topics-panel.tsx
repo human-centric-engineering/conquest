@@ -26,6 +26,8 @@ import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/rou
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
+import { ScopeIssueStrip } from '@/components/admin/questionnaires/topics/scope-issue-strip';
+import { ScopeStatusHeader } from '@/components/admin/questionnaires/topics/scope-status-header';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import { PlanPreviewCard } from '@/components/admin/questionnaires/topics/plan-preview-card';
 import { RoutingQualityCard } from '@/components/admin/questionnaires/topics/routing-quality-card';
@@ -35,9 +37,19 @@ import {
   type DraftTopic,
 } from '@/components/admin/questionnaires/topics/topic-list-editor';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
+import { useScopeTabs } from '@/components/admin/questionnaires/topics/use-scope-tabs';
+import {
+  ADAPTIVE_SCOPE_TABS,
+  ADAPTIVE_SCOPE_TAB_HINTS,
+  ADAPTIVE_SCOPE_TAB_LABELS,
+  narrowAdaptiveScopeTab,
+  tabForScopeIssue,
+} from '@/lib/constants/adaptive-scope-tabs';
 import type { AdaptiveScopeSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
+import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 export interface TopicsPanelProps {
@@ -48,6 +60,7 @@ export interface TopicsPanelProps {
 
 export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanelProps) {
   const router = useRouter();
+  const { activeTab, setActiveTab } = useScopeTabs();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkNotice, setForkNotice] = useState<number | null>(null);
@@ -137,6 +150,14 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
     }
   };
 
+  /**
+   * The header switch. Goes through the same runner as every other write on this tab, so it
+   * inherits the busy lock, the fork confirmation and the declined-fork silent no-op — and because
+   * the switch is controlled by `payload.settings.enabled`, a declined fork simply leaves it where
+   * it was on the next render rather than stranding it in the clicked position.
+   */
+  const toggleEnabled = (next: boolean) => run('PATCH', { enabled: next });
+
   const saveTopics = (drafts: DraftTopic[]) =>
     run('PUT', {
       topics: drafts.map((d) => ({
@@ -157,7 +178,9 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // `AdaptiveScopeSettings` field is a two-place change — here and in the card.
   const saveSettings = (settings: AdaptiveScopeSettings) =>
     run('PATCH', {
-      enabled: settings.enabled,
+      // `enabled` is deliberately ABSENT. The status header owns it, and this PATCH is a
+      // read-merge-write — so including it here would let the card's draft (captured whenever it
+      // last remounted) silently undo a toggle the admin made in the header seconds ago.
       maxConditionalTopics: settings.maxConditionalTopics,
       sessionBudgetSeconds: settings.sessionBudgetSeconds,
       secondsPerQuestionType: settings.secondsPerQuestionType,
@@ -181,9 +204,63 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       })),
     });
 
+  const conditionalCount = payload.topics.filter((t) => t.phase === 'conditional').length;
+
+  /**
+   * Take the admin to the thing that fixes a finding.
+   *
+   * Reuses the topic-list focus handoff the routing map already drives — same nonce, same effect,
+   * same "waits while the panel is hidden" gate. A finding about a topic and a map node about a
+   * topic want the identical thing to happen, so they ask for it the identical way rather than
+   * growing a second mechanism that behaves almost the same.
+   */
+  /**
+   * Open a topic in the editor, from anywhere on the tab.
+   *
+   * Switching to Topics is part of the act, not a caller's responsibility. The editor's `active`
+   * gate makes a request arriving while hidden WAIT rather than be spent (F17.24) — which is the
+   * right behaviour, and also means a caller that forgets the tab switch produces no visible
+   * effect now and an unexplained jump the next time the admin opens Topics for another reason.
+   * That is exactly what the routing map did between the sub-tabs landing and this being fixed.
+   */
+  const openTopic = (key: string) => {
+    setActiveTab('topics');
+    setFocusTopic((prev) => ({ key, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+
+  const goToIssue = (issue: ScopeIssue) => {
+    const tab = tabForScopeIssue(issue);
+    // Only queue a topic focus when the fix actually lives on the Topics tab. Two findings carry a
+    // `topicKey` and are fixed in the settings — `always_topic_named_as_choice` and
+    // `rule_names_always_topic` both name a topic, but what is wrong is the rule or the list that
+    // points AT it. Focusing the topic there would park a request that fires later, out of context.
+    if (tab === 'topics' && issue.topicKey) {
+      openTopic(issue.topicKey);
+      return;
+    }
+    setActiveTab(tab);
+  };
+
   return (
     <div className="space-y-5">
-      <ScopeExplainer />
+      <ScopeExplainer onGoToTab={setActiveTab} />
+
+      {/* Above everything, and always: the two questions this tab exists to answer are "is it on?"
+          and "is it ready?", and both used to require scrolling past several screens of cards. */}
+      <ScopeStatusHeader
+        enabled={payload.settings.enabled}
+        topicCount={payload.topics.length}
+        conditionalCount={conditionalCount}
+        uncoveredQuestions={payload.coverage.uncoveredQuestions}
+        alwaysSeconds={payload.costs.alwaysSeconds}
+        budgetSeconds={payload.costs.budgetSeconds}
+        busy={busy}
+        // Discarded deliberately: `run` reports its own outcome through `busy`, `error` and
+        // `forkNotice`, and the header has nothing to do with a boolean it cannot act on.
+        onToggleEnabled={(next) => void toggleEnabled(next)}
+      />
+
+      <ScopeIssueStrip issues={payload.issues} onSelectIssue={goToIssue} />
 
       {/* The map sits above every card rather than inside one: it is a view of the whole tab — the
           settings, the rules and the topic set together — and hanging it off any single card would
@@ -195,7 +272,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           // button after a save would be a picture of a version that no longer exists.
           key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
           payload={payload}
-          onEditTopic={(key) => setFocusTopic((prev) => ({ key, nonce: (prev?.nonce ?? 0) + 1 }))}
+          onEditTopic={openTopic}
           disabled={busy}
         />
       </div>
@@ -215,139 +292,186 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         </div>
       )}
 
-      <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(narrowAdaptiveScopeTab(v))}>
+        <TabsList>
+          {ADAPTIVE_SCOPE_TABS.map((tab) => (
+            <TabsTrigger key={tab} value={tab}>
+              {ADAPTIVE_SCOPE_TAB_LABELS[tab]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <p className="text-muted-foreground mt-2 text-sm">{ADAPTIVE_SCOPE_TAB_HINTS[activeTab]}</p>
 
-      {/* The analyst leads: on a freshly-ingested instrument its proposal IS the starting point,
-          and an admin who scrolled past it to hand-author the same topics has wasted their time. */}
-      <RoutingAnalystCard
-        // Remount when the server payload changes so a discard or accept elsewhere in the workspace
-        // cannot leave a stale proposal on screen.
-        key={`analyst-${payload.draft?.generatedAt ?? 'none'}`}
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        initialDraft={payload.draft}
-        questionKeys={payload.inventory.questions.map((q) => q.key)}
-        liveTopicCount={payload.topics.length}
-        candidacy={payload.candidacy}
-        autoTriggerPending={payload.autoTriggerPending}
-        runRequest={analystRequest}
-        onRunHandled={() => setAnalystRequest(null)}
-        onTurnGapIntoTopic={turnGapIntoTopic}
-        disabled={busy}
-      />
+        {/* `forceMount` on all three, and it is load-bearing rather than tidy. Radix unmounts an
+            inactive panel, and five things here hold state that must survive a switch: the
+            analyst's in-flight SSE run (which has no AbortController, so unmounting does not stop
+            the paid model call — it only orphans the result), the preview form, the evaluation
+            result, the topic editor's unsaved drafts, and the settings draft. Radix applies
+            `hidden` itself, so the panels are invisible but alive.
 
-      {/* Sits after the settings it reads and before the topic list it is a verdict on: an author
-          adjusts criteria below, scrolls up, and re-runs. Hidden entirely when nothing is
-          conditional — there is no decision to preview. */}
-      <PlanPreviewCard
-        // Remount when the server payload changes, for the same reason the two cards below do —
-        // and one this card makes sharper. A verdict is only true of the settings that produced it,
-        // so an author who runs the preview, edits a topic's criteria and saves would otherwise be
-        // left looking at last run's plan sitting next to criteria that no longer produced it.
-        key={`preview-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}-${payload.settings.rules.length}`}
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        form={payload.preview}
-        topics={payload.topics}
-        enabled={payload.settings.enabled}
-        disabled={busy}
-      />
-
-      {/* Immediately after the dry-run, and deliberately: "what it would do" and "what it did" are
-          the same question asked of intent and of evidence, and an author comparing them is doing
-          exactly the check this tab exists for. Renders nothing until the version is switched on
-          and has something to decide. */}
-      <RoutingQualityCard
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        enabled={payload.settings.enabled}
-        conditionalCount={payload.topics.filter((t) => t.phase === 'conditional').length}
-      />
-
-      {/* A second, structural opinion — independent of the coherence checks above and of the
-          behavioural evidence RoutingQualityCard reports. Sits beside its siblings on the tab
-          rather than under the design-evaluation "Evaluations" tab: it judges topics/rules/
-          settings, not questions, so it belongs with the surface it reviews. */}
-      <ScopeEvaluationCard
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        topics={payload.topics}
-        rules={payload.settings.rules}
-        dataSlots={payload.inventory.dataSlots}
-        disabled={busy}
-      />
-
-      <ScopeSettingsCard
-        // Remount the card when the server payload changes so a save's normalised result (clamped
-        // numbers, dropped blanks, sorted rules) replaces the local draft rather than being hidden
-        // behind it — the admin must see what a later read will actually produce.
-        key={`settings-${payload.settings.rules.length}-${payload.settings.enabled}`}
-        settings={payload.settings}
-        topics={payload.topics}
-        dataSlots={payload.inventory.dataSlots}
-        onSave={saveSettings}
-        costs={payload.costs}
-        busy={busy}
-      />
-
-      <section className="space-y-3">
-        {/* The heading and the AI action share a row. The analyst has always been reachable, but
-            only from its own card — above the settings, the preview, the quality card and the
-            evaluation card, several screens from here. An admin who arrives at this list to decide
-            which groups are conditional is at the exact point of need, and had nothing to press.
-            The button does not duplicate the analyst; it asks the card above to run and scrolls
-            them to it, so there is still one place a proposal is reviewed. */}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <h2 className="flex items-center gap-1.5 text-lg font-semibold">
-              Topics
-              <FieldHelp title="What a topic is">
-                <p>
-                  The unit adaptive scope decides about: a named group of questions and data slots,
-                  with a phase saying when it runs and — if it is conditional — your criteria for
-                  when it applies.
-                </p>
-                <p className="mt-2">
-                  <strong>Every question should belong to exactly one topic.</strong> A question no
-                  topic claims can never be asked once you switch on, and nothing else in the system
-                  would tell you.
-                </p>
-                <p className="mt-2">
-                  <strong>Size is not significant.</strong> A one-question topic is how you express
-                  a fine-grained “only ask this if…”, so there is no second rule language to learn.
-                </p>
-              </FieldHelp>
-            </h2>
-            <p className="text-muted-foreground text-sm">
-              Group the questions, then decide which groups are conditional. Uploading a document
-              seeds one always-asked topic per section, so a fresh questionnaire starts with a
-              complete set that changes nothing about how it runs.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
+            The cost is that everything renders on first paint, `RoutingQualityCard`'s analytics
+            fetch included: this buys scannability, not render time. That was already true before
+            the split, when every card was on one page. */}
+        <TabsContent
+          value="topics"
+          forceMount
+          className="mt-4 space-y-5 data-[state=inactive]:hidden"
+        >
+          {/* The analyst leads: on a freshly-ingested instrument its proposal IS the starting point,
+              and an admin who scrolled past it to hand-author the same topics has wasted their time. */}
+          <RoutingAnalystCard
+            // Remount when the server payload changes so a discard or accept elsewhere in the workspace
+            // cannot leave a stale proposal on screen.
+            key={`analyst-${payload.draft?.generatedAt ?? 'none'}`}
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            initialDraft={payload.draft}
+            questionKeys={payload.inventory.questions.map((q) => q.key)}
+            liveTopicCount={payload.topics.length}
+            candidacy={payload.candidacy}
+            autoTriggerPending={payload.autoTriggerPending}
+            runRequest={analystRequest}
+            onRunHandled={() => setAnalystRequest(null)}
+            onTurnGapIntoTopic={turnGapIntoTopic}
             disabled={busy}
-            onClick={() => setAnalystRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))}
-          >
-            <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />
-            Set up conditional topics with AI
-          </Button>
-        </div>
-        <TopicListEditor
-          key={`topics-${payload.topics.map((t) => t.key).join('|')}`}
-          topics={payload.topics}
-          inventory={payload.inventory}
-          onSave={saveTopics}
-          busy={busy}
-          enabled={payload.settings.enabled}
-          focusTopic={focusTopic}
-          onFocusHandled={() => setFocusTopic(null)}
-          seedTopic={seedTopic}
-          onSeedHandled={() => setSeedTopic(null)}
-        />
-      </section>
+          />
+          <section className="space-y-3">
+            {/* The heading and the AI action share a row. The analyst has always been reachable, but
+                only from its own card — above the settings, the preview, the quality card and the
+                evaluation card, several screens from here. An admin who arrives at this list to decide
+                which groups are conditional is at the exact point of need, and had nothing to press.
+                The button does not duplicate the analyst; it asks the card above to run and scrolls
+                them to it, so there is still one place a proposal is reviewed. */}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <h2 className="flex items-center gap-1.5 text-lg font-semibold">
+                  Topics
+                  <FieldHelp title="What a topic is">
+                    <p>
+                      The unit adaptive scope decides about: a named group of questions and data
+                      slots, with a phase saying when it runs and — if it is conditional — your
+                      criteria for when it applies.
+                    </p>
+                    <p className="mt-2">
+                      <strong>Every question should belong to exactly one topic.</strong> A question
+                      no topic claims can never be asked once you switch on, and nothing else in the
+                      system would tell you.
+                    </p>
+                    <p className="mt-2">
+                      <strong>Size is not significant.</strong> A one-question topic is how you
+                      express a fine-grained “only ask this if…”, so there is no second rule
+                      language to learn.
+                    </p>
+                  </FieldHelp>
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  Group the questions, then decide which groups are conditional. Uploading a
+                  document seeds one always-asked topic per section, so a fresh questionnaire starts
+                  with a complete set that changes nothing about how it runs.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={busy}
+                onClick={() => setAnalystRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))}
+              >
+                <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                Set up conditional topics with AI
+              </Button>
+            </div>
+            {/* The second level of the strip at the top of the tab. Both render the SAME
+                `validateAdaptiveScope` output, so they cannot disagree about what is wrong — the
+                difference is only how much of it each says, and where. This one sits against the rows
+                it is about, and unlike the strip it also reports the all-clear. */}
+            <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
+
+            <TopicListEditor
+              key={`topics-${payload.topics.map((t) => t.key).join('|')}`}
+              topics={payload.topics}
+              inventory={payload.inventory}
+              onSave={saveTopics}
+              busy={busy}
+              enabled={payload.settings.enabled}
+              focusTopic={focusTopic}
+              onFocusHandled={() => setFocusTopic(null)}
+              seedTopic={seedTopic}
+              onSeedHandled={() => setSeedTopic(null)}
+              // Mounted but hidden under `forceMount`, so it still commits effects. Without this
+              // the focus and seed handoffs would be spent against a node with no layout — the
+              // admin lands here having been scrolled nowhere, with no way to ask again (F17.24).
+              active={activeTab === 'topics'}
+            />
+          </section>
+        </TabsContent>
+
+        <TabsContent
+          value="rules"
+          forceMount
+          className="mt-4 space-y-5 data-[state=inactive]:hidden"
+        >
+          <ScopeSettingsCard
+            // Remount the card when the server payload changes so a save's normalised result (clamped
+            // numbers, dropped blanks, sorted rules) replaces the local draft rather than being hidden
+            // behind it — the admin must see what a later read will actually produce.
+            // NOT keyed on `enabled` — the header owns that now, and remounting this card when it
+            // flips would discard an admin's unsaved settings edits for a change made elsewhere.
+            key={`settings-${payload.settings.rules.length}`}
+            settings={payload.settings}
+            topics={payload.topics}
+            dataSlots={payload.inventory.dataSlots}
+            onSave={saveSettings}
+            costs={payload.costs}
+            busy={busy}
+          />
+        </TabsContent>
+
+        <TabsContent
+          value="check"
+          forceMount
+          className="mt-4 space-y-5 data-[state=inactive]:hidden"
+        >
+          {/* Sits after the settings it reads and before the topic list it is a verdict on: an author
+              adjusts criteria below, scrolls up, and re-runs. Hidden entirely when nothing is
+              conditional — there is no decision to preview. */}
+          <PlanPreviewCard
+            // Remount when the server payload changes, for the same reason the two cards below do —
+            // and one this card makes sharper. A verdict is only true of the settings that produced it,
+            // so an author who runs the preview, edits a topic's criteria and saves would otherwise be
+            // left looking at last run's plan sitting next to criteria that no longer produced it.
+            key={`preview-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}-${payload.settings.rules.length}`}
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            form={payload.preview}
+            topics={payload.topics}
+            enabled={payload.settings.enabled}
+            disabled={busy}
+          />
+          {/* Immediately after the dry-run, and deliberately: "what it would do" and "what it did" are
+              the same question asked of intent and of evidence, and an author comparing them is doing
+              exactly the check this tab exists for. Renders nothing until the version is switched on
+              and has something to decide. */}
+          <RoutingQualityCard
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            enabled={payload.settings.enabled}
+            conditionalCount={conditionalCount}
+          />
+          {/* A second, structural opinion — independent of the coherence checks above and of the
+              behavioural evidence RoutingQualityCard reports. Sits beside its siblings on the tab
+              rather than under the design-evaluation "Evaluations" tab: it judges topics/rules/
+              settings, not questions, so it belongs with the surface it reviews. */}
+          <ScopeEvaluationCard
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            topics={payload.topics}
+            rules={payload.settings.rules}
+            dataSlots={payload.inventory.dataSlots}
+            disabled={busy}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

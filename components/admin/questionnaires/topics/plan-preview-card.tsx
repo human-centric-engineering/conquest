@@ -36,6 +36,7 @@ import { FlaskConical, Loader2, PlayCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScopeEmptyState } from '@/components/admin/questionnaires/topics/scope-empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -141,8 +142,16 @@ export function PlanPreviewCard({
     }
   }
 
+  // A whole tab that can render blank needs copy, not nothing. Before the sub-tab split this card
+  // was one of a dozen on a long page, so vanishing was invisible; on the Check tab it would be
+  // most of what the tab has to show.
   if (conditionalCount === 0) {
-    return null;
+    return (
+      <ScopeEmptyState
+        title="Nothing to preview yet"
+        body="A dry run decides between your conditional topics. Mark at least one topic as conditional on the Topics tab and you can try the decision here before any respondent sees it."
+      />
+    );
   }
 
   return (
@@ -243,7 +252,7 @@ export function PlanPreviewCard({
             ) : (
               <PlayCircle className="mr-1.5 h-4 w-4" aria-hidden="true" />
             )}
-            {running ? 'Planning…' : 'Run the planner'}
+            {running ? 'Working it out…' : 'Preview the decision'}
           </Button>
           {result && (
             <span className="text-muted-foreground text-xs">cost ${result.costUsd.toFixed(4)}</span>

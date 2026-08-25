@@ -96,7 +96,7 @@ describe('ScopeSettingsCard — session length budget (C7)', () => {
   it('keeps the topic limit alongside it — breadth and duration are different bounds', () => {
     renderCard({ sessionBudgetSeconds: 600 });
     expect(screen.getByText(/Most conditional topics per interview/)).toBeInTheDocument();
-    expect(screen.getByText(/Session length budget/)).toBeInTheDocument();
+    expect(screen.getByText(/How long an interview may take/)).toBeInTheDocument();
   });
 
   it('carries the budget into the saved settings', () => {

@@ -105,7 +105,7 @@ export function ScopeFindingReviewCard({
   const op = finding.editedOverride ?? finding.proposedEdit;
   const isTerminal = finding.status === 'applied' || finding.status === 'declined';
   const applyDisabledTitle = !canApply
-    ? 'Scope evaluation is disabled'
+    ? 'Reviews are switched off'
     : finding.stale
       ? 'The config changed since this run — re-run the evaluation'
       : undefined;
