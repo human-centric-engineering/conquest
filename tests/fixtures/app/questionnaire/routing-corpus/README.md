@@ -44,18 +44,126 @@ See "Known gaps" below.
 
 ## The documents
 
-| #   | File                                | Domain                   | Routing lives                                                     | Phrasing used                                                                             | Tests                                                                                                                                                                                      |
-| --- | ----------------------------------- | ------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 01  | `01-medication-review.csv`          | Community pharmacy       | Structured `When to ask` column                                   | "Only where…"                                                                             | Baseline. The Merlin-like easy case, in CSV rather than XLSX.                                                                                                                              |
-| 02  | `02-safeguarding-review.md`         | School safeguarding      | Prose "How to use this review" preamble                           | "only complete a part where…"                                                             | Prose instruction page at the front.                                                                                                                                                       |
-| 03  | `03-site-safety-audit.md`           | Industrial safety        | Inline notes under each heading                                   | "_Applies to:_"                                                                           | Routing scattered across the body, not centralised.                                                                                                                                        |
-| 04  | `04-grant-application-review.md`    | Grant-making             | **Section headings only**                                         | (no instruction sentence at all)                                                          | Conditionality encoded purely in headings — "Section 3 — Applicants requesting more than £50,000". Nothing states a rule.                                                                  |
-| 05  | `05-cloud-migration-readiness.md`   | Cloud migration          | **Appendix C, at the very back**                                  | "Ask Domain N only where…"                                                                | Position. Also carries a breadth cap ("no more than four") and a scoring note that is _not_ routing.                                                                                       |
-| 06  | `06-exit-interview.md`              | HR                       | **Nowhere**                                                       | —                                                                                         | **Negative control.** No conditionality exists. Correct answer: propose everything `core`, `fromDocument: false`, and say so. A proposal with conditional topics here is a false positive. |
-| 07  | `07-housing-needs-assessment.md`    | Local government housing | Prose, with an explicit two-mechanism explanation                 | "standing conditions" vs "**triggers**… at any point"                                     | ⚠️ **The unsupported case.** See below.                                                                                                                                                    |
-| 08  | `08-suitability-review.md`          | Financial advice         | A front-sheet table **and** contradicting adviser notes on page 2 | "Use it when…" vs "mandatory regardless" / "Skip where"                                   | Contradiction. Three direct conflicts, one deliberately vague ("Use judgement").                                                                                                           |
-| 09  | `09-ethics-review.md`               | Research ethics          | Prose secretary notes                                             | "prioritise no more than three" / "covered **briefly**" / "in full"                       | Breadth cap **and** depth modulation — the `depth: light \| full` dial.                                                                                                                    |
-| 10  | `10-franchise-operations-review.md` | Franchise operations     | Mixed, three mechanisms in one document                           | "stop the review" / "a partner takes one of these, not several" / "whenever they surface" | Combined hard case: a **terminating** screener, mutually-exclusive role routing, and mid-interview triggers.                                                                               |
+| #   | Difficulty     | File                                | Domain                   | Routing lives                                                     | Phrasing used                                                                             | Tests                                                                                                                                                                                      |
+| --- | -------------- | ----------------------------------- | ------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 01  | **1** trivial  | `01-medication-review.csv`          | Community pharmacy       | Structured `When to ask` column                                   | "Only where…"                                                                             | Baseline. The Merlin-like easy case, in CSV rather than XLSX.                                                                                                                              |
+| 02  | **2** easy     | `02-safeguarding-review.md`         | School safeguarding      | Prose "How to use this review" preamble                           | "only complete a part where…"                                                             | Prose instruction page at the front.                                                                                                                                                       |
+| 03  | **2** easy     | `03-site-safety-audit.md`           | Industrial safety        | Inline notes under each heading                                   | "_Applies to:_"                                                                           | Routing scattered across the body, not centralised.                                                                                                                                        |
+| 04  | **3** moderate | `04-grant-application-review.md`    | Grant-making             | **Section headings only**                                         | (no instruction sentence at all)                                                          | Conditionality encoded purely in headings — "Section 3 — Applicants requesting more than £50,000". Nothing states a rule.                                                                  |
+| 05  | **3** moderate | `05-cloud-migration-readiness.md`   | Cloud migration          | **Appendix C, at the very back**                                  | "Ask Domain N only where…"                                                                | Position. Also carries a breadth cap ("no more than four") and a scoring note that is _not_ routing.                                                                                       |
+| 06  | **3** moderate | `06-exit-interview.md`              | HR                       | **Nowhere**                                                       | —                                                                                         | **Negative control.** No conditionality exists. Correct answer: propose everything `core`, `fromDocument: false`, and say so. A proposal with conditional topics here is a false positive. |
+| 07  | **5** severe   | `07-housing-needs-assessment.md`    | Local government housing | Prose, with an explicit two-mechanism explanation                 | "standing conditions" vs "**triggers**… at any point"                                     | ⚠️ **The unsupported case.** See below.                                                                                                                                                    |
+| 08  | **4** hard     | `08-suitability-review.md`          | Financial advice         | A front-sheet table **and** contradicting adviser notes on page 2 | "Use it when…" vs "mandatory regardless" / "Skip where"                                   | Contradiction. Three direct conflicts, one deliberately vague ("Use judgement").                                                                                                           |
+| 09  | **3** moderate | `09-ethics-review.md`               | Research ethics          | Prose secretary notes                                             | "prioritise no more than three" / "covered **briefly**" / "in full"                       | Breadth cap **and** depth modulation — the `depth: light \| full` dial.                                                                                                                    |
+| 10  | **5** severe   | `10-franchise-operations-review.md` | Franchise operations     | Mixed, three mechanisms in one document                           | "stop the review" / "a partner takes one of these, not several" / "whenever they surface" | Combined hard case: a **terminating** screener, mutually-exclusive role routing, and mid-interview triggers.                                                                               |
+
+## Difficulty ratings
+
+The rating scores **how hard the document is for the pipeline to get right**, not how
+hard it is for a person to read. Those two come apart, and 06 is the clearest case:
+a human needs ten seconds to see there is no routing in it, while the analyst is the
+one being asked to find some.
+
+The ratings live here, not in the instruments. `.md` fixtures are read by the
+plain-text parser (`lib/orchestration/knowledge/parsers/txt-parser.ts` — a straight
+`buffer.toString('utf-8')`), so **every byte of a document body reaches the extractor
+and the Routing Analyst**, HTML comments included. A line reading "difficulty 3 —
+routing is in Appendix C" would hand the analyst the answer for the exact thing 05
+exists to measure. Nothing that describes the expected result may sit inside a
+document.
+
+| Score | Band     | What it means                                                                                                 |
+| ----- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| **1** | trivial  | Routing is in a machine-readable field. Failure implicates plumbing, not judgement.                           |
+| **2** | easy     | Routing is stated in prose, in one consistent form, and every criterion is quotable.                          |
+| **3** | moderate | One thing is missing or misplaced — the instruction, its position, or the conditionality itself.              |
+| **4** | hard     | The document argues with itself. Getting it right means declining to resolve the argument.                    |
+| **5** | severe   | The document specifies routing the product cannot perform. The only correct output is a refusal plus a `gap`. |
+
+The bands are not evenly spaced. **1–3 test extraction; 4–5 test restraint** — whether
+the analyst will report that it cannot do something rather than produce a plausible
+proposal that quietly misstates the author's instrument. A pipeline can score full
+marks on 01–06 and still be unsafe to ship.
+
+### Per document
+
+- **01 — trivial.** A `When to ask` column, one rule per row, in CSV. The only wrinkle
+  is that Adherence is _mixed_: AD1 is `Always` while AD2–AD3 are conditional, so the
+  section does not map cleanly onto a single topic. Everything else is a lookup.
+
+- **02 — easy.** One prose paragraph states the mechanism, and each Part's heading
+  restates its own criterion ("Part C — Where the school has admitted a child looked
+  after during the year"), so intent is doubly attested. Two mild distractors: "Part G
+  is completed by every school, **last**" is ordering rather than routing, and "if you
+  are unsure whether a part applies, complete it" is an inclusion bias that should not
+  become a criterion.
+
+- **03 — easy.** Six `_Applies to:_` notes, uniformly formatted, each directly
+  quotable, with explicit guidance that an unmarked section is asked everywhere. Only
+  harder than 02 in that intent is decentralised — the marker itself never varies.
+
+- **04 — moderate.** No instruction sentence exists anywhere in the document.
+  Conditionality is carried entirely by headings, so the analyst must infer a rule and
+  then set `sourceQuote` to the heading. The failure to watch for is a fabricated
+  quote: an invented "applicants requesting over £50,000 should complete Section 3"
+  that appears in no line of the source.
+
+- **05 — moderate.** The rules are clean once found; the difficulty is that they sit
+  in Appendix C, behind a glossary and a scoring appendix, ~3,800 characters in. Two
+  further traps: the numeric cap ("no more than four") must land in
+  `maxConditionalTopics`, and Appendix B's scoring note reads like a rule but is not
+  one. Not scored higher only because the document fits inside
+  `MAX_CANDIDACY_DOCUMENT_CHARS` several times over — it tests position, not
+  truncation.
+
+- **06 — moderate.** Structurally the simplest document here and behaviourally one of
+  the more revealing. There is nothing to find, and the analyst is under instruction to
+  look. Bait is present: Q19 ("did you ever see or experience behaviour that concerned
+  you?") invites a safeguarding topic, and the Reward and progression block looks
+  role-shaped. Correct output is every topic `core`, `fromDocument: false`, and a
+  sentence saying the document specifies no conditionality.
+
+- **07 — severe.** The standing blocks A–D are a level-2 problem. The five triggered
+  blocks are not solvable at all: Adaptive Scope settles scope once, when the opening
+  completes. The document goes out of its way to distinguish the two mechanisms and to
+  forbid deferral, so there is no reading under which a trigger is an opening-time
+  criterion. The dangerous failure is silent coercion — rendering "if the applicant
+  discloses abuse **at any stage**" as "include when the opening mentions abuse" — on
+  the most safety-critical block in the instrument.
+
+- **08 — hard.** The front-sheet table and the page-2 adviser notes conflict four
+  times, not three: Protection needs (conditional vs "mandatory regardless"),
+  Vulnerability ("use judgement" vs "every client, without exception"), Attitude to
+  risk (table says every client, notes add an execution-only exemption), and Estate
+  planning — where the note is not merely a contradiction but a **trigger** ("only ever
+  asked where the client raises inheritance themselves"), which makes it unexpressible
+  as well as contested. Any output that silently picks a side has failed, however
+  reasonable the side it picked.
+
+- **09 — moderate.** Routing is legible; the load is that three configuration surfaces
+  must be set at once from one prose paragraph — the topic set, `maxConditionalTopics: 3`,
+  and per-topic `depth`. The vocabulary is signposted ("no more than three",
+  "briefly", "in full"), which is what holds this at 3. A miss on `depth` is partial
+  credit; a miss on the cap is not.
+
+- **10 — severe.** Three mechanisms, and two of them are outside the product. The
+  eligibility screener terminates the review rather than scoping it, and the four
+  escalation triggers are mid-interview by construction ("whenever they surface, at
+  any point"). Only the role sections are proposable — and even there, "a partner
+  takes one of these, not several" is a mutual-exclusivity constraint the schema has
+  no way to express, so it belongs in `gaps[]` alongside the rest. The most exposed
+  document in the corpus: an analyst that produces a tidy proposal here has silently
+  discarded a stop condition.
+
+### What the spread does and does not cover
+
+The corpus clusters at 3 — four of ten documents. That is a fair reflection of real
+instruments, but it means the middle band carries the least discriminating power: a
+run that scores 3/4 in that band tells you little about which failure mode is active.
+The 1 and the two 5s are the informative ends. Nothing here scores above 5 for the
+reasons in "Known gaps" — every document is clean, short, and Markdown or CSV, so
+none of the ratings account for parser damage, 200-question scale, or routing that
+falls past the candidacy cap.
 
 ## What "correct" looks like, per document
 

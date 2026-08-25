@@ -37,7 +37,7 @@ import {
   type RoutingAnalysisResult,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
 import { runRoutingAnalysisSchema } from '@/lib/app/questionnaire/scope/schemas';
-import type { ProposedTopicSet } from '@/lib/app/questionnaire/scope/types';
+import { narrowProposedTopicSet, type ProposedTopicSet } from '@/lib/app/questionnaire/scope/types';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import {
   buildRoutingAnalysisInput,
@@ -57,7 +57,7 @@ function toProposedSet(
   existingKeys: ReadonlySet<string>,
   generatedAt: string
 ): ProposedTopicSet {
-  return {
+  const built: ProposedTopicSet = {
     v: 1,
     topics: result.topics.map((topic) => ({
       key: topic.key,
@@ -86,10 +86,24 @@ function toProposedSet(
     ...(result.maxConditionalTopics !== undefined
       ? { maxConditionalTopics: result.maxConditionalTopics }
       : {}),
+    ...(result.fallbackTopicKeys !== undefined
+      ? { fallbackTopicKeys: result.fallbackTopicKeys }
+      : {}),
+    ...(result.checkTopicPreference !== undefined
+      ? { checkTopicPreference: result.checkTopicPreference }
+      : {}),
     summary: result.summary,
     fromDocument: result.fromDocument,
     generatedAt,
   };
+
+  // Through the SAME narrow the DB read uses, and that is the point rather than belt-and-braces:
+  // this object is both persisted AND streamed to the card, so anything the narrow does on the way
+  // back out — correcting `light` depth on an always-run topic, dropping a settings key naming no
+  // proposed topic — must already have happened here, or the draft the admin reviews live differs
+  // from the one they would see after a refresh. It cannot return null on input this function just
+  // built from a validated result, but the fallback keeps the signature total.
+  return narrowProposedTopicSet(built) ?? built;
 }
 
 const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(

@@ -796,4 +796,24 @@ describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)'
     });
     expect(issues.map((i) => i.code)).toContain('light_depth_on_always_topic');
   });
+
+  it('names the data slots, not the questions, when only the slots were trimmed', () => {
+    // The check fires on either kind, so the message has to follow. Reporting "asks only 1 of its
+    // 1 questions" on a topic whose questions all fit is self-contradictory, and it points the
+    // admin at the half that is fine.
+    const slotHeavyOpening = topic('open', 'opening', {
+      depth: 'light',
+      members: { dataSlotKeys: ['s1', 's2', 's3', 's4', 's5'], questionKeys: ['q1'] },
+    });
+    const issues = validateAdaptiveScope({
+      topics: [slotHeavyOpening, topic('cond_a', 'conditional')],
+      settings: settings(),
+      allQuestionKeys: ['q1', 'cond_a_q'],
+      allDataSlotKeys: ['s1', 's2', 's3', 's4', 's5'],
+    });
+
+    const found = issues.find((i) => i.code === 'light_depth_on_always_topic');
+    expect(found?.message).toContain('3 of its data slots are never filled');
+    expect(found?.message).not.toContain('of its 1 questions');
+  });
 });

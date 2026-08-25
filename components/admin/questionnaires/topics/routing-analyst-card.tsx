@@ -339,8 +339,13 @@ export function RoutingAnalystCard({
             : {}),
           // Settings rather than topics, but read out of the same routing prose in the same pass,
           // so they are accepted or discarded with it rather than left for the admin to re-derive.
-          ...(draft.fallbackTopicKeys ? { fallbackTopicKeys: draft.fallbackTopicKeys } : {}),
-          ...(draft.checkTopicPreference
+          // `.length > 0`, not truthiness: `[]` is truthy, and `acceptTopicDraft` merges on
+          // `!== undefined` — so sending an empty array would ERASE the admin's existing list
+          // rather than leave it alone, which is the opposite of "the proposal said nothing".
+          ...((draft.fallbackTopicKeys?.length ?? 0) > 0
+            ? { fallbackTopicKeys: draft.fallbackTopicKeys }
+            : {}),
+          ...((draft.checkTopicPreference?.length ?? 0) > 0
             ? { checkTopicPreference: draft.checkTopicPreference }
             : {}),
         }
@@ -504,7 +509,8 @@ export function RoutingAnalystCard({
               )}
             </p>
 
-            {(draft.fallbackTopicKeys?.length || draft.checkTopicPreference?.length) && (
+            {((draft.fallbackTopicKeys?.length ?? 0) > 0 ||
+              (draft.checkTopicPreference?.length ?? 0) > 0) && (
               <div className="text-muted-foreground space-y-1 text-sm">
                 {draft.fallbackTopicKeys && draft.fallbackTopicKeys.length > 0 && (
                   <p>

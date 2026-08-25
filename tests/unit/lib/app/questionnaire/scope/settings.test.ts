@@ -537,6 +537,28 @@ describe('narrowProposedTopicSet — the F17.23 additions', () => {
       expect(set?.checkTopicPreference).toBeUndefined();
     });
 
+    it('filters for membership BEFORE capping, so a stale key does not cost a valid one', () => {
+      // Capping first spends the budget on keys about to be discarded: one stale key ahead of five
+      // valid ones would keep only four.
+      const many = Array.from({ length: 6 }, (_, i) => ({
+        key: `t${i}`,
+        label: `T${i}`,
+        phase: 'conditional',
+        criteria: 'c',
+        depth: 'full',
+        members: { questionKeys: [`q${i}`], dataSlotKeys: [] },
+        rationale: 'r',
+      }));
+      const set = narrowProposedTopicSet(
+        stored({
+          topics: many,
+          fallbackTopicKeys: ['ghost', 't0', 't1', 't2', 't3', 't4'],
+        })
+      );
+
+      expect(set?.fallbackTopicKeys).toEqual(['t0', 't1', 't2', 't3', 't4']);
+    });
+
     it('drops a key the proposal itself does not carry', () => {
       const set = narrowProposedTopicSet(
         stored({ fallbackTopicKeys: ['pipeline', 'not_a_topic'], checkTopicPreference: ['ghost'] })

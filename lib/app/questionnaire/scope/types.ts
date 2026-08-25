@@ -214,6 +214,18 @@ export const MIN_CONDITIONAL_TOPICS = 1;
 export const MAX_CONDITIONAL_TOPICS_CEILING = 20;
 
 /**
+ * Most keys the Routing Analyst may propose for `fallbackTopicKeys` / `checkTopicPreference`.
+ *
+ * Lives here rather than beside the analyst's other output caps because BOTH sides need it — the
+ * analyst's contract and `narrowProposedTopicSet`'s read — and `types.ts` is the leaf module, so
+ * this is the only direction the import can go without a cycle. A literal in the narrow was the
+ * alternative and it silently truncated whenever this number moved.
+ *
+ * A hint, not a second topic list: the settings themselves accept up to 20 through the PATCH.
+ */
+export const MAX_PROPOSED_SETTING_KEYS = 5;
+
+/**
  * Bounds on a session's time budget, in seconds. `0` means "no budget" and is the default, so
  * nothing changes for a version that never sets one.
  *
@@ -1053,12 +1065,15 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
   // unknown keys) but it reads on the review card as a decision the admin never gets, so it is
   // dropped here rather than shown.
   const proposedKeys = new Set(topics.map((t) => t.key));
-  const fallbackTopicKeys = asKeyList(value.fallbackTopicKeys, 5).filter((k) =>
-    proposedKeys.has(k)
-  );
-  const checkTopicPreference = asKeyList(value.checkTopicPreference, 5).filter((k) =>
-    proposedKeys.has(k)
-  );
+  // Filter for membership BEFORE capping. Capping first spends the budget on keys that are about
+  // to be discarded, so one stale key ahead of five valid ones would keep only four. The cap is
+  // MAX_PROPOSED_SETTING_KEYS rather than a literal so raising it cannot move in one place only.
+  const settingKeys = (raw: unknown): string[] =>
+    asKeyList(raw)
+      .filter((k) => proposedKeys.has(k))
+      .slice(0, MAX_PROPOSED_SETTING_KEYS);
+  const fallbackTopicKeys = settingKeys(value.fallbackTopicKeys);
+  const checkTopicPreference = settingKeys(value.checkTopicPreference);
 
   return {
     v: 1,

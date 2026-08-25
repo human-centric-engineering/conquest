@@ -344,6 +344,95 @@ describe('POST …/topics/analyse/stream — the run', () => {
     expect(events[0].message).toContain('no source document is attached');
   });
 
+  describe('what toProposedSet actually carries across', () => {
+    // This projection is the ONLY place a validated RoutingAnalysisResult becomes the stored and
+    // streamed ProposedTopicSet. Nothing else tested it: the Zod schema tests cover the input side
+    // and the accept tests cover the output side, so a field the analyst returns and the accept
+    // writes could still be dropped in the middle and every other test would pass. It was.
+    it('carries fallbackTopicKeys and checkTopicPreference through to the saved draft', async () => {
+      (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+        success: true,
+        data: {
+          result: {
+            ...ANALYSIS,
+            fallbackTopicKeys: ['wellbeing'],
+            checkTopicPreference: ['wellbeing'],
+          },
+          costUsd: 0,
+        },
+      });
+
+      await invoke();
+      await drain();
+
+      expect(saveTopicDraft).toHaveBeenCalledWith(
+        VID,
+        expect.objectContaining({
+          fallbackTopicKeys: ['wellbeing'],
+          checkTopicPreference: ['wellbeing'],
+        })
+      );
+    });
+
+    it('omits both when the analyst proposed neither', async () => {
+      await invoke();
+      await drain();
+
+      const saved = (saveTopicDraft as Mock).mock.calls[0][1];
+      expect(saved).not.toHaveProperty('fallbackTopicKeys');
+      expect(saved).not.toHaveProperty('checkTopicPreference');
+    });
+
+    it('drops a settings key naming no proposed topic', async () => {
+      (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+        success: true,
+        data: {
+          result: { ...ANALYSIS, fallbackTopicKeys: ['wellbeing', 'not_a_topic'] },
+          costUsd: 0,
+        },
+      });
+
+      await invoke();
+      await drain();
+
+      const saved = (saveTopicDraft as Mock).mock.calls[0][1];
+      expect(saved.fallbackTopicKeys).toEqual(['wellbeing']);
+    });
+
+    it('corrects light depth on an always-run topic BEFORE persisting or streaming', async () => {
+      // The correction must happen here, not only on the DB read path: this object is both saved
+      // and streamed, so a card rendering the streamed draft would otherwise show — and accept —
+      // an opening set to Light.
+      (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+        success: true,
+        data: {
+          result: {
+            ...ANALYSIS,
+            topics: [
+              {
+                ...ANALYSIS.topics[0],
+                key: 'opening',
+                label: 'Opening',
+                phase: 'opening' as const,
+                criteria: null,
+                depth: 'light' as const,
+                questionKeys: ['q1', 'q2', 'q3', 'q4'],
+              },
+            ],
+          },
+          costUsd: 0,
+        },
+      });
+
+      await invoke();
+      await drain();
+
+      const saved = (saveTopicDraft as Mock).mock.calls[0][1];
+      expect(saved.topics[0].depth).toBe('full');
+      expect(saved.depthCorrectedKeys).toEqual(['opening']);
+    });
+  });
+
   it('persists the draft and reports replacedCount/uncoveredQuestionCount on done', async () => {
     await invoke();
     const events = await drain();

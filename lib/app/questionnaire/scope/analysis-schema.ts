@@ -28,6 +28,7 @@ import { z } from 'zod';
 
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_PROPOSED_SETTING_KEYS,
   MIN_CONDITIONAL_TOPICS,
   SCOPE_RATIONALE_MAX_LENGTH,
   SCOPE_RULE_ACTIONS,
@@ -112,14 +113,14 @@ const proposedGapSchema = z.object({
 export type ProposedGapPayload = z.infer<typeof proposedGapSchema>;
 
 /**
- * Most keys either settings list can carry. A settings hint, not a second topic list.
+ * Re-exported so the analyst's contract and its tests read the cap from one place.
  *
  * Membership — that every key names a topic the same proposal carries — is enforced in
  * `narrowProposedTopicSet`, not here. Deliberately: an unknown key is inert at runtime (both the
  * fallback loop and `chooseCheckTopic` skip keys they cannot resolve), so refusing the whole
  * response over one would throw away an otherwise-good proposal and pay for a retry to fix a hint.
  */
-export const ROUTING_ANALYSIS_MAX_SETTING_KEYS = 5;
+export const ROUTING_ANALYSIS_MAX_SETTING_KEYS = MAX_PROPOSED_SETTING_KEYS;
 
 export const routingAnalysisSchema = z.object({
   topics: z

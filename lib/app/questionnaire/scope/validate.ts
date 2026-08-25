@@ -194,16 +194,24 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         topic.members.dataSlotKeys.length - LIGHT_DEPTH_MEMBER_COUNT
       );
       if (droppedQuestions > 0 || droppedSlots > 0) {
-        const asked = Math.min(topic.members.questionKeys.length, LIGHT_DEPTH_MEMBER_COUNT);
         const total = topic.members.questionKeys.length;
+        const asked = Math.min(total, LIGHT_DEPTH_MEMBER_COUNT);
+        // Name whichever kind actually lost members. The check fires on either, so a topic whose
+        // questions all fit under the floor but whose data slots do not would otherwise read
+        // "asks only 1 of its 1 questions" — self-contradictory, and it points the admin at the
+        // half that is fine.
+        const lost =
+          droppedQuestions > 0
+            ? `it asks only ${asked} of its ${total} questions`
+            : `${droppedSlots} of its data slots are never filled`;
         issues.push({
           severity: settings.enabled ? 'error' : 'warning',
           code: 'light_depth_on_always_topic',
           topicKey: topic.key,
           message:
             topic.phase === 'opening'
-              ? `"${topic.label}" is the opening, but it is set to Light depth — so it asks only ${asked} of its ${total} questions. The opening is what the agent works out the rest of the interview from, so sampling it means deciding what to ask from half the answers. Set it to Full depth.`
-              : `"${topic.label}" is asked of everyone, but it is set to Light depth — so ${droppedQuestions > 0 ? `${droppedQuestions} of its ${total} questions are` : 'some of its data slots are'} never asked, of anyone. Set it to Full depth, or move what you do not need into a conditional topic.`,
+              ? `"${topic.label}" is the opening, but it is set to Light depth — so ${lost}. The opening is what the agent works out the rest of the interview from, so sampling it means deciding what to ask from part of the answers. Set it to Full depth.`
+              : `"${topic.label}" is asked of everyone, but it is set to Light depth — so ${lost}, for anyone. Set it to Full depth, or move what you do not need into a conditional topic.`,
         });
       }
     }
