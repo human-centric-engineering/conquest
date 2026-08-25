@@ -1248,10 +1248,24 @@ export const DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION: CapabilityFunctionDefin
     properties: {
       documentText: {
         type: 'string',
-        description: 'The uploaded document’s parsed text (may be truncated for this cheap read).',
+        description:
+          'The uploaded document’s parsed text — for a long document, a composed excerpt (head, ' +
+          'tail and routing-language passages) with “[…]” marking what was left out.',
       },
       documentFileName: { type: 'string', description: 'Original file name (prompt context).' },
       versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+      sectionTitles: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Extracted section titles, in document order — a role- or segment-shaped instrument ' +
+          'states its routing in its titles.',
+      },
+      questionPrompts: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Extracted question wordings, in document order.',
+      },
     },
     required: ['documentText'],
   },

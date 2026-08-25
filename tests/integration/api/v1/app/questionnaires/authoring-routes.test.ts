@@ -64,6 +64,12 @@ const prismaMock = vi.hoisted(() => ({
   appDataSlot: {
     count: vi.fn(async () => 1),
   },
+  // The launch gate counts conditional topics so it can WARN when adaptive scope is off while
+  // some exist (F17.22 Phase 4). Default 0 — no warning row — so the readiness assertions below
+  // see only the checks they are about.
+  appQuestionnaireTopic: {
+    count: vi.fn(async () => 0),
+  },
   // The route-local countLaunchBlockers reads these when leaving `launched`: live invitations
   // (F3.2) and real respondent sessions (isPreview:false) both pin the version.
   appQuestionnaireInvitation: {

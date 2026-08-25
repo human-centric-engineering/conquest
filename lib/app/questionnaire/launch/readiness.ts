@@ -76,6 +76,14 @@ export interface LaunchReadinessInput {
    * else in the system would report it. Warnings never block.
    */
   adaptiveScopeErrorCount?: number;
+  /**
+   * How many `conditional` topics the version has. Read only while adaptive scope is OFF, to raise
+   * the warning row below: conditional topics that nothing ever chooses between are asked to every
+   * respondent, and until F17.22 nothing outside the Adaptive scope tab said so. Never blocks —
+   * "every topic is asked" is a legitimate way to run a questionnaire, just rarely the intended one
+   * once someone has authored conditions for it.
+   */
+  adaptiveScopeConditionalCount?: number;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -89,13 +97,38 @@ export type LaunchCheckKey =
   | 'embeddings'
   | 'dataSlots'
   | 'dataSlotEmbeddings'
-  | 'adaptiveScope';
+  | 'adaptiveScope'
+  | 'adaptiveScopeOff';
+
+/**
+ * Whether a failed check stops a launch.
+ *
+ * `blocker` is every check that predates F17.22 and the default posture for a new one: launch is
+ * refused until it passes. `warning` describes a version that CAN launch but probably should not
+ * be launched as it stands — it renders on the checklist and is deliberately ignored by every
+ * readiness verdict. Explicit on every check rather than optional-with-a-default, so a future
+ * check cannot become non-blocking by omission.
+ */
+export type LaunchCheckSeverity = 'blocker' | 'warning';
 
 export interface LaunchReadinessCheck {
   key: LaunchCheckKey;
   ok: boolean;
   /** Short, admin-facing label (e.g. "A goal is set"). */
   label: string;
+  severity: LaunchCheckSeverity;
+}
+
+/**
+ * The one predicate that decides whether a check stands between a version and launch.
+ *
+ * Four surfaces compute readiness from the same check list — {@link isLaunchReady}, the server
+ * `loadLaunchReadiness`, the status route's launch gate, and the checklist UI. Before warnings
+ * existed each did it with its own `!c.ok`, which is exactly how a non-blocking row would have
+ * silently become a blocker in three of the four.
+ */
+export function blocksLaunch(check: LaunchReadinessCheck): boolean {
+  return check.severity === 'blocker' && !check.ok;
 }
 
 /**
@@ -118,11 +151,27 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
       key: 'goal',
       ok: Boolean(input.goal && input.goal.trim().length > 0),
       label: 'A goal is set',
+      severity: 'blocker',
     },
-    { key: 'audience', ok: hasAudience(input.audience), label: 'An audience is described' },
-    { key: 'sections', ok: input.sectionCount >= 1, label: 'At least one section' },
-    { key: 'questions', ok: input.questionCount >= 1, label: 'At least one question' },
-    { key: 'config', ok: input.configSaved, label: 'Configuration saved' },
+    {
+      key: 'audience',
+      ok: hasAudience(input.audience),
+      label: 'An audience is described',
+      severity: 'blocker',
+    },
+    {
+      key: 'sections',
+      ok: input.sectionCount >= 1,
+      label: 'At least one section',
+      severity: 'blocker',
+    },
+    {
+      key: 'questions',
+      ok: input.questionCount >= 1,
+      label: 'At least one question',
+      severity: 'blocker',
+    },
+    { key: 'config', ok: input.configSaved, label: 'Configuration saved', severity: 'blocker' },
     ...((input.likertCount ?? 0) >= 1 || (input.matrixCount ?? 0) >= 1
       ? [
           {
@@ -131,6 +180,7 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
               (input.unlabelledLikertCount ?? 0) === 0 &&
               (input.misconfiguredMatrixCount ?? 0) === 0,
             label: 'Every rating scale is labelled',
+            severity: 'blocker' as const,
           },
         ]
       : []),
@@ -140,11 +190,19 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
             key: 'embeddings' as const,
             ok: input.embeddingsReady === true,
             label: 'Questions embedded for adaptive selection',
+            severity: 'blocker' as const,
           },
         ]
       : []),
     ...(input.dataSlotsRequired
-      ? [{ key: 'dataSlots' as const, ok: input.dataSlotsReady, label: 'Data slots generated' }]
+      ? [
+          {
+            key: 'dataSlots' as const,
+            ok: input.dataSlotsReady,
+            label: 'Data slots generated',
+            severity: 'blocker' as const,
+          },
+        ]
       : []),
     ...(input.dataSlotEmbeddingsRequired
       ? [
@@ -152,6 +210,7 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
             key: 'dataSlotEmbeddings' as const,
             ok: input.dataSlotEmbeddingsReady === true,
             label: 'Data slots embedded for adaptive selection',
+            severity: 'blocker' as const,
           },
         ]
       : []),
@@ -161,15 +220,39 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
             key: 'adaptiveScope' as const,
             ok: (input.adaptiveScopeErrorCount ?? 0) === 0,
             label: 'Adaptive scope topics are coherent',
+            severity: 'blocker' as const,
+          },
+        ]
+      : []),
+    // The mirror image of the row above, and the only warning on the list: conditional topics with
+    // the feature off. The AI proposes them, an admin accepts them, and every one of them is then
+    // asked to everybody — a state the Adaptive scope tab reports plainly and nothing else did.
+    ...(!input.adaptiveScopeEnabled && (input.adaptiveScopeConditionalCount ?? 0) > 0
+      ? [
+          {
+            key: 'adaptiveScopeOff' as const,
+            ok: false,
+            label: adaptiveScopeOffLabel(input.adaptiveScopeConditionalCount ?? 0),
+            severity: 'warning' as const,
           },
         ]
       : []),
   ];
 }
 
-/** True when every readiness check passes — the bar for launch AND for a pre-launch preview. */
+/** "Adaptive scope is off, so all 4 conditional topics are asked to everyone." */
+function adaptiveScopeOffLabel(conditionalCount: number): string {
+  return conditionalCount === 1
+    ? 'Adaptive scope is off, so its 1 conditional topic is asked to everyone'
+    : `Adaptive scope is off, so all ${conditionalCount} conditional topics are asked to everyone`;
+}
+
+/**
+ * True when every BLOCKING readiness check passes — the bar for launch AND for a pre-launch
+ * preview. Warnings are reported, never enforced (see {@link blocksLaunch}).
+ */
 export function isLaunchReady(input: LaunchReadinessInput): boolean {
-  return launchReadinessChecks(input).every((c) => c.ok);
+  return !launchReadinessChecks(input).some(blocksLaunch);
 }
 
 /**

@@ -328,6 +328,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             initialDraft={payload.draft}
             questionKeys={payload.inventory.questions.map((q) => q.key)}
             liveTopicCount={payload.topics.length}
+            scopeEnabled={payload.settings.enabled}
             candidacy={payload.candidacy}
             autoTriggerPending={payload.autoTriggerPending}
             runRequest={analystRequest}

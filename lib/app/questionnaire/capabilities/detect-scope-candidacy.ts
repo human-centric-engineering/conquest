@@ -11,6 +11,11 @@
  * context (`entityContext.candidacyAgent`). Unlike the verifier and the analyst, this resolves the
  * `routing` tier, not `reasoning` — this runs on every fresh ingestion, so it must stay cheap.
  *
+ * Since F17.22 Phase 3 it reads a COMPOSED excerpt (head + tail + routing-language windows, see
+ * `candidacy-excerpt.ts`) rather than the document's first 20k characters, plus the extracted
+ * section titles and question wordings — a role- or segment-shaped instrument states its routing
+ * in its titles, and those may sit nowhere near the part of the text an excerpt can afford.
+ *
  * It sees the uploaded document's text (which may carry examples or PII), so `processesPii = true`
  * with a redacted provenance form. Boundary: lives under `lib/app/**` — no Prisma, no Next.js.
  */
@@ -57,10 +62,26 @@ const CANDIDACY_MAX_TOKENS = 1_024;
  */
 const CANDIDACY_TIMEOUT_MS = 20_000;
 
+/**
+ * Caps on the extracted structure. Generous enough for a real instrument (the pilot workbook runs
+ * to 70 questions across 16 sections) and firm enough that a pathological upload cannot make the
+ * triage read expensive. A truncated list is still evidence — routing-shaped titles cluster at the
+ * front, where the sections that decide eligibility live.
+ */
+const MAX_SECTION_TITLES = 120;
+const MAX_QUESTION_PROMPTS = 300;
+
 const argsSchema = z.object({
   documentText: z.string().min(1),
   documentFileName: z.string().optional(),
   versionId: z.string().optional(),
+  /**
+   * The extracted structure (F17.22 Phase 3) — section titles and question wordings, in document
+   * order. Capped here rather than only at the caller, because the caps are what keep this a cheap
+   * read: an instrument with 900 questions must not quietly turn a triage call into a long one.
+   */
+  sectionTitles: z.array(z.string()).max(MAX_SECTION_TITLES).optional(),
+  questionPrompts: z.array(z.string()).max(MAX_QUESTION_PROMPTS).optional(),
 });
 
 export type DetectScopeCandidacyArgs = z.infer<typeof argsSchema>;
@@ -112,6 +133,11 @@ export class AppDetectScopeCandidacyCapability extends BaseCapability<
     const safeArgs = {
       ...(args.documentFileName !== undefined ? { documentFileName: args.documentFileName } : {}),
       documentText: redactedString('documentText'),
+      // Counts, never the text. The extracted structure is authored instrument content rather than
+      // respondent data, but it is still lifted verbatim out of the upload — the same posture the
+      // document text gets, for the same reason.
+      ...(args.sectionTitles ? { sectionTitleCount: args.sectionTitles.length } : {}),
+      ...(args.questionPrompts ? { questionPromptCount: args.questionPrompts.length } : {}),
     };
     const preview =
       result.success && result.data
@@ -164,6 +190,8 @@ export class AppDetectScopeCandidacyCapability extends BaseCapability<
     const messages = buildScopeCandidacyPrompt({
       documentText: args.documentText,
       ...(args.documentFileName ? { documentFileName: args.documentFileName } : {}),
+      ...(args.sectionTitles?.length ? { sectionTitles: args.sectionTitles } : {}),
+      ...(args.questionPrompts?.length ? { questionPrompts: args.questionPrompts } : {}),
     });
 
     let lastIssuePaths: string[] = [];

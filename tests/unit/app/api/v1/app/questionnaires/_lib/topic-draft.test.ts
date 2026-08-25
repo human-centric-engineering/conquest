@@ -318,6 +318,27 @@ describe('acceptTopicDraft', () => {
     expect(result.settings.enabled).toBe(true);
   });
 
+  it('leaves an off version off when the body carries no enable (F17.22 Phase 4)', async () => {
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      adaptiveScope: { enabled: false, rules: [] },
+    });
+    const result = await acceptTopicDraft('v-1', BODY);
+    expect(result.settings.enabled).toBe(false);
+  });
+
+  it('turns the feature on when the admin ticked the offer', async () => {
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      adaptiveScope: { enabled: false, rules: [] },
+    });
+    const result = await acceptTopicDraft('v-1', { ...BODY, enable: true });
+
+    expect(result.settings.enabled).toBe(true);
+    // Persisted, not merely returned: the whole point is that the next respondent gets a plan.
+    const written = (prismaMock.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0];
+    expect(written.update.adaptiveScope.enabled).toBe(true);
+    expect(written.create.adaptiveScope.enabled).toBe(true);
+  });
+
   it('clears the pending draft as part of the same transaction', async () => {
     await acceptTopicDraft('v-1', BODY);
     expect(prismaMock.appQuestionnaireTopicDraft.deleteMany).toHaveBeenCalledWith({

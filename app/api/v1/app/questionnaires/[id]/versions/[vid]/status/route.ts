@@ -33,7 +33,7 @@ import {
   hasLaunchBlockers,
 } from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
 import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
-import type { LaunchCheckKey } from '@/lib/app/questionnaire/launch/readiness';
+import { blocksLaunch, type LaunchCheckKey } from '@/lib/app/questionnaire/launch/readiness';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 
@@ -58,6 +58,11 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
   dataSlotEmbeddings: 'Generate data-slot embeddings before launching adaptive data-slot selection',
   adaptiveScope:
     'Fix the adaptive-scope problems on the Adaptive scope tab before launch — most often a question that belongs to no topic, which could never be asked',
+  // Never reachable: `adaptiveScopeOff` is a warning, and the loop below skips warnings. Present
+  // because the map is exhaustive over the key union, which is what stops a future BLOCKING check
+  // from shipping without a launch-gate message.
+  adaptiveScopeOff:
+    'Adaptive scope is off, so every conditional topic is asked to everyone — this does not stop a launch',
 };
 
 /**
@@ -70,7 +75,9 @@ async function assertLaunchable(versionId: string): Promise<void> {
   const { checks } = await loadLaunchReadiness(versionId);
   const missing: Record<string, string[]> = {};
   for (const check of checks) {
-    if (!check.ok) missing[check.key] = [LAUNCH_MISSING_MESSAGE[check.key]];
+    // Warnings describe a version that can launch but probably should not be launched as it
+    // stands. Reporting one here would refuse the launch outright.
+    if (blocksLaunch(check)) missing[check.key] = [LAUNCH_MISSING_MESSAGE[check.key]];
   }
   if (Object.keys(missing).length > 0) {
     throw new ValidationError('Version is not ready to launch', missing);

@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  blocksLaunch,
   hasAudience,
   isLaunchReady,
   isPreviewAvailable,
@@ -75,6 +76,89 @@ describe('launchReadinessChecks — adaptive scope', () => {
       adaptiveScopeErrorCount: 0,
     });
     expect(checks.find((c) => c.key === 'adaptiveScope')?.ok).toBe(true);
+  });
+});
+
+describe('launchReadinessChecks — adaptive scope is off but conditional topics exist', () => {
+  const OFF_WITH_CONDITIONALS: LaunchReadinessInput = {
+    ...READY,
+    adaptiveScopeEnabled: false,
+    adaptiveScopeConditionalCount: 4,
+  };
+
+  it('raises a warning row naming how many topics everybody is being asked', () => {
+    const row = launchReadinessChecks(OFF_WITH_CONDITIONALS).find(
+      (c) => c.key === 'adaptiveScopeOff'
+    );
+    expect(row?.ok).toBe(false);
+    expect(row?.severity).toBe('warning');
+    expect(row?.label).toContain('all 4 conditional topics are asked to everyone');
+  });
+
+  it('says "its 1 conditional topic is" for a single topic', () => {
+    const row = launchReadinessChecks({
+      ...OFF_WITH_CONDITIONALS,
+      adaptiveScopeConditionalCount: 1,
+    }).find((c) => c.key === 'adaptiveScopeOff');
+    expect(row?.label).toContain('its 1 conditional topic is asked to everyone');
+  });
+
+  it('never blocks a launch', () => {
+    // The whole point of the row: it reports a state the product used to keep silent about, and a
+    // version whose author meant to ask everyone everything must still be launchable.
+    const row = launchReadinessChecks(OFF_WITH_CONDITIONALS).find(
+      (c) => c.key === 'adaptiveScopeOff'
+    );
+    expect(row).toBeDefined();
+    expect(blocksLaunch(row!)).toBe(false);
+    expect(isLaunchReady(OFF_WITH_CONDITIONALS)).toBe(true);
+  });
+
+  it('is silent when the feature is on — the coherence row covers that version instead', () => {
+    const checks = launchReadinessChecks({
+      ...OFF_WITH_CONDITIONALS,
+      adaptiveScopeEnabled: true,
+    });
+    expect(checks.map((c) => c.key)).not.toContain('adaptiveScopeOff');
+    expect(checks.map((c) => c.key)).toContain('adaptiveScope');
+  });
+
+  it('is silent when the version has no conditional topics', () => {
+    // Every topic `core`/`opening`/`closing` means the plan is the whole instrument either way, so
+    // the feature being off changes nothing and the row would be noise.
+    const checks = launchReadinessChecks({ ...READY, adaptiveScopeConditionalCount: 0 });
+    expect(checks.map((c) => c.key)).not.toContain('adaptiveScopeOff');
+  });
+});
+
+describe('blocksLaunch', () => {
+  it('is true only for a failed blocker', () => {
+    const checks = launchReadinessChecks({
+      ...READY,
+      goal: null,
+      adaptiveScopeConditionalCount: 2,
+    });
+    const failedBlocker = checks.find((c) => c.key === 'goal')!;
+    const warning = checks.find((c) => c.key === 'adaptiveScopeOff')!;
+    const passing = checks.find((c) => c.key === 'sections')!;
+
+    expect(blocksLaunch(failedBlocker)).toBe(true);
+    expect(blocksLaunch(warning)).toBe(false);
+    expect(blocksLaunch(passing)).toBe(false);
+  });
+
+  it('marks every pre-existing check as a blocker', () => {
+    // The severity is explicit on every check rather than defaulted, so a new one cannot become
+    // non-blocking by omission. This pins that none of the old ones drifted.
+    const checks = launchReadinessChecks({
+      ...READY,
+      likertCount: 1,
+      dataSlotsRequired: true,
+      embeddingsRequired: true,
+      dataSlotEmbeddingsRequired: true,
+      adaptiveScopeEnabled: true,
+    });
+    expect(checks.filter((c) => c.severity !== 'blocker')).toEqual([]);
   });
 });
 

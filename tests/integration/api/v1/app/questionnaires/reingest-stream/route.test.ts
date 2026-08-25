@@ -72,6 +72,13 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
 // Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
 // logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
 // the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/routing-analysis', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('@/app/api/v1/app/questionnaires/_lib/routing-analysis')>();
+  // `canProposeDuringIngest` stays REAL — the elapsed-time gate is what this route depends on.
+  return { ...real, proposeScopeDuringIngest: vi.fn() };
+});
+
 vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
   checkAdaptiveScopeCandidacy: vi.fn(),
   isEligibleForScopeCandidacy: vi.fn(),
@@ -95,6 +102,7 @@ import {
   checkAdaptiveScopeCandidacy,
   isEligibleForScopeCandidacy,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
+import { proposeScopeDuringIngest } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -226,6 +234,7 @@ beforeEach(() => {
   // frame sequence and done-event shape (no `adaptiveScopeCandidate` key) unchanged.
   (isEligibleForScopeCandidacy as Mock).mockResolvedValue(true);
   (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
+  (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
 });
 
 // ─── Gates (pre-stream — JSON envelope, not SSE) ───────────────────────────────
@@ -551,5 +560,67 @@ describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
     const doneFrame = frames[frames.length - 1];
     expect(doneFrame.type).toBe('done');
     expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+  });
+});
+
+// ─── Proposing during the re-upload (F17.22 Phase 2) ─────────────────────────────
+
+describe('POST …/reingest/stream — proposing scope during the upload', () => {
+  const CANDIDATE = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
+
+  it('runs the analyst after the check says yes, and reports what it proposed', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 4, conditionalCount: 2 });
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    expect(phaseNames.indexOf('proposing_scope')).toBeGreaterThan(
+      phaseNames.indexOf('checking_scope')
+    );
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.data.adaptiveScopeProposal).toEqual({ topicCount: 4, conditionalCount: 2 });
+  });
+
+  it('never runs the analyst when the version was pre-check ineligible', async () => {
+    // A re-ingest can land on a version that already has authored topics or a pending draft.
+    // Proposing over it would replace work the admin is part-way through reviewing.
+    (isEligibleForScopeCandidacy as Mock).mockResolvedValue(false);
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    await drainSse(res);
+
+    expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+  });
+
+  it('skips the proposal when the re-ingest has already spent the wall-clock budget', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    const realNow = Date.now;
+    let ticks = 0;
+    Date.now = () => ticks++ * 90_000;
+
+    try {
+      const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+      const frames = await drainSse(res);
+
+      expect(proposeScopeDuringIngest).not.toHaveBeenCalled();
+      expect(frames[frames.length - 1].type).toBe('done');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('completes the re-ingest when the proposal fails', async () => {
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue(null);
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect('adaptiveScopeProposal' in doneFrame.data).toBe(false);
+    expect(frames.some((f) => f.type === 'error')).toBe(false);
   });
 });

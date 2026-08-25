@@ -178,6 +178,17 @@ export const acceptTopicDraftSchema = z.object({
   fallbackTopicKeys: z.array(topicKeySchema).max(20).optional(),
   /** Same contract as `fallbackTopicKeys` above. */
   checkTopicPreference: z.array(topicKeySchema).max(20).optional(),
+  /**
+   * Turn adaptive scope ON as part of this accept (F17.22 Phase 4). Sent only when the admin ticks
+   * the offer in the accept dialog, which is itself only shown when the proposal contains a
+   * conditional topic.
+   *
+   * `literal(true)`, not `boolean`, and deliberately named for the ACT rather than the state: this
+   * route can turn the feature on and can never turn it off. Omitting it leaves `enabled` exactly
+   * where it was, which is what every accept did before this field existed. The invariant holds —
+   * `enabled` still moves only on an explicit admin act; this is that act, one click earlier.
+   */
+  enable: z.literal(true).optional(),
 });
 
 export type AcceptTopicDraftBody = z.infer<typeof acceptTopicDraftSchema>;

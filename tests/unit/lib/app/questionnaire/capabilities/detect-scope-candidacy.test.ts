@@ -206,7 +206,54 @@ describe('execute — error branches', () => {
   });
 });
 
+describe('execute — the extracted structure (F17.22 Phase 3)', () => {
+  it('passes section titles and question wordings into the prompt', async () => {
+    await capability.execute(
+      {
+        ...ARGS,
+        sectionTitles: ['Section 6 — franchise owners only'],
+        questionPrompts: ['Which best describes your organisation?'],
+      },
+      CONTEXT
+    );
+
+    const { messages } = (runStructuredCompletion as Mock).mock.calls[0][0] as {
+      messages: { role: string; content: string }[];
+    };
+    const user = messages.find((m) => m.role === 'user')!;
+    expect(user.content).toContain('Section 6 — franchise owners only');
+    expect(user.content).toContain('Which best describes your organisation?');
+  });
+
+  it('omits the blocks entirely when the caller sends empty lists', async () => {
+    await capability.execute({ ...ARGS, sectionTitles: [], questionPrompts: [] }, CONTEXT);
+
+    const { messages } = (runStructuredCompletion as Mock).mock.calls[0][0] as {
+      messages: { role: string; content: string }[];
+    };
+    expect(messages.find((m) => m.role === 'user')!.content).not.toContain('EXTRACTED');
+  });
+});
+
 describe('redactProvenance', () => {
+  it('records structure as counts, never as text', () => {
+    // Instrument content rather than respondent data, but still lifted verbatim out of the upload
+    // — so it gets the same posture the document text gets.
+    const { args } = capability.redactProvenance(
+      {
+        ...ARGS,
+        sectionTitles: ['Only for prescribing clinicians'],
+        questionPrompts: ['Your NHS trust?'],
+      },
+      { success: true, data: { result: RESULT } }
+    );
+    const serialized = JSON.stringify(args);
+
+    expect(serialized).not.toContain('Only for prescribing clinicians');
+    expect(serialized).not.toContain('Your NHS trust?');
+    expect(args).toMatchObject({ sectionTitleCount: 1, questionPromptCount: 1 });
+  });
+
   it('redacts documentText from the safe args — never appears verbatim', () => {
     const { args } = capability.redactProvenance(ARGS, { success: true, data: { result: RESULT } });
     const serialized = JSON.stringify(args);

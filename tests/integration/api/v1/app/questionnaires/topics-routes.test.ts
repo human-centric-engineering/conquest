@@ -33,7 +33,8 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireConfig: { findUnique: vi.fn() },
     // F17.19 Phase 3: the cached candidacy verdict, and whether the analyst has already run.
     appQuestionnaireVersion: { findUnique: vi.fn() },
-    appAiRun: { findFirst: vi.fn() },
+    // `findFirst` looks for a SUCCEEDED analyst run; `count` counts failed ones (F17.22 Phase 3).
+    appAiRun: { findFirst: vi.fn(), count: vi.fn() },
   },
 }));
 
@@ -188,6 +189,7 @@ beforeEach(() => {
     adaptiveScopeCandidate: null,
   });
   (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
+  (prisma.appAiRun.count as Mock).mockResolvedValue(0);
 });
 
 // ─── GET ──────────────────────────────────────────────────────────────────────

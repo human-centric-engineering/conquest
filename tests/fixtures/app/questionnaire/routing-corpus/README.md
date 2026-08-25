@@ -7,6 +7,10 @@ just the one workbook family it has been exercised on.
 **No third-party content is reproduced here** — every document was written for this
 repository, following the convention of the sibling `sample-questionnaire.md`.
 
+**Results are recorded in [`RESULTS.md`](./RESULTS.md).** This file says what correct
+looks like; that one is the ledger of what actually happened on each run — date, build,
+resolved models, per-document scores, where it failed, and the trend across runs.
+
 ## Why this exists
 
 Before this corpus, the pipeline's only real-world evidence was two versions of one

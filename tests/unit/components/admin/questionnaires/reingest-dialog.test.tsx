@@ -69,7 +69,14 @@ function sseBody(
  * `res.json()` — so the mock must expose a real `ReadableStream`.
  */
 function mockFetchSuccess(
-  data: { sectionCount: number; questionCount: number; changeCount: number; deduped: boolean } = {
+  data: {
+    sectionCount: number;
+    questionCount: number;
+    changeCount: number;
+    deduped: boolean;
+    /** F17.22 Phase 2 — present only when the analyst proposed during this upload. */
+    adaptiveScopeProposal?: { topicCount: number; conditionalCount: number };
+  } = {
     sectionCount: 2,
     questionCount: 5,
     changeCount: 1,
@@ -196,6 +203,39 @@ describe('ReingestDialog', () => {
     expect(screen.getByText(/3/)).toBeInTheDocument();
     expect(screen.getByText(/12/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /replace structure/i })).not.toBeInTheDocument();
+  });
+
+  it('reports what the analyst proposed during the upload (F17.22 Phase 2)', async () => {
+    // This dialog is the only place the admin is still standing when the proposal finishes —
+    // without this line, a draft that cost a real model call waits on a tab nothing mentioned.
+    mockFetchSuccess({
+      sectionCount: 3,
+      questionCount: 12,
+      changeCount: 4,
+      deduped: false,
+      adaptiveScopeProposal: { topicCount: 6, conditionalCount: 3 },
+    });
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    const line = await screen.findByText(/document describes routing/i);
+    expect(line).toHaveTextContent('6');
+    expect(line).toHaveTextContent('3');
+    // Says plainly that nothing is live — accepting stays an explicit act on the tab.
+    expect(line).toHaveTextContent(/nothing is live/i);
+  });
+
+  it('says nothing about routing when no proposal was made', async () => {
+    mockFetchSuccess({ sectionCount: 3, questionCount: 12, changeCount: 4, deduped: false });
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await screen.findByText(/re-ingested/i);
+    expect(screen.queryByText(/document describes routing/i)).not.toBeInTheDocument();
   });
 
   it('reports an unchanged re-ingest when the document is identical (deduped)', async () => {
