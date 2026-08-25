@@ -164,6 +164,17 @@ export const NOT_EXEMPT_DESPITE_COVERAGE_EXCLUSION: ReadonlyArray<{
       'coverage skips it for its import-time validation side effects, not ' +
       'because it needs no test — it has three.',
   },
+  {
+    pattern: 'scripts/smoke/!(*-assertions).ts',
+    reason:
+      'coverage skips the harnesses because vitest never executes these ' +
+      'standalone tsx entry points, so their 0% is structural rather than a ' +
+      'gap. 4f still asks about them: it reports and never gates, so a ' +
+      'harness is answered in review rather than silenced here. Note the ' +
+      'coverage pattern deliberately spares `*-assertions.ts` — the pure ' +
+      'logic a harness extracts to be testable, which is covered and gated ' +
+      'like any other source file.',
+  },
 ];
 
 /**

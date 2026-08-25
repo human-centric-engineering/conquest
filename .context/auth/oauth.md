@@ -232,6 +232,14 @@ export function OAuthButtons({ callbackUrl }: { callbackUrl?: string }) {
 }
 ```
 
+### 5. Decide the provider's `issuer`
+
+New providers need no schema change, and none is needed once
+`20260825120000_add_account_issuer` has been applied — better-auth writes
+`issuer` on every row it creates. Only a database that already holds rows for
+the new provider when that migration first runs needs it extended.
+See [Account Identity](#account-identity-issuer-accountid).
+
 ## OAuth Flow
 
 1. User clicks "Continue with Google"
@@ -243,6 +251,54 @@ export function OAuthButtons({ callbackUrl }: { callbackUrl?: string }) {
    - Links account if existing user
    - Creates session
 6. User redirected to callback URL (dashboard)
+
+## Account Identity: `(issuer, accountId)`
+
+Since better-auth 1.7, an `Account` row is identified by the pair
+**`(issuer, accountId)`** — enforced by `@@unique([issuer, accountId])`.
+`providerId` is local configuration only and is **never** an identity key.
+
+| Account kind                   | `issuer`                           | `accountId`              |
+| ------------------------------ | ---------------------------------- | ------------------------ |
+| Email/password                 | `local:credential`                 | the owning `User.id`     |
+| Google (and any OIDC provider) | `https://accounts.google.com`      | the verified `sub` claim |
+| OAuth2 provider with no issuer | `local:oauth:<encoded providerId>` | the provider's subject   |
+
+`issuer` names the authority that vouched for the subject, so two providers can
+never collide on a subject string. better-auth derives it from the provider's
+`accountIssuer`; `lib/auth/constants.ts` exports `CREDENTIAL_ACCOUNT_ISSUER`
+for the credential case.
+
+**Anything that writes an `Account` outside better-auth — a smoke fixture, a
+seed, a fork's importer — must set `issuer`,** and a credential row must also
+set `accountId` to the owning user's id. Sign-in checks all three; a row that
+disagrees simply cannot be signed in to.
+
+### Adding a provider that is not in the table above
+
+**In most cases you need to do nothing.** better-auth writes `issuer` on every
+row it creates, so a provider you add _after_
+`20260825120000_add_account_issuer` has already run needs no migration change —
+and editing an applied migration is actively harmful, because Prisma compares
+checksums and will refuse with "migration was modified after it was applied".
+
+The one case that needs work is a database that **already holds rows** for the
+new provider when the migration first runs — a fork that added the provider
+before taking this upgrade. The migration deliberately **refuses to guess**
+there: it raises on a `providerId` whose issuer it does not know. Extend it,
+before it has been applied, with that provider's verified issuer (Microsoft,
+for example, is `https://login.microsoftonline.com/<tenant>/v2.0`), because an
+issuer cannot be derived from a provider's name. A plain OAuth2 provider with
+no issuer of its own uses `local:oauth:` + the percent-encoded `providerId`.
+
+Getting this wrong does not fail loudly at runtime — it strands the affected
+users at the login screen — which is why the migration stops instead. Note what
+stopping costs: `prisma migrate deploy` records the migration as failed, and
+every later deploy stops with P3009 until you clear it with
+`prisma migrate resolve --rolled-back 20260825120000_add_account_issuer` (on
+Neon, prefix `PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=true`). The same applies to
+the collision guard, which raises if two rows would share an
+`(issuer, accountId)`.
 
 ## Linking Social Accounts
 
