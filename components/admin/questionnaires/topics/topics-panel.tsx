@@ -76,11 +76,22 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       nonce: (prev?.nonce ?? 0) + 1,
     }));
 
-  // Release the busy lock once the refreshed payload arrives — closing the window where a second
-  // save could fire against the pre-fork version id.
+  // Release the busy lock when a FORK's redirect lands on the new version.
+  //
+  // Keyed on `versionId`, not on the payload object. `payload` is a fresh object on every RSC
+  // render — a `router.refresh()` from any card on the page produces one, and so does any soft
+  // navigation within this route — so keying on it released the lock at moments that have nothing
+  // to do with the save completing, which is precisely the window the lock exists to close.
+  //
+  // A content signature was the other candidate and is worse: an admin who presses Save without
+  // having changed anything produces an identical payload, the signature never changes, and the
+  // page stays locked with no way out.
+  //
+  // The non-fork path does not wait for this — it releases in `run` itself, because `endpoint`
+  // still names a version the admin is on and a second save there is merely a second save.
   useEffect(() => {
     setBusy(false);
-  }, [payload]);
+  }, [versionId]);
 
   const endpoint = API.APP.QUESTIONNAIRES.versionTopics(questionnaireId, versionId);
 
@@ -91,9 +102,26 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       const { meta } = await authoringMutate(method, endpoint, body);
       if (meta?.forked) {
         setForkNotice(meta.versionNumber);
-        router.replace(`/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/topics`);
+        // Carry the current query across the fork. Today that preserves nothing in particular;
+        // once this tab is split into sub-tabs (`?tab=`), dropping it would silently return the
+        // admin to the first sub-tab after every fork — on the version they have just been moved
+        // to, which is the worst moment to lose their place.
+        //
+        // Read off `window.location` rather than `useSearchParams()`: this runs in an async
+        // callback, so the live value is the honest one and a hook's render-time closure could be
+        // a tab behind.
+        const search = typeof window === 'undefined' ? '' : window.location.search;
+        router.replace(
+          `/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/topics${search}`
+        );
+        router.refresh();
+        // Deliberately stays busy. `endpoint` closes over the PRE-fork version id and stays wrong
+        // until the redirect lands, so a second save released here would write to the version the
+        // admin has just been moved off. The effect above releases it when `versionId` changes.
+        return true;
       }
       router.refresh();
+      setBusy(false);
       return true;
     } catch (err) {
       // The admin declined the fork confirmation → nothing was written; resync, no error banner.

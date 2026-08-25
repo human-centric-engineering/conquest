@@ -417,6 +417,33 @@ describe('TopicsPanel — fork on launch', () => {
     expect(routerMock.replace).toHaveBeenCalledWith('/admin/questionnaires/q1/v/v2/topics');
   });
 
+  it('carries the current query across the fork redirect', async () => {
+    // Today this preserves nothing in particular. Once the tab is split into sub-tabs (`?tab=`),
+    // dropping it would silently return the admin to the first sub-tab after every fork — on the
+    // version they have just been moved to, which is the worst moment to lose their place.
+    const user = userEvent.setup();
+    const original = window.location.search;
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: '?tab=rules' },
+      writable: true,
+    });
+    authoringMutateMock.mockResolvedValue({
+      data: {},
+      meta: { forked: true, versionId: 'v2', versionNumber: 4 },
+    });
+    renderPanel();
+
+    await user.click(screen.getByTestId('save-topics'));
+
+    expect(routerMock.replace).toHaveBeenCalledWith(
+      '/admin/questionnaires/q1/v/v2/topics?tab=rules'
+    );
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: original },
+      writable: true,
+    });
+  });
+
   it('does not redirect or announce when the save did not fork', async () => {
     const user = userEvent.setup();
     renderPanel();
@@ -484,7 +511,7 @@ describe('TopicsPanel — errors and the busy lock', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
-  it('holds the busy lock until the refreshed payload arrives', async () => {
+  it('holds the busy lock while a save is in flight, and releases it when the save lands', async () => {
     const user = userEvent.setup();
     let release: (v: { data: unknown; meta: null }) => void = () => {};
     authoringMutateMock.mockReturnValue(
@@ -492,7 +519,7 @@ describe('TopicsPanel — errors and the busy lock', () => {
         release = resolve;
       })
     );
-    const { rerender } = renderPanel();
+    renderPanel();
 
     await user.click(screen.getByTestId('save-topics'));
 
@@ -501,10 +528,48 @@ describe('TopicsPanel — errors and the busy lock', () => {
     expect(screen.getByTestId('routing-map')).toBeDisabled();
 
     release({ data: {}, meta: null });
-    // The lock is released by the NEW payload, not by the promise settling — which is what closes the
-    // window where a second save could fire against the pre-fork version id.
-    rerender(<TopicsPanel questionnaireId="q1" versionId="v1" payload={payload()} />);
+    // No fork, so `endpoint` still names a version the admin is on — nothing is gained by making
+    // them wait for the refresh to land.
     await waitFor(() => expect(screen.getByTestId('save-topics')).not.toBeDisabled());
+  });
+
+  it('does NOT release the lock just because a new payload object arrived', async () => {
+    // The lock used to be keyed on the payload object, which is fresh on every RSC render — a
+    // `router.refresh()` from any card on the page produced one, and so does any soft navigation
+    // within this route. That released the lock at moments with nothing to do with the save
+    // completing, which is the exact window the lock exists to close.
+    const user = userEvent.setup();
+    authoringMutateMock.mockReturnValue(new Promise(() => {}));
+    const { rerender } = renderPanel();
+
+    await user.click(screen.getByTestId('save-topics'));
+    await waitFor(() => expect(screen.getByTestId('save-topics')).toBeDisabled());
+
+    // A brand-new payload object with identical content — what a refresh mid-save looks like.
+    rerender(<TopicsPanel questionnaireId="q1" versionId="v1" payload={payload()} />);
+
+    expect(screen.getByTestId('save-topics')).toBeDisabled();
+  });
+
+  it('stays locked after a fork until the redirect lands on the new version', async () => {
+    const user = userEvent.setup();
+    authoringMutateMock.mockResolvedValue({
+      data: {},
+      meta: { forked: true, versionId: 'v2', versionNumber: 4 },
+    });
+    const { rerender } = renderPanel();
+
+    await user.click(screen.getByTestId('save-topics'));
+
+    // `endpoint` closes over the PRE-fork version id and stays wrong until the route changes, so a
+    // second save released here would write to the version the admin has just been moved off.
+    await waitFor(() => expect(screen.getByTestId('routing-map')).toBeDisabled());
+    rerender(<TopicsPanel questionnaireId="q1" versionId="v1" payload={payload()} />);
+    expect(screen.getByTestId('routing-map')).toBeDisabled();
+
+    // The redirect lands: new versionId, lock released.
+    rerender(<TopicsPanel questionnaireId="q1" versionId="v2" payload={payload()} />);
+    await waitFor(() => expect(screen.getByTestId('routing-map')).not.toBeDisabled());
   });
 });
 

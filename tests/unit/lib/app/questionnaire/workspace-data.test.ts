@@ -555,6 +555,12 @@ function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
     preview: { openingQuestions: [], fillTargets: [] },
     candidacy: null,
     autoTriggerPending: false,
+    coverage: {
+      totalQuestions: 0,
+      uncoveredQuestions: 0,
+      totalDataSlots: 0,
+      uncoveredDataSlots: 0,
+    },
     ...over,
   };
 }

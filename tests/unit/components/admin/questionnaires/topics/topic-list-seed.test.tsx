@@ -165,3 +165,58 @@ describe('TopicListEditor — seedTopic', () => {
     });
   });
 });
+
+describe('TopicListEditor — seedTopic while hidden (active=false)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+  });
+
+  const SEED = { description: 'Too vague to test', criteria: 'Use judgement', nonce: 1 };
+
+  function editor(active: boolean, onSeedHandled: () => void) {
+    return (
+      <TopicListEditor
+        topics={TOPICS}
+        inventory={INVENTORY}
+        onSave={vi.fn().mockResolvedValue(true)}
+        busy={false}
+        enabled
+        seedTopic={SEED}
+        onSeedHandled={onSeedHandled}
+        active={active}
+      />
+    );
+  }
+
+  it('does not append the row while hidden', () => {
+    // Worse than the focus case: a seed that fired while hidden would append a row the admin never
+    // saw appear, and mark the editor dirty on a tab they are not looking at.
+    const onSeedHandled = vi.fn();
+    render(editor(false, onSeedHandled));
+
+    expect(onSeedHandled).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue('Use judgement')).not.toBeInTheDocument();
+  });
+
+  it('appends it the moment the panel becomes visible', () => {
+    const onSeedHandled = vi.fn();
+    const { rerender } = render(editor(false, onSeedHandled));
+    expect(onSeedHandled).not.toHaveBeenCalled();
+
+    rerender(editor(true, onSeedHandled));
+
+    expect(onSeedHandled).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('Use judgement')).toBeInTheDocument();
+  });
+
+  it('defaults to active, so today’s single-stack tab is unaffected', () => {
+    const onSeedHandled = vi.fn();
+    render(editor(true, onSeedHandled));
+    expect(onSeedHandled).toHaveBeenCalledTimes(1);
+  });
+});

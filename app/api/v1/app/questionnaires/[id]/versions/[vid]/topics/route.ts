@@ -40,7 +40,11 @@ import {
   adaptiveScopeSettingsSchema,
   saveTopicsSchema,
 } from '@/lib/app/questionnaire/scope/schemas';
-import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import {
+  uncoveredDataSlotKeys,
+  uncoveredQuestionKeys,
+  validateAdaptiveScope,
+} from '@/lib/app/questionnaire/scope/validate';
 import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 import { buildPlanPreviewForm } from '@/lib/app/questionnaire/scope/views';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
@@ -148,11 +152,14 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       .map((t) => byTopicKey.get(t.key)?.full ?? 0)
       .filter((s) => s > 0);
 
+    const allQuestionKeys = inventory.questions.map((q) => q.key);
+    const allDataSlotKeys = inventory.dataSlots.map((d) => d.key);
+
     const issues = validateAdaptiveScope({
       topics,
       settings,
-      allQuestionKeys: inventory.questions.map((q) => q.key),
-      allDataSlotKeys: inventory.dataSlots.map((d) => d.key),
+      allQuestionKeys,
+      allDataSlotKeys,
       seconds: {
         always: alwaysSeconds,
         cheapestConditional: conditionalCosts.length > 0 ? Math.min(...conditionalCosts) : 0,
@@ -193,6 +200,15 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       ),
       candidacy,
       autoTriggerPending,
+      // Through the SAME helpers the orphan findings above use, so a header reporting "3 questions
+      // in no topic" and an issue list reporting a different number is not a state this payload
+      // can be in.
+      coverage: {
+        totalQuestions: allQuestionKeys.length,
+        uncoveredQuestions: uncoveredQuestionKeys(topics, allQuestionKeys).length,
+        totalDataSlots: allDataSlotKeys.length,
+        uncoveredDataSlots: uncoveredDataSlotKeys(topics, allDataSlotKeys).length,
+      },
     });
   }
 );

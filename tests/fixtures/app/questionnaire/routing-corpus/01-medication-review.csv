@@ -1,0 +1,23 @@
+Section,Question ID,Question,Response type,When to ask
+Patient context,PC1,How long have you been taking your current regular medicines?,Free text,Always
+Patient context,PC2,How many different regular medicines are you taking at the moment?,Number,Always
+Patient context,PC3,Who usually collects or receives your prescriptions?,Single choice,Always
+Patient context,PC4,Is there anything about your health that has changed in the last six months?,Free text,Always
+Adherence,AD1,In a typical week how often do you miss a dose?,Single choice,Always
+Adherence,AD2,What tends to get in the way when a dose is missed?,Free text,Only where PC2 is 4 or more
+Adherence,AD3,Do you use any aid such as a dosette box or a phone reminder?,Single choice,Only where PC2 is 4 or more
+Inhaler technique,IN1,Can you talk me through how you take your inhaler?,Free text,Only where the patient is prescribed an inhaled medicine
+Inhaler technique,IN2,When did someone last watch you use it?,Single choice,Only where the patient is prescribed an inhaled medicine
+Inhaler technique,IN3,Do you use a spacer?,Single choice,Only where the patient is prescribed an inhaled medicine
+Anticoagulation,AC1,How do you keep track of your anticoagulant dose?,Free text,Only where the patient is prescribed an anticoagulant
+Anticoagulation,AC2,Have you had any unusual bruising or bleeding since your last review?,Free text,Only where the patient is prescribed an anticoagulant
+Anticoagulation,AC3,Has anyone gone through what to do if you miss a dose?,Single choice,Only where the patient is prescribed an anticoagulant
+Pain management,PM1,How well controlled is your pain on your current medicines?,Rating 1-5,Only where the patient reports ongoing pain
+Pain management,PM2,Have you needed to take more than the prescribed amount on any day?,Single choice,Only where the patient reports ongoing pain
+Side effects,SE1,Have you noticed any effects you think might come from your medicines?,Free text,Always
+Side effects,SE2,Has anything led you to stop a medicine without telling anyone?,Free text,Always
+Falls and frailty,FR1,Have you had a fall or near-fall in the last twelve months?,Single choice,Only where the patient is 65 or over
+Falls and frailty,FR2,Do you feel steady when you first stand up?,Single choice,Only where the patient is 65 or over
+Cost and access,CA1,Has the cost of prescriptions ever stopped you collecting one?,Single choice,Only where the patient pays for prescriptions
+Wrap up,WU1,What would make managing your medicines easier over the next few months?,Free text,Always
+Wrap up,WU2,Is there anything we have not covered that you wanted to raise?,Free text,Always

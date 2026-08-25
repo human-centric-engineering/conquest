@@ -93,6 +93,42 @@ export interface ValidateScopeInput {
  *
  * Pure and total: never throws, and an empty result means "nothing to say", not "not checked".
  */
+/**
+ * Question keys no topic claims — the orphan set, as keys rather than a count.
+ *
+ * Exported because two callers need the same answer and must not compute it twice: the orphan
+ * finding below, and the Topics payload's `coverage` block, which reports the number on a header
+ * that is visible whether or not the issue list is. A second implementation would eventually
+ * disagree with this one, and "the header says 3, the issue says 4" is the kind of contradiction
+ * that makes an admin stop trusting both.
+ *
+ * Note this is the raw set: the finding additionally suppresses itself when the version has no
+ * topics at all (nothing is authored yet, so "belongs to no topic" is not yet a mistake). A caller
+ * reporting coverage wants the count regardless, and decides its own framing.
+ */
+export function uncoveredQuestionKeys(
+  topics: readonly Topic[],
+  allQuestionKeys: readonly string[]
+): string[] {
+  const covered = new Set<string>();
+  for (const topic of topics) {
+    for (const key of topic.members.questionKeys) covered.add(key);
+  }
+  return allQuestionKeys.filter((k) => !covered.has(k));
+}
+
+/** Data-slot equivalent of {@link uncoveredQuestionKeys}. */
+export function uncoveredDataSlotKeys(
+  topics: readonly Topic[],
+  allDataSlotKeys: readonly string[]
+): string[] {
+  const covered = new Set<string>();
+  for (const topic of topics) {
+    for (const key of topic.members.dataSlotKeys) covered.add(key);
+  }
+  return allDataSlotKeys.filter((k) => !covered.has(k));
+}
+
 export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
   const { topics, settings } = input;
   const issues: ScopeIssue[] = [];
@@ -101,11 +137,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
   // ── The orphan check ───────────────────────────────────────────────────────────────────────
   // Reported whether or not the feature is on, because it is precisely what an admin needs to see
   // BEFORE flipping the switch — afterwards, the symptom is a question that silently never appears.
-  const covered = new Set<string>();
-  for (const topic of topics) {
-    for (const key of topic.members.questionKeys) covered.add(key);
-  }
-  const orphans = input.allQuestionKeys.filter((k) => !covered.has(k));
+  const orphans = uncoveredQuestionKeys(topics, input.allQuestionKeys);
   if (orphans.length > 0 && topics.length > 0) {
     issues.push({
       severity: settings.enabled ? 'error' : 'warning',
@@ -116,10 +148,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
     });
   }
 
-  const orphanSlots = (input.allDataSlotKeys ?? []).filter((k) => {
-    for (const topic of topics) if (topic.members.dataSlotKeys.includes(k)) return false;
-    return true;
-  });
+  const orphanSlots = uncoveredDataSlotKeys(topics, input.allDataSlotKeys ?? []);
   if (orphanSlots.length > 0 && topics.length > 0) {
     issues.push({
       severity: settings.enabled ? 'error' : 'warning',
