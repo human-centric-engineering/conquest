@@ -26,6 +26,8 @@ import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/rou
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
+import { ScopeIssueStrip } from '@/components/admin/questionnaires/topics/scope-issue-strip';
+import { ScopeStatusHeader } from '@/components/admin/questionnaires/topics/scope-status-header';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import { PlanPreviewCard } from '@/components/admin/questionnaires/topics/plan-preview-card';
 import { RoutingQualityCard } from '@/components/admin/questionnaires/topics/routing-quality-card';
@@ -137,6 +139,14 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
     }
   };
 
+  /**
+   * The header switch. Goes through the same runner as every other write on this tab, so it
+   * inherits the busy lock, the fork confirmation and the declined-fork silent no-op — and because
+   * the switch is controlled by `payload.settings.enabled`, a declined fork simply leaves it where
+   * it was on the next render rather than stranding it in the clicked position.
+   */
+  const toggleEnabled = (next: boolean) => run('PATCH', { enabled: next });
+
   const saveTopics = (drafts: DraftTopic[]) =>
     run('PUT', {
       topics: drafts.map((d) => ({
@@ -157,7 +167,9 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // `AdaptiveScopeSettings` field is a two-place change — here and in the card.
   const saveSettings = (settings: AdaptiveScopeSettings) =>
     run('PATCH', {
-      enabled: settings.enabled,
+      // `enabled` is deliberately ABSENT. The status header owns it, and this PATCH is a
+      // read-merge-write — so including it here would let the card's draft (captured whenever it
+      // last remounted) silently undo a toggle the admin made in the header seconds ago.
       maxConditionalTopics: settings.maxConditionalTopics,
       sessionBudgetSeconds: settings.sessionBudgetSeconds,
       secondsPerQuestionType: settings.secondsPerQuestionType,
@@ -181,9 +193,41 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       })),
     });
 
+  const conditionalCount = payload.topics.filter((t) => t.phase === 'conditional').length;
+
+  /**
+   * Take the admin to the thing that fixes a finding.
+   *
+   * Reuses the topic-list focus handoff the routing map already drives — same nonce, same effect,
+   * same "waits while the panel is hidden" gate. A finding about a topic and a map node about a
+   * topic want the identical thing to happen, so they ask for it the identical way rather than
+   * growing a second mechanism that behaves almost the same.
+   */
+  const goToIssue = (issue: { topicKey?: string }) => {
+    if (!issue.topicKey) return;
+    setFocusTopic((prev) => ({ key: issue.topicKey as string, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+
   return (
     <div className="space-y-5">
       <ScopeExplainer />
+
+      {/* Above everything, and always: the two questions this tab exists to answer are "is it on?"
+          and "is it ready?", and both used to require scrolling past several screens of cards. */}
+      <ScopeStatusHeader
+        enabled={payload.settings.enabled}
+        topicCount={payload.topics.length}
+        conditionalCount={conditionalCount}
+        uncoveredQuestions={payload.coverage.uncoveredQuestions}
+        alwaysSeconds={payload.costs.alwaysSeconds}
+        budgetSeconds={payload.costs.budgetSeconds}
+        busy={busy}
+        // Discarded deliberately: `run` reports its own outcome through `busy`, `error` and
+        // `forkNotice`, and the header has nothing to do with a boolean it cannot act on.
+        onToggleEnabled={(next) => void toggleEnabled(next)}
+      />
+
+      <ScopeIssueStrip issues={payload.issues} onSelectIssue={goToIssue} />
 
       {/* The map sits above every card rather than inside one: it is a view of the whole tab — the
           settings, the rules and the topic set together — and hanging it off any single card would
@@ -214,8 +258,6 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           {error}
         </div>
       )}
-
-      <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
 
       {/* The analyst leads: on a freshly-ingested instrument its proposal IS the starting point,
           and an admin who scrolled past it to hand-author the same topics has wasted their time. */}
@@ -261,7 +303,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         questionnaireId={questionnaireId}
         versionId={versionId}
         enabled={payload.settings.enabled}
-        conditionalCount={payload.topics.filter((t) => t.phase === 'conditional').length}
+        conditionalCount={conditionalCount}
       />
 
       {/* A second, structural opinion — independent of the coherence checks above and of the
@@ -281,7 +323,9 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         // Remount the card when the server payload changes so a save's normalised result (clamped
         // numbers, dropped blanks, sorted rules) replaces the local draft rather than being hidden
         // behind it — the admin must see what a later read will actually produce.
-        key={`settings-${payload.settings.rules.length}-${payload.settings.enabled}`}
+        // NOT keyed on `enabled` — the header owns that now, and remounting this card when it
+        // flips would discard an admin's unsaved settings edits for a change made elsewhere.
+        key={`settings-${payload.settings.rules.length}`}
         settings={payload.settings}
         topics={payload.topics}
         dataSlots={payload.inventory.dataSlots}
@@ -335,6 +379,12 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             Set up conditional topics with AI
           </Button>
         </div>
+        {/* The second level of the strip at the top of the tab. Both render the SAME
+            `validateAdaptiveScope` output, so they cannot disagree about what is wrong — the
+            difference is only how much of it each says, and where. This one sits against the rows
+            it is about, and unlike the strip it also reports the all-clear. */}
+        <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
+
         <TopicListEditor
           key={`topics-${payload.topics.map((t) => t.key).join('|')}`}
           topics={payload.topics}

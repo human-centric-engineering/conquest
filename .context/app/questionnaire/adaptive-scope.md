@@ -14,7 +14,9 @@ several, which costs cross-section scoring and cohort analysis.
 > routing-quality analytics, the opening's follow-up allowance, the scope judge panel (F17.21),
 > and the defect fixes the first real imported instrument exposed (F17.23).
 >
-> Remaining: the tab itself is still one long stack, and F17.24 is the first phase of splitting it.
+> Remaining: the tab is being split in phases — F17.24 de-risked it, F17.25 added the status
+> header and moved the master switch out of the tenth card. The sub-tabs and the plain-English
+> sweep are still to come.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
 
@@ -1331,7 +1333,33 @@ back), **routing analytics** (F17.16) weighting each topic by how often it was r
 
 ## The authoring surface
 
-Three things about the tab are load-bearing rather than cosmetic.
+### The status header owns the switch (F17.25)
+
+The stack is ordered by the runtime pipeline, not by the authoring job, so the master switch used
+to sit in the header of the tenth card — the last place someone asking "is this even on?" would
+look. `ScopeStatusHeader` sits above everything and answers both arriving questions: whether it is
+on (with a sentence saying what that _means_ — "Off — every respondent is asked the whole
+questionnaire"), and whether it is ready (topics, conditionals, questions in no topic, the
+always-asked cost, the time limit).
+
+**The switch is controlled by the server's value, never a local draft.** That is what makes a
+declined fork correct: nothing was written, so the next render puts the switch back rather than
+leaving it in the clicked position describing a version that never existed.
+
+**Single-writer discipline is enforced in three places**, and all three matter. `enabled` is gone
+from the settings card's control, from its remount key, and from the panel's enumerated PATCH body.
+Left in the key, a header toggle remounts the card and eats unsaved settings work. Left in the
+body, the card's stale draft re-writes whatever the header just set — the classic two-writer race,
+resolved by whoever saved last.
+
+`ScopeIssueStrip` is the summary half of the two-level pattern `config-conflicts.tsx` established;
+`ScopeIssues` remains the full read, moved down beside the topic rows it is about. Both render the
+same `validateAdaptiveScope` output, so they cannot disagree. Rows are **buttons, not anchors** —
+`ScopeIssue` carries no `sectionId`, and what fixes a finding is a topic row whose DOM id is a
+client-side detail — and a topic-scoped row reuses the routing map's existing focus handoff rather
+than growing a second mechanism that behaves almost the same.
+
+Three more things about the tab are load-bearing rather than cosmetic.
 
 **The page teaches an order the controls cannot.** Adaptive scope only works if it is authored in a
 sequence — group every question into a topic, mark the conditional ones, pin the certainties, then

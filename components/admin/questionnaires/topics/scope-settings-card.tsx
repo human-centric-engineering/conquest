@@ -199,25 +199,14 @@ export function ScopeSettingsCard({
           </CardTitle>
           <CardDescription className="text-xs leading-relaxed">
             Decide which conditional topics each respondent’s interview covers, once, when the
-            opening completes. Off by default — while it is off every topic is asked and nothing
-            below has any effect.
+            opening completes. The on/off switch is in the header at the top of this tab; while it
+            is off, every topic is asked and nothing below has any effect.
           </CardDescription>
-        </div>
-        <div className="mt-0.5 flex shrink-0 items-center gap-2">
-          <Label htmlFor="adaptive-scope-enabled" className="text-xs font-medium">
-            {draft.enabled ? 'On' : 'Off'}
-          </Label>
-          <Switch
-            id="adaptive-scope-enabled"
-            checked={draft.enabled}
-            onCheckedChange={(v) => set({ enabled: v })}
-            disabled={busy}
-          />
         </div>
       </CardHeader>
 
       <CardContent className="space-y-5 p-4">
-        {draft.enabled && conditionalCount === 0 && (
+        {settings.enabled && conditionalCount === 0 && (
           <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             No topic is conditional yet, so there is nothing to decide between — every respondent
             gets the same interview. Set at least one topic to “Ask when it fits”.

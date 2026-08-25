@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 vi.mock('@/components/ui/field-help', () => ({
@@ -181,26 +181,40 @@ const confidence = () => spin('1');
 /* The master switch                                                          */
 /* -------------------------------------------------------------------------- */
 
-describe('ScopeSettingsCard — the master switch', () => {
-  it('reads Off when the version does not route, and On when it does', () => {
+describe('ScopeSettingsCard — no longer owns the master switch', () => {
+  // The switch moved to the status header at the top of the tab (F17.25). This card must not
+  // render one at all: two writers of `enabled` drift, and the loser is whichever rendered last —
+  // an admin toggling the header and then saving unrelated settings here would have silently
+  // undone their own toggle.
+  it('renders no adaptive-scope switch', () => {
     renderCard({ enabled: false });
-    expect(screen.getByText('Off')).toBeInTheDocument();
+    expect(document.getElementById('adaptive-scope-enabled')).toBeNull();
   });
 
-  it('flips the draft and the label together', () => {
-    renderCard({ enabled: false });
+  it('reads `enabled` from props for its conditional copy, not from a local draft', () => {
+    // The "nothing is conditional yet" warning is gated on the feature being on. With no local
+    // draft of `enabled` left, it has to follow the server's value — and it does, because the
+    // card can no longer produce a value of its own to disagree with.
+    renderCard({ enabled: true }, { topics: [] });
+    expect(screen.getByText(/No topic is conditional yet/)).toBeInTheDocument();
 
-    fireEvent.click(toggleById('adaptive-scope-enabled'));
-
-    expect(screen.getByText('On')).toBeInTheDocument();
+    cleanup();
+    renderCard({ enabled: false }, { topics: [] });
+    expect(screen.queryByText(/No topic is conditional yet/)).not.toBeInTheDocument();
   });
 
-  it('carries the flip through to the save', async () => {
+  it('cannot change `enabled`, whatever else it saves', async () => {
+    // The card still CARRIES the field — its draft is a whole AdaptiveScopeSettings — but it has
+    // no control that writes to it, so what it saves is whatever the server last said. The panel
+    // is what stops it reaching the wire (see topics-panel.test.tsx); this asserts the card never
+    // mutates it on the way through.
     const { onSave } = renderCard({ enabled: false });
 
-    fireEvent.click(toggleById('adaptive-scope-enabled'));
+    fireEvent.change(topicLimit(), { target: { value: '4' } });
 
-    expect((await savedDraft(onSave)).enabled).toBe(true);
+    const saved = await savedDraft(onSave);
+    expect(saved.enabled).toBe(false);
+    expect(saved.maxConditionalTopics).toBe(4);
   });
 });
 

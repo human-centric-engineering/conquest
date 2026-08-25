@@ -337,6 +337,83 @@ describe('TopicsPanel — saving the topic set', () => {
 /* Saving settings                                                            */
 /* -------------------------------------------------------------------------- */
 
+describe('TopicsPanel — the status header owns the master switch', () => {
+  const headerSwitch = () => document.getElementById('scope-status-enabled') as HTMLElement;
+
+  it('PATCHes `enabled` ALONE, so the merge cannot touch a sibling', async () => {
+    const user = userEvent.setup();
+    renderPanel(payload({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: false } }));
+
+    await user.click(headerSwitch());
+
+    await waitFor(() => expect(authoringMutateMock).toHaveBeenCalled());
+    expect(lastMutation().method).toBe('PATCH');
+    // The server side is a read-merge-write over a schema whose every field is optional, so a
+    // lone-field body is the shape most likely to expose a regression there. It is pinned in
+    // `topic-routes.test.ts`; this pins that the header actually sends one.
+    expect(lastMutation().body).toEqual({ enabled: true });
+  });
+
+  it('renders the server value, so a declined fork leaves the switch where it was', async () => {
+    const user = userEvent.setup();
+    authoringMutateMock.mockRejectedValue(new ForkCancelledError());
+    renderPanel(payload({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: false } }));
+
+    await user.click(headerSwitch());
+
+    // Nothing was written, so nothing should look written. A locally-drafted switch would sit in
+    // the clicked position describing a version that never existed.
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(headerSwitch()).not.toBeChecked();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it("reports the version's coverage, not a count it derived itself", () => {
+    renderPanel(
+      payload({
+        coverage: {
+          totalQuestions: 10,
+          uncoveredQuestions: 3,
+          totalDataSlots: 0,
+          uncoveredDataSlots: 0,
+        },
+      })
+    );
+
+    expect(screen.getByText(/questions in no topic/i)).toBeInTheDocument();
+  });
+});
+
+describe('TopicsPanel — the issue strip', () => {
+  it("drives the topic-list focus handoff, reusing the map's mechanism", async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      payload({
+        issues: [
+          {
+            severity: 'error',
+            code: 'conditional_without_criteria',
+            topicKey: 'pricing',
+            message: 'Pricing is conditional but has no criteria.',
+          },
+        ],
+      })
+    );
+
+    await user.click(screen.getByRole('button', { name: /Pricing is conditional/i }));
+
+    // Same nonce shape the routing map produces: a finding about a topic and a map node about a
+    // topic want the identical thing to happen, so they ask for it the identical way.
+    expect(screen.getByTestId('focus')).toHaveAttribute('data-key', 'pricing');
+    expect(screen.getByTestId('focus')).toHaveAttribute('data-nonce', '1');
+  });
+
+  it('renders nothing when the setup is coherent', () => {
+    renderPanel(payload({ issues: [] }));
+    expect(screen.queryByText(/block launch/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('TopicsPanel — saving the settings', () => {
   it('PATCHes the settings to the same endpoint', async () => {
     const user = userEvent.setup();
@@ -359,7 +436,6 @@ describe('TopicsPanel — saving the settings', () => {
     const body = lastMutation().body as Record<string, unknown>;
 
     expect(body).toMatchObject({
-      enabled: true,
       maxConditionalTopics: 5,
       sessionBudgetSeconds: 900,
       secondsPerQuestionType: { text: 30 },
@@ -374,6 +450,10 @@ describe('TopicsPanel — saving the settings', () => {
       limitOpeningProbes: true,
       maxOpeningProbes: 2,
     });
+    // `enabled` is the ONE settings field this body must not carry. The status header owns it, and
+    // including it here would let the card's draft — captured whenever it last remounted — undo a
+    // toggle the admin made in the header seconds earlier.
+    expect(body).not.toHaveProperty('enabled');
   });
 
   it('maps rules field by field rather than passing the objects through', async () => {
