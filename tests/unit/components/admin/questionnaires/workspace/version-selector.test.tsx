@@ -34,17 +34,13 @@ const { mockRouterPush, mockUsePathname } = vi.hoisted(() => ({
   mockUsePathname: vi.fn<() => string>(),
 }));
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: mockRouterPush,
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  usePathname: mockUsePathname,
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: () => createMockRouter({ push: mockRouterPush }),
+    usePathname: mockUsePathname,
+  };
+});
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
