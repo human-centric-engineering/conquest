@@ -417,6 +417,46 @@ analyst declare which it did:
 
 Uncovered questions are counted **server-side** before the accept, never trusted from the model.
 
+### Two settings the analyst may propose, and one it may not (F17.23)
+
+The analyst's output used to carry topics, rules and `maxConditionalTopics` only. But a document's
+routing prose routinely states two other things, and with nowhere to put them the analyst reported
+them as unformalizable `gaps` — a proposal admitting defeat about settings the platform had
+implemented all along:
+
+- **`fallbackTopicKeys`** — the safe default when the planner chose nothing at all. Folding this
+  into topic criteria instead (which is what the analyst used to do) is not the same behaviour:
+  `applyGuardrails` fires the fallback list **only** when nothing was seated, whereas criteria put
+  those topics into ordinary competition against the limit.
+- **`checkTopicPreference`** — which area is worth sampling as the blind-spot check.
+
+Both are optional and **omitted when the document is silent**, the same discipline
+`maxConditionalTopics` follows, so a default never lands where the author said nothing. Both are
+capped at 5 in the analyst's contract; the accept path caps at 20 to match the settings PATCH,
+because both paths write the same field.
+
+**Membership is enforced on the way out, not at the schema.** A key naming no proposed topic is
+dropped in `narrowProposedTopicSet` rather than refused by `routingAnalysisSchema`. An unknown key
+is inert at runtime — `chooseCheckTopic` and the fallback loop both skip what they cannot resolve —
+so refusing the whole response over one would throw away an otherwise-good proposal and pay for a
+retry to fix a hint.
+
+**`plannerInstructions` is deliberately not proposable.** It is prose steering the model, and an
+analyst writing its own steering is a loop worth not building. Authors write it by hand, and the
+proposal's `gaps[]` is the better prompt for what it should say.
+
+### The depth correction — fixed on the way in, but never silently (F17.23)
+
+`narrowProposedTopicSet` coerces `light` → `full` on any always-run topic and records the corrected
+keys in `depthCorrectedKeys`, which the review card renders as an amber note.
+
+Corrected rather than refused at the schema, on purpose: a hard `.refine` would throw away an
+otherwise-good fifteen-topic proposal — and pay for a second model call — over one field, and the
+analyst has produced exactly this mistake on real instruments. Corrected **and** reported, because a
+silent fix would leave an admin unable to learn that their document's wording invited a proposal
+that drops questions. The prompt now forbids it too (see `## Depth` in `analysis-prompt.ts`); the
+coercion is the belt to that braces.
+
 ### Gaps — what the proposal admits it left out (F17.19 Phase 2)
 
 The rubric above is about the analyst being right; `gaps` is about it being **honest when it isn't
@@ -699,6 +739,24 @@ The check that matters is **`orphaned_questions`**: with scope active, a questio
 topic can never be asked, and nothing else in the system would report it. It is an `error` when the
 feature is on and a `warning` when it is off — the second being exactly what an admin needs to see
 _before_ flipping the switch.
+
+### `light_depth_on_always_topic` — the second way to delete a question silently (F17.23)
+
+`membersAtDepth` applies depth to **every** phase, not only `conditional`. So `light` on an
+`opening`, `core` or `closing` topic does not sample it — it drops every member past
+`LIGHT_DEPTH_MEMBER_COUNT` from an interview everyone gets, and nothing else reports it. That is the
+same harm as an orphaned question arriving by a different route, so it carries the same severity
+rule: `error` once the feature is on, `warning` before.
+
+On the **opening** it is worse than a deletion, and the message says so separately: the opening is
+the evidence the whole plan is decided from, so sampling it decides the interview from half the
+answers. This was not hypothetical — the Routing Analyst proposed exactly this on two real
+instruments before F17.23.
+
+Two things keep it from being noise. It counts **per kind**, because depth trims `questionKeys` and
+`dataSlotKeys` separately; and it stays silent when the topic is small enough that `light` and
+`full` are the same run, because `membersAtDepth` early-returns there and the setting changed
+nothing.
 
 ### Hard-rule reachability
 

@@ -350,6 +350,28 @@ export interface ProposedTopicSet {
    * would put the analyst's guess where the author's silence was.
    */
   maxConditionalTopics?: number;
+  /**
+   * Topics to ask when the planner produced nothing at all — the document's own safe default, when
+   * it names one. Absent when it says nothing, same discipline as {@link maxConditionalTopics}.
+   */
+  fallbackTopicKeys?: string[];
+  /**
+   * Preferred topics for the blind-spot check, best first. Absent when the document says nothing.
+   *
+   * Before F17.23 the analyst had no field for this, so a document that named a blind-spot area
+   * ("carry two items from a section they did not pick") came back as an unformalizable `gap` — a
+   * proposal admitting defeat about a setting the platform has implemented all along.
+   */
+  checkTopicPreference?: string[];
+  /**
+   * Topics whose `light` depth was corrected to `full` on the way in, because they run for
+   * everyone. Empty on a well-formed proposal.
+   *
+   * The correction is silent to the runtime but must NOT be silent to the reviewer: the analyst
+   * asked for something that would have dropped questions, and an admin who is never told cannot
+   * learn that their document's wording invited it. See {@link narrowProposedTopicSet}.
+   */
+  depthCorrectedKeys?: string[];
   /** What the analyst found, in a sentence or two. The first thing the reviewer reads. */
   summary: string;
   /**
@@ -928,6 +950,10 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
   if (!isRecord(value)) return null;
   if (value.v !== 1) return null;
 
+  // Topic keys whose `light` depth was corrected on the way in — collected here rather than
+  // returned per-topic because the reviewer needs the list, not a flag on each row.
+  const depthCorrectedKeys: string[] = [];
+
   const topics: ProposedTopic[] = Array.isArray(value.topics)
     ? value.topics.flatMap((t): ProposedTopic[] => {
         if (!isRecord(t)) return [];
@@ -936,13 +962,31 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
         if (key.length === 0 || label.length === 0) return [];
         const criteria = asText(t.criteria, TOPIC_CRITERIA_MAX_LENGTH, '');
         const sourceQuote = asText(t.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
+        const phase = narrowToEnum(
+          typeof t.phase === 'string' ? t.phase : '',
+          TOPIC_PHASES,
+          'core'
+        );
+        const askedDepth = narrowToEnum(
+          typeof t.depth === 'string' ? t.depth : '',
+          TOPIC_DEPTHS,
+          'full'
+        );
+        // `light` on a phase everyone gets does not sample, it deletes — `membersAtDepth` applies
+        // depth to every phase, so the members it trims from an always-run topic are asked of
+        // nobody. Corrected here rather than refused at the schema on purpose: a hard rejection
+        // would throw away an otherwise-good fifteen-topic proposal (and pay for a second model
+        // call) over one field, and the analyst has produced exactly this mistake on real
+        // instruments. Corrected AND reported — `depthCorrectedKeys` is what stops it being silent.
+        const corrected = ALWAYS_PHASES.includes(phase) && askedDepth === 'light';
+        if (corrected) depthCorrectedKeys.push(key);
         return [
           {
             key,
             label,
-            phase: narrowToEnum(typeof t.phase === 'string' ? t.phase : '', TOPIC_PHASES, 'core'),
+            phase,
             criteria: criteria.length > 0 ? criteria : null,
-            depth: narrowToEnum(typeof t.depth === 'string' ? t.depth : '', TOPIC_DEPTHS, 'full'),
+            depth: corrected ? 'full' : askedDepth,
             members: narrowTopicMembers(t.members),
             rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
             ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
@@ -1004,12 +1048,27 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
         )
       : null;
 
+  // Both lists are constrained to keys the proposal itself carries. A settings key naming a topic
+  // that does not exist is inert at runtime (`chooseCheckTopic` and the fallback loop both skip
+  // unknown keys) but it reads on the review card as a decision the admin never gets, so it is
+  // dropped here rather than shown.
+  const proposedKeys = new Set(topics.map((t) => t.key));
+  const fallbackTopicKeys = asKeyList(value.fallbackTopicKeys, 5).filter((k) =>
+    proposedKeys.has(k)
+  );
+  const checkTopicPreference = asKeyList(value.checkTopicPreference, 5).filter((k) =>
+    proposedKeys.has(k)
+  );
+
   return {
     v: 1,
     topics,
     rules,
     gaps,
     ...(cap !== null ? { maxConditionalTopics: cap } : {}),
+    ...(fallbackTopicKeys.length > 0 ? { fallbackTopicKeys } : {}),
+    ...(checkTopicPreference.length > 0 ? { checkTopicPreference } : {}),
+    ...(depthCorrectedKeys.length > 0 ? { depthCorrectedKeys } : {}),
     summary: asText(value.summary, SCOPE_RATIONALE_MAX_LENGTH, ''),
     fromDocument: asBool(value.fromDocument, false),
     generatedAt: asText(value.generatedAt, 40, ''),

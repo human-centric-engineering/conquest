@@ -70,7 +70,7 @@ export interface AcceptTopicDraftResult {
  * Atomicity is the point. A half-applied accept (topics written, draft still pending) would leave
  * the admin looking at a review queue for work already done, and re-accepting would duplicate it.
  *
- * Three deliberate choices about what accept does and does not touch:
+ * Four deliberate choices about what accept does and does not touch:
  *
  * - **Topics are replaced, not merged.** The reviewed proposal IS the set — the analyst was given
  *   the existing topics and told to revise them by reusing keys, so a merge here would re-introduce
@@ -79,6 +79,12 @@ export interface AcceptTopicDraftResult {
  *   from a hand-authored one after the fact.
  * - **`enabled` is never touched.** Accepting a proposal is an authoring act; turning the feature on
  *   is a decision about what respondents are asked, and it stays the admin's explicit choice.
+ * - **`fallbackTopicKeys` and `checkTopicPreference` ride along when the analyst proposed them**
+ *   (F17.23), on the same omitted-means-leave-alone / present-means-replace contract as `rules`.
+ *   They are settings rather than topics, but they are read out of the same routing prose in the
+ *   same pass — before this, a document that named a safe default or a blind-spot area came back as
+ *   an unformalizable `gap`, which was the proposal admitting defeat about a setting the platform
+ *   had implemented all along. `enabled` is still not among them.
  */
 export async function acceptTopicDraft(
   versionId: string,
@@ -127,6 +133,12 @@ export async function acceptTopicDraft(
       rules,
       ...(body.maxConditionalTopics !== undefined
         ? { maxConditionalTopics: body.maxConditionalTopics }
+        : {}),
+      ...(body.fallbackTopicKeys !== undefined
+        ? { fallbackTopicKeys: body.fallbackTopicKeys }
+        : {}),
+      ...(body.checkTopicPreference !== undefined
+        ? { checkTopicPreference: body.checkTopicPreference }
         : {}),
     };
 

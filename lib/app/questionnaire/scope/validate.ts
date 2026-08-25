@@ -26,6 +26,7 @@ import { routedAllowanceSeconds } from '@/lib/app/questionnaire/scope/budget';
 import { checkScaleComparability } from '@/lib/app/questionnaire/scope/comparability';
 import {
   ALWAYS_PHASES,
+  LIGHT_DEPTH_MEMBER_COUNT,
   type AdaptiveScopeSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -144,6 +145,38 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         topicKey: topic.key,
         message: `"${topic.label}" is conditional but has no "include this when…" criteria, so the agent has nothing to judge it on.`,
       });
+    }
+    // Light depth on a topic EVERYONE gets does not sample — it deletes. `membersAtDepth`
+    // (scope/resolve.ts) applies depth to every phase, not just conditional ones, so the members it
+    // drops from an always-run topic are asked of nobody. Reported regardless of `enabled` for the
+    // same reason as the orphan check: before the switch this is advice, after it is a defect.
+    //
+    // Counted PER KIND because that is how `membersAtDepth` is applied — questions and data slots
+    // are each trimmed to LIGHT_DEPTH_MEMBER_COUNT separately (see graph.ts, "up to two of EACH
+    // kind"). A topic small enough that light and full are the same run is not a finding: the
+    // resolver early-returns on it, so flagging it would be noise on a setting that changed nothing.
+    if (ALWAYS_PHASES.includes(topic.phase) && topic.depth === 'light') {
+      const droppedQuestions = Math.max(
+        0,
+        topic.members.questionKeys.length - LIGHT_DEPTH_MEMBER_COUNT
+      );
+      const droppedSlots = Math.max(
+        0,
+        topic.members.dataSlotKeys.length - LIGHT_DEPTH_MEMBER_COUNT
+      );
+      if (droppedQuestions > 0 || droppedSlots > 0) {
+        const asked = Math.min(topic.members.questionKeys.length, LIGHT_DEPTH_MEMBER_COUNT);
+        const total = topic.members.questionKeys.length;
+        issues.push({
+          severity: settings.enabled ? 'error' : 'warning',
+          code: 'light_depth_on_always_topic',
+          topicKey: topic.key,
+          message:
+            topic.phase === 'opening'
+              ? `"${topic.label}" is the opening, but it is set to Light depth — so it asks only ${asked} of its ${total} questions. The opening is what the agent works out the rest of the interview from, so sampling it means deciding what to ask from half the answers. Set it to Full depth.`
+              : `"${topic.label}" is asked of everyone, but it is set to Light depth — so ${droppedQuestions > 0 ? `${droppedQuestions} of its ${total} questions are` : 'some of its data slots are'} never asked, of anyone. Set it to Full depth, or move what you do not need into a conditional topic.`,
+        });
+      }
     }
   }
 
