@@ -9,10 +9,12 @@ not-applicable, and any long instrument that should not ask all of itself to eve
 same requirement — and before P17 the only way to express it was to split the questionnaire into
 several, which costs cross-section scoring and cohort analysis.
 
-> **Status:** F17.1–F17.17 shipped — the model, the runtime, the planner, the authoring
+> **Status:** F17.1–F17.24 shipped — the model, the runtime, the planner, the authoring
 > surface, the Routing Analyst, report/scoring awareness, respondent amendment, the plan preview,
-> routing-quality analytics and the opening's follow-up allowance. The pilot client instrument
-> itself is not built: it needs its source workbook, which is not in this repo.
+> routing-quality analytics, the opening's follow-up allowance, the scope judge panel (F17.21),
+> and the defect fixes the first real imported instrument exposed (F17.23).
+>
+> Remaining: the tab itself is still one long stack, and F17.24 is the first phase of splitting it.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
 
