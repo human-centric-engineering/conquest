@@ -165,6 +165,17 @@ export const NOT_EXEMPT_DESPITE_COVERAGE_EXCLUSION: ReadonlyArray<{
       'because it needs no test — it has three.',
   },
   {
+    pattern: 'scripts/db/!(*-assertions).ts',
+    reason:
+      'coverage skips `scripts/db/check-drift.ts` because it probes a live ' +
+      'database and nothing imports it, so its 0% is structural. 4f still ' +
+      'asks, and should: most of the drift primitives it drives live in ' +
+      '`lib/db/drift-probes.ts` and are tested there, but not all — ' +
+      '`englishTsConfigExists` is defined in the excluded file itself, and ' +
+      'there is no `tests/unit/scripts/db/` at all. If a probe script grows ' +
+      'pure logic of its own, the `*-assertions.ts` convention keeps it gated.',
+  },
+  {
     pattern: 'scripts/smoke/!(*-assertions).ts',
     reason:
       'coverage skips the harnesses because vitest never executes these ' +

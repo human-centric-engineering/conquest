@@ -137,6 +137,79 @@ export function changedPaths(base: string, cwd: string): { paths: string[]; fail
   };
 }
 
+/**
+ * The changed paths this branch actually **authored**, which is what the
+ * per-file coverage floor is entitled to ask about.
+ *
+ * {@link changedPaths} answers "what does this branch touch" and is right for
+ * test *selection*: a sync merge really can break upstream's tests, and those
+ * tests should run. It is the wrong question for the coverage *floor*, which
+ * asks "is what you changed tested". On a sync merge the answer is that the
+ * fork changed nothing — every file in the diff was written upstream — so the
+ * floor was demanding a fork either fail its own gate or write tests for
+ * platform code it does not own, and `CUSTOMIZATION.md` asks it to do neither
+ * (#671).
+ *
+ * Measured on this tree at the time of writing: a fork syncing from v0.9.0 hit
+ * 6 such files, from v0.7.0 about 15, from v0.5.0 about 16 — the count grows
+ * with the distance from the fork point, so the friction is worst for exactly
+ * the forks with the most merging to do.
+ *
+ * Authorship is read off git's own history rather than inferred: the diff of
+ * the branch's **first-parent line**, with merges shown as
+ * `--diff-merges=dense-combined`. That combination is doing two jobs:
+ *
+ * - An ordinary commit contributes its files, so a feature branch authors all
+ *   of its work and is gated exactly as strictly as before.
+ * - A merge contributes only the hunks that differ from **every** parent —
+ *   i.e. **conflict resolutions**, and nothing either side merely brought
+ *   along. A clean sync merge therefore authors nothing, while a sync merge
+ *   whose conflicts were resolved by hand authors exactly those resolutions.
+ *
+ * That second case is the reason `--no-merges` is wrong here, and it is not a
+ * corner: hand-resolved conflict hunks are the one part of a sync a fork
+ * really does write, they exist in no other commit, and they are the most
+ * likely part of the merge to be wrong. Exempting them would have been the
+ * worst possible exemption.
+ *
+ * Staged and working-tree files are always included — uncommitted work is by
+ * definition yours.
+ *
+ * **Known trade-off.** Writing code on one branch and merging it into another
+ * before opening the PR moves those files out of the floor's reach, because a
+ * clean merge of your own branch resolves nothing. That is deliberate evasion
+ * rather than something anyone does by accident — but note it is not caught
+ * downstream either: no CI job runs coverage (`test-full` and `test-changed`
+ * both run plain `vitest run`), so this floor is the only thing that applies
+ * it, and what it skips is skipped. The alternative was a gate that is wrong
+ * for every fork on every sync, which is a cost paid constantly by people who
+ * did nothing wrong.
+ */
+export function authoredPaths(base: string, cwd: string): { paths: string[]; failed: boolean } {
+  const quiet = ['-C', cwd, '-c', 'core.quotePath=false'];
+  const authored = git([
+    ...quiet,
+    'log',
+    '--first-parent',
+    // Not `--no-merges`: that drops hand-resolved conflict hunks, which are
+    // the one thing a fork authors during a sync. `dense-combined` shows a
+    // merge as only what differs from all parents.
+    '--diff-merges=dense-combined',
+    '--name-only',
+    '--pretty=format:',
+    `${base}..HEAD`,
+  ]);
+  if (authored === null) return { paths: [], failed: true };
+  const staged = git([...quiet, 'diff', '--cached', '--name-only']);
+  if (staged === null) return { paths: [], failed: true };
+  const working = git([...quiet, 'ls-files', '--others', '--modified', '--exclude-standard']);
+  if (working === null) return { paths: [], failed: true };
+  return {
+    paths: [...new Set([...lines(authored), ...lines(staged), ...lines(working)])].sort(),
+    failed: false,
+  };
+}
+
 /** The vitest CLI entry point, or `null` if dependencies are not installed. */
 export function vitestEntry(root: string): string | null {
   const entry = resolve(root, 'node_modules/vitest/vitest.mjs');
@@ -329,11 +402,32 @@ export function main(
   const alwaysRun = alwaysRunPaths().filter((path) => existsSync(resolve(root, path)));
   const missingAlways = alwaysRunPaths().filter((path) => !alwaysRun.includes(path));
 
+  // The floor lands on what this branch authored, not on what a merge dragged
+  // in — see `authoredPaths`. Selection above still uses the full diff, so a
+  // sync merge runs every test it can affect; only the 80% floor narrows.
+  //
+  // If git cannot answer, gate the full diff as before. That is the stricter
+  // reading, and a gate that quietly stops gating is worse than one that asks
+  // too much.
+  let gateable = paths;
+  let notAuthored = 0;
+  if (wantsCoverage) {
+    const authored = authoredPaths(base, root);
+    if (authored.failed) {
+      console.warn(`Could not tell which files this branch authored (${lastGitError}).`);
+      console.warn('Holding every changed file to the coverage floor, which may over-ask.');
+    } else {
+      const authoredSet = new Set(authored.paths);
+      gateable = paths.filter((path) => authoredSet.has(path));
+      notAuthored = paths.length - gateable.length;
+    }
+  }
+
   // Deleted paths are in the diff and must not be gated: `--coverage.include`
   // for a file that no longer exists matches nothing, so it would inflate the
   // printed count while gating nothing.
   const coverage = wantsCoverage
-    ? coverageTargets(paths).filter((path) => existsSync(resolve(root, path)))
+    ? coverageTargets(gateable).filter((path) => existsSync(resolve(root, path)))
     : [];
 
   // Refuse rather than filter, and only for the paths that actually become
@@ -358,8 +452,14 @@ export function main(
   // coverage gate, so applying it to a plain `test:changed` bricked the run
   // over an unrelated repo file with a tab in its name and no gate to drop out
   // of — a refusal wider than its own reason.
+  //
+  // `gateable`, not `paths`: the justification is that these drop out of the
+  // coverage gate in silence, and a file this branch did not author no longer
+  // enters that gate at all. Left on `paths`, a sync merge that merely carried
+  // in a filename containing a tab would abort the whole run for a reason that
+  // no longer applied to it.
   const quotedSources = wantsCoverage
-    ? paths.filter(
+    ? gateable.filter(
         (path) => path.startsWith('"') && (path.endsWith('.ts"') || path.endsWith('.tsx"'))
       )
     : [];
@@ -390,6 +490,11 @@ export function main(
 
   console.log(`Scoped run vs ${base}`);
   console.log(`  changed paths     ${paths.length}`);
+  if (notAuthored > 0) {
+    console.log(
+      `  not authored here ${notAuthored} (from a merge — not held to the coverage floor)`
+    );
+  }
   console.log(`  tests selected    ${selection.files.length} by module graph`);
   console.log(`  always-run added  ${alwaysRun.length - countOverlap(selection.files, alwaysRun)}`);
   console.log(`  test files to run ${total}`);
@@ -404,7 +509,11 @@ export function main(
     );
     console.log("                    (vitest.config.ts's coverage.exclude may drop some)");
     if (coverage.length === 0) {
-      console.log('    (no TypeScript sources changed — nothing to gate)');
+      console.log(
+        notAuthored > 0
+          ? '    (no TypeScript sources authored on this branch — nothing to gate)'
+          : '    (no TypeScript sources changed — nothing to gate)'
+      );
     }
   }
 
