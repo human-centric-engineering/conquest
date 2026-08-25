@@ -507,6 +507,15 @@ export const API = {
        */
       versionTopics: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics`,
+      /**
+       * A version's source documents (GET list, POST attach a supporting one). The instrument
+       * itself is written by ingest / re-ingest and cannot be posted here.
+       */
+      versionDocuments: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/documents`,
+      /** One attached supporting document (DELETE detaches it; the instrument is refused). */
+      versionDocument: (id: string, versionId: string, documentId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/documents/${documentId}`,
       /** Run the Routing Analyst over a version (POST → SSE: reading → analysing → saving → done). */
       versionTopicsAnalyseStream: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/analyse/stream`,

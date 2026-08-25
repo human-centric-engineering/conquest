@@ -1218,6 +1218,32 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
 };
 
 /* -------------------------------------------------------------------------- */
+/* Source documents — what a version was built from, and what was attached to it */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What one `AppQuestionnaireSourceDocument` row IS.
+ *
+ * - `primary` — the document the version's structure was extracted from. Re-ingest appends a newer
+ *   one rather than replacing the row, so "the current document" is the NEWEST primary; an older
+ *   one describes an instrument that is no longer the one being asked.
+ * - `supplementary` — a companion an admin attached afterwards for context: the routing memo that
+ *   arrived beside the question bank, the eligibility appendix that was a separate file. It never
+ *   touches the extracted structure, and only the Routing Analyst reads it.
+ */
+export const SOURCE_DOCUMENT_ROLES = ['primary', 'supplementary'] as const;
+export type SourceDocumentRole = (typeof SOURCE_DOCUMENT_ROLES)[number];
+
+/**
+ * How many supplementary documents one version may carry.
+ *
+ * A bound rather than a judgement about instruments: every one of these is read in full by the
+ * analyst, and the failure mode of an unbounded list is a silently truncated prompt — the analyst
+ * reporting confidently on an instrument whose routing page it never saw.
+ */
+export const MAX_SUPPLEMENTARY_DOCUMENTS = 5;
+
+/* -------------------------------------------------------------------------- */
 /* Conditional Topics — ingestion-time candidacy detection (P17.19)               */
 /* -------------------------------------------------------------------------- */
 

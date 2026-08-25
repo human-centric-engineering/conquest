@@ -35,6 +35,8 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireVersion: { findUnique: vi.fn() },
     // `findFirst` looks for a SUCCEEDED analyst run; `count` counts failed ones (F17.22 Phase 3).
     appAiRun: { findFirst: vi.fn(), count: vi.fn() },
+    // F17.29: the documents the analyst will read, listed in the same payload.
+    appQuestionnaireSourceDocument: { findMany: vi.fn() },
   },
 }));
 
@@ -190,6 +192,7 @@ beforeEach(() => {
   });
   (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
   (prisma.appAiRun.count as Mock).mockResolvedValue(0);
+  (prisma.appQuestionnaireSourceDocument.findMany as Mock).mockResolvedValue([]);
 });
 
 // ─── GET ──────────────────────────────────────────────────────────────────────

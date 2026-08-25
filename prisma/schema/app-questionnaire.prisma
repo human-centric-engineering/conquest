@@ -571,6 +571,13 @@ model AppQuestionnaireExtractionChange {
 model AppQuestionnaireSourceDocument {
   id            String   @id @default(cuid())
   versionId     String
+  // SourceDocumentRole (constants.ts): "primary" | "supplementary". A primary row is the document
+  // the version's structure was extracted FROM — re-ingest appends a newer one that supersedes it,
+  // which is why readers take the newest primary rather than the newest row. A supplementary row is
+  // a companion an admin attached for context (a routing memo beside a question bank); it never
+  // touches the extracted structure and is read only by the Routing Analyst. Defaults "primary",
+  // so every row written before this field existed keeps its old meaning exactly.
+  role          String   @default("primary")
   fileName      String
   fileHash      String // sha256 of the raw bytes
   byteSize      Int

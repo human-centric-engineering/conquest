@@ -96,31 +96,95 @@ describe('buildRoutingAnalysisPrompt', () => {
     expect(content).not.toContain('null');
   });
 
-  it('marks the source document for the analyst to read first, and names the file', () => {
+  it('marks the instrument for the analyst to read first, and names the file', () => {
     const content = userContent(
       buildRoutingAnalysisPrompt({
         questions: QUESTIONS,
-        documentText: 'Only ask the Partner Channel section if they sell through resellers.',
-        documentFileName: 'channel-instrument.pdf',
+        documents: [
+          {
+            role: 'primary',
+            fileName: 'channel-instrument.pdf',
+            text: 'Only ask the Partner Channel section if they sell through resellers.',
+          },
+        ],
       })
     );
-    expect(content).toContain(
-      "SOURCE DOCUMENT (channel-instrument.pdf) — read the author's guidance in it first:"
-    );
+    expect(content).toContain('THE INSTRUMENT (channel-instrument.pdf)');
+    expect(content).toContain("Read the author's guidance in it first:");
     expect(content).toContain(
       'Only ask the Partner Channel section if they sell through resellers.'
     );
   });
 
-  it('still marks the document section when no filename is known', () => {
+  it('still marks the instrument when no filename is known', () => {
     const content = userContent(
       buildRoutingAnalysisPrompt({
         questions: QUESTIONS,
-        documentText: 'Route by company size.',
+        documents: [{ role: 'primary', text: 'Route by company size.' }],
       })
     );
-    expect(content).toContain("SOURCE DOCUMENT — read the author's guidance in it first:");
-    expect(content).not.toContain('SOURCE DOCUMENT (');
+    expect(content).toContain('THE INSTRUMENT —');
+    expect(content).not.toContain('THE INSTRUMENT (');
+  });
+
+  it('says what a supporting document IS, and forbids inventing question keys from it', () => {
+    // An analyst shown two documents with the same header has no way to tell guidance about an
+    // instrument from a second instrument, and will happily propose topics for questions that do
+    // not exist.
+    const content = userContent(
+      buildRoutingAnalysisPrompt({
+        questions: QUESTIONS,
+        documents: [
+          { role: 'primary', fileName: 'bank.md', text: 'Q1. How many partners?' },
+          { role: 'supplementary', fileName: 'routing-memo.md', text: 'Resellers only.' },
+        ],
+      })
+    );
+    expect(content).toContain('SUPPORTING DOCUMENT (routing-memo.md)');
+    expect(content).toContain('It carries guidance, not questions.');
+    expect(content).toContain('never invent a question key from it');
+    // The contradiction rule is the restraint half: report it, do not resolve it quietly.
+    expect(content).toContain('report the disagreement in "gaps"');
+  });
+
+  it('says a supporting document was cut short, so nothing is quoted across the seam', () => {
+    const content = userContent(
+      buildRoutingAnalysisPrompt({
+        questions: QUESTIONS,
+        documents: [
+          { role: 'supplementary', fileName: 'long-memo.md', text: 'Part one…', truncated: true },
+        ],
+      })
+    );
+    expect(content).toContain('CUT SHORT where marked');
+    expect(content).toContain('did not see all of it');
+  });
+
+  it('names a supporting document it could not afford to show, rather than hiding it', () => {
+    // Silence here would be the worst outcome: the analyst reports confidently on an instrument
+    // whose routing page it never saw, and nothing in the proposal says so.
+    const content = userContent(
+      buildRoutingAnalysisPrompt({
+        questions: QUESTIONS,
+        documents: [{ role: 'supplementary', fileName: 'overflow.md', text: '', omitted: true }],
+      })
+    );
+    expect(content).toContain('SUPPORTING DOCUMENT (overflow.md)');
+    expect(content).toContain('NOT shown to you');
+    expect(content).toContain('your reading of this instrument is incomplete');
+  });
+
+  it('does not mention supporting documents when there are none', () => {
+    // The instrument-only prompt is what every version before F17.29 sent, and most versions still
+    // send. A paragraph of rules about companion documents on a version that has none is spend.
+    const content = userContent(
+      buildRoutingAnalysisPrompt({
+        questions: QUESTIONS,
+        documents: [{ role: 'primary', fileName: 'only.md', text: 'One file.' }],
+      })
+    );
+    expect(content).not.toContain('SUPPORTING DOCUMENT');
+    expect(content).not.toContain('describe ONE instrument between them');
   });
 
   it('tells the analyst plainly when no document is attached, rather than omitting the section', () => {

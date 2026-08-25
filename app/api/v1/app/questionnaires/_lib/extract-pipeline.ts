@@ -228,30 +228,21 @@ export async function parseAndGuardUpload(
 }
 
 /**
- * Steps 10–13 of the ingest pipeline: parse the document to text, detect a
- * scanned/empty upload, load the extractor agent, dispatch the extraction
- * capability, and run the coherence pre-check. Returns the validated extractor
- * output plus the parsed document (the caller needs its title/pageInfo/warnings/
- * fullText for the source-document row). Maps every failure to the exact
- * status/envelope the inline F1.1 route returned.
+ * Parse a guarded upload to text, rejecting a document with nothing in it to read.
+ *
+ * Steps 10–11 of the ingest pipeline, lifted out so the two callers that need TEXT without an
+ * extraction can have it: {@link extractFromDocument} below, and the supplementary-document attach
+ * route, which stores a companion file's text for the Routing Analyst and never touches structure.
+ *
+ * Every failure keeps the exact status and envelope the ingest route has always returned —
+ * `PARSE_FAILED`, `SCANNED_DOCUMENT`, `EMPTY_DOCUMENT` — because those codes are what the upload
+ * dialog already knows how to explain.
  */
-export async function extractFromDocument(
+export async function parseUploadToText(
   upload: GuardedUpload,
-  ctx: {
-    adminId: string;
-    log: RouteLogger;
-    /**
-     * Optional live "questions so far" sink. When present (the streaming ingest
-     * route), the extractor runs its first pass STREAMED and reports a rising
-     * count through this callback; absent (non-streaming ingest / re-ingest), the
-     * extractor keeps its single blocking call. Rides the dispatcher's
-     * `entityContext` seam — see {@link ExtractionProgressSink}.
-     */
-    onExtractionProgress?: ExtractionProgressSink;
-  }
-): Promise<PipelineResult<ExtractedDocument>> {
-  const { file, buffer, adminMeta, extractTables } = upload;
-  const { adminId, log, onExtractionProgress } = ctx;
+  log: RouteLogger
+): Promise<PipelineResult<Awaited<ReturnType<typeof parseDocument>>>> {
+  const { file, buffer, extractTables } = upload;
   const fileExt = getExtension(file.name);
 
   let parsed: Awaited<ReturnType<typeof parseDocument>>;
@@ -280,15 +271,14 @@ export async function extractFromDocument(
 
   // Scanned / empty detection. A scanned PDF yields no extractable text — distinct
   // from a genuinely empty file so the admin knows OCR is the missing step.
-  const ext = fileExt;
   const hasNoText = parsed.fullText.trim().length === 0;
   const pdfAllPagesBlank =
-    ext === '.pdf' &&
+    fileExt === '.pdf' &&
     Array.isArray(parsed.pageInfo) &&
     parsed.pageInfo.length > 0 &&
     parsed.pageInfo.every((page) => !page.hasText);
   if (hasNoText || pdfAllPagesBlank) {
-    if (ext === '.pdf') {
+    if (fileExt === '.pdf') {
       return {
         ok: false,
         response: errorResponse('The PDF appears to be scanned — no extractable text', {
@@ -307,6 +297,39 @@ export async function extractFromDocument(
       }),
     };
   }
+
+  return { ok: true, value: parsed };
+}
+
+/**
+ * Steps 12–13 of the ingest pipeline: parse the document to text (via
+ * {@link parseUploadToText}), load the extractor agent, dispatch the extraction
+ * capability, and run the coherence pre-check. Returns the validated extractor
+ * output plus the parsed document (the caller needs its title/pageInfo/warnings/
+ * fullText for the source-document row). Maps every failure to the exact
+ * status/envelope the inline F1.1 route returned.
+ */
+export async function extractFromDocument(
+  upload: GuardedUpload,
+  ctx: {
+    adminId: string;
+    log: RouteLogger;
+    /**
+     * Optional live "questions so far" sink. When present (the streaming ingest
+     * route), the extractor runs its first pass STREAMED and reports a rising
+     * count through this callback; absent (non-streaming ingest / re-ingest), the
+     * extractor keeps its single blocking call. Rides the dispatcher's
+     * `entityContext` seam — see {@link ExtractionProgressSink}.
+     */
+    onExtractionProgress?: ExtractionProgressSink;
+  }
+): Promise<PipelineResult<ExtractedDocument>> {
+  const { file, adminMeta } = upload;
+  const { adminId, log, onExtractionProgress } = ctx;
+
+  const parseResult = await parseUploadToText(upload, log);
+  if (!parseResult.ok) return parseResult;
+  const parsed = parseResult.value;
 
   // Load the extractor agent — provider-agnostic binding + cost attribution.
   const agent = await prisma.aiAgent.findUnique({

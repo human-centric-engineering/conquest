@@ -63,3 +63,21 @@ export const PROBE_EVIDENCE_CHARS = 600;
 
 /** How many pieces of opening evidence to inline. */
 export const MAX_EVIDENCE_IN_PROBE_PROMPT = 20;
+
+/* -------------------------------------------------------------------------- */
+/* The Routing Analyst's document budget (F17.29)                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Total characters of SUPPLEMENTARY document text the analyst prompt may carry.
+ *
+ * The primary document is deliberately NOT bounded here: it is what every run before this one
+ * carried in full, and shrinking it would change the answer on versions nobody touched. The
+ * companions an admin attaches are new spend, so they get the budget — shared across all of them,
+ * oldest attachment first, because the earlier attachment is the one the admin has already seen the
+ * analyst act on.
+ */
+export const MAX_SUPPLEMENTARY_DOCUMENT_CHARS = 40_000;
+
+/** Marks where a supplementary document was cut, so the analyst never quotes across the seam. */
+export const SUPPLEMENTARY_TRUNCATION_MARKER = '\n\n[… document truncated to fit the budget …]';

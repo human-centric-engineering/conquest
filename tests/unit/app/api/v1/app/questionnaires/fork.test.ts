@@ -235,6 +235,8 @@ function sourceGraph() {
       },
     ],
     glossaryDocument: null,
+    // F17.29: the instrument and any companions fork with the version.
+    sourceDocuments: [],
   };
 }
 

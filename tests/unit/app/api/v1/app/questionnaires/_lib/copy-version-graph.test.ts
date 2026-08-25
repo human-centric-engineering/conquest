@@ -105,6 +105,9 @@ function buildTx() {
     appGlossaryDocument: {
       create: vi.fn(async () => ({ id: 'new-glossary-doc' })),
     },
+    appQuestionnaireSourceDocument: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
     $executeRawUnsafe: vi.fn(async () => 0),
   };
 }
@@ -171,6 +174,17 @@ const MINIMAL_SOURCE = {
     members: unknown;
     ordinal: number;
     source: string;
+  }>,
+  sourceDocuments: [] as Array<{
+    role: string;
+    fileName: string;
+    fileHash: string;
+    byteSize: number;
+    mimeType: string | null;
+    pageCount: number | null;
+    warnings: unknown;
+    extractedText: string;
+    createdAt: Date;
   }>,
   glossaryDocument: null as {
     fileName: string;
@@ -414,6 +428,7 @@ describe('copyVersionGraph — positive branches (tags + data slots)', () => {
       scoringSchema: null,
       glossaryTerms: [],
       glossaryDocument: null,
+      sourceDocuments: [],
       topics: [],
       tags: [
         {
@@ -908,6 +923,7 @@ describe('copyVersionGraph — glossary', () => {
         },
       ],
       glossaryDocument: null,
+      sourceDocuments: [],
     };
   }
 
@@ -1057,5 +1073,97 @@ describe('copyVersionGraph — glossary', () => {
       'sectionIdMap',
       'tagIdMap',
     ]);
+  });
+
+  describe('source documents (F17.29)', () => {
+    /** The rows the copy wrote, typed — the file's idiom for reading a `createMany` payload. */
+    function documentsWritten() {
+      return (tx.appQuestionnaireSourceDocument.createMany as Mock).mock.calls[0][0].data as Array<{
+        versionId: string;
+        role: string;
+        fileName: string;
+        pageCount?: number;
+        createdAt: Date;
+      }>;
+    }
+
+    function documentSource() {
+      return {
+        ...MINIMAL_SOURCE,
+        sourceDocuments: [
+          {
+            role: 'primary',
+            fileName: 'bank.md',
+            fileHash: 'hash-bank',
+            byteSize: 100,
+            mimeType: 'text/markdown',
+            pageCount: null,
+            warnings: null,
+            extractedText: 'Q1…',
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+          {
+            role: 'supplementary',
+            fileName: 'memo.md',
+            fileHash: 'hash-memo',
+            byteSize: 50,
+            mimeType: null,
+            pageCount: 2,
+            warnings: [{ code: 'x' }],
+            extractedText: 'Owners only.',
+            createdAt: new Date('2026-02-01T00:00:00.000Z'),
+          },
+        ],
+      };
+    }
+
+    it('carries both roles onto the fork', async () => {
+      // Before this, documents did not fork at all — and the consequence was silent: the Routing
+      // Analyst, whose whole job is to read the author's own guidance, had none to read on any
+      // forked version and reported `fromDocument: false`.
+      tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(documentSource());
+
+      await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+      const data = documentsWritten();
+      expect(data.map((d) => [d.role, d.fileName])).toEqual([
+        ['primary', 'bank.md'],
+        ['supplementary', 'memo.md'],
+      ]);
+      expect(data.every((d) => d.versionId === 'tgt-v')).toBe(true);
+    });
+
+    it('copies createdAt verbatim — the readers order by it', async () => {
+      // "Newest primary" is the current instrument and supplementary rows are budgeted
+      // oldest-first. Re-stamping every row with the fork's timestamp keeps the rows and loses the
+      // order that gives them meaning.
+      tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(documentSource());
+
+      await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+      const data = documentsWritten();
+      expect(data[0]?.createdAt).toEqual(new Date('2026-01-01T00:00:00.000Z'));
+      expect(data[1]?.createdAt).toEqual(new Date('2026-02-01T00:00:00.000Z'));
+    });
+
+    it('omits the optional columns a row left null', async () => {
+      tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(documentSource());
+
+      await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+      const [primary, supplementary] = documentsWritten();
+      expect(primary).not.toHaveProperty('pageCount');
+      expect(primary).not.toHaveProperty('warnings');
+      expect(supplementary).not.toHaveProperty('mimeType');
+      expect(supplementary?.pageCount).toBe(2);
+    });
+
+    it('writes nothing when the version was never built from a document', async () => {
+      tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(MINIMAL_SOURCE);
+
+      await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+      expect(tx.appQuestionnaireSourceDocument.createMany).not.toHaveBeenCalled();
+    });
   });
 });

@@ -139,6 +139,7 @@ const INPUT = {
   questions: [{ key: 'q1', prompt: 'How connected do you feel to your higher self?' }],
   dataSlots: [{ key: 'ds1', name: 'Mood' }],
   existingTopics: [EXISTING_TOPIC],
+  documents: [],
 };
 
 const ANALYSIS = {
@@ -326,8 +327,13 @@ describe('POST …/topics/analyse/stream — the run', () => {
   it('mentions the uploaded document in the reading phase when one is attached', async () => {
     (buildRoutingAnalysisInput as Mock).mockResolvedValue({
       ...INPUT,
-      documentText: 'Routing: ask about stress only when raised.',
-      documentFileName: 'instructions.pdf',
+      documents: [
+        {
+          role: 'primary',
+          fileName: 'instructions.pdf',
+          text: 'Routing: ask about stress only when raised.',
+        },
+      ],
     });
 
     await invoke();
@@ -335,7 +341,27 @@ describe('POST …/topics/analyse/stream — the run', () => {
     expect(events[0].message).toContain('your uploaded document');
 
     const [, args] = (capabilityDispatcher.dispatch as Mock).mock.calls[0];
-    expect(args).toMatchObject({ documentFileName: 'instructions.pdf' });
+    expect(args).toMatchObject({
+      documents: [expect.objectContaining({ fileName: 'instructions.pdf' })],
+    });
+  });
+
+  it('counts the supporting documents in the reading phase, so the spend is not a surprise', async () => {
+    // An admin who attached two memos and watches "Reading 12 questions and your uploaded
+    // document…" has no way to tell whether the attach actually took.
+    (buildRoutingAnalysisInput as Mock).mockResolvedValue({
+      ...INPUT,
+      documents: [
+        { role: 'primary', fileName: 'bank.md', text: 'Q1…' },
+        { role: 'supplementary', fileName: 'memo-a.md', text: 'Owners only.' },
+        { role: 'supplementary', fileName: 'memo-b.md', text: 'Skip Part C.' },
+      ],
+    });
+
+    await invoke();
+    const events = await drain();
+
+    expect(events[0].message).toContain('2 supporting documents');
   });
 
   it('says no document is attached when none is', async () => {

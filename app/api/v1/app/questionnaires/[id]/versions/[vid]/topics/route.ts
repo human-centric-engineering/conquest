@@ -57,6 +57,7 @@ import {
   replaceTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import { listSourceDocuments } from '@/app/api/v1/app/questionnaires/_lib/source-documents';
 import {
   loadCachedCandidacyVerdict,
   resolveAutoTriggerPending,
@@ -129,19 +130,23 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
 
     // Settings first: the key inventory prices itself against this version's per-type overrides.
     const settings = await loadConditionalTopicsSettings(vid);
-    const [topics, inventory, draft, scoring, maxDataSlotAttempts, candidacy] = await Promise.all([
-      loadTopics(vid),
-      loadKeyInventory(vid, settings),
-      loadTopicDraft(vid),
-      // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
-      // `null` for the versions that do not score, which is most of them.
-      loadScoringSchemaContent(vid),
-      // For the opening follow-up checks (G03) — the per-slot re-ask cap the allowance sits under.
-      loadMaxDataSlotAttempts(vid),
-      // F17.19 Phase 3: the ingestion-time candidacy verdict — independent of everything else
-      // above, so it rides this same batch rather than paying a second serial round-trip.
-      loadCachedCandidacyVerdict(vid),
-    ]);
+    const [topics, inventory, draft, scoring, maxDataSlotAttempts, candidacy, documents] =
+      await Promise.all([
+        loadTopics(vid),
+        loadKeyInventory(vid, settings),
+        loadTopicDraft(vid),
+        // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
+        // `null` for the versions that do not score, which is most of them.
+        loadScoringSchemaContent(vid),
+        // For the opening follow-up checks (G03) — the per-slot re-ask cap the allowance sits under.
+        loadMaxDataSlotAttempts(vid),
+        // F17.19 Phase 3: the ingestion-time candidacy verdict — independent of everything else
+        // above, so it rides this same batch rather than paying a second serial round-trip.
+        loadCachedCandidacyVerdict(vid),
+        // F17.29: the documents the analyst will read. Metadata only — the card above the topic list
+        // names them, and a second fetch for at most six filenames is a round-trip for nothing.
+        listSourceDocuments(vid),
+      ]);
 
     // The time arithmetic (C7), computed here for the same reason `issues` is: one implementation,
     // so the number an author reads and the number the planner works to cannot disagree.
@@ -209,6 +214,7 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
         totalDataSlots: allDataSlotKeys.length,
         uncoveredDataSlots: uncoveredDataSlotKeys(topics, allDataSlotKeys).length,
       },
+      documents,
     });
   }
 );

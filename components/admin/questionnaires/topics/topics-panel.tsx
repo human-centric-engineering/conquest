@@ -23,6 +23,7 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
+import { SupportingDocumentsCard } from '@/components/admin/questionnaires/topics/supporting-documents-card';
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
@@ -336,6 +337,15 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             runRequest={analystRequest}
             onRunHandled={() => setAnalystRequest(null)}
             onTurnGapIntoTopic={turnGapIntoTopic}
+            disabled={busy}
+          />
+          {/* Directly under the analyst, because this is the analyst's input and nothing else's:
+              an admin who has just read "no routing guidance found in the document" is one line
+              away from the reason — the memo that guidance lives in was never attached. */}
+          <SupportingDocumentsCard
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            documents={payload.documents}
             disabled={busy}
           />
           <section className="space-y-3">

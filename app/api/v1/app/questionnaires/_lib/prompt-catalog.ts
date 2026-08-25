@@ -487,9 +487,18 @@ const ROUTING_ANALYST: PromptAgentCatalogEntry = {
               { key: 'q2', prompt: '{{ question 2 }}' },
             ],
             dataSlots: [{ key: 'slot_1', name: '{{ data slot 1 }}', theme: '{{ theme }}' }],
-            documentText:
-              '{{ text extracted from the uploaded document — its routing/eligibility guidance }}',
-            documentFileName: '{{ uploaded-file }}',
+            documents: [
+              {
+                role: 'primary',
+                fileName: '{{ uploaded-file }}',
+                text: '{{ text extracted from the uploaded document — its routing/eligibility guidance }}',
+              },
+              {
+                role: 'supplementary',
+                fileName: '{{ attached-routing-memo }}',
+                text: '{{ text of a companion document an admin attached beside the instrument }}',
+              },
+            ],
           })
         ),
     }),

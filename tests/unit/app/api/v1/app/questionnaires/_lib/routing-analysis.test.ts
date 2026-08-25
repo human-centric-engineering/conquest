@@ -66,7 +66,13 @@ const INPUT = {
   questions: [{ key: 'q1', prompt: 'How is pipeline?' }],
   dataSlots: [],
   existingTopics: [],
-  documentText: 'Only ask Section 6 of franchise owners.',
+  documents: [
+    {
+      role: 'primary' as const,
+      fileName: 'franchise-review.md',
+      text: 'Only ask Section 6 of franchise owners.',
+    },
+  ],
 };
 
 /** What the analyst capability returns — one conditional topic, one always-run topic. */
@@ -158,13 +164,44 @@ describe('dispatchRoutingAnalysis', () => {
 
     await dispatchRoutingAnalysis({
       ...BASE,
-      input: { goal: INPUT.goal, questions: INPUT.questions, dataSlots: [], existingTopics: [] },
+      input: {
+        goal: INPUT.goal,
+        questions: INPUT.questions,
+        dataSlots: [],
+        existingTopics: [],
+        documents: [],
+      },
       log: log as never,
     });
 
     const args = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1];
-    expect(args).not.toHaveProperty('documentText');
-    expect(args).not.toHaveProperty('documentFileName');
+    expect(args).not.toHaveProperty('documents');
+  });
+
+  it('sends the instrument and its supporting documents together', async () => {
+    // The whole point of F17.29: an instrument delivered as a question bank plus a separate routing
+    // memo used to reach the analyst as whichever file was uploaded last.
+    const log = makeLog();
+
+    await dispatchRoutingAnalysis({
+      ...BASE,
+      input: {
+        ...INPUT,
+        documents: [
+          ...INPUT.documents,
+          { role: 'supplementary' as const, fileName: 'routing-memo.md', text: 'Owners only.' },
+        ],
+      },
+      log: log as never,
+    });
+
+    const args = (capabilityDispatcher.dispatch as Mock).mock.calls[0][1] as {
+      documents: { role: string; fileName: string }[];
+    };
+    expect(args.documents.map((d) => [d.role, d.fileName])).toEqual([
+      ['primary', 'franchise-review.md'],
+      ['supplementary', 'routing-memo.md'],
+    ]);
   });
 
   it('falls back to a generic code and message when the dispatch reports neither', async () => {

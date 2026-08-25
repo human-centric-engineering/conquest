@@ -23,6 +23,11 @@ import {
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { TOPIC_SELECT, toTopic } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import type { RoutingAnalysisDocument } from '@/lib/app/questionnaire/scope/analysis-prompt';
+import {
+  MAX_SUPPLEMENTARY_DOCUMENT_CHARS,
+  SUPPLEMENTARY_TRUNCATION_MARKER,
+} from '@/lib/app/questionnaire/scope/constants';
 
 /** The version's pending proposal, or null when there is none (or it no longer parses). */
 export async function loadTopicDraft(versionId: string): Promise<ProposedTopicSet | null> {
@@ -173,17 +178,26 @@ export interface RoutingAnalysisRouteInput {
   audience?: unknown;
   questions: { key: string; prompt: string; sectionTitle?: string }[];
   dataSlots: { key: string; name: string; theme?: string }[];
-  documentText?: string;
-  documentFileName?: string;
+  /** The current instrument first, then any companion documents, in attachment order. */
+  documents: RoutingAnalysisDocument[];
   existingTopics: Topic[];
 }
 
 /**
  * Assemble the analyst's input from the version.
  *
- * The source document is the **newest** one on the version, not the first: re-ingest adds a row
+ * The instrument is the **newest primary** document, not the newest row: re-ingest adds a row
  * rather than replacing it, and an analyst reading the superseded upload would propose routing for
  * an instrument that is no longer the one being asked.
+ *
+ * Beside it travel the version's **supplementary** documents — companions an admin attached because
+ * the instrument arrived as more than one file (a question bank plus a separate routing memo). They
+ * are ordered oldest-first, which is attachment order, and share one character budget; a document
+ * that does not fit is cut with a marked seam rather than dropped silently, because a routing rule
+ * that vanished without trace is exactly the failure this is meant to end.
+ *
+ * The budget covers the companions only. The primary document is passed in full, as it always has
+ * been — bounding it here would change what the analyst proposes on versions nobody has touched.
  */
 export async function buildRoutingAnalysisInput(
   questionnaireId: string,
@@ -204,8 +218,7 @@ export async function buildRoutingAnalysisInput(
       dataSlots: { orderBy: { ordinal: 'asc' }, select: { key: true, name: true, theme: true } },
       sourceDocuments: {
         orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: { fileName: true, extractedText: true },
+        select: { fileName: true, extractedText: true, role: true },
       },
       topics: { orderBy: { ordinal: 'asc' }, select: TOPIC_SELECT },
     },
@@ -221,8 +234,6 @@ export async function buildRoutingAnalysisInput(
   );
   if (questions.length === 0) return null;
 
-  const document = version.sourceDocuments[0];
-
   return {
     goal: version.goal,
     audience: version.audience ?? undefined,
@@ -232,9 +243,58 @@ export async function buildRoutingAnalysisInput(
       name: slot.name,
       ...(slot.theme ? { theme: slot.theme } : {}),
     })),
-    ...(document
-      ? { documentText: document.extractedText, documentFileName: document.fileName }
-      : {}),
+    documents: selectAnalystDocuments(version.sourceDocuments),
     existingTopics: version.topics.map(toTopic),
   };
+}
+
+/** One source-document row, as much of it as {@link selectAnalystDocuments} needs. */
+type SourceDocumentRow = { fileName: string; extractedText: string; role: string };
+
+/**
+ * Choose and budget the documents the analyst reads: the newest primary, then every supplementary
+ * one in attachment order, truncated as a set.
+ *
+ * Rows arrive newest-first (the query's `orderBy`). A version whose rows all predate the `role`
+ * column reads exactly as it did before — they default to `primary`, so the first row is the newest
+ * primary and there is nothing else to add.
+ */
+export function selectAnalystDocuments(
+  rows: readonly SourceDocumentRow[]
+): RoutingAnalysisDocument[] {
+  const documents: RoutingAnalysisDocument[] = [];
+
+  const primary = rows.find((row) => row.role !== 'supplementary');
+  if (primary) {
+    documents.push({ role: 'primary', fileName: primary.fileName, text: primary.extractedText });
+  }
+
+  // Oldest-first: the companion attached first is the one the admin has already seen the analyst
+  // act on, so it is the one that keeps its text when the budget runs out.
+  const supplementary = rows.filter((row) => row.role === 'supplementary').reverse();
+
+  let remaining = MAX_SUPPLEMENTARY_DOCUMENT_CHARS;
+  for (const row of supplementary) {
+    if (remaining <= 0) {
+      documents.push({
+        role: 'supplementary',
+        fileName: row.fileName,
+        text: '',
+        omitted: true,
+      });
+      continue;
+    }
+    const truncated = row.extractedText.length > remaining;
+    documents.push({
+      role: 'supplementary',
+      fileName: row.fileName,
+      text: truncated
+        ? row.extractedText.slice(0, remaining) + SUPPLEMENTARY_TRUNCATION_MARKER
+        : row.extractedText,
+      ...(truncated ? { truncated: true } : {}),
+    });
+    remaining -= row.extractedText.length;
+  }
+
+  return documents;
 }

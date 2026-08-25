@@ -431,6 +431,51 @@ It is a **proposer**. Everything lands in `AppQuestionnaireTopicDraft` for revie
 contract as `AppDataSlotDraft`. The analysis route does **not** fork a launched version (a proposal
 is inert); the accept does.
 
+### The documents it reads — the instrument, and its companions (F17.29)
+
+An instrument does not always arrive as one file. A question bank plus a separate routing memo used
+to be inexpressible: the only way to put a second document on a version was a **re-ingest**, which
+replaces the structure extracted from the first. So the analyst read the memo and lost the
+questions, or read the questions and never saw the routing rules it exists to find.
+
+`AppQuestionnaireSourceDocument.role` now says what each row IS:
+
+| Role            | Written by                        | What it means                                                    |
+| --------------- | --------------------------------- | ---------------------------------------------------------------- |
+| `primary`       | ingest / re-ingest                | the document the version's questions were extracted from         |
+| `supplementary` | `POST …/versions/[vid]/documents` | a companion an admin attached; carries guidance, never questions |
+
+The analyst reads **the newest primary** — re-ingest appends rather than replaces, and the older row
+describes an instrument that is no longer the one being asked — followed by every supplementary row
+in **attachment order**.
+
+**There is no way to POST a primary document.** That role belongs to the two routes that extract a
+structure from it in the same pass; a primary row written without one would claim the version's
+questions came from a document they did not come from. Symmetrically, DELETE refuses a primary row:
+it is the provenance record for questions that already exist.
+
+**Only the companions are budgeted.** `MAX_SUPPLEMENTARY_DOCUMENT_CHARS` (40,000) is shared across
+them, oldest first; the primary document is passed **whole**, exactly as every run before this one
+carried it. Bounding it here would change what the analyst proposes on versions nobody has touched.
+A companion that overruns is cut at a **marked seam** and the prompt says so — the analyst is told
+not to quote across it, and to report that it did not see all of the document. One that the budget
+cannot reach at all is **named but not shown**, for the same reason: a proposal that silently missed
+a routing page is the failure this feature exists to end.
+
+**Where they disagree, the analyst reports rather than resolves.** A companion is guidance about the
+instrument, not a second instrument — the prompt says so, forbids inventing a question key from it,
+and instructs it to put a genuine contradiction in `gaps[]` quoting both sides. That is the same
+restraint the corpus's document 08 tests.
+
+**Documents now fork with the version.** They did not before, and the consequence was silent: fork a
+launched version and the analyst — whose whole job is to read the author's own guidance — had none
+to read, so it inferred from question wording and reported `fromDocument: false`. `copyVersionGraph`
+copies every row, `createdAt` included, because the readers order by it.
+
+The ingestion-time **candidacy check** still reads the primary document only. It runs during upload,
+before any companion can exist, and an admin who has gone to the trouble of attaching a routing memo
+has already answered the question that check asks.
+
 ### Grounding is the hard part, not generation
 
 A model asked "what are the topics?" will confidently invent a clean taxonomy from the section

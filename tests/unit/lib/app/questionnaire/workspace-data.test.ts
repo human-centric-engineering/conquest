@@ -564,6 +564,7 @@ function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
       totalDataSlots: 0,
       uncoveredDataSlots: 0,
     },
+    documents: [],
     ...over,
   };
 }
