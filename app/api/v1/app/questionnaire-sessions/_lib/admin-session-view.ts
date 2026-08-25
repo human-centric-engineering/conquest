@@ -17,6 +17,7 @@
 import { prisma } from '@/lib/db/client';
 import { SESSION_STATUSES, narrowToEnum, type SessionStatus } from '@/lib/app/questionnaire/types';
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
+import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import {
   narrowInterviewPlan,
   narrowTopicMembers,
@@ -163,6 +164,26 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
  * needs to see that the interview covered something since deleted, which is precisely the case a
  * silent drop would hide.
  */
+/**
+ * How many of one half of a topic an interview asked.
+ *
+ * A named subset is intersected with what the topic contains today; an un-named half falls to the
+ * topic's depth, exactly as `plannedMembers` resolves it at run time. Only the COUNT is needed
+ * here, so no weights are loaded — `membersAtDepth` picks which two a `light` topic samples, but
+ * how many it samples is the same either way.
+ */
+export function askedCount(
+  authored: readonly string[],
+  named: readonly string[] | undefined,
+  depth: TopicDepth
+): number {
+  if (named && named.length > 0) {
+    const kept = authored.filter((key) => named.includes(key));
+    if (kept.length > 0) return kept.length;
+  }
+  return membersAtDepth(authored, depth, undefined).length;
+}
+
 async function resolvePlanView(
   versionId: string,
   stored: unknown
@@ -193,10 +214,12 @@ async function resolvePlanView(
     const authored = membersByKey.get(t.key);
     if (!authored) return {};
     const total = authored.questionKeys.length + authored.dataSlotKeys.length;
-    const wanted = new Set([...t.members.questionKeys, ...t.members.dataSlotKeys]);
+    // A plan narrows one half and leaves the other to the depth, so the halves are counted
+    // separately. Counting a `new Set` of both at once would read the un-named half — stored
+    // empty, meaning "the depth decides" — as nothing asked at all.
     const asked =
-      authored.questionKeys.filter((k) => wanted.has(k)).length +
-      authored.dataSlotKeys.filter((k) => wanted.has(k)).length;
+      askedCount(authored.questionKeys, t.members.questionKeys, t.depth) +
+      askedCount(authored.dataSlotKeys, t.members.dataSlotKeys, t.depth);
     if (asked === 0 || asked >= total) return {};
     return { partial: { asked, total } };
   };

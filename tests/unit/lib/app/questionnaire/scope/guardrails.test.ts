@@ -9,10 +9,12 @@ import {
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  LIGHT_DEPTH_MEMBER_COUNT,
   type ConditionalTopicsSettings,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
+import { resolveScope } from '@/lib/app/questionnaire/scope/resolve';
 
 function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Topic> = {}): Topic {
   return {
@@ -600,9 +602,42 @@ describe('applyGuardrails — a proposal that names only part of a topic (C6 / F
 
     expect(plan.topics[0]?.members).toEqual({
       questionKeys: ['wide_q1', 'wide_q3'],
-      // Naming questions says nothing about the topic's data slots, so those stay whole.
-      dataSlotKeys: ['wide_ds'],
+      // Naming questions says nothing about the topic's data slots, so the un-named half is left
+      // EMPTY — which `plannedMembers` reads as "the depth decides", not as "ask none of them".
+      dataSlotKeys: [],
     });
+  });
+
+  it('never widens the un-named half past the topic’s own depth', () => {
+    // The failure this guards: filling the un-named half with the whole authored list would take a
+    // `light` topic from the two items it samples to every one it has — so narrowing the questions
+    // would silently WIDEN the data slots, which is the one thing a subset must never do.
+    const sampled = topic('sampled', 'conditional', {
+      depth: 'light',
+      members: {
+        questionKeys: ['s_q1', 's_q2', 's_q3'],
+        dataSlotKeys: ['s_ds1', 's_ds2', 's_ds3', 's_ds4'],
+      },
+    });
+
+    const plan = applyGuardrails(
+      input({
+        topics: [topic('open', 'opening'), sampled],
+        proposed: [{ key: 'sampled', rationale: 'these two', members: { questionKeys: ['s_q1'] } }],
+      })
+    );
+
+    const scope = resolveScope({
+      topics: [topic('open', 'opening'), sampled],
+      plan,
+      settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true },
+    });
+
+    expect([...scope.questionKeys].filter((k) => k.startsWith('s_q'))).toEqual(['s_q1']);
+    // Two, because `light` samples two — not four, and not zero.
+    expect([...scope.dataSlotKeys].filter((k) => k.startsWith('s_ds'))).toHaveLength(
+      LIGHT_DEPTH_MEMBER_COUNT
+    );
   });
 
   it('discards a key the topic does not contain', () => {

@@ -167,13 +167,12 @@ function seatedMembers(
   if (questionKeys.length === 0 && dataSlotKeys.length === 0) return {};
 
   // A subset naming only questions leaves the topic's data slots to the depth, and vice versa —
-  // narrowing one half is not a statement about the other.
-  return {
-    members: {
-      questionKeys: questionKeys.length > 0 ? questionKeys : [...topic.members.questionKeys],
-      dataSlotKeys: dataSlotKeys.length > 0 ? dataSlotKeys : [...topic.members.dataSlotKeys],
-    },
-  };
+  // narrowing one half is not a statement about the other. The un-named half is stored EMPTY
+  // rather than filled with the whole authored list, because `plannedMembers` reads an empty half
+  // as "the depth decides" and a full one as "ask all of these". Filling it would silently widen a
+  // `light` topic from its two sampled items to every one it has — the one thing a subset must
+  // never do, and the opposite of what narrowing the other half asked for.
+  return { members: { questionKeys, dataSlotKeys } };
 }
 
 /**
@@ -298,25 +297,6 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
 }
 
 /**
- * Drop the lowest-ranked topics until the plan fits the budget. Mutates `planned` and `seen`.
- *
- * Returns the reason each dropped topic was dropped, keyed by topic key — so the plan can say
- * "there was no time for this" rather than the untrue "the agent did not pick it".
- *
- * Three decisions worth stating, because each is a place a reasonable implementation differs:
- *
- * - **A rule-seated topic is never dropped.** An author's "always ask about compliance" is not a
- *   preference the arithmetic gets to overrule; if the rules alone bust the budget, the interview
- *   runs long and the settings tab has already said so (`budget_below_floor`).
- * - **The lowest-ranked goes first** — the last thing seated, which is the planner's own least
- *   confident pick, or the last fallback. The model ordered them; the budget takes them back in
- *   reverse.
- * - **The check topic's seconds are reserved before anything is judged to fit.** It is chosen from
- *   what did NOT make the cut, so its cost is not known until the drops are settled — hence the
- *   re-evaluation each pass. Treating it as free is exactly the omission the pilot client workbook's own
- *   arithmetic makes, and it is how a plan lands 14 seconds over the number it just promised.
- */
-/**
  * The per-item price list `plannedSeconds` needs to cost a partial topic (C6), or `undefined` when
  * the caller did not supply one.
  */
@@ -341,6 +321,25 @@ function exactPricing(
   };
 }
 
+/**
+ * Drop the lowest-ranked topics until the plan fits the budget. Mutates `planned` and `seen`.
+ *
+ * Returns the reason each dropped topic was dropped, keyed by topic key — so the plan can say
+ * "there was no time for this" rather than the untrue "the agent did not pick it".
+ *
+ * Three decisions worth stating, because each is a place a reasonable implementation differs:
+ *
+ * - **A rule-seated topic is never dropped.** An author's "always ask about compliance" is not a
+ *   preference the arithmetic gets to overrule; if the rules alone bust the budget, the interview
+ *   runs long and the settings tab has already said so (`budget_below_floor`).
+ * - **The lowest-ranked goes first** — the last thing seated, which is the planner's own least
+ *   confident pick, or the last fallback. The model ordered them; the budget takes them back in
+ *   reverse.
+ * - **The check topic's seconds are reserved before anything is judged to fit.** It is chosen from
+ *   what did NOT make the cut, so its cost is not known until the drops are settled — hence the
+ *   re-evaluation each pass. Treating it as free is exactly the omission the pilot client workbook's own
+ *   arithmetic makes, and it is how a plan lands 14 seconds over the number it just promised.
+ */
 function fitToBudget(args: {
   planned: PlannedTopic[];
   seen: Set<string>;

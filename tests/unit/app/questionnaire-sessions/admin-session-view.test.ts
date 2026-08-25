@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 
+import { LIGHT_DEPTH_MEMBER_COUNT } from '@/lib/app/questionnaire/scope/types';
 import {
+  askedCount,
   loadAdminSessionView,
   resolveSessionRefLocation,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
@@ -128,5 +130,33 @@ describe('resolveSessionRefLocation', () => {
       isPreview: true,
       status: 'active',
     });
+  });
+});
+
+describe('askedCount — how much of one half of a topic an interview asked (C6)', () => {
+  const authored = ['a', 'b', 'c', 'd'];
+
+  it('counts a named subset, ignoring keys the topic no longer contains', () => {
+    // The instrument can be edited after an interview ran, so a plan can name a key that is gone.
+    expect(askedCount(authored, ['a', 'c', 'deleted-since'], 'full')).toBe(2);
+  });
+
+  it('falls to the depth for an un-named half rather than reading it as nothing asked', () => {
+    // The regression this pins: an un-named half is stored EMPTY, meaning "the depth decides".
+    // Counting it as a named-but-empty subset would report "1 of 8 asked" on an interview that
+    // asked six things.
+    expect(askedCount(authored, [], 'full')).toBe(4);
+    expect(askedCount(authored, undefined, 'full')).toBe(4);
+    expect(askedCount(authored, [], 'light')).toBe(LIGHT_DEPTH_MEMBER_COUNT);
+  });
+
+  it('falls to the depth when nothing named survives the intersection', () => {
+    // Same rule the guardrails apply when seating: an empty intersection is not a narrowing.
+    expect(askedCount(authored, ['gone', 'also-gone'], 'light')).toBe(LIGHT_DEPTH_MEMBER_COUNT);
+  });
+
+  it('never reports more than the topic contains', () => {
+    expect(askedCount(['only'], [], 'light')).toBe(1);
+    expect(askedCount([], [], 'full')).toBe(0);
   });
 });

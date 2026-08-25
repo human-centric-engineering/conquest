@@ -300,7 +300,12 @@ planned topic. Three rules make it safe to have:
   worse than asking more than strictly necessary, which is the direction every degradation in
   `resolve.ts` takes.
 - **Narrowing one half says nothing about the other.** A subset naming only questions leaves the
-  topic's data slots at their depth.
+  topic's data slots at their depth. The un-named half is stored **empty**, which `plannedMembers`
+  reads as "the depth decides"; storing the whole authored list instead would take a `light` topic
+  from the two items it samples to every one it has, so narrowing the questions would silently
+  _widen_ the data slots — the one thing rule 1 forbids. Data slots are the background, abstracted
+  form of the questions themselves, so filling them for questions the plan decided not to ask is
+  incoherent as well as expensive.
 
 **The fit prices what it will actually ask.** `plannedSeconds` takes the per-item seconds and costs
 a subset on the items it names; charging `full` for a three-of-ten topic drops one that would have
@@ -1815,7 +1820,7 @@ compliance audit, a role-specific survey.
 
 ## Related
 
-- [`../planning/features/f17.1.md`](../planning/features/f17.1.md) onward — the trackers
+- [`../planning/features/f17.1-ui.md`](../planning/features/f17.1-ui.md) onward — the trackers
 - The pilot client research notes (held outside this repo) — the client
   requirement analysis this capability was generalised from
 - [`experiences.md`](./experiences.md) — routing _between_ questionnaires, the sibling mechanism

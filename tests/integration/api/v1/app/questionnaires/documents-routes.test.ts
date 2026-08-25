@@ -70,6 +70,7 @@ import {
   parseAndGuardUpload,
   parseUploadToText,
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
+import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -150,6 +151,15 @@ beforeEach(() => {
   (prisma.appQuestionnaireSourceDocument.findFirst as Mock).mockResolvedValue(null);
   (prisma.appQuestionnaireSourceDocument.create as Mock).mockResolvedValue({ id: 'doc-new' });
   (prisma.appQuestionnaireSourceDocument.deleteMany as Mock).mockResolvedValue({ count: 1 });
+  // Re-stated here, not left to the module factory: `clearAllMocks` wipes call history but keeps
+  // a `mockReturnValue` an earlier test set, so the 429 case would otherwise leak into every test
+  // that runs after it.
+  (ingestLimiter.check as Mock).mockReturnValue({
+    success: true,
+    limit: 5,
+    remaining: 4,
+    reset: 0,
+  });
   (parseAndGuardUpload as Mock).mockResolvedValue(upload());
   (parseUploadToText as Mock).mockResolvedValue(parsed());
 });
@@ -245,7 +255,11 @@ describe('POST /documents', () => {
       role: 'primary',
     });
 
-    const body = await (await POST(req(), ctx(PARAMS))).json();
+    const res = await POST(req(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error.code).toBe('DUPLICATE_DOCUMENT');
     expect(body.error.message).toContain('built from');
   });
 
@@ -260,6 +274,30 @@ describe('POST /documents', () => {
     expect(res.status).toBe(409);
     expect(body.error.code).toBe('TOO_MANY_DOCUMENTS');
     expect(parseUploadToText).not.toHaveBeenCalled();
+  });
+
+  it('429s over the ingest sub-cap, before reading or parsing anything', async () => {
+    // The per-admin sub-cap is checked FIRST, ahead of the version load: an attach parses an
+    // upload, so it is budgeted with ingest and re-ingest rather than the 100/min section default.
+    (ingestLimiter.check as Mock).mockReturnValue({
+      success: false,
+      limit: 5,
+      remaining: 0,
+      reset: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await POST(req(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(res.headers.get('Retry-After')).toBeTruthy();
+    // Nothing downstream ran — not the parse, not the count, not the write.
+    expect(parseAndGuardUpload).not.toHaveBeenCalled();
+    expect(parseUploadToText).not.toHaveBeenCalled();
+    expect(prisma.appQuestionnaireSourceDocument.count).not.toHaveBeenCalled();
+    expect(prisma.appQuestionnaireSourceDocument.create).not.toHaveBeenCalled();
   });
 
   it('passes a parse failure straight through, with the upload dialog’s own code', async () => {
