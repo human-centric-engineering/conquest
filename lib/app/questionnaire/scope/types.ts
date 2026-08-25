@@ -585,6 +585,21 @@ export interface PlannedTopic {
   source: ScopeDecisionSource;
   /** Why, in a sentence — for the admin surface, never shown to the respondent. */
   rationale: string;
+  /**
+   * An explicit subset of this topic's members, when only PART of the topic applies (C6, F17.29).
+   *
+   * Absent on nearly every planned topic, and that is the normal case: `depth` decides, `full`
+   * takes everything and `light` takes the two highest-weight members. Present when the planner
+   * judged that a few named items are what this respondent's situation calls for — three from one
+   * topic, one from another — which `depth` cannot express, because it is a dial with two stops
+   * and no way to say *which* items.
+   *
+   * Always intersected with what the topic actually claims at resolution time: a plan can narrow a
+   * topic, never widen it into questions the author did not put in it. An intersection that comes
+   * out empty falls back to the depth, because "in scope and asks nothing" is a topic that reports
+   * as covered while contributing no answer.
+   */
+  members?: TopicMembers;
 }
 
 /**
@@ -743,6 +758,21 @@ function asKeyList(value: unknown, max = 64): string[] {
   return out;
 }
 
+/**
+ * Project a planned topic's optional member subset — `{}` when there is nothing usable in it.
+ *
+ * Spread into the planned topic rather than assigned, so `members` is genuinely absent on the
+ * common path instead of present-but-empty. The distinction is load-bearing: an empty subset means
+ * "the depth decides", and a reader that saw `{questionKeys: [], dataSlotKeys: []}` would have to
+ * know that to avoid resolving the topic to nothing.
+ */
+function narrowPlannedMembers(value: unknown): { members?: TopicMembers } {
+  if (!isRecord(value)) return {};
+  const members = narrowTopicMembers(value);
+  if (members.questionKeys.length === 0 && members.dataSlotKeys.length === 0) return {};
+  return { members };
+}
+
 /** Project a stored `members` Json onto a complete {@link TopicMembers}. */
 export function narrowTopicMembers(value: unknown): TopicMembers {
   const obj = isRecord(value) ? value : {};
@@ -877,6 +907,10 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
               'llm'
             ),
             rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+            // Absent on nearly every row. A stored `members` that narrows to nothing is dropped
+            // rather than kept as an empty object — an empty subset means "the depth decides", and
+            // carrying `{[], []}` would make every reader special-case the difference.
+            ...narrowPlannedMembers(t.members),
           },
         ];
       })

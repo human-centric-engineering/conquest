@@ -19,6 +19,7 @@ import { SESSION_STATUSES, narrowToEnum, type SessionStatus } from '@/lib/app/qu
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
 import {
   narrowInterviewPlan,
+  narrowTopicMembers,
   type ScopeDecisionSource,
   type TopicDepth,
 } from '@/lib/app/questionnaire/scope/types';
@@ -31,6 +32,14 @@ export interface AdminPlannedTopicView {
   depth?: TopicDepth;
   source: ScopeDecisionSource;
   rationale: string;
+  /**
+   * How much of the topic this interview asked, when the plan named a SUBSET of it (C6) — e.g.
+   * `{ asked: 3, total: 10 }`. Absent when the whole topic (at its depth) was in scope.
+   *
+   * On the viewer this is the difference between "we covered Talent" and "we asked three of
+   * Talent's ten questions", which is exactly the distinction a challenged report turns on.
+   */
+  partial?: { asked: number; total: number };
 }
 
 /**
@@ -163,10 +172,34 @@ async function resolvePlanView(
 
   const topics = await prisma.appQuestionnaireTopic.findMany({
     where: { versionId },
-    select: { key: true, label: true },
+    select: { key: true, label: true, members: true },
   });
   const labelByKey = new Map(topics.map((t) => [t.key, t.label]));
   const label = (key: string): string => labelByKey.get(key) ?? key;
+  const membersByKey = new Map(topics.map((t) => [t.key, narrowTopicMembers(t.members)] as const));
+
+  /**
+   * The "3 of 10" line, only when the plan actually narrowed the topic.
+   *
+   * Counted against what the topic contains TODAY. The instrument can be edited after an interview
+   * runs, so this can read "3 of 8" on a topic that had ten questions at the time — which is the
+   * honest answer to "how much of the topic as it now stands did this interview ask", and the
+   * alternative (storing the total on the plan) answers a question nobody puts.
+   */
+  const partial = (
+    t: (typeof plan.topics)[number]
+  ): { partial?: { asked: number; total: number } } => {
+    if (!t.members) return {};
+    const authored = membersByKey.get(t.key);
+    if (!authored) return {};
+    const total = authored.questionKeys.length + authored.dataSlotKeys.length;
+    const wanted = new Set([...t.members.questionKeys, ...t.members.dataSlotKeys]);
+    const asked =
+      authored.questionKeys.filter((k) => wanted.has(k)).length +
+      authored.dataSlotKeys.filter((k) => wanted.has(k)).length;
+    if (asked === 0 || asked >= total) return {};
+    return { partial: { asked, total } };
+  };
 
   return {
     selected: plan.topics.map((t) => ({
@@ -175,6 +208,7 @@ async function resolvePlanView(
       depth: t.depth,
       source: t.source,
       rationale: t.rationale,
+      ...partial(t),
     })),
     excluded: plan.excluded.map((t) => ({
       key: t.key,

@@ -188,6 +188,24 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
 
     const budget = await loadPlanBudget(session.versionId, settings, topics);
 
+    // What each candidate topic's questions ASK, so the planner can name a subset of one (C6).
+    // One query, and only when a conditional topic actually names questions — an instrument whose
+    // conditional topics are data-slot-only pays nothing for it.
+    const conditionalQuestionKeys = new Set(
+      topics.filter((t) => t.phase === 'conditional').flatMap((t) => t.members.questionKeys)
+    );
+    const itemPrompts =
+      conditionalQuestionKeys.size === 0
+        ? undefined
+        : new Map(
+            (
+              await prisma.appQuestionSlot.findMany({
+                where: { versionId: session.versionId, key: { in: [...conditionalQuestionKeys] } },
+                select: { key: true, prompt: true },
+              })
+            ).map((q) => [q.key, q.prompt] as const)
+          );
+
     const result = await planScope({
       sessionId,
       topics,
@@ -197,6 +215,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       settings,
       decidedAtTurn: session._count.turns,
       ...(budget ? { budget } : {}),
+      ...(itemPrompts ? { itemPrompts } : {}),
     });
 
     // Guarded write: `interviewPlan: null` in the WHERE is what makes a concurrent second call a

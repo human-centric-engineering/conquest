@@ -521,3 +521,113 @@ describe('isOpeningComplete', () => {
     expect(isOpeningComplete(topics, new Set())).toBe(true);
   });
 });
+
+describe('planScope — naming part of a topic (C6 / F17.29)', () => {
+  const WIDE = topic('wide', 'conditional', {
+    members: { dataSlotKeys: [], questionKeys: ['wq1', 'wq2', 'wq3'] },
+  });
+  const PROMPTS = new Map([
+    ['wq1', 'How long does approval take?'],
+    ['wq2', 'Who signs off above £50k?'],
+    ['wq3', 'What did the last escalation cost?'],
+  ]);
+
+  function systemPrompt(): string {
+    const call = mocks.runStructuredCompletion.mock.calls[0]?.[0] as {
+      messages: Array<{ content: string }>;
+    };
+    return call.messages[0].content;
+  }
+
+  it('lists a candidate’s questions only when the caller supplied their wording', async () => {
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    await planScope(params({ topics: [topic('open', 'opening'), WIDE] }));
+    expect(systemPrompt()).not.toContain('wq1');
+
+    vi.clearAllMocks();
+    mocks.prisma.aiAgent.findUnique.mockResolvedValue({
+      id: 'agent-1',
+      provider: '',
+      model: '',
+      fallbackProviders: [],
+    });
+    mocks.resolveAgentProviderAndModel.mockResolvedValue({
+      providerSlug: 'openai',
+      model: 'gpt-5.4',
+    });
+    mocks.getProvider.mockResolvedValue({});
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    await planScope(params({ topics: [topic('open', 'opening'), WIDE], itemPrompts: PROMPTS }));
+    const prompt = systemPrompt();
+    expect(prompt).toContain('wq1: How long does approval take?');
+    expect(prompt).toContain('wq3: What did the last escalation cost?');
+  });
+
+  it('seats the subset the model named', async () => {
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({
+        selected: [
+          { topicKey: 'wide', rationale: 'only the approval half', questionKeys: ['wq2'] },
+        ],
+        confidence: 0.9,
+        respondentMessage: 'Let us look at approvals.',
+      })
+    );
+
+    const result = await planScope(
+      params({ topics: [topic('open', 'opening'), WIDE], itemPrompts: PROMPTS })
+    );
+
+    expect(result.plan.topics[0]?.members).toEqual({
+      questionKeys: ['wq2'],
+      dataSlotKeys: [],
+    });
+  });
+
+  it('ignores a subset for a topic whose items it was never shown', async () => {
+    // The prompt tells the model a topic with unlisted questions is whole-or-nothing. If it names
+    // keys anyway they are keys it invented, and they must not narrow a real interview.
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({
+        selected: [{ topicKey: 'wide', rationale: 'guessing', questionKeys: ['q_i_made_up'] }],
+        confidence: 0.9,
+        respondentMessage: '',
+      })
+    );
+
+    const result = await planScope(params({ topics: [topic('open', 'opening'), WIDE] }));
+
+    expect(result.plan.topics.map((t) => t.key)).toEqual(['wide']);
+    expect(result.plan.topics[0]).not.toHaveProperty('members');
+  });
+
+  it('says so rather than truncating when a topic has more questions than it can list', async () => {
+    const huge = topic('huge', 'conditional', {
+      members: {
+        dataSlotKeys: [],
+        questionKeys: Array.from({ length: 40 }, (_, i) => `hq${i}`),
+      },
+    });
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    await planScope(
+      params({
+        topics: [topic('open', 'opening'), huge],
+        itemPrompts: new Map(huge.members.questionKeys.map((k) => [k, `asks ${k}`])),
+      })
+    );
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('choose this topic whole or not at all');
+    // Silently listing the first twelve would invite a subset chosen from an arbitrary window.
+    expect(prompt).not.toContain('hq0: asks hq0');
+  });
+});

@@ -81,3 +81,27 @@ export const MAX_SUPPLEMENTARY_DOCUMENT_CHARS = 40_000;
 
 /** Marks where a supplementary document was cut, so the analyst never quotes across the seam. */
 export const SUPPLEMENTARY_TRUNCATION_MARKER = '\n\n[… document truncated to fit the budget …]';
+
+/* -------------------------------------------------------------------------- */
+/* Partial topic selection — what the planner is shown (C6 / F17.29)          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How many of a topic's questions the planner prompt lists, per topic.
+ *
+ * A topic whose items are not listed cannot be partially selected — the prompt says so, so the
+ * planner chooses it whole rather than guessing at keys it was never shown.
+ */
+export const MAX_PLANNER_ITEMS_PER_TOPIC = 12;
+
+/** Characters of one question's wording. Enough to recognise it; not enough to re-read it. */
+export const MAX_PLANNER_ITEM_CHARS = 90;
+
+/**
+ * Items listed across ALL candidates, spent best-first.
+ *
+ * The whole-prompt bound. Without it a forty-topic instrument would spend more of the planner's
+ * context on question wording than on what the respondent actually said — which is the evidence
+ * the decision rests on.
+ */
+export const MAX_PLANNER_RENDERED_ITEMS = 120;

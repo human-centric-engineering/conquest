@@ -277,6 +277,46 @@ The amendment is recorded on the plan (`InterviewPlan.amendments`) _and_ the add
 topic as a good selection would make the planner look better the worse it got. The acknowledgement
 rides the same one-turn briefing seam as the original announcement, matched on `atTurn`.
 
+### A plan may ask part of a topic (C6, F17.29)
+
+`depth` is a dial with two stops — all of it, or the two highest-weight members — and no way to say
+_which_ items. That covers the blind-spot check exactly, which is why the pilot instrument works,
+and it cannot express "three of these ten questions are the reason this topic fits this respondent".
+
+`PlannedTopic.members` is that expression: an optional explicit subset, absent on nearly every
+planned topic. Three rules make it safe to have:
+
+- **It can only narrow.** The subset is intersected with what the topic actually claims, in
+  **authored order** — a plan never widens a topic into questions its author did not put in it, and
+  never reorders the instrument to match the order a model listed keys in.
+- **An empty intersection falls back to the depth.** A planner naming items that do not exist is the
+  same class of mistake as naming a topic that does not exist, and gets the same treatment. "In
+  scope and asks nothing" would be a topic that reports as covered while contributing no answer —
+  worse than asking more than strictly necessary, which is the direction every degradation in
+  `resolve.ts` takes.
+- **Narrowing one half says nothing about the other.** A subset naming only questions leaves the
+  topic's data slots at their depth.
+
+**The fit prices what it will actually ask.** `plannedSeconds` takes the per-item seconds and costs
+a subset on the items it names; charging `full` for a three-of-ten topic drops one that would have
+fitted and shows the author a budget that lies. Without those prices — a caller that supplied only
+the per-depth costs — a subset is charged at its depth, which over-states rather than under-states.
+That is the safe direction: it drops a topic rather than overrunning the respondent's time.
+
+**What the planner is shown, and what it costs.** A candidate's questions are listed in the prompt
+(key plus wording) so the model can name them, bounded three ways: `MAX_PLANNER_ITEM_CHARS` per
+question, `MAX_PLANNER_ITEMS_PER_TOPIC` per topic, and `MAX_PLANNER_RENDERED_ITEMS` across the whole
+prompt, spent best-candidate-first. A topic whose items do not fit that budget is printed as
+_"questions: not listed — choose this topic whole or not at all"_ rather than having its first
+twelve shown, because a subset chosen from an arbitrary window is worse than no subset at all. The
+prompt sets a high bar for using it: the named items must be _the reason the topic was chosen_, not
+the ones that look most interesting.
+
+The admin session viewer shows "3 of 10 asked" beside a narrowed topic. "We covered Talent" and "we
+asked three of Talent's ten questions" are different claims, and a challenged report turns on which
+one was true. The count is against what the topic holds **today** — the instrument can be edited
+after an interview runs, and a total stored on the plan would answer a question nobody puts.
+
 ### The blind-spot check
 
 One conditional topic that was **not** selected, sampled at `light` depth (its highest-weight

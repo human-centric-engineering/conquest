@@ -149,6 +149,30 @@ export function membersAtDepth(
 }
 
 /**
+ * The members a topic contributes to ONE PLAN: an explicit subset when the plan named one, the
+ * depth otherwise (C6, F17.29).
+ *
+ * The subset is intersected with what the topic actually claims, in AUTHORED order — a plan may
+ * narrow a topic, never widen it into questions its author did not put in it, and never reorder
+ * the instrument. An intersection that comes out empty falls back to the depth: "in scope and asks
+ * nothing" is a topic that reports as covered while contributing no answer, which is worse than
+ * asking more than strictly necessary — the same direction every other degradation here takes.
+ */
+export function plannedMembers(
+  authored: readonly string[],
+  planned: readonly string[] | undefined,
+  depth: TopicDepth,
+  weights: ReadonlyMap<string, number> | undefined
+): string[] {
+  if (planned && planned.length > 0) {
+    const wanted = new Set(planned);
+    const kept = authored.filter((key) => wanted.has(key));
+    if (kept.length > 0) return kept;
+  }
+  return membersAtDepth(authored, depth, weights);
+}
+
+/**
  * Resolve what is in scope for one session.
  *
  * Never throws. Every malformed or missing input degrades toward asking more, not less.
@@ -182,16 +206,18 @@ export function resolveScope(input: ScopeInput): ResolvedScope {
     topicKeys.add(topic.key);
     depthByTopicKey.set(topic.key, depth);
 
-    for (const key of membersAtDepth(
+    for (const key of plannedMembers(
       topic.members.questionKeys,
+      planned?.members?.questionKeys,
       depth,
       input.weightByQuestionKey
     )) {
       questionKeys.add(key);
       if (!topicByQuestionKey.has(key)) topicByQuestionKey.set(key, topic.key);
     }
-    for (const key of membersAtDepth(
+    for (const key of plannedMembers(
       topic.members.dataSlotKeys,
+      planned?.members?.dataSlotKeys,
       depth,
       input.weightByDataSlotKey
     )) {

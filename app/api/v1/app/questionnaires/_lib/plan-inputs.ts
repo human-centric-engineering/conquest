@@ -59,11 +59,17 @@ export async function loadPlanBudget(
     settings
   );
 
+  const weights = {
+    byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
+    byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
+  };
+
   return {
     budgetSeconds: settings.sessionBudgetSeconds,
-    costs: estimateTopicCosts(topics, seconds, {
-      byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
-      byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
-    }),
+    costs: estimateTopicCosts(topics, seconds, weights),
+    // Carried so the fit can price a plan that asks only PART of a topic (C6) on the items it
+    // actually names, rather than charging the whole topic and dropping one that would have fitted.
+    seconds,
+    weights,
   };
 }

@@ -85,6 +85,13 @@ export function InterviewPlanCard({ plan }: InterviewPlanCardProps) {
                           : TOPIC_DEPTH_LABELS.light}
                       </Badge>
                     )}
+                    {topic.partial && (
+                      /* "We covered Talent" and "we asked three of Talent's ten questions" are
+                         different claims, and a challenged report turns on which one was true. */
+                      <Badge variant="outline" className="text-[10px]">
+                        {topic.partial.asked} of {topic.partial.total} asked
+                      </Badge>
+                    )}
                   </span>
                   {topic.rationale && (
                     <span className="text-muted-foreground block">{topic.rationale}</span>

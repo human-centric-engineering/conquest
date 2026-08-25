@@ -319,3 +319,86 @@ describe('resolveScope — robustness', () => {
     expect(scope.questionKeys.has('shared')).toBe(true);
   });
 });
+
+describe('a plan that names a SUBSET of a topic (C6 / F17.29)', () => {
+  const wide = topic('wide', 'conditional', {
+    members: {
+      dataSlotKeys: ['wide_ds1', 'wide_ds2'],
+      questionKeys: ['wide_q1', 'wide_q2', 'wide_q3', 'wide_q4'],
+    },
+  });
+
+  function resolveWith(members: { questionKeys?: string[]; dataSlotKeys?: string[] } | undefined) {
+    return resolveScope({
+      settings: settings(),
+      topics: [topic('open', 'opening'), wide],
+      plan: plan([
+        {
+          key: 'wide',
+          depth: 'full',
+          source: 'llm',
+          rationale: 'part of it',
+          ...(members
+            ? {
+                members: {
+                  questionKeys: members.questionKeys ?? [],
+                  dataSlotKeys: members.dataSlotKeys ?? [],
+                },
+              }
+            : {}),
+        },
+      ]),
+      allQuestionKeys: [...wide.members.questionKeys, 'open_q1', 'open_q2'],
+      allDataSlotKeys: [...wide.members.dataSlotKeys, 'open_ds'],
+    });
+  }
+
+  it('asks only the named items, and reports the rest as not asked', () => {
+    const scope = resolveWith({ questionKeys: ['wide_q3', 'wide_q1'], dataSlotKeys: ['wide_ds2'] });
+
+    expect(isQuestionInScope(scope, 'wide_q1')).toBe(true);
+    expect(isQuestionInScope(scope, 'wide_q3')).toBe(true);
+    expect(isQuestionInScope(scope, 'wide_q2')).toBe(false);
+    expect(isDataSlotInScope(scope, 'wide_ds2')).toBe(true);
+    expect(isDataSlotInScope(scope, 'wide_ds1')).toBe(false);
+    // The unnamed members are not silently forgotten — a report has to be able to say what this
+    // interview did not cover.
+    expect(scope.notAskedQuestionKeys.has('wide_q2')).toBe(true);
+  });
+
+  it('keeps the instrument’s own order, not the order the model listed', () => {
+    const scope = resolveWith({ questionKeys: ['wide_q4', 'wide_q2'] });
+    const asked = [...wide.members.questionKeys].filter((k) => isQuestionInScope(scope, k));
+    expect(asked).toEqual(['wide_q2', 'wide_q4']);
+  });
+
+  it('never widens a topic into a question its author did not put in it', () => {
+    const scope = resolveWith({ questionKeys: ['wide_q1', 'spine_q1', 'made_up'] });
+
+    expect(isQuestionInScope(scope, 'wide_q1')).toBe(true);
+    expect(isQuestionInScope(scope, 'spine_q1')).toBe(false);
+    expect(isQuestionInScope(scope, 'made_up')).toBe(false);
+  });
+
+  it('falls back to the whole topic when nothing named survives the intersection', () => {
+    // Degrading toward asking MORE is this module's rule everywhere. A topic in scope that asks
+    // nothing would report as covered while contributing no answer.
+    const scope = resolveWith({ questionKeys: ['nothing_real'] });
+
+    for (const key of wide.members.questionKeys) expect(isQuestionInScope(scope, key)).toBe(true);
+  });
+
+  it('leaves the topic whole when the plan named nothing', () => {
+    const scope = resolveWith(undefined);
+    for (const key of wide.members.questionKeys) expect(isQuestionInScope(scope, key)).toBe(true);
+  });
+
+  it('narrowing the questions leaves the data slots to the depth, and vice versa', () => {
+    // Naming three questions is not a statement about the topic's data slots.
+    const scope = resolveWith({ questionKeys: ['wide_q1'] });
+
+    expect(isQuestionInScope(scope, 'wide_q2')).toBe(false);
+    expect(isDataSlotInScope(scope, 'wide_ds1')).toBe(true);
+    expect(isDataSlotInScope(scope, 'wide_ds2')).toBe(true);
+  });
+});
