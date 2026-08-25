@@ -18,6 +18,8 @@ import {
   applyAmendment,
   looksLikeTopicRequest,
   matchTopicByLabel,
+  isEnglishLocale,
+  candidateLabelHits,
 } from '@/lib/app/questionnaire/scope/amendment';
 import type { InterviewPlan, Topic } from '@/lib/app/questionnaire/scope/types';
 
@@ -190,5 +192,60 @@ describe('applyAmendment', () => {
     expect(next.respondentMessage).toBe(before.respondentMessage);
     expect(next.decidedAtTurn).toBe(before.decidedAtTurn);
     expect(next.source).toBe(before.source);
+  });
+});
+
+describe('isEnglishLocale — which gate a version gets', () => {
+  it('treats an absent or blank locale as English', () => {
+    // Most versions have no locale at all, and the English cue gate is what every one of them has
+    // always run. A new field must not change their behaviour.
+    expect(isEnglishLocale(undefined)).toBe(true);
+    expect(isEnglishLocale(null)).toBe(true);
+    expect(isEnglishLocale('  ')).toBe(true);
+  });
+
+  it('accepts every English tag, in any case, with either separator', () => {
+    for (const tag of ['en', 'EN', 'en-GB', 'en_US', 'En-Au']) {
+      expect(isEnglishLocale(tag)).toBe(true);
+    }
+  });
+
+  it('rejects a language that merely starts with the letters "en"', () => {
+    // A prefix test without the separator would read Estonian, Basque and Ewe as English and give
+    // them a cue list that cannot fire.
+    for (const tag of ['eng-Latn', 'et', 'eu', 'ee', 'es', 'sv-SE']) {
+      expect(isEnglishLocale(tag)).toBe(false);
+    }
+  });
+});
+
+describe('candidateLabelHits — the non-English gate', () => {
+  const topics = [
+    topic('talent', 'Personal och kompetens'),
+    topic('pricing', 'Prissättning'),
+  ] as const;
+
+  it('finds a label written in a non-English language', () => {
+    const hits = candidateLabelHits('Kan vi prata om prissättning?', topics);
+    expect(hits.map((t) => t.key)).toEqual(['pricing']);
+  });
+
+  it('tokenises an accented multi-word label instead of shredding it', () => {
+    // The old ASCII split turned "Prissättning" into "priss" + "ttning", so a correctly spelled
+    // message matched nothing.
+    const hits = candidateLabelHits('personal och kompetens borde vi ta', topics);
+    expect(hits.map((t) => t.key)).toEqual(['talent']);
+  });
+
+  it('returns every hit, including the ambiguous case matchTopicByLabel refuses', () => {
+    // The gate asks "is anything named", not "which one" — the agent decides that, and an ambiguous
+    // mention is exactly the case that needs it.
+    const hits = candidateLabelHits('prissättning och personal och kompetens', topics);
+    expect(hits.map((t) => t.key).sort()).toEqual(['pricing', 'talent']);
+    expect(matchTopicByLabel('prissättning och personal och kompetens', topics)).toBeNull();
+  });
+
+  it('is empty for a message that names nothing', () => {
+    expect(candidateLabelHits('Ja, det stämmer.', topics)).toEqual([]);
   });
 });

@@ -1210,6 +1210,9 @@ async function handleMessage(
         // `decidedAtTurn` uses — so it equals the NEXT turn's `selectionRound` exactly once, which
         // is what gives the acknowledgement its single outing.
         atTurn: state.selectionRound + 1,
+        // Decides which gate runs: the English cue list, or the label match that works in any
+        // language. Read off the meta this turn already loaded, so the English path stays free.
+        ...(meta.audience?.locale ? { locale: meta.audience.locale } : {}),
       });
       if (amended.kind === 'amended') {
         log.info('Conditional topics amended by the respondent', {

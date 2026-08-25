@@ -248,6 +248,25 @@ conditional topic into scope at `full` depth. Three tiers again, cheapest first:
 deterministic **label match**, and only then a small **routing-tier model call** to resolve
 "can we cover hiring?" against a topic called "People & capability".
 
+**The cue gate is English, so a non-English version gets a different first tier (F17.29).**
+`AMENDMENT_CUES` is a list of English phrasings. On a version whose `audience.locale` says the
+interview is held in another language — a configuration the product already supports, since the
+interviewer is instructed to respond in that language — the gate could only ever return false,
+silently, on every turn, for the whole feature.
+
+The fix is not a translated cue list: authoring cue phrasings for every language the product might
+be run in is work nobody here can check, and a bad list fails the same silent way. What _is_
+language-neutral is the **topic labels**, written in the instrument's own language by whoever wrote
+the instrument. So a non-English version gates on "does this message name an excluded topic"
+(`candidateLabelHits`), and a hit goes **straight to the model tier** — never to the deterministic
+label match. Naming a subject is not asking for it ("we sorted talent last year"), the cue list is
+what tells those apart in English, and with no cue list that judgement is the agent's. The prompt is
+told the message and the labels may be in different languages.
+
+The cost moves rather than disappearing: an English version still pays **nothing** on an ordinary
+turn (the locale is passed in from the turn context, so the gate needs no query), and a non-English
+version pays **one indexed query** per turn and a model call only when a topic was named.
+
 **It only ever adds.** A respondent declining a topic the instrument requires is a different feature
 with different consequences — partial scoring, an incomparable cohort — and quietly allowing it here
 would make every completed assessment mean something slightly different.
@@ -1649,6 +1668,21 @@ The three conflicts that only fire when scope is on (`conditional-topics-targete
 config, so turning scope on there raises them while the admin is still deciding rather than after a
 save and a reload. They stay anchored to `interviewer-strategy`: turning the feature off is not the
 fix any of the three is asking for.
+
+### Rows drag, and the buttons stay (F17.29)
+
+The topic list reorders by drag (`@dnd-kit`, the same primitive the section and question editors
+use) **and** keeps its up/down buttons. A drag is what forty topics need; the buttons are what a
+keyboard reaches without learning a chord. The handle is a separate control rather than the whole
+card being draggable — the collapsed line is itself the expand button, and the open row is full of
+inputs, so a draggable card would start a drag on every click into a text field.
+
+Both are disabled while a filter is applied, for the reason that predates the drag: "up" means the
+row above **in the full set**, and with rows hidden that is not the row above on screen. The drop
+logic is `reorderDrafts`, exported and pure — dnd-kit reads element geometry and a jsdom-class
+environment reports every rect as zero, so a simulated drag never produces a drop, and the pure
+function is where the behaviour is actually pinned. A drop outside the list is a no-op rather than a
+move to index `-1`, which `arrayMove` would silently read as "the end".
 
 ### Three sub-tabs, named after the job (F17.26)
 
