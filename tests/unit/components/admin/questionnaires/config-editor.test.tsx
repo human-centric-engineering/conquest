@@ -1112,6 +1112,117 @@ describe('ConfigEditor', () => {
     }
   });
 
+  // ── Adaptive scope master switch ───────────────────────────────────────────────
+  //
+  // The switch is mirrored here from the Adaptive scope tab, which makes it the only field on
+  // this tab with two editors. The send is therefore conditional, and the test that matters most
+  // is the negative one: an untouched switch must not appear in the body at all, or a Settings
+  // tab loaded before someone turned scope on would turn it back off on the next unrelated save.
+
+  const scopeConfig = (enabled: boolean) => ({
+    adaptiveScope: { ...DEFAULT_QUESTIONNAIRE_CONFIG.adaptiveScope, enabled },
+  });
+
+  it('renders the Adaptive scope group with a link to its tab', () => {
+    setup();
+    const content = settingsContent();
+    expect(content.getByText('Adaptive scope')).toBeInTheDocument();
+    expect(content.getByRole('link', { name: /set up topics and conditions/i })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn-1/v/ver-1/topics'
+    );
+  });
+
+  it('reflects the stored adaptiveScope.enabled in the switch', () => {
+    setup(scopeConfig(true));
+    expect(screen.getByRole('switch', { name: /use adaptive scope/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+  });
+
+  it('says what off means, and what on means', () => {
+    const { rerender } = render(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig(scopeConfig(false))}
+        questionCount={5}
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    // Matched on the state sentence, not the group description — the description says something
+    // deliberately similar, and matching it would pass whatever the switch said.
+    expect(screen.getByText(/sits idle until this is on/i)).toBeInTheDocument();
+
+    rerender(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig(scopeConfig(true))}
+        questionCount={5}
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    expect(screen.getByText(/is still asked of everyone/i)).toBeInTheDocument();
+  });
+
+  it('sends adaptiveScope only when the switch was changed', () => {
+    const { specs } = setup(scopeConfig(false));
+    fireEvent.click(screen.getByRole('switch', { name: /use adaptive scope/i }));
+    clickSave();
+    expect(bodyOf(specs)).toMatchObject({ adaptiveScope: { enabled: true } });
+  });
+
+  it('turning it back off from on sends enabled:false', () => {
+    const { specs } = setup(scopeConfig(true));
+    fireEvent.click(screen.getByRole('switch', { name: /use adaptive scope/i }));
+    clickSave();
+    expect(bodyOf(specs)).toMatchObject({ adaptiveScope: { enabled: false } });
+  });
+
+  it('omits adaptiveScope entirely when the switch was not touched', () => {
+    const { specs } = setup(scopeConfig(true));
+    // Change something unrelated, so this is a real save rather than a no-op one.
+    fireEvent.click(switchNear(/show percent completed/i));
+    clickSave();
+    expect(bodyOf(specs)).not.toHaveProperty('adaptiveScope');
+  });
+
+  it('resyncs the switch when the config prop changes', () => {
+    const { rerender } = render(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig(scopeConfig(false))}
+        questionCount={5}
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    expect(screen.getByRole('switch', { name: /use adaptive scope/i })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+
+    rerender(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig(scopeConfig(true))}
+        questionCount={5}
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    expect(screen.getByRole('switch', { name: /use adaptive scope/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+  });
+
   // ── Resync from new config prop ────────────────────────────────────────────────
 
   it('resyncs all fields when the config prop changes', () => {

@@ -561,8 +561,10 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
    * nothing is empty; the instrument simply asks less than its author believes it asks.
    *
    * All three are anchored to `interviewer-strategy` rather than to Adaptive Scope: that is the
-   * setting the admin would change, and it is the one on this tab. Adaptive Scope lives on the
-   * Topics tab and has its own (server-side) checker for its own coherence.
+   * setting the admin would change to resolve them. The Settings tab does now carry Adaptive
+   * Scope's master switch, but turning the feature off is not the fix any of these three is
+   * asking for — the topics and their coherence still live on the Adaptive scope tab, which has
+   * its own (server-side) checker.
    */
   if (input.adaptiveScopeEnabled) {
     // 18 — The sharpest of the three. `targeted` asks one specific question from the very first
