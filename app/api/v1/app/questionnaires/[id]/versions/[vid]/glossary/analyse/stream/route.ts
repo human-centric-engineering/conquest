@@ -36,6 +36,10 @@ import {
 } from '@/lib/app/questionnaire/glossary/analysis-schema';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import {
+  normaliseBinding,
+  readResolvedBinding,
+} from '@/lib/app/questionnaire/ai-run/resolved-binding';
+import {
   buildGlossaryAnalysisInput,
   loadGlossaryTerms,
   persistProposedTerms,
@@ -128,8 +132,9 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
           versionId: vid,
           kind: 'glossary_analysis',
           status: 'failed',
-          provider: agent!.provider || 'resolved-at-runtime',
-          model: agent!.model || 'resolved-at-runtime',
+          // The sentinel is right here: the dispatch failed, so there may be no model that ever
+          // answered. Do not "fix" this to match the success path below.
+          ...normaliseBinding(agent!.provider, agent!.model),
           durationMs: Date.now() - startedAt,
           error: message,
           triggeredByUserId: adminId,
@@ -174,8 +179,9 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
         versionId: vid,
         kind: 'glossary_analysis',
         status: 'succeeded',
-        provider: agent!.provider || 'resolved-at-runtime',
-        model: agent!.model || 'resolved-at-runtime',
+        // Read off the dispatch, not the agent row — this agent's configured model is empty by
+        // design, so the row used to record a placeholder for a call that really ran on a model.
+        ...readResolvedBinding(dispatch.data),
         outputSnapshot: result,
         durationMs: Date.now() - startedAt,
         detail: {

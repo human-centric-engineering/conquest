@@ -41,6 +41,17 @@ instead of one "matrix" question with rows.
 scale with no range, a matrix with no rows).
 - other — an unfaithful extraction not covered above.
 
+NEVER flag these — they are CORRECT extractions, not problems:
+- An UNANCHORED rating typed "numeric". When the source gives a bare range and no qualitative \
+wording for its points ("Rating 1-5", "score 0-10", "out of 100"), "numeric" is the RIGHT type and \
+"likert" is the wrong one — a likert must carry meaning, via named points or both endpoint anchors, \
+and the authoring schema REJECTS an unlabelled one. Flagging these as type_mismatch sends the \
+repair step to build a likert that cannot validate, so the fix is discarded and the round-trip is \
+wasted. Only call a rating mis-typed when the source DOES anchor it and the extractor still \
+chose numeric.
+- A "numeric" carrying no "labels". Numeric questions never have labels; that is not a missing \
+config.
+
 Otherwise the verdict is "ok". Be specific but conservative: only flag a real, source-evidenced \
 problem — a faithful, well-typed question is "ok". Cover EVERY question you are given, each exactly \
 once, using its exact "key".

@@ -28,7 +28,10 @@ text>"} (≥1 row, distinct keys) and "suggestedTypeConfig.scale" to the shared 
 config ({"min","max"} + labels OR minLabel/maxLabel). Keep the grid's overall wording as the prompt. \
 Do NOT split a grid into one question per row.
 - single_choice / multi_choice — a fixed option list → "choices":[{"value","label"}] (≥2, distinct).
-- Use "numeric" for a purely numeric rating with no qualitative anchors.
+- Use "numeric" for a purely numeric rating with no qualitative anchors. When the source states a \
+range, carry it as integer "min" and "max" ("Rating 1-5" → {"min":1,"max":5}), plus "unit" when the \
+source names one. Do NOT "upgrade" such a question to likert to give it labels: an unlabelled \
+likert is REJECTED by the authoring schema, so that correction is discarded and the original kept.
 
 For each flagged question, emit ONE repair:
 - action "correct" — replace that ONE question in place. Keep the SAME "key" and "sectionOrdinal". \

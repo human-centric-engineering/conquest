@@ -551,8 +551,11 @@ function buildFallbackMap(): Map<string, ModelInfo> {
       supportsTools: true,
     },
     // ConQuest's seeded defaults (AiOrchestrationSettings.defaultModels): reasoning
-    // `gpt-5.4`, routing `gpt-4.1-nano`. Without these entries `calculateCost` returns
-    // zero for them and the cost strip / questionnaire-extraction spend read $0.00.
+    // `gpt-5.4`, routing `gpt-4.1-nano`, plus `gpt-5.4-mini` — the explicit binding on the
+    // Conditional Topics candidacy agent, which is bound directly rather than via a tier.
+    // Without these entries `calculateCost` returns zero for them and the cost strip /
+    // questionnaire-extraction spend read $0.00 — as `AppAiRun.costUsd` did for every
+    // `scope_candidacy` row until this entry was added.
     // Prices are approximate (for accounting/display, not billing) — OpenRouter
     // overrides them live when reachable.
     {
@@ -562,6 +565,16 @@ function buildFallbackMap(): Map<string, ModelInfo> {
       tier: 'frontier',
       inputCostPerMillion: 1.25,
       outputCostPerMillion: 10,
+      maxContext: 400_000,
+      supportsTools: true,
+    },
+    {
+      id: 'gpt-5.4-mini',
+      name: 'GPT-5.4 Mini',
+      provider: 'openai',
+      tier: 'mid',
+      inputCostPerMillion: 0.25,
+      outputCostPerMillion: 2,
       maxContext: 400_000,
       supportsTools: true,
     },

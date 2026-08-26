@@ -14,12 +14,31 @@ import { QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG } from '@/lib/app/questionnair
  * **The load-bearing rubric lives in code, not here.** Dispatched app-natively (a structured
  * `runStructuredCompletion` call) with the prompt built from `scope/candidacy-prompt.ts` — it does
  * NOT read these `systemInstructions`; they exist so the agent is self-describing in the admin UI.
- * Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts` (the
- * `routing` tier at call time — this must stay cheap, it runs on every upload). Idempotent —
- * `update` only re-asserts `isSystem` so re-seeding never clobbers an operator's edits.
+ * **Bound explicitly to `openai/gpt-5.4-mini`, not left empty for the `routing` tier.** It used to
+ * ship empty on the reasoning that a per-upload check must stay cheap, which resolved it to
+ * `gpt-4.1-nano`. Measured over the routing corpus (`tests/fixtures/app/questionnaire/routing-corpus`),
+ * that model returned malformed JSON on roughly one call in six; both attempts failing means the
+ * ingest silently skips Conditional Topics altogether. `gpt-5.4-mini` was clean on 60 of 60 calls,
+ * was the FASTEST of the five models tried (~1.6s against nano's ~2.6s), and costs $0.0009 per
+ * uploaded document — a rounding error next to the extractor's $0.12 on the same upload. The
+ * frontier `gpt-5.4` was measurably WORSE here (17/20) as well as six times dearer: it returns more
+ * signals than the contract allows. Cheap was never the problem; the wrong tier was.
+ *
+ * Provider-agnosticism is preserved by the resolver, not by emptiness: clear `model`/`provider` on
+ * the agent row and `agent-resolver.ts` falls back to the `routing` tier exactly as before. An
+ * Anthropic-only fork does that once. Idempotent — `update` re-asserts `isSystem` and fills the
+ * binding ONLY when it is still empty, so re-seeding never clobbers an operator's chosen model.
  */
 
 const SLUG = QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG;
+
+/**
+ * The binding this check runs on. ConQuest is an OpenAI-default deployment, so an OpenAI id here
+ * follows the same app-seed convention as `020-orchestration-default-models`; a fork on another
+ * provider clears these two fields and inherits the tier default instead.
+ */
+const CANDIDACY_MODEL = 'gpt-5.4-mini';
+const CANDIDACY_PROVIDER = 'openai';
 
 const SYSTEM_INSTRUCTIONS = `You are a fast triage check for ConQuest's questionnaire ingestion \
 pipeline. Given a freshly-uploaded document, you decide ONLY whether its own words describe routing \
@@ -42,9 +61,20 @@ const unit: SeedUnit = {
       throw new Error('No admin user found — ensure 001-system-owner runs first.');
     }
 
+    // Fill the binding only where nobody has chosen one. An operator who picked a model in the
+    // admin UI keeps it; a database seeded before this agent had a model gets the measured default.
+    const existing = await prisma.aiAgent.findUnique({
+      where: { slug: SLUG },
+      select: { model: true, provider: true },
+    });
+    const bindingIsUnset = Boolean(existing && !existing.model && !existing.provider);
+
     await prisma.aiAgent.upsert({
       where: { slug: SLUG },
-      update: { isSystem: false },
+      update: {
+        isSystem: false,
+        ...(bindingIsUnset ? { model: CANDIDACY_MODEL, provider: CANDIDACY_PROVIDER } : {}),
+      },
       create: {
         name: 'Conditional Topics Candidacy Check',
         slug: SLUG,
@@ -52,9 +82,9 @@ const unit: SeedUnit = {
           'Cheap triage read that flags a freshly-uploaded questionnaire as a Conditional Topics ' +
           'candidate when its own text describes conditional routing.',
         systemInstructions: SYSTEM_INSTRUCTIONS,
-        // Empty strings → resolved at runtime via agent-resolver.ts (routing tier).
-        model: '',
-        provider: '',
+        // Explicit, and measured — see the docblock. Clear both to fall back to the routing tier.
+        model: CANDIDACY_MODEL,
+        provider: CANDIDACY_PROVIDER,
         // Near-deterministic triage read — same band as the extraction verifier.
         temperature: 0.2,
         // Verdict + a handful of signals stays small.

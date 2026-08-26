@@ -152,9 +152,9 @@ describe('ReingestDialog', () => {
     vi.unstubAllGlobals();
   });
 
-  it('accepts the spreadsheet extension on the file input', async () => {
+  it('accepts the spreadsheet and CSV extensions on the file input', async () => {
     await openDialog();
-    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.xlsx');
+    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.csv,.xlsx');
   });
 
   it('POSTs the extraction instructions to the re-ingest endpoint', async () => {

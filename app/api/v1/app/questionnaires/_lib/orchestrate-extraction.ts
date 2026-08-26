@@ -45,6 +45,11 @@ import {
   type RepairResult,
 } from '@/lib/app/questionnaire/ingestion/repair-schema';
 import type { ExtractionPhaseEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
+import {
+  normaliseBinding,
+  readResolvedBinding,
+  readResolvedCost,
+} from '@/lib/app/questionnaire/ai-run/resolved-binding';
 
 import {
   extractFromDocument,
@@ -232,15 +237,17 @@ export async function* orchestrateExtraction(
       extraction,
       parsed,
       fidelity: {
-        // 'n/a' is the codebase's existing sentinel for a provider/model-less run (see the
-        // evaluation rollup in run-worker.ts and the edit-agent apply seam). Using a second
-        // spelling here would split any "runs by provider" grouping in two.
-        provider: verification.provider ?? 'n/a',
-        model: verification.model ?? 'n/a',
+        // `??` was the bug here, not the sentinel: a verifier that resolves its model at call time
+        // reported an EMPTY STRING, which is not nullish, so the fallback never fired and the
+        // column stored ''. `normaliseBinding` treats empty and nullish alike, and keeps 'n/a' —
+        // the codebase's existing spelling (run-worker.ts, the edit-agent apply seam) — so a
+        // "runs by provider" grouping isn't split across two spellings.
+        ...normaliseBinding(verification.provider, verification.model),
         verdicts: flags.verdicts,
         flaggedCount: flagged.length,
         totalCount: total,
         repairOutcome,
+        costUsd: verification.costUsd,
         durationMs: verification.durationMs,
       },
     },
@@ -256,6 +263,8 @@ interface VerificationOutcome {
   /** Resolved verifier binding; null when the agent wasn't available. */
   provider: string | null;
   model: string | null;
+  /** USD billed for the verify call; null when it never reached a provider. */
+  costUsd: number | null;
   durationMs: number;
 }
 
@@ -270,6 +279,7 @@ async function runVerification(
     result: EMPTY_VERIFY,
     provider: null,
     model: null,
+    costUsd: null,
     durationMs: Date.now() - startedAt,
   });
   try {
@@ -327,10 +337,15 @@ async function runVerification(
       );
       return unavailable();
     }
+    // The binding the capability resolved and used — NOT `agent.provider`/`agent.model`, which are
+    // empty on this agent by design (it resolves to the reasoning tier at call time). Recording the
+    // agent row's blanks is what made `extraction_verify` rows store an empty provider.
+    const binding = readResolvedBinding(dispatch.data);
     return {
       result: validated.value,
-      provider: agent.provider,
-      model: agent.model,
+      provider: binding.provider,
+      model: binding.model,
+      costUsd: readResolvedCost(dispatch.data),
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {

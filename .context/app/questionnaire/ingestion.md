@@ -31,21 +31,39 @@ the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProg
 contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
 [Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
-| Field              | In       | Notes                                                                              |
-| ------------------ | -------- | ---------------------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.xlsx`. Extension is the source of truth.     |
-| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).    |
-| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.          |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                     |
-| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.** |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.            |
-| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.          |
-| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.      |
+| Field              | In       | Notes                                                                                   |
+| ------------------ | -------- | --------------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth. |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).         |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.               |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                          |
+| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**      |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                 |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.               |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.           |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
 200-char cap is `400`. When `title` is absent the server falls back to the parsed
 document title, else the filename.
+
+### Accepted formats — one list, two flavours
+
+Both lists live in `lib/app/questionnaire/constants.ts` and **nothing may re-declare them**.
+The server guards and every admin file picker's `accept` attribute derive from the same
+constants, because seven hand-kept literals had already drifted: the Conditional Topics
+supporting-documents picker offered `.csv` that the server then rejected with a `400`.
+
+| Constant                                                | Contents                         | For                                                                                                            |
+| ------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_EXTENSIONS` / `UPLOAD_ACCEPT_ATTR`              | `.pdf .docx .md .txt .csv .xlsx` | Routes that flatten workbooks first: ingest, re-ingest, supplementary documents                                |
+| `PARSEABLE_UPLOAD_EXTENSIONS` / `PARSEABLE_ACCEPT_ATTR` | the same, **minus `.xlsx`**      | Routes that call `parseDocument` directly: intro-background parse, scoring-schema extract, round-context parse |
+
+The `.xlsx` split is load-bearing rather than cosmetic. `parseDocument` has no workbook branch
+and **throws** on one, so a route without a `flattenWorkbook` step must reject `.xlsx` at the
+boundary (`hasParseableExtension` → clean `415`) rather than let the parser router blow up two
+lines later. Server-side the pair are `hasAllowedExtension` and `hasParseableExtension`, both in
+`_lib/upload-input.ts`.
 
 ### Requiredness (`requiredMode`)
 

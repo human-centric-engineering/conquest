@@ -25,9 +25,10 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import type { GlossaryDocumentView } from '@/lib/app/questionnaire/glossary';
+import { PARSEABLE_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 
-/** File types `parseDocument` can read. Deliberately excludes .xlsx, which it cannot. */
-const ACCEPT = '.pdf,.docx,.md,.txt';
+/** File types `parseDocument` can read. Deliberately excludes `.xlsx`, which it cannot. */
+const ACCEPT = PARSEABLE_ACCEPT_ATTR;
 
 export interface GlossaryDocumentCardProps {
   questionnaireId: string;

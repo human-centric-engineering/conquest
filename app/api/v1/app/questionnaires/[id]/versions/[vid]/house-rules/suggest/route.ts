@@ -170,6 +170,8 @@ const handleSuggest = withAdminAuth<{ id: string; vid: string }>(
         versionId: vid,
         kind: 'house_rules_suggest',
         status: 'failed',
+        // Correct as-is: this is the failure path, so no model served the call. The SUCCESS path
+        // above already records the resolved binding (`result.provider` / `result.model`).
         provider: 'n/a',
         model: 'n/a',
         durationMs: Date.now() - startedAt,

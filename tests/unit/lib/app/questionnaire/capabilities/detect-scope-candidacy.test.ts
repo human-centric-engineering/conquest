@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CostOperation } from '@/types/orchestration';
+import { scopeCandidacyJsonSchema } from '@/lib/app/questionnaire/scope/candidacy-schema';
 
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
@@ -59,6 +60,18 @@ const RESULT = {
     },
   ],
   summary: 'The document routes Section B based on channel structure.',
+};
+
+/**
+ * What a successful dispatch carries. The binding rides beside the result because the candidacy
+ * agent ships with an empty model and binds to a tier at call time — the caller writing the
+ * `scope_candidacy` provenance row has no other way to learn what served it.
+ */
+const SUCCESS_DATA = {
+  result: RESULT,
+  provider: 'openai',
+  model: 'gpt-5.4-mini',
+  costUsd: 0.0009,
 };
 
 const CONTEXT = {
@@ -235,6 +248,28 @@ describe('execute — the extracted structure (F17.22 Phase 3)', () => {
   });
 });
 
+describe('provider-native structured output', () => {
+  // The regression this file exists to prevent. `scopeCandidacyJsonSchema` was exported and
+  // unit-tested from day one but wired to nothing, so the check ran on prose alone against the
+  // cheapest model in the stack — which returned malformed JSON on roughly one call in six. Both
+  // attempts failing means the ingest completes having silently skipped Conditional Topics: no
+  // proposal, no `AppAiRun` row, and an admin who saw "Checking for conditional routing…" and then
+  // nothing at all. Asserting the schema OBJECT (not merely that some schema was passed) is what
+  // keeps a future refactor from forwarding an empty `{}`, which `runStructuredCompletion` treats
+  // as "no enforcement" and drops on the floor.
+  it('forwards the candidacy JSON schema so the shape is constrained at the provider', async () => {
+    await capability.execute(ARGS, CONTEXT);
+
+    const opts = (runStructuredCompletion as Mock).mock.calls[0][0] as {
+      responseSchema?: Record<string, unknown>;
+      responseSchemaName?: string;
+    };
+    expect(opts.responseSchema).toBe(scopeCandidacyJsonSchema);
+    expect(Object.keys(opts.responseSchema ?? {}).length).toBeGreaterThan(0);
+    expect(opts.responseSchemaName).toBe('scope_candidacy');
+  });
+});
+
 describe('redactProvenance', () => {
   it('records structure as counts, never as text', () => {
     // Instrument content rather than respondent data, but still lifted verbatim out of the upload
@@ -245,7 +280,7 @@ describe('redactProvenance', () => {
         sectionTitles: ['Only for prescribing clinicians'],
         questionPrompts: ['Your NHS trust?'],
       },
-      { success: true, data: { result: RESULT } }
+      { success: true, data: SUCCESS_DATA }
     );
     const serialized = JSON.stringify(args);
 
@@ -255,7 +290,7 @@ describe('redactProvenance', () => {
   });
 
   it('redacts documentText from the safe args — never appears verbatim', () => {
-    const { args } = capability.redactProvenance(ARGS, { success: true, data: { result: RESULT } });
+    const { args } = capability.redactProvenance(ARGS, { success: true, data: SUCCESS_DATA });
     const serialized = JSON.stringify(args);
     expect(serialized).not.toContain(ARGS.documentText);
     expect(args).toMatchObject({ documentFileName: 'survey.pdf' });
@@ -264,7 +299,7 @@ describe('redactProvenance', () => {
   it('includes verdict counts but never a raw sourceQuote or summary in the preview', () => {
     const { resultPreview } = capability.redactProvenance(ARGS, {
       success: true,
-      data: { result: RESULT },
+      data: SUCCESS_DATA,
     });
     const parsed = JSON.parse(resultPreview) as {
       data: { isCandidate: boolean; confidence: number; signalCount: number };

@@ -10,10 +10,8 @@ import { z } from 'zod';
 
 import { errorResponse } from '@/lib/api/responses';
 import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
-import {
-  ALLOWED_EXTENSIONS,
-  hasAllowedExtension,
-} from '@/app/api/v1/app/questionnaires/_lib/upload-input';
+import { hasParseableExtension } from '@/app/api/v1/app/questionnaires/_lib/upload-input';
+import { PARSEABLE_UPLOAD_EXTENSIONS } from '@/lib/app/questionnaire/constants';
 
 /** Max upload size for an intro-background source document (bytes). Mirrors the ingest cap. */
 export const INTRO_BACKGROUND_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -98,13 +96,20 @@ export async function parseUploadGuard(
       }),
     };
   }
-  if (!hasAllowedExtension(file.name)) {
+  // The parseable list, NOT the full upload list: every consumer of this guard (intro-background
+  // parse, scoring-schema extract, round-context parse) hands the buffer straight to
+  // `parseDocument`, which has no `.xlsx` branch and throws on one. Allowing a workbook through
+  // here turned a clean 415 into a thrown parse error.
+  if (!hasParseableExtension(file.name)) {
     return {
       ok: false,
-      response: errorResponse(`Unsupported file type (allowed: ${ALLOWED_EXTENSIONS.join(', ')})`, {
-        code: 'UNSUPPORTED_FILE_TYPE',
-        status: 415,
-      }),
+      response: errorResponse(
+        `Unsupported file type (allowed: ${PARSEABLE_UPLOAD_EXTENSIONS.join(', ')})`,
+        {
+          code: 'UNSUPPORTED_FILE_TYPE',
+          status: 415,
+        }
+      ),
     };
   }
   return { ok: true, file };

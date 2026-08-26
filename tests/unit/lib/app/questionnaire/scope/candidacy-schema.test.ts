@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  CANDIDACY_LIMITS,
   scopeCandidacyJsonSchema,
   validateScopeCandidacy,
 } from '@/lib/app/questionnaire/scope/candidacy-schema';
@@ -83,11 +84,21 @@ describe('validateScopeCandidacy', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('rejects more than the maximum number of signals', () => {
-    // MAX_CANDIDACY_SIGNALS is 8 — construct one over the cap.
+  // The three tests below used to assert REJECTION on each cap, and that is what made the caps
+  // dangerous: candidacy is fail-soft, so a verdict thrown away for being twenty characters too
+  // long takes the whole Conditional Topics chain with it, silently. Measured over the routing
+  // corpus, every model overflowed one cap or another and corpus doc 05 failed 3/3 on all of them.
+  // Clipping is the deliberate replacement — do not restore the rejecting assertions.
+  it('clips to the maximum number of signals rather than rejecting the verdict', () => {
+    // MAX_CANDIDACY_SIGNALS is 8 — construct one over the cap. `gpt-5.4` really does return nine
+    // on a richly-signposted document.
     const tooMany = Array.from({ length: 9 }, (_, i) => ({ note: `Signal ${i}` }));
     const result = validateScopeCandidacy(candidacy({ signals: tooMany }));
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.signals).toHaveLength(8);
+    // The ones kept are the first eight, in order — not an arbitrary subset.
+    expect(result.value.signals[7].note).toBe('Signal 7');
   });
 
   it('accepts exactly the maximum number of signals', () => {
@@ -96,16 +107,37 @@ describe('validateScopeCandidacy', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('rejects a sourceQuote exceeding its max length', () => {
+  it('clips an over-long sourceQuote rather than rejecting the verdict', () => {
     const result = validateScopeCandidacy(
       candidacy({ signals: [{ note: 'x', sourceQuote: 'a'.repeat(501) }] })
     );
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.signals[0].sourceQuote).toHaveLength(500);
   });
 
-  it('rejects a note exceeding its max length', () => {
+  it('clips an over-long note rather than rejecting the verdict', () => {
     const result = validateScopeCandidacy(candidacy({ signals: [{ note: 'a'.repeat(301) }] }));
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.signals[0].note).toHaveLength(300);
+  });
+
+  it('clips an over-long summary rather than rejecting the verdict', () => {
+    const result = validateScopeCandidacy(candidacy({ summary: 'a'.repeat(501) }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.summary).toHaveLength(500);
+  });
+
+  // Leniency has a floor: a reply carrying no verdict at all is still a failure. Clipping must not
+  // become "accept anything".
+  it('still rejects a summary that is only whitespace', () => {
+    expect(validateScopeCandidacy(candidacy({ summary: '   ' })).ok).toBe(false);
+  });
+
+  it('still rejects a signal whose note is only whitespace', () => {
+    expect(validateScopeCandidacy(candidacy({ signals: [{ note: '  ' }] })).ok).toBe(false);
   });
 
   it('scopeCandidacyJsonSchema is a non-empty object exposing properties for the core fields', () => {
@@ -116,5 +148,36 @@ describe('validateScopeCandidacy', () => {
     expect(properties).toBeTypeOf('object');
     const propertyKeys = Object.keys(properties as Record<string, unknown>);
     expect(propertyKeys).toEqual(expect.arrayContaining(['isCandidate', 'confidence', 'summary']));
+  });
+
+  // The serialised schema is what constrains the provider, so it must carry the SIGNAL ITEM shape —
+  // and that is exactly what a naive serialisation loses. Zod cannot represent a `.transform()`, so
+  // pointing `z.toJSONSchema` at the lenient parse schema silently emitted `"signals": {"default":
+  // []}` — no item type, no properties — at the one field where malformed output was actually
+  // observed. Hence the separate un-transformed wire schema. If this assertion ever fails, the two
+  // schemas have been collapsed back into one and the provider is being sent a shape that
+  // constrains nothing.
+  it('serialises the signal item shape, not a bare default', () => {
+    const properties = scopeCandidacyJsonSchema.properties as Record<string, unknown>;
+    const signals = properties.signals as Record<string, unknown>;
+
+    expect(signals.type).toBe('array');
+    const items = signals.items as Record<string, unknown>;
+    expect(Object.keys(items.properties as Record<string, unknown>)).toEqual(
+      expect.arrayContaining(['note', 'sourceQuote'])
+    );
+    expect(signals.maxItems).toBe(8);
+  });
+
+  // The prompt now states every cap to the model (`candidacy-prompt.ts`). These must stay in step
+  // with the schema, or the model is once again being held to a limit it was never told about —
+  // the root cause of the deterministic doc-05 failure.
+  it('exposes the caps the prompt quotes to the model', () => {
+    expect(CANDIDACY_LIMITS).toEqual({
+      maxSignals: 8,
+      noteChars: 300,
+      sourceQuoteChars: 500,
+      summaryChars: 500,
+    });
   });
 });

@@ -105,7 +105,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
     success: true,
-    data: { result: RESULT },
+    // The capability returns the binding it resolved beside the result — the agent row cannot
+    // supply it, because the analyst binds to a tier at call time.
+    data: { result: RESULT, provider: 'openai', model: 'gpt-5.4' },
   });
   (saveTopicDraft as Mock).mockImplementation((_versionId: string, draft: unknown) => draft);
   (buildRoutingAnalysisInput as Mock).mockResolvedValue(INPUT);
@@ -155,6 +157,28 @@ describe('dispatchRoutingAnalysis', () => {
     expect(recordAiRun).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'routing_analysis', status: 'failed' })
     );
+  });
+
+  it('carries the resolved binding out of the dispatch for the caller to record', async () => {
+    const log = makeLog();
+
+    const outcome = await dispatchRoutingAnalysis({ ...BASE, log: log as never });
+
+    expect(outcome).toMatchObject({ ok: true, binding: { provider: 'openai', model: 'gpt-5.4' } });
+  });
+
+  it('falls back to the sentinel when the capability reports no binding', async () => {
+    // A capability predating the wider data type must not make a provenance write throw — an
+    // unreadable binding degrades to 'n/a' rather than propagating undefined into the row.
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { result: RESULT },
+    });
+    const log = makeLog();
+
+    const outcome = await dispatchRoutingAnalysis({ ...BASE, log: log as never });
+
+    expect(outcome).toMatchObject({ ok: true, binding: { provider: 'n/a', model: 'n/a' } });
   });
 
   it('analyses a version with no source document attached', async () => {
@@ -215,9 +239,13 @@ describe('dispatchRoutingAnalysis', () => {
     });
 
     expect(outcome).toMatchObject({ ok: false, code: 'ROUTING_ANALYSIS_FAILED' });
-    // Still recorded, and still attributable: an unbound agent resolves its provider at runtime.
+    // Still recorded — the run's EXISTENCE is the durable "already tried" signal the Topics tab
+    // reads, independent of which model it would have used. The sentinel is the honest value on a
+    // failure path: the dispatch never reached a provider, so no model served this. It reads 'n/a'
+    // rather than 'resolved-at-runtime' so a "runs by provider" rollup isn't split across two
+    // spellings of the same nothing.
     expect(recordAiRun).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'failed', provider: 'resolved-at-runtime' })
+      expect.objectContaining({ status: 'failed', provider: 'n/a', model: 'n/a' })
     );
   });
 
@@ -251,9 +279,12 @@ describe('persistRoutingAnalysis', () => {
     versionId: 'ver-1',
     adminId: 'admin-1',
     clientIp: '203.0.113.7',
-    agent: AGENT,
     input: INPUT,
     result: RESULT,
+    // What the dispatch reported actually served the call. Persist no longer takes the agent row:
+    // its provider/model are empty by design, so recording them wrote a blank provenance row.
+    binding: { provider: 'openai', model: 'gpt-5.4' },
+    costUsd: 0.0042,
     startedAt: 0,
     trigger: 'admin' as const,
   };
@@ -322,20 +353,23 @@ describe('persistRoutingAnalysis', () => {
     expect(draft.checkTopicPreference).toEqual(['pipeline']);
   });
 
-  it('records the run even when the agent resolves its provider at runtime', async () => {
-    // An agent row may carry empty provider/model and let the resolver pick — the run must still
-    // be recorded, because its existence (not its provider) is the "already tried" signal.
+  it('records the model that actually served the call, not the agent row placeholder', async () => {
+    // The analyst agent ships with empty provider/model and binds to the reasoning tier at call
+    // time. This used to record the literal 'resolved-at-runtime', so `AppAiRun` could not answer
+    // "which model produced this proposal?" — the one question a corpus-run ledger asks first, and
+    // the reason the trial run had to join `ai_cost_log` on a timestamp instead.
     const log = makeLog();
 
     await persistRoutingAnalysis({
       ...PERSIST,
-      agent: { ...AGENT, provider: '', model: '' },
+      binding: { provider: 'openai', model: 'gpt-5.4' },
+      costUsd: 0.0042,
       input: { ...INPUT, audience: { who: 'Founders' } },
       log: log as never,
     });
 
     expect(recordAiRun).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: 'resolved-at-runtime', model: 'resolved-at-runtime' })
+      expect.objectContaining({ provider: 'openai', model: 'gpt-5.4' })
     );
     // The audience travels with the dispatch input, not the run — pinned here because the spread
     // that carries it is the kind of line a refactor drops without any test noticing.

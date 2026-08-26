@@ -221,6 +221,17 @@ Being explicit, so a good score here is not over-read:
   parsers all exist (`lib/orchestration/knowledge/parsers/`) and none is exercised
   here. A PDF export with broken table structure is a realistic failure mode this
   corpus cannot see.
+
+  > **`.csv` was not ingestible until 2026-08-26.** The first trial run of doc 01 found
+  > the questionnaire upload allowlist had never listed `.csv`, even though the parser
+  > router has always had a `.csv` branch — so the corpus' _easiest_ document could not
+  > be run as authored at all. Fixed by deriving the allowlist and every admin file
+  > picker from one constant. Any run recorded before that date either did not cover
+  > doc 01 or ran it through a `.txt` copy, which reaches the plain-text parser rather
+  > than the CSV one and is **not** a comparable result — the CSV parser labels every
+  > row with its column names (`… | When to ask: Always`), which is a materially
+  > stronger signal to the extractor and the analyst than raw comma-separated text.
+
 - **Scale.** The largest document is ~36 questions. Real instruments reach 200+, where
   `ROUTING_ANALYSIS_MAX_TOPICS` and the 12,288-token output cap start to bind.
 - **Messiness.** These are clean. Real documents have inconsistent numbering, orphaned

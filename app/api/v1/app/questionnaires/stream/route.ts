@@ -174,6 +174,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
           status: fidelity.repairOutcome === 'verifier_unavailable' ? 'failed' : 'succeeded',
           provider: fidelity.provider,
           model: fidelity.model,
+          costUsd: fidelity.costUsd,
           outputSnapshot: fidelity.verdicts,
           durationMs: fidelity.durationMs,
           detail: {

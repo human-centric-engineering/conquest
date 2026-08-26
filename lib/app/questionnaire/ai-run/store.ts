@@ -34,7 +34,18 @@ export interface RecordAiRunParams {
   versionId?: string | null;
   kind: AppAiRunKind;
   status?: AppAiRunStatus;
-  /** Resolved provider slug + model id that actually served the call (post-fallback). */
+  /**
+   * Resolved provider slug + model id that actually served the call (post-fallback).
+   *
+   * **Resolved, never configured.** Most app agents ship with an empty `provider`/`model` so they
+   * bind to a tier at call time; passing the agent row's values therefore records a blank for a
+   * call that really ran on something. Read the binding back off the dispatch instead — see
+   * `readResolvedBinding` in `ai-run/resolved-binding.ts`.
+   *
+   * `'n/a'` (the single agreed spelling — `UNRESOLVED_BINDING`) means the call never reached a
+   * provider: a failed dispatch, or a seam where the model call happened in a different request.
+   * That is a legitimate value on a failure path, not a gap to be filled in.
+   */
   provider: string;
   model: string;
   /** The fully interpolated prompt as sent, and the raw output as received. Both capped. */

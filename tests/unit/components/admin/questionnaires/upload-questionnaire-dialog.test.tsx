@@ -125,9 +125,12 @@ describe('UploadQuestionnaireDialog', () => {
     vi.unstubAllGlobals();
   });
 
+  // Pinned as a literal on purpose: this is the list the admin actually sees in the file picker,
+  // so an unintended change to the shared constant should fail here. That the string stays in
+  // step with the SERVER's allowlist is asserted separately, in the upload-input suite.
   it('opens the dialog from the trigger and shows the file input with accepted types', async () => {
     await openDialog();
-    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.xlsx');
+    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.csv,.xlsx');
   });
 
   it('POSTs multipart FormData to the streaming ingest endpoint and navigates on `done`', async () => {

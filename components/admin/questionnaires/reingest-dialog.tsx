@@ -42,9 +42,10 @@ import { ExtractionProgress } from '@/components/admin/questionnaires/status-tic
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { parseSseBlock } from '@/lib/api/sse-parser';
+import { UPLOAD_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 
-/** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
-const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx';
+/** Allowed upload extensions — DERIVED from the server's list, never a hand-kept copy. */
+const ACCEPT = UPLOAD_ACCEPT_ATTR;
 
 interface ReingestResult {
   sectionCount: number;
@@ -281,9 +282,9 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
               <Label htmlFor={fileInputId}>
                 Replacement document{' '}
                 <FieldHelp title="Replacement document">
-                  A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>, or{' '}
-                  <code>.xlsx</code> file (max 25 MB). The extractor re-reads it from scratch and
-                  rebuilds this draft’s sections and questions.
+                  A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>,{' '}
+                  <code>.csv</code>, or <code>.xlsx</code> file (max 25 MB). The extractor re-reads
+                  it from scratch and rebuilds this draft’s sections and questions.
                 </FieldHelp>
               </Label>
               <Input

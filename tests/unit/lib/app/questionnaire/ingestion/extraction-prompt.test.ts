@@ -255,6 +255,34 @@ describe('buildExtractionPrompt — admin instructions', () => {
   });
 });
 
+/**
+ * A "Rating 1-5" in the routing corpus was extracted as `numeric` with an EMPTY config: the type
+ * was right (an unanchored rating is not a likert) but the 1–5 bound was dropped, leaving the
+ * respondent an unbounded box and the report no scale to read the answer against. The prompt
+ * taught `min`/`max` for likert and matrix and said nothing about numeric.
+ */
+describe('buildExtractionPrompt — numeric bounds', () => {
+  const system = (): string =>
+    systemContent(buildExtractionPrompt({ documentText: 'Q1', fileName: 'survey.pdf' }));
+
+  it('instructs the extractor to carry a stated range into min/max', () => {
+    const rules = system();
+    expect(rules).toMatch(/for "numeric"/i);
+    expect(rules).toMatch(/Rating 1-5/);
+    expect(rules).toMatch(/\{"min":1,"max":5\}/);
+  });
+
+  it('still tells it to leave an unbounded quantity empty', () => {
+    expect(system()).toMatch(/unbounded|does not bound/i);
+  });
+
+  it('demonstrates the numeric config in the output example, not only in prose', () => {
+    // The likert and matrix shapes are both taught by example; numeric was described nowhere.
+    const example = system().slice(system().indexOf('"suggestedTypeConfig"'));
+    expect(example).toMatch(/numeric with a bounded range/i);
+  });
+});
+
 describe('buildExtractionRetryMessage', () => {
   it('names the failing issue paths when provided', () => {
     const message = buildExtractionRetryMessage([

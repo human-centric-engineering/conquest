@@ -71,9 +71,22 @@ const argsSchema = z.object({
 
 export type VerifyExtractionStructureArgs = z.infer<typeof argsSchema>;
 
-/** What the capability returns: the verifier's verdicts + detected grid spans. */
+/**
+ * What the capability returns: the verifier's verdicts + detected grid spans, plus the binding
+ * that actually served the call.
+ *
+ * The binding travels with the result because the verifier agent ships with an empty
+ * `provider`/`model` (it resolves to the reasoning tier at call time), so the orchestrator that
+ * writes the `extraction_verify` provenance row cannot learn it from the agent row.
+ */
 export interface VerifyExtractionStructureData {
   result: VerifyResult;
+  /** Resolved provider slug, post-fallback — what actually answered. */
+  provider: string;
+  /** Resolved model id, post-fallback. */
+  model: string;
+  /** USD billed across both attempts, so the provenance row can price itself. */
+  costUsd: number;
 }
 
 /** Read the dispatched verifier agent's binding from the dispatch context (empty → system default). */
@@ -228,6 +241,11 @@ export class AppVerifyExtractionStructureCapability extends BaseCapability<
       });
     });
 
-    return this.success({ result: completion.value });
+    return this.success({
+      result: completion.value,
+      provider: providerSlug,
+      model,
+      costUsd: completion.costUsd,
+    });
   }
 }

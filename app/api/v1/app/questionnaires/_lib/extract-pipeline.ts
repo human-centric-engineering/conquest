@@ -103,6 +103,12 @@ export interface FidelityRecord {
   /** What happened to the flagged ones. */
   repairOutcome:
     'none_flagged' | 'repaired' | 'repair_failed' | 'skipped_systemic' | 'verifier_unavailable';
+  /**
+   * USD billed for the verify call, so the `extraction_verify` provenance row can price itself.
+   * `null` when the critic never reached a provider (unavailable agent, dispatch failure) — a real
+   * answer, distinct from a call that genuinely cost nothing.
+   */
+  costUsd: number | null;
   durationMs: number;
 }
 

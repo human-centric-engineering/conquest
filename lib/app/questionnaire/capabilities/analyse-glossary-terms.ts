@@ -77,9 +77,17 @@ const argsSchema = z.object({
 
 export type AnalyseGlossaryTermsArgs = z.infer<typeof argsSchema>;
 
-/** What the capability returns: the analyst's proposal. Nothing is persisted here. */
+/**
+ * What the capability returns: the analyst's proposal, plus the binding that served the call.
+ * Nothing is persisted here. The binding travels with the result because this agent resolves its
+ * model at call time, so the route writing the provenance row cannot read it off the agent row.
+ */
 export interface AnalyseGlossaryTermsData {
   result: GlossaryAnalysisResult;
+  /** Resolved provider slug, post-fallback — what actually answered. */
+  provider: string;
+  /** Resolved model id, post-fallback. */
+  model: string;
 }
 
 /** Read the dispatched analyst agent's binding from the dispatch context (empty → system default). */
@@ -240,6 +248,6 @@ export class AppAnalyseGlossaryTermsCapability extends BaseCapability<
       });
     });
 
-    return this.success({ result: completion.value });
+    return this.success({ result: completion.value, provider: providerSlug, model });
   }
 }

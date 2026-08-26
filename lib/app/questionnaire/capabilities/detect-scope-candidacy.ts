@@ -42,6 +42,7 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 
 import { DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import {
+  scopeCandidacyJsonSchema,
   validateScopeCandidacy,
   type ScopeCandidacyResult,
 } from '@/lib/app/questionnaire/scope/candidacy-schema';
@@ -86,9 +87,23 @@ const argsSchema = z.object({
 
 export type DetectScopeCandidacyArgs = z.infer<typeof argsSchema>;
 
-/** What the capability returns: the check's verdict. Nothing is persisted here. */
+/**
+ * What the capability returns: the check's verdict, plus the binding that actually served it.
+ * Nothing is persisted here.
+ *
+ * The binding is returned because only this layer knows it. The agent row ships with empty
+ * `provider`/`model` so it resolves to the reasoning tier at call time, so a caller reading the
+ * agent row records a blank — which is what `AppAiRun` used to store for every candidacy check,
+ * making "which model served this?" unanswerable from the provenance table.
+ */
 export interface DetectScopeCandidacyData {
   result: ScopeCandidacyResult;
+  /** Resolved provider slug, post-fallback — what actually answered. */
+  provider: string;
+  /** Resolved model id, post-fallback. */
+  model: string;
+  /** USD billed across both attempts, so the provenance row can price itself. */
+  costUsd: number;
 }
 
 /** Read the dispatched check agent's binding from the dispatch context (empty → system default). */
@@ -203,6 +218,14 @@ export class AppDetectScopeCandidacyCapability extends BaseCapability<
         messages,
         maxTokens: CANDIDACY_MAX_TOKENS,
         timeoutMs: CANDIDACY_TIMEOUT_MS,
+        // Constrain the shape at the provider, not only in the prose. This was the gap that made
+        // an ingest silently skip Conditional Topics: the check ran on the cheapest model in the
+        // stack, hand-writing its JSON from the prompt alone, and got it wrong on roughly one call
+        // in six — a stray brace after each signal object. Both attempts failing means no verdict,
+        // no `AppAiRun` row, and an admin who sees "Checking for conditional routing…" and then
+        // nothing. Forwarded on the retry too, by `runStructuredCompletion`.
+        responseSchema: scopeCandidacyJsonSchema,
+        responseSchemaName: 'scope_candidacy',
         parse: (raw) =>
           tryParseJson(raw, (parsed) => {
             const validation = validateScopeCandidacy(parsed);
@@ -248,6 +271,11 @@ export class AppDetectScopeCandidacyCapability extends BaseCapability<
       });
     });
 
-    return this.success({ result: completion.value });
+    return this.success({
+      result: completion.value,
+      provider: providerSlug,
+      model,
+      costUsd: completion.costUsd,
+    });
   }
 }

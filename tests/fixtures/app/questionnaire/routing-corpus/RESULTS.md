@@ -10,8 +10,9 @@ an unrun document is left blank rather than estimated, and a run that was abando
 half-way is recorded as such. A ledger that guesses is worse than no ledger, because the
 trend line it draws is fiction.
 
-> **Status: no runs recorded yet.** The log below is empty by design — copy the template
-> in [Recording a run](#recording-a-run) for the first one.
+> **Status: two partial runs recorded (R001 — doc 01, R002 — doc 02; both 2026-08-26).** No full
+> corpus run has been performed, so there is no corpus score and the restraint band — the band that
+> decides shippability — is still untouched.
 
 ---
 
@@ -57,7 +58,10 @@ below.
    thing being measured is what the analyst offered an admin, not what an admin made of it.
 5. **Pull the run rows** for timings, cost, resolved models and failures (below).
 6. **Score, fill in the template, append to the log.** Newest run at the top.
-7. **Clean up.** Ten questionnaires per run accumulate; archive or delete the run's
+7. **File what the run suggests changing in [Candidate tweaks](#candidate-tweaks)** — do not edit
+   a prompt off the back of one run. Promote an entry to **confirmed** when a second run sees it
+   again; that, not a single striking result, is what justifies a change.
+8. **Clean up.** Ten questionnaires per run accumulate; archive or delete the run's
    questionnaires once it is recorded, or the next person's list is unusable.
 
 ### Pulling the run rows
@@ -86,6 +90,24 @@ The `kind` values that matter here are `extraction_verify`, `scope_candidacy` an
 `routing_analysis`. A document with no `scope_candidacy` row did not have the check run at
 all. A `routing_analysis` row with `status = 'failed'` is also the durable "already tried"
 signal the Topics tab reads, so a failed analysis will not silently re-propose later.
+
+**On `provider` / `model`.** These now hold the binding that actually served the call, for all
+three kinds. Before 2026-08-26 they held the agent row's _configured_ values — and these agents
+ship with an empty model on purpose, binding to the reasoning tier at call time — so the columns
+read `''`, `'n/a'` or `'resolved-at-runtime'` for calls that had really run on `openai/gpt-5.4`.
+A run recorded before that date cannot name its models from this table; join `ai_cost_log` on the
+`agentId` and timestamp instead.
+
+`'n/a'` is now the single spelling for "no model served this", and it is a real answer rather
+than a gap: the call failed before reaching a provider. Do not fill it in from the agent row —
+that is the bug that was fixed.
+
+**On `costUsd`.** It is populated for all three ingest kinds from R002 onward. Before that it was
+always `NULL` — the three ingest-chain writers (`stream/route.ts`, `scope-candidacy.ts`,
+`routing-analysis.ts`) simply never passed it, though the session-side writers did — so the query
+above returned a blank cost column and a run had to be priced by joining `ai_cost_log` on a
+timestamp. A `0` on a `scope_candidacy` row predating R002 means "the model was not in the pricing
+registry", not "this was free".
 
 The full prompt as sent and the raw reply are on `promptSnapshot` / `outputSnapshot` of the
 same row (capped and flagged `truncated`) — that is where to look when a score is
@@ -207,7 +229,220 @@ that turns the trend table into an explanation rather than a graph.>
 
 ## Run log
 
-_Newest first. No runs recorded yet._
+_Newest first._
+
+### R002 — 2026-08-26 · **PARTIAL (doc 02 only)**
+
+| Field                      | Value                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Commit                     | `e0a966ea6` + the ingest-fidelity and candidacy fixes on `fix/ingest-fidelity`      |
+| Ran by                     | Claude (agent), driven by John                                                      |
+| How                        | streaming ingest via `POST /questionnaires/stream` · **partial — doc 02 only**      |
+| Extractor model            | `openai/gpt-5.4`                                                                    |
+| Critic model               | `openai/gpt-5.4`                                                                    |
+| Candidacy model            | `openai/gpt-4.1-nano` (attempts 1–2), then `openai/gpt-5.4-mini` (attempts 3–6)     |
+| Analyst model              | `openai/gpt-5.4`                                                                    |
+| Conditional topics enabled | no (fresh version each attempt — the candidacy check requires an untouched version) |
+| Extract tables             | default (on; PDF-only, so inert for a `.md`)                                        |
+| Total cost / wall time     | ~$0.42 across six ingests · 48–88s each                                             |
+| Environment                | local dev DB, dev server on :3020                                                   |
+
+| Doc | Difficulty | P   | C   | T   | G   | R   | /10 | Failed at | Critical | Note                                                            |
+| --- | ---------- | --- | --- | --- | --- | --- | --- | --------- | -------- | --------------------------------------------------------------- |
+| 01  | 1          |     |     |     |     |     |     |           |          | not run (see R001)                                              |
+| 02  | 2          | 1   | 2   | 1   | 2   | 2   | 8   | extract   | none     | Analyst near-ideal; extraction question count varies run to run |
+| 03  | 2          |     |     |     |     |     |     |           |          | not run                                                         |
+| 04  | 3          |     |     |     |     |     |     |           |          | not run                                                         |
+| 05  | 3          |     |     |     |     |     |     |           |          | not run                                                         |
+| 06  | 3          |     |     |     |     |     |     |           |          | not run                                                         |
+| 07  | 5          |     |     |     |     |     |     |           |          | not run                                                         |
+| 08  | 4          |     |     |     |     |     |     |           |          | not run                                                         |
+| 09  | 3          |     |     |     |     |     |     |           |          | not run                                                         |
+| 10  | 5          |     |     |     |     |     |     |           |          | not run                                                         |
+
+**Corpus score:** _n/a — partial_ · **Extraction band:** _n/a_ · **Restraint band:** _not exercised_
+**Verdict:** not comparable — one document, in the easy band. The restraint band is still untouched.
+
+**Six ingests, not one, and the row scores the sixth.** The first attempt failed at `candidacy` and
+scored nothing below C; the run was then used to find and fix the cause, and repeated. Recording it
+as one row would hide the most useful thing this run produced, so the sequence is below.
+
+#### What broke
+
+**C = 0 on attempt 1 — the check did not run.** No `scope_candidacy` `AppAiRun` row, no cached
+verdict, and the stream went straight from "Checking for conditional routing…" to `done`. The cause
+was not variance: `gpt-4.1-nano` emitted a stray `}` after each signal object, both attempts failed
+to parse, and the fail-soft returned `null` — so the ingest completed having silently skipped
+Conditional Topics entirely. Sampled directly against the API, that model malformed **4 of 24**
+calls; the temp-0 retry path failed **1 in 10** on its own.
+
+Chasing it turned up a **deterministic** fault underneath, which matters more than the model: the
+`sourceQuote` cap (500 chars) and the `signals` cap (8) were enforced by Zod, stated nowhere in the
+prompt, and a violation threw away the whole verdict. **Corpus doc 05 failed this way 3/3 on every
+model tested**, `gpt-5.4` included — which means doc 05's candidacy check had never once worked and
+never would have. Frontier models were not immune, they simply failed the other cap: `gpt-5.4`
+returns nine or ten signals where the contract allows eight.
+
+Measured over all ten corpus documents, schema enforcement on:
+
+| Model                      |     Clean | Latency | $/call   | How it failed       |
+| -------------------------- | --------: | ------- | -------- | ------------------- |
+| `gpt-4.1-nano` _(was)_     | 20/24 raw | ~2.6s   | $0.00026 | malformed JSON      |
+| `gpt-4o-mini`              |     45/50 | ~2.6s   | $0.00039 | `sourceQuote` > 500 |
+| `gpt-5.4-nano`             |     38/40 | ~2.0s   | $0.00020 | `sourceQuote` > 500 |
+| **`gpt-5.4-mini`** _(now)_ | **60/60** | ~1.7s   | $0.00086 | —                   |
+| `gpt-5.4` _(reasoning)_    |     17/20 | ~3.5s   | $0.00530 | `signals` > 8       |
+
+**P = 1 — the question count is not stable.** Six ingests of the same file on the same build
+produced **22, 28, 23, 28, 28 and 28** questions against a source with 22 numbered items. The
+extractor is splitting compound questions ("Who is the DSL this year, **and** when did they last
+complete advanced training?" → two), which `extraction-prompt.ts` explicitly instructs it to do, and
+every split was recorded as a revertable `split_question` change. So this is disclosed, not
+invented — but it is applied inconsistently, and two ingests of one document that disagree on the
+question count are not comparable in a cohort. Parked as **T02**.
+
+The fidelity critic did not notice. It checked all 28 and flagged 3 — correctly downgrading two
+`date` types to `free_text` — because it is a **per-question** check with no count or coverage
+dimension. Parked as **T03**.
+
+**T = 1 — Part A placed at `opening` rather than `core`.** Everything else matched: A/B universal,
+C–F conditional, G closing, `fromDocument: true`. Both README distractors were handled _well_ —
+"Part G … last" became `phase: closing` rather than a criterion, and "if you are unsure whether a
+part applies, complete it" became `fallbackTopicKeys: [C,D,E,F]` rather than a criterion, which is
+the ideal reading of an inclusion bias. Whether `opening` is an error at all is arguable; scored
+against the README as written, and parked as **T04** because it may be the ground truth that needs
+the edit.
+
+G = 2: all six `sourceQuote`s verified as exact spans, zero fabrication. R = 2: no invented caps or
+depth dials. C = 2 on every attempt after the fix, `isCandidate: true`, confidence 1.0, three quoted
+signals.
+
+#### Changed since last run
+
+1. **The candidacy JSON schema is forwarded.** `scopeCandidacyJsonSchema` existed and was
+   unit-tested since P17.19 but was wired to nothing.
+2. **Caps clip instead of rejecting**, and the prompt now states all three to the model.
+3. **The candidacy agent is bound to `openai/gpt-5.4-mini`** rather than left empty to resolve the
+   routing tier. Clear the binding to fall back as before.
+4. **`AppAiRun.costUsd` is populated** for `extraction_verify`, `scope_candidacy` and
+   `routing_analysis` — the three ingest writers never passed it. `gpt-5.4-mini` was added to the
+   pricing registry, without which the new binding logged $0.00.
+
+---
+
+### R001 — 2026-08-26 · **PARTIAL (doc 01 only)**
+
+| Field                      | Value                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| Commit                     | `e0a966ea6` + the uncommitted ingest-fidelity fixes on `fix/ingest-fidelity`   |
+| Ran by                     | Claude (agent), driven by John                                                 |
+| How                        | streaming ingest via `POST /questionnaires/stream` · **partial — doc 01 only** |
+| Extractor model            | `openai/gpt-5.4`                                                               |
+| Critic model               | `openai/gpt-5.4`                                                               |
+| Candidacy model            | `openai/gpt-4.1-nano`                                                          |
+| Analyst model              | `openai/gpt-5.4`                                                               |
+| Conditional topics enabled | no (fresh version — the candidacy check requires an untouched version)         |
+| Extract tables             | default (on; PDF-only, so inert for a CSV)                                     |
+| Total cost / wall time     | $0.1139 · 76s                                                                  |
+| Environment                | local dev DB, dev server on :3020                                              |
+
+| Doc | Difficulty | P   | C   | T   | G   | R   | /10 | Failed at | Critical | Note                                                      |
+| --- | ---------- | --- | --- | --- | --- | --- | --- | --------- | -------- | --------------------------------------------------------- |
+| 01  | 1          | 2   | 2   | 1   | 2   | 2   | 9   | analyst   | none     | AD1 (`Always`) swept into the conditional Adherence topic |
+| 02  | 2          |     |     |     |     |     |     |           |          | not run                                                   |
+| 03  | 2          |     |     |     |     |     |     |           |          | not run                                                   |
+| 04  | 3          |     |     |     |     |     |     |           |          | not run                                                   |
+| 05  | 3          |     |     |     |     |     |     |           |          | not run                                                   |
+| 06  | 3          |     |     |     |     |     |     |           |          | not run                                                   |
+| 07  | 5          |     |     |     |     |     |     |           |          | not run                                                   |
+| 08  | 4          |     |     |     |     |     |     |           |          | not run                                                   |
+| 09  | 3          |     |     |     |     |     |     |           |          | not run                                                   |
+| 10  | 5          |     |     |     |     |     |     |           |          | not run                                                   |
+
+**Corpus score:** _n/a — partial_ · **Extraction band:** _n/a_ · **Restraint band:** _not exercised_
+**Verdict:** not comparable — a single document, and the only one in the trivial band.
+
+**Why partial.** This run existed to verify the ingest-fidelity fixes end to end, not to score the
+corpus. Doc 01 was chosen because it is the one the `.csv` blocker made unrunnable. The other nine
+were not attempted; the restraint band (07, 08, 10) — the band that decides shippability — is
+untouched, so nothing here says the pipeline is safe to ship.
+
+#### What broke
+
+**T = 1 — the Adherence split.** The analyst put all three Adherence questions into one
+`conditional` topic criteria'd _"Only where PC2 is 4 or more"_. The document marks AD1 `Always`,
+so a patient on one to three medicines would now never be asked "In a typical week how often do
+you miss a dose?" — the section's only universal question, silently gated. The README names this
+as doc 01's one wrinkle, and the analyst did notice it: it filed a `gap` saying the section
+_"mixes one always-asked question with two questions asked only where PC2 is 4 or more"_ and that
+it could not split them _"while keeping every question in exactly one topic"_. Reporting the
+conflict is the honest half; resolving it by widening the criterion over AD1 is the wrong half.
+
+Worth recording that a **prior run of the same document through a `.txt` copy split it correctly**
+into `adherence` (core, AD1) and `adherence_support_needs` (conditional, AD2–AD3). Same build,
+same models, different parse. So this is analyst variance on a genuinely hard case, not a
+regression from the fixes — none of which touch the analyst prompt. It is the single most useful
+thing this run found. Parked as **T01** in [Candidate tweaks](#candidate-tweaks) rather than acted
+on: one observation of a case that has already been seen going the other way is not evidence.
+
+Everything else was clean. P: 9/9 sections, 22/22 questions, every answer type faithful — the
+critic flagged **zero** questions (against four on the earlier `.txt` run), so the repair pass did
+not run at all. C: `isCandidate: true`, confidence 1.0. G: all ten `sourceQuote`s verified as exact
+spans of the parsed CSV; zero fabrication. R: `fromDocument: true`, no invented caps or depth
+dials, one honest gap.
+
+#### Changed since last run
+
+First recorded run. The build carries the four ingest-fidelity fixes this run was made to verify:
+
+1. **`.csv` accepted.** Doc 01 could not previously be ingested at all — the allowlist never
+   listed `.csv` though the parser router always had a branch for it. Server guards and all six
+   admin file pickers now derive from one constant.
+2. **The critic's numeric carve-out.** `Rating 1-5` was being flagged as a type mismatch, sending
+   the repair specialist to build an unanchored likert the write schema rejects by design. Both
+   the flag and the wasted round-trip are gone.
+3. **Numeric bounds kept.** PM1 now persists as `numeric` with `{"min":1,"max":5}` instead of an
+   empty config.
+4. **Resolved-model provenance.** All three `AppAiRun` rows name a real provider and model; the
+   models in the table above were read from `AppAiRun` alone, with no join to `ai_cost_log`.
+
+---
+
+## Candidate tweaks
+
+Things a run suggested changing, parked here **deliberately unactioned** until more runs say
+whether they are real.
+
+**Why parking is the rule, not caution.** These documents are read by an LLM, so two runs of the
+same file on the same build can differ — T01 below was seen going both ways. A prompt edit made
+from one observation is as likely to encode the noise as fix the fault, and prompt edits are the
+hardest change here to attribute later: the next run moves for a reason nobody can separate from
+the edit. A tweak earns its way out of this table by recurring, or by being a bug rather than a
+judgement.
+
+Statuses: **open** (seen once, watching) · **confirmed** (seen on ≥2 runs, worth acting on) ·
+**actioned** (changed — say in which run's "Changed since last run") · **dropped** (did not recur,
+or judged correct as-is).
+
+| ID  | Raised | Docs | Status | What was seen                                                                                                                                                                                                                                                                                                                                                                     | Candidate tweak                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ------ | ---- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| T04 | R002   | 02   | open   | Part A proposed at `phase: opening` where the README's ground truth says `core`. The rationale given ("the universal baseline before any situational parts are considered") is defensible, and it changes nothing about routing: none of C–F's criteria are answerable from any question in the instrument anyway.                                                                | Decide whether this is a pipeline error or a README error. If `opening` is a reasonable reading, fix the ground truth rather than the analyst. Do not touch the prompt on one observation.                                                                                                                                                                         |
+| T03 | R002   | 02   | open   | The fidelity critic checked all 28 extracted questions, flagged 3, and never noticed that 6 of the 28 did not exist in a 22-question source. It is a per-question faithfulness check with no count or coverage dimension.                                                                                                                                                         | Give the critic a coverage/count check so extraction drift is caught at ingest, where it is cheap, rather than by a human reading the Structure editor. Pairs with T02.                                                                                                                                                                                            |
+| T02 | R002   | 02   | open   | Six ingests of one file on one build produced 22, 28, 23, 28, 28, 28 questions. The extractor splits compound questions — which `extraction-prompt.ts:182` instructs and which is recorded as a revertable `split_question` change — but does so inconsistently.                                                                                                                  | Decide the policy, then make it deterministic. Splitting improves completion accuracy (each half gets its own satisfaction bar) and costs nothing in interview length; not splitting keeps a 1:1 mirror of the source. **Either way, non-determinism is the defect** — two ingests of one document that disagree on question count are not comparable in a cohort. |
+| T01 | R001   | 01   | open   | All three Adherence questions swept into one `conditional` topic criteria'd _"Only where PC2 is 4 or more"_, though the source marks AD1 `Always`. The analyst filed an honest `gap` naming the mix, then resolved it by widening. **An earlier run of the same document (via a `.txt` copy) split it correctly**, so this is variance on a hard case, not a deterministic fault. | Teach the analyst to prefer **splitting a mixed section into two topics** (one core, one conditional) over widening one criterion across a question the source says to always ask. Silently gating an `Always` question is the worse failure of the two.                                                                                                           |
+
+### Working the table
+
+- **One line per observation, raised against the run that found it.** If a later run sees it again,
+  add that run to `Raised` and move it to **confirmed** — that is the promotion signal.
+- **Record the ones that did not recur too.** Marking T0n **dropped** after three clean runs is a
+  real result: it says the pipeline is variable there, which is worth knowing before anyone trusts
+  a single-run score.
+- **Never edit a prompt straight from a `What broke` paragraph.** It goes here first. The whole
+  point of the ledger is that changes are attributable to evidence, and evidence means more than
+  one run.
+- **A tweak that is a plain bug can skip the queue** — a fabricated quote, a dropped stop
+  condition, a crash. Those are not judgement calls and do not need corroboration.
 
 ---
 
@@ -216,9 +451,10 @@ _Newest first. No runs recorded yet._
 One row per run. The three percentages and the critical-failure count are the whole point
 of the file; everything above exists to make them mean the same thing each time.
 
-| Run          | Date | Commit | Analyst model | Corpus | Extraction band | Restraint band | Critical failures | Verdict |
-| ------------ | ---- | ------ | ------------- | ------ | --------------- | -------------- | ----------------- | ------- |
-| _(none yet)_ |      |        |               |        |                 |                |                   |         |
+| Run            | Date       | Commit            | Analyst model    | Corpus | Extraction band | Restraint band | Critical failures | Verdict               |
+| -------------- | ---------- | ----------------- | ---------------- | ------ | --------------- | -------------- | ----------------- | --------------------- |
+| R002 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 02 only |
+| R001 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 01 only |
 
 ### Reading it honestly
 

@@ -96,7 +96,9 @@ beforeEach(() => {
   (prisma.aiAgent.findUnique as Mock).mockResolvedValue(AGENT);
   (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
     success: true,
-    data: { result: VERDICT_RESULT },
+    // The capability returns the binding it resolved alongside the verdict — the candidacy agent
+    // ships with an empty model and binds to a tier at call time, so this is the only source.
+    data: { result: VERDICT_RESULT, provider: 'openai', model: 'gpt-4.1-nano' },
   });
   (prisma.appQuestionnaireVersion.update as Mock).mockResolvedValue({ id: 'ver-1' });
   (recordAiRun as Mock).mockResolvedValue('run-1');
@@ -275,6 +277,33 @@ describe('checkConditionalTopicsCandidacy — happy path', () => {
         versionId: 'ver-1',
         outputSnapshot: VERDICT_RESULT,
       })
+    );
+  });
+
+  it('records the model that actually served the check, not the agent row blank', async () => {
+    // The candidacy agent's configured provider/model are empty by design. Recording those wrote
+    // 'n/a' onto a check that really ran, so the provenance table could not say which model
+    // produced a verdict — the first thing a corpus-run ledger needs when a score moves.
+    const log = makeLog();
+
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
+
+    expect(recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'openai', model: 'gpt-4.1-nano' })
+    );
+  });
+
+  it('falls back to the sentinel when the capability returns no binding', async () => {
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { result: VERDICT_RESULT },
+    });
+    const log = makeLog();
+
+    await checkConditionalTopicsCandidacy({ ...BASE_PARAMS, log: log as never });
+
+    expect(recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'n/a', model: 'n/a' })
     );
   });
 

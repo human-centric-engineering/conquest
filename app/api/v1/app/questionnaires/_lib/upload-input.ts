@@ -21,14 +21,22 @@ import {
   type AudienceShape,
 } from '@/lib/app/questionnaire/types';
 import { MAX_QUESTIONNAIRE_TITLE_LENGTH } from '@/lib/app/questionnaire/title';
-import { MAX_INSTRUCTIONS_LENGTH } from '@/lib/app/questionnaire/constants';
+import {
+  MAX_INSTRUCTIONS_LENGTH,
+  PARSEABLE_UPLOAD_EXTENSIONS,
+  UPLOAD_EXTENSIONS,
+} from '@/lib/app/questionnaire/constants';
 
 /**
- * Extension allowlist — the source of truth for accepted formats (the caller's
- * MIME type is advisory only, mirroring the knowledge documents route). Narrower
- * than the knowledge KB's list: a questionnaire is a document, not a corpus.
+ * Extension allowlist — accepted formats for a route that flattens workbooks before parsing
+ * (ingest, re-ingest, supplementary documents). The caller's MIME type is advisory only,
+ * mirroring the knowledge documents route.
+ *
+ * Aliased from the lib-tier {@link UPLOAD_EXTENSIONS} rather than declared here, because the
+ * admin file pickers derive their `accept` attributes from that same list — a literal in this
+ * file could (and did) drift from what the UI offers.
  */
-export const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt', '.xlsx'] as const;
+export const ALLOWED_EXTENSIONS = UPLOAD_EXTENSIONS;
 
 // Re-exported from the lib-tier source of truth so existing importers of this
 // path keep working while the capability's Zod cap references the same constant.
@@ -42,6 +50,16 @@ export function getExtension(name: string): string {
 export function hasAllowedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * Narrower check for routes that hand the buffer straight to `parseDocument` — no workbook
+ * flattening step, so `.xlsx` must be refused at the boundary rather than thrown on by the
+ * parser router two lines later. See {@link PARSEABLE_UPLOAD_EXTENSIONS}.
+ */
+export function hasParseableExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return PARSEABLE_UPLOAD_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**

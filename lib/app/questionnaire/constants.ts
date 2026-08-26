@@ -18,6 +18,40 @@ import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilit
  */
 export const MAX_INSTRUCTIONS_LENGTH = 4_000;
 
+/* -------------------------------------------------------------------------- */
+/* Upload formats — one source of truth for guards AND file pickers            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every extension a questionnaire-side upload may arrive as.
+ *
+ * The source of truth for BOTH the server guard (`upload-input.ts`) and every admin file
+ * picker's `accept` attribute. These used to be seven independent literals and had already
+ * drifted apart: the Conditional Topics supporting-documents picker offered `.csv` that the
+ * guard then rejected with a 400. Deriving both ends from this one list is what stops that
+ * recurring — a picker can no longer offer what the server refuses.
+ *
+ * Narrower than the knowledge base's list (no `.epub` / `.html`) — a questionnaire is a single
+ * document, not a corpus.
+ */
+export const UPLOAD_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt', '.csv', '.xlsx'] as const;
+
+/**
+ * The subset the shared parser router (`parseDocument`) can read unaided.
+ *
+ * `.xlsx` is excluded deliberately, and this is not cosmetic: the router has no workbook branch
+ * and THROWS on one. Only routes that reach `flattenWorkbook` first — ingest, re-ingest and
+ * supplementary documents — may accept a workbook. Every other upload route parses directly, so
+ * accepting `.xlsx` there turns a clean 415 into a thrown parse error.
+ */
+export const PARSEABLE_UPLOAD_EXTENSIONS = UPLOAD_EXTENSIONS.filter((ext) => ext !== '.xlsx');
+
+/** `accept` attribute for a picker whose route flattens workbooks (ingest, re-ingest, supplementary). */
+export const UPLOAD_ACCEPT_ATTR = UPLOAD_EXTENSIONS.join(',');
+
+/** `accept` attribute for a picker whose route calls `parseDocument` directly — no `.xlsx`. */
+export const PARSEABLE_ACCEPT_ATTR = PARSEABLE_UPLOAD_EXTENSIONS.join(',');
+
 /**
  * Slug of the seeded selection `AiAgent` (F4.1 / adaptive). Drives the "which of
  * these candidate questions flows most naturally?" pick via `drainStreamChat`,

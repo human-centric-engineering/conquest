@@ -21,6 +21,10 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import type { getRouteLogger } from '@/lib/api/context';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
+import {
+  readResolvedBinding,
+  readResolvedCost,
+} from '@/lib/app/questionnaire/ai-run/resolved-binding';
 import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import { selectCandidacyExcerpt } from '@/lib/app/questionnaire/scope/candidacy-excerpt';
 import {
@@ -272,6 +276,10 @@ export async function checkConditionalTopicsCandidacy(
 
   const startedAt = Date.now();
   let result: ScopeCandidacyResult;
+  // The model that actually served the check, read back off the dispatch — the agent row's own
+  // provider/model are empty by design (it resolves to the reasoning tier at call time).
+  let binding = { provider: 'n/a', model: 'n/a' };
+  let costUsd: number | null = null;
   try {
     const dispatch = await capabilityDispatcher.dispatch(
       DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG,
@@ -306,6 +314,8 @@ export async function checkConditionalTopicsCandidacy(
       return null;
     }
     result = validated.value;
+    binding = readResolvedBinding(dispatch.data);
+    costUsd = readResolvedCost(dispatch.data);
   } catch (err) {
     log.warn('scope candidacy: check threw; skipping', {
       error: err instanceof Error ? err.message : String(err),
@@ -344,8 +354,9 @@ export async function checkConditionalTopicsCandidacy(
     subjectId: versionId,
     versionId,
     kind: 'scope_candidacy',
-    provider: agent.provider || 'n/a',
-    model: agent.model || 'n/a',
+    provider: binding.provider,
+    model: binding.model,
+    costUsd,
     outputSnapshot: result,
     durationMs,
     detail: { isCandidate: result.isCandidate, confidence: result.confidence, fileName },
