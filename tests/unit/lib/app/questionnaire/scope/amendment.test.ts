@@ -35,6 +35,7 @@ function topic(key: string, label: string, phase: Topic['phase'] = 'conditional'
     members: { questionKeys: [`${key}_q1`], dataSlotKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 

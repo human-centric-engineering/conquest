@@ -17,6 +17,7 @@ import {
   MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
+  MAX_TRIGGER_CUES,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
   MIN_SECONDS_PER_ITEM,
@@ -32,6 +33,7 @@ import {
   TOPIC_KEY_MAX_LENGTH,
   TOPIC_LABEL_MAX_LENGTH,
   TOPIC_PHASES,
+  TRIGGER_CUE_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 
 /** A stable slug: lowercase alphanumerics and underscores. Matches the authoring key recipe. */
@@ -48,6 +50,22 @@ export const topicKeySchema = z
  */
 const keyListSchema = z.array(z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH)).max(500);
 
+/**
+ * What the instrument says to watch for mid-conversation (F17.31a) — see {@link TopicTrigger}.
+ *
+ * On the INPUT schema as well as the analyst's, so a trigger survives the round trip through the
+ * Topics tab. The bulk save replaces the whole set from what the client sends back, so a field the
+ * admin surface cannot carry is a field an ordinary save silently deletes.
+ */
+export const topicTriggerSchema = z.object({
+  condition: z.string().trim().min(1).max(TOPIC_CRITERIA_MAX_LENGTH),
+  cues: z
+    .array(z.string().trim().min(1).max(TRIGGER_CUE_MAX_LENGTH))
+    .max(MAX_TRIGGER_CUES)
+    .default([]),
+  sourceQuote: z.string().trim().max(TOPIC_CRITERIA_MAX_LENGTH).optional(),
+});
+
 /** One topic as the admin surface submits it. */
 export const topicInputSchema = z.object({
   key: topicKeySchema,
@@ -58,6 +76,7 @@ export const topicInputSchema = z.object({
   depth: z.enum(TOPIC_DEPTHS).default('full'),
   questionKeys: keyListSchema.default([]),
   dataSlotKeys: keyListSchema.default([]),
+  trigger: topicTriggerSchema.nullable().default(null),
 });
 
 export type TopicInput = z.infer<typeof topicInputSchema>;

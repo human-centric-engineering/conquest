@@ -235,6 +235,14 @@ export const PLANNER_INSTRUCTIONS_MAX_LENGTH = 4_000;
 export const RESPONDENT_MESSAGE_MAX_LENGTH = 1_000;
 export const SCOPE_RATIONALE_MAX_LENGTH = 1_000;
 
+/**
+ * Bounds on a {@link TopicTrigger}. The condition is prose and shares the criteria bound; a cue is
+ * a word or short phrase lifted from the instrument, never a sentence — a long "cue" is a sign the
+ * analyst quoted the rule instead of naming what to listen for.
+ */
+export const TRIGGER_CUE_MAX_LENGTH = 80;
+export const MAX_TRIGGER_CUES = 12;
+
 /** Bounds on how many conditional topics one interview may cover. */
 export const MIN_CONDITIONAL_TOPICS = 1;
 export const MAX_CONDITIONAL_TOPICS_CEILING = 20;
@@ -303,6 +311,40 @@ export interface TopicMembers {
 /** The empty membership. A topic with no members is inert and the launch check flags it. */
 export const EMPTY_TOPIC_MEMBERS: TopicMembers = { dataSlotKeys: [], questionKeys: [] };
 
+/**
+ * What the INSTRUMENT says to watch for during the conversation, when it asks for a topic to be
+ * added on something that surfaces rather than on how the opening went (F17.31a).
+ *
+ * ## Recorded, not yet acted on
+ *
+ * Scope is settled once, when the opening completes, and this field does not change that: a topic
+ * carrying a trigger is still selected (or not) by its `criteria`, exactly as before. What this
+ * captures is the difference between what the document asked for and what the product can do, on
+ * the topic itself, so an admin reviewing the routing sees it where the decision is made rather
+ * than inferring it from a list of caveats.
+ *
+ * Three of the ten routing-corpus documents specify this — see
+ * `tests/fixtures/app/questionnaire/routing-corpus/README.md`, "Mid-interview triggers are not
+ * expressible today". The mechanism that would honour it is specced separately in
+ * `.context/app/planning/features/f17-mid-interview-triggers.md`; nothing here prejudges it.
+ */
+export interface TopicTrigger {
+  /** "The applicant discloses that they are fleeing abuse." The condition, in the author's terms. */
+  condition: string;
+  /**
+   * Words or short phrases, taken FROM THE INSTRUMENT, that a conversation would contain if the
+   * condition were met — "abuse", "fleeing", "arrears".
+   *
+   * Nothing reads these yet. They are captured now because they are only cheaply knowable while the
+   * document is in front of the analyst, and because they are what makes an eventual evaluator
+   * affordable: a turn containing none of them needs no judgement. Written in the instrument's own
+   * language, which is why they are authored rather than inferred.
+   */
+  cues: string[];
+  /** The span of the source document that says so. Absent on a hand-authored trigger. */
+  sourceQuote?: string;
+}
+
 /** One topic, as every pure consumer sees it (`AppQuestionnaireTopic` projected). */
 export interface Topic {
   id: string;
@@ -315,6 +357,8 @@ export interface Topic {
   members: TopicMembers;
   ordinal: number;
   source: TopicSource;
+  /** Null on every topic the author scopes from the opening, which is nearly all of them. */
+  trigger: TopicTrigger | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -341,6 +385,12 @@ export interface ProposedTopic {
   rationale: string;
   /** The span of the source document this was drawn from, when the document actually says it. */
   sourceQuote?: string;
+  /**
+   * Present when the document asks for this topic to be added on something said during the
+   * conversation rather than on the opening (F17.31a). The `criteria` above is still the
+   * opening-time approximation the product actually runs; this is what was asked for.
+   */
+  trigger?: TopicTrigger;
   /** True when a live topic already carries this key — the review surface shows it as a change. */
   replacesExisting?: boolean;
 }
@@ -777,12 +827,12 @@ function asSecondsMap(value: unknown): Record<string, number> {
  * data-slot keys, and truncating one of those to 64 characters does not shorten it, it *changes* it
  * into a key that resolves to nothing and silently orphans the question.
  */
-function asKeyList(value: unknown, max = 64): string[] {
+function asKeyList(value: unknown, max = 64, itemMax = MEMBER_KEY_MAX_LENGTH): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const raw of value) {
     if (typeof raw !== 'string') continue;
-    const key = raw.trim().slice(0, MEMBER_KEY_MAX_LENGTH);
+    const key = raw.trim().slice(0, itemMax);
     if (key.length === 0 || out.includes(key)) continue;
     out.push(key);
     if (out.length >= max) break;
@@ -811,6 +861,28 @@ export function narrowTopicMembers(value: unknown): TopicMembers {
   return {
     dataSlotKeys: asKeyList(obj.dataSlotKeys, 500),
     questionKeys: asKeyList(obj.questionKeys, 500),
+  };
+}
+
+/**
+ * Project a stored `trigger` blob onto a {@link TopicTrigger}, or null.
+ *
+ * Null on absent, malformed, or condition-less input. Absent is the overwhelmingly common case —
+ * every topic authored before F17.31a, and every topic scoped from the opening — so this is a plain
+ * read-path narrow rather than anything a migration needs to backfill.
+ *
+ * A trigger with no `condition` is dropped entirely: cues with nothing to confirm say only that
+ * some words matter, which is not a record of what the document asked for.
+ */
+export function narrowTopicTrigger(value: unknown): TopicTrigger | null {
+  if (!isRecord(value)) return null;
+  const condition = asText(value.condition, TOPIC_CRITERIA_MAX_LENGTH, '');
+  if (condition.length === 0) return null;
+  const sourceQuote = asText(value.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
+  return {
+    condition,
+    cues: asKeyList(value.cues, MAX_TRIGGER_CUES, TRIGGER_CUE_MAX_LENGTH),
+    ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
   };
 }
 
@@ -1058,6 +1130,7 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
         // instruments. Corrected AND reported — `depthCorrectedKeys` is what stops it being silent.
         const corrected = ALWAYS_PHASES.includes(phase) && askedDepth === 'light';
         if (corrected) depthCorrectedKeys.push(key);
+        const trigger = narrowTopicTrigger(t.trigger);
         return [
           {
             key,
@@ -1068,6 +1141,10 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
             members: narrowTopicMembers(t.members),
             rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
             ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
+            // What the document asked for, when it asked for something the opening cannot decide
+            // (F17.31a). Dropped silently when unreadable — a malformed trigger is the absence of a
+            // record, not a reason to refuse an otherwise-good proposal.
+            ...(trigger !== null ? { trigger } : {}),
             ...(t.replacesExisting === true ? { replacesExisting: true } : {}),
           },
         ];

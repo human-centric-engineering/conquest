@@ -247,6 +247,26 @@ const DRAFTS_FIXTURE = [
     questionKeys: ['q_a'],
     dataSlotKeys: ['s_a'],
     source: 'manual' as const,
+    trigger: null,
+  },
+  // F17.31a — a topic carrying what the questionnaire said to watch for. The editor shows this and
+  // never edits it; the panel's only job is to send it back.
+  {
+    clientId: 'c2',
+    key: 'abuse',
+    label: 'Domestic abuse',
+    description: '',
+    phase: 'conditional' as const,
+    criteria: 'The opening indicates the applicant is fleeing abuse.',
+    depth: 'full' as const,
+    questionKeys: ['q_b'],
+    dataSlotKeys: [],
+    source: 'analyst' as const,
+    trigger: {
+      condition: 'The applicant discloses that they are fleeing abuse',
+      cues: ['abuse'],
+      sourceQuote: 'If the applicant discloses, at any stage…',
+    },
   },
 ];
 
@@ -262,6 +282,7 @@ function topic(key: string, phase: Topic['phase']): Topic {
     members: { questionKeys: [], dataSlotKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 
@@ -329,8 +350,42 @@ describe('TopicsPanel — saving the topic set', () => {
           depth: 'full',
           questionKeys: ['q_a'],
           dataSlotKeys: ['s_a'],
+          trigger: null,
+        },
+        {
+          key: 'abuse',
+          label: 'Domestic abuse',
+          description: null,
+          phase: 'conditional',
+          criteria: 'The opening indicates the applicant is fleeing abuse.',
+          depth: 'full',
+          questionKeys: ['q_b'],
+          dataSlotKeys: [],
+          trigger: {
+            condition: 'The applicant discloses that they are fleeing abuse',
+            cues: ['abuse'],
+            sourceQuote: 'If the applicant discloses, at any stage…',
+          },
         },
       ],
+    });
+  });
+
+  it('sends a recorded trigger back untouched (F17.31a)', async () => {
+    // The save REPLACES the whole set, and this payload is enumerated field by field — so a
+    // trigger missing from it would be deleted the next time an admin renamed an unrelated topic.
+    // The editor never edits this field; it only has to not lose it.
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByTestId('save-topics'));
+
+    await waitFor(() => expect(authoringMutateMock).toHaveBeenCalled());
+    const sent = (lastMutation().body as { topics: Record<string, unknown>[] }).topics[1];
+    expect(sent?.trigger).toEqual({
+      condition: 'The applicant discloses that they are fleeing abuse',
+      cues: ['abuse'],
+      sourceQuote: 'If the applicant discloses, at any stage…',
     });
   });
 

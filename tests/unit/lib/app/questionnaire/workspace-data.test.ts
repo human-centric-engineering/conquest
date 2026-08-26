@@ -543,6 +543,7 @@ function makeTopic(over: Partial<Topic> = {}): Topic {
     members: { dataSlotKeys: [], questionKeys: ['q1'] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
     ...over,
   };
 }

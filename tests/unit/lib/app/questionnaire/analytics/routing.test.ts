@@ -50,6 +50,7 @@ function topic(key: string, phase: TopicPhase = 'conditional'): Topic {
     members: { dataSlotKeys: [], questionKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 

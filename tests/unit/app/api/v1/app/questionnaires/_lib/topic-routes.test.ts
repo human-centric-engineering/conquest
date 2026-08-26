@@ -59,6 +59,7 @@ function makeTopicRow(
     members: unknown;
     ordinal: number;
     source: string;
+    trigger: unknown;
   }> = {}
 ) {
   return {
@@ -72,6 +73,7 @@ function makeTopicRow(
     members: over.members ?? { questionKeys: ['q1'], dataSlotKeys: [] },
     ordinal: over.ordinal ?? 0,
     source: over.source ?? 'manual',
+    trigger: over.trigger ?? null,
   };
 }
 
@@ -106,6 +108,7 @@ describe('toTopic', () => {
       members: { questionKeys: ['q1', 'q2'], dataSlotKeys: ['ds1'] },
       ordinal: 3,
       source: 'analyst',
+      trigger: null,
     });
   });
 
@@ -145,6 +148,7 @@ describe('TOPIC_SELECT', () => {
       members: true,
       ordinal: true,
       source: true,
+      trigger: true,
     });
   });
 });
@@ -217,6 +221,7 @@ describe('replaceTopics', () => {
       depth: 'full',
       questionKeys: ['q1'],
       dataSlotKeys: [],
+      trigger: null,
     },
     {
       key: 'closing',
@@ -227,6 +232,7 @@ describe('replaceTopics', () => {
       depth: 'full',
       questionKeys: ['q2'],
       dataSlotKeys: ['ds1'],
+      trigger: null,
     },
   ];
 
@@ -484,5 +490,73 @@ describe('patchConditionalTopicsSettings', () => {
 
     expect(result.rules).toHaveLength(1);
     expect(result.rules[0]?.dataSlotKey).toBe('d-new');
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('a recorded trigger survives the round trip', () => {
+  const trigger = {
+    condition: 'The partner mentions a food safety incident',
+    cues: ['food safety'],
+    sourceQuote: 'A food safety incident, complaint or environmental health visit',
+  };
+
+  it('projects a stored trigger onto the Topic', () => {
+    expect(toTopic(makeTopicRow({ trigger })).trigger).toEqual(trigger);
+  });
+
+  it('reads a malformed stored trigger as none, rather than throwing on a live read', () => {
+    expect(toTopic(makeTopicRow({ trigger: { cues: ['x'] } })).trigger).toBeNull();
+  });
+
+  it('writes the trigger back on a bulk save', async () => {
+    // The load-bearing case. The save REPLACES the whole set from what the Topics tab submitted,
+    // so if this helper dropped the field, an admin renaming an unrelated topic would silently
+    // delete every record of what the document asked for.
+    const withTrigger: TopicInput[] = [
+      {
+        key: 'food_safety',
+        label: 'Food Safety',
+        description: null,
+        phase: 'conditional',
+        criteria: 'The opening mentions a food safety incident.',
+        depth: 'full',
+        questionKeys: ['q1'],
+        dataSlotKeys: [],
+        trigger,
+      },
+    ];
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+    await replaceTopics('v-1', withTrigger);
+
+    const created = prismaMock.appQuestionnaireTopic.createMany.mock.calls[0]?.[0] as {
+      data: { key: string; trigger?: unknown }[];
+    };
+    expect(created.data[0]?.trigger).toEqual(trigger);
+  });
+
+  it('omits the column entirely for a topic without one', async () => {
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+    await replaceTopics('v-1', [
+      {
+        key: 'intro',
+        label: 'Intro',
+        description: null,
+        phase: 'opening',
+        criteria: null,
+        depth: 'full',
+        questionKeys: ['q1'],
+        dataSlotKeys: [],
+        trigger: null,
+      },
+    ]);
+
+    const created = prismaMock.appQuestionnaireTopic.createMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>[];
+    };
+    expect(created.data[0]).not.toHaveProperty('trigger');
   });
 });

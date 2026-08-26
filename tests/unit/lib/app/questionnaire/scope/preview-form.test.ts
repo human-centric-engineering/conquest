@@ -35,6 +35,7 @@ function topic(key: string, phase: TopicPhase, questionKeys: string[], ordinal =
     members: { questionKeys, dataSlotKeys: [] },
     ordinal,
     source: 'manual',
+    trigger: null,
   };
 }
 

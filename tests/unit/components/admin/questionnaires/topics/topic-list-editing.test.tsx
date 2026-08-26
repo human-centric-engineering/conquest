@@ -78,6 +78,7 @@ function topic(key: string, phase: Topic['phase'], label: string, ordinal: numbe
     members: { questionKeys: [`q_${key}`], dataSlotKeys: [] },
     ordinal,
     source: 'seeded',
+    trigger: null,
   };
 }
 
@@ -707,5 +708,57 @@ describe('TopicListEditor — saving', () => {
 
     expect(addButton()).toBeDisabled();
     expect(screen.getByRole('button', { name: /Expand all/ })).toBeDisabled();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Mid-interview triggers (F17.31a)                                           */
+/* -------------------------------------------------------------------------- */
+
+describe('TopicListEditor — a recorded trigger', () => {
+  const TRIGGER = {
+    condition: 'The applicant discloses that they are fleeing abuse',
+    cues: ['abuse'],
+    sourceQuote: 'If the applicant discloses, at any stage…',
+  };
+
+  function withTrigger(): Topic[] {
+    return TOPICS.map((t) => (t.key === 'pricing' ? { ...t, trigger: TRIGGER } : t));
+  }
+
+  it('says what the questionnaire asked for, and what will actually happen', async () => {
+    // This is the whole reason the record exists before anything acts on it: the admin sees the
+    // difference here, on the topic, rather than inferring it from the analyst's gap list.
+    renderEditor({ topics: withTrigger() });
+
+    openRow('Pricing and packaging');
+
+    expect(
+      await screen.findByText(/The questionnaire said to add this whenever it comes up/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/fleeing abuse/)).toBeInTheDocument();
+    expect(screen.getByText(/not if it first comes up later/)).toBeInTheDocument();
+  });
+
+  it('says nothing at all on a topic without one', () => {
+    renderEditor();
+
+    openRow('Pricing and packaging');
+
+    expect(
+      screen.queryByText(/The questionnaire said to add this whenever it comes up/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps it on the saved draft through an edit that has nothing to do with it', async () => {
+    // The save replaces the whole set from these drafts. If the editor dropped the field, renaming
+    // a topic would silently delete the record — which is exactly the failure worth pinning.
+    const { onSave } = renderEditor({ topics: withTrigger() });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pricing and packaging up' }));
+
+    const saved = await savedDrafts(onSave);
+    expect(saved.find((d) => d.key === 'pricing')?.trigger).toEqual(TRIGGER);
+    expect(saved.find((d) => d.key === 'spine')?.trigger).toBeNull();
   });
 });

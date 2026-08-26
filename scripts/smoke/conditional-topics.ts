@@ -312,6 +312,7 @@ async function main() {
           depth: 'full',
           questionKeys: ['pipe_1'],
           dataSlotKeys: [],
+          trigger: null,
         },
       ],
       rules: [],

@@ -569,6 +569,14 @@ async function runRepair(
  * type recorded" branch and reverted to `free_text` with no config — silent data loss on the one
  * operation whose entire promise is that it can be undone. The planner now also accepts the old
  * spelling, so rows written before this fix revert correctly rather than needing a backfill.
+ *
+ * **Scope of that fix: the `infer_type` branch only.** When the type did NOT change this files an
+ * `augment_question`, which `planRevert` routes to `planFieldRestore(..., ['prompt', 'guidelines',
+ * 'rationale'])` — and none of `key`/`type`/`typeConfig` is in that allowlist, so `touched` is empty
+ * and a config-only repair (the specialist fixing a likert's endpoint labels) still reverts as
+ * `missing_before_json`. Pre-existing, not introduced here — the old spelling missed that allowlist
+ * too — and left alone deliberately: widening it would change revert behaviour for every other
+ * producer of `augment_question`, which is a separate decision from this rename.
  */
 function changeForCorrect(
   original: ExtractedQuestion,

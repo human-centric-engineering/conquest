@@ -174,6 +174,7 @@ const MINIMAL_SOURCE = {
     members: unknown;
     ordinal: number;
     source: string;
+    trigger?: unknown;
   }>,
   sourceDocuments: [] as Array<{
     role: string;
@@ -817,6 +818,7 @@ describe('conditional topics topics', () => {
           members: { questionKeys: ['q1', 'q2'], dataSlotKeys: ['pipeline_health'] },
           ordinal: 0,
           source: 'analyst',
+          trigger: null,
         },
       ],
     };
@@ -857,6 +859,39 @@ describe('conditional topics topics', () => {
       data: Array<Record<string, unknown>>;
     };
     expect(data[0]).not.toHaveProperty('description');
+  });
+
+  it('carries a recorded trigger onto the fork', async () => {
+    // F17.31a. A trigger that did not survive a fork would go missing on the copy the client
+    // actually fields — the worst place for a record of what the document asked for to vanish.
+    const trigger = {
+      condition: 'The applicant discloses that they are fleeing abuse',
+      cues: ['abuse'],
+      sourceQuote: 'If the applicant discloses, at any stage…',
+    };
+    const base = topicSource();
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...base,
+      topics: [{ ...base.topics[0], trigger }],
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const { data } = (tx.appQuestionnaireTopic.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data[0]?.trigger).toEqual(trigger);
+  });
+
+  it('omits the trigger column for a topic that has none', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(topicSource());
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const { data } = (tx.appQuestionnaireTopic.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data[0]).not.toHaveProperty('trigger');
   });
 
   it('writes nothing when the source version has no topics', async () => {

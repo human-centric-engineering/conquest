@@ -22,6 +22,7 @@ import {
   TOPIC_SOURCES,
   narrowConditionalTopicsSettings,
   narrowTopicMembers,
+  narrowTopicTrigger,
   type ConditionalTopicsSettings,
   type ScopeRule,
   type Topic,
@@ -41,6 +42,7 @@ export const TOPIC_SELECT = {
   members: true,
   ordinal: true,
   source: true,
+  trigger: true,
 } as const;
 
 type TopicRow = {
@@ -54,6 +56,7 @@ type TopicRow = {
   members: unknown;
   ordinal: number;
   source: string;
+  trigger: unknown;
 };
 
 /** Project a `TOPIC_SELECT` row to the pure {@link Topic}. */
@@ -69,6 +72,7 @@ export function toTopic(row: TopicRow): Topic {
     members: narrowTopicMembers(row.members),
     ordinal: row.ordinal,
     source: narrowToEnum(row.source, TOPIC_SOURCES, 'manual'),
+    trigger: narrowTopicTrigger(row.trigger),
   };
 }
 
@@ -139,6 +143,7 @@ export function buildTopicCreateInput(
     | 'depth'
     | 'questionKeys'
     | 'dataSlotKeys'
+    | 'trigger'
   >,
   ordinal: number,
   source: TopicSource
@@ -154,6 +159,10 @@ export function buildTopicCreateInput(
     ordinal,
     source,
     ...(topic.description !== null ? { description: topic.description } : {}),
+    // F17.31a. Carried through every write path, not just the analyst's: the bulk save replaces the
+    // whole set from what the Topics tab sends back, so a trigger this helper dropped would be
+    // deleted by an admin renaming an unrelated topic.
+    ...(topic.trigger ? { trigger: jsonInput(topic.trigger) } : {}),
   };
 }
 

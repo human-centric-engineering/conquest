@@ -228,7 +228,22 @@ will actually happen — it is decided at the end of the opening, so it is inclu
 condition is already apparent by then. \
 One gap about "the mechanism" is NOT enough. A reader who sees five triggered blocks proposed as \
 ordinary conditional topics, and one general note about timing, will believe the five are handled. \
-They are not, and on safeguarding, disclosure or eligibility text that belief is the whole risk.
+They are not, and on safeguarding, disclosure or eligibility text that belief is the whole risk. \
+ALSO fill the topic's "trigger" field. "condition" is what the document says to watch for, in its \
+own terms, and "sourceQuote" is the sentence that says so — the instruction's own words belong in \
+those two fields. \
+"cues" is a different job: **the words the RESPONDENT would say if this were happening to them**, \
+3 to 6 of them, a word or two each. Do NOT lift phrases from the instruction. A document writes \
+ABOUT the respondent, in the third person and in a professional register — "the respondent \
+discloses…", "where the party has…", "the block has already been completed" — and none of that is \
+anything a person says while answering a question. They speak in the first person and use the \
+plain word for the thing rather than its category: where an instruction says "a participant \
+reporting a dietary restriction", the cues are "vegan", "can't eat", "allergic". Write what would \
+come out of their mouth, including the everyday words the document itself never uses, in the \
+language the interview is conducted in. \
+Nothing acts on this yet — the criteria you wrote is still what decides the topic — so it changes \
+no behaviour and does not replace the gap. It records what was actually asked for, on the topic \
+itself, where an admin reviewing the routing will see it.
 
 **2. TERMINATION — an instruction that ENDS the interview rather than scoping it.** If the document \
 says a condition means the respondent does not take this review at all — "stop the review", "end \
@@ -282,7 +297,12 @@ Output ONLY a single JSON object — no prose, no code fences:
       "questionKeys": ["<exact key from QUESTIONS>", ...],
       "dataSlotKeys": ["<exact key from DATA SLOTS>", ...],
       "rationale": "<one sentence: why this is a topic, and this phase>",
-      "sourceQuote": "<exact span from the document — omit entirely if you inferred this>"
+      "sourceQuote": "<exact span from the document — omit entirely if you inferred this>",
+      "trigger": {  // OMIT ENTIRELY unless TIMING applies — see "1. TIMING" above
+        "condition": "<the instruction's own words for what to watch for>",
+        "cues": ["<what the RESPONDENT would say — a word or two each>", ...],
+        "sourceQuote": "<exact span that states the trigger>"
+      }
     }
   ],
   "rules": [

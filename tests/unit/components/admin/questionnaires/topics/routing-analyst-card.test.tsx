@@ -549,6 +549,7 @@ describe('RoutingAnalystCard — reviewing a pending draft', () => {
           depth: 'full',
           questionKeys: ['q1'],
           dataSlotKeys: [],
+          trigger: null,
         },
       ],
       rules: [],
@@ -977,5 +978,66 @@ describe('RoutingAnalystCard — the accept dialog offers to turn the feature on
       within(dialog).queryByRole('checkbox', { name: /Turn conditional topics on now/ })
     ).not.toBeInTheDocument();
     expect(dialog).toHaveTextContent(/stays off until you turn it on yourself/i);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Mid-interview triggers (F17.31a)                                           */
+/* -------------------------------------------------------------------------- */
+
+describe('RoutingAnalystCard — a proposed trigger', () => {
+  const TRIGGERED = {
+    key: 'abuse',
+    label: 'Domestic abuse',
+    phase: 'conditional' as const,
+    criteria: 'The opening indicates the applicant is fleeing abuse.',
+    depth: 'full' as const,
+    members: { questionKeys: ['q1'], dataSlotKeys: [] },
+    rationale: 'The document adds this block on disclosure.',
+    trigger: {
+      condition: 'The applicant discloses that they are fleeing abuse',
+      cues: ['abuse'],
+      sourceQuote: 'If the applicant discloses, at any stage…',
+    },
+  };
+
+  it('tells the reviewer what the questionnaire asked for and what will happen instead', () => {
+    renderCard({ initialDraft: draft({ topics: [TRIGGERED] }) });
+
+    expect(
+      screen.getByText(/The questionnaire says to add this whenever it comes up/)
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/fleeing abuse/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/decides what to cover once, after the opening questions/)
+    ).toBeInTheDocument();
+  });
+
+  it('posts it with the accepted topic, so the record outlives the proposal', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === DRAFT_URL && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ success: true, data: {}, meta: null }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ initialDraft: draft({ topics: [TRIGGERED] }) });
+    await user.click(screen.getByRole('button', { name: /accept/i }));
+    const confirm = screen.getAllByRole('button', { name: /accept/i }).at(-1);
+    if (confirm) await user.click(confirm);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => url === DRAFT_URL && (init as RequestInit)?.method === 'POST'
+        )
+      ).toBe(true)
+    );
+
+    const [, init] = fetchMock.mock.calls.find(
+      ([url, callInit]) => url === DRAFT_URL && (callInit as RequestInit)?.method === 'POST'
+    ) as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { topics: Record<string, unknown>[] };
+    expect(body.topics[0]?.trigger).toEqual(TRIGGERED.trigger);
   });
 });

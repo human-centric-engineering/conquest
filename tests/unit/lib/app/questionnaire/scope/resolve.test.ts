@@ -26,6 +26,7 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
     members: { dataSlotKeys: [`${key}_ds`], questionKeys: [`${key}_q1`, `${key}_q2`] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
     ...overrides,
   };
 }

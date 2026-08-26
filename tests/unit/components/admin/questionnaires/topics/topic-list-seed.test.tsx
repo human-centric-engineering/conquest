@@ -32,6 +32,7 @@ function topic(key: string, phase: Topic['phase'], label: string, ordinal: numbe
     members: { questionKeys: [`q_${key}`], dataSlotKeys: [] },
     ordinal,
     source: 'manual',
+    trigger: null,
   };
 }
 

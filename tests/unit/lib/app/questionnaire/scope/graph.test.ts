@@ -62,6 +62,7 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
     members: { dataSlotKeys: [], questionKeys: [`q_${key}`] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
     ...overrides,
   };
 }

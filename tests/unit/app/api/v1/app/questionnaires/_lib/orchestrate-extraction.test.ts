@@ -351,6 +351,16 @@ describe('orchestrateExtraction — repair applied', () => {
       // Proof the repair was actually merged in — not just that dispatch was called.
       expect(result.value.extraction.questions[0].suggestedType).toBe('likert');
       expect(result.value.extraction.changes).toHaveLength(1);
+      // ...and that the change row is the SHAPE the revert path reads. Both halves were wrong
+      // until corpus doc 08 caught them: without `key` the row names no question and the earlier
+      // `infer_type` row stays un-superseded, and under the old `suggestedType` spelling
+      // `planInferType` took its "no prior type recorded" branch and reverted to `free_text`,
+      // discarding the type sitting in the row. Asserting only the length lets both regress green.
+      expect(result.value.extraction.changes[0]).toMatchObject({
+        changeType: 'infer_type',
+        beforeJson: { key: 'name', type: 'free_text' },
+        afterJson: { key: 'name', type: 'likert' },
+      });
     }
     expect(capabilityDispatcher.dispatch).toHaveBeenCalledTimes(2);
     expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(

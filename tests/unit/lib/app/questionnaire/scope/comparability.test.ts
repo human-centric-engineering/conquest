@@ -21,6 +21,7 @@ function topic(key: string, phase: TopicPhase, questionKeys: string[]): Topic {
     members: { dataSlotKeys: [], questionKeys },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
   };
 }
 

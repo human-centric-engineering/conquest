@@ -175,6 +175,51 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
         message: `"${topic.label}" is conditional but has no "include this when…" criteria, so the agent has nothing to judge it on.`,
       });
     }
+    // F17.31a — what the document asked for, where the product settles scope once.
+    //
+    // A trigger is RECORDED, not run: the topic is still chosen (or not) from the opening by its
+    // criteria above. So this is not a defect in the configuration — nothing here is misconfigured
+    // and there is no edit that fixes it. It is the one place an admin can see, while reviewing the
+    // routing, that the instrument asked for something narrower than what will happen.
+    //
+    // Always a warning, and reported whether or not the feature is enabled, because it describes
+    // the DOCUMENT rather than the settings.
+    //
+    // Mutually exclusive with `trigger_on_always_topic` below. On an always-run topic this
+    // message is not merely redundant, it is FALSE — it says the topic is included only when the
+    // condition is clear by the end of the opening, and an always-run topic is included for
+    // everyone regardless. Two warnings on one topic key that contradict each other teach an admin
+    // to distrust the panel, so each trigger raises exactly one of the two.
+    if (topic.trigger && !ALWAYS_PHASES.includes(topic.phase)) {
+      issues.push({
+        severity: 'warning',
+        code: 'trigger_settled_at_opening',
+        topicKey: topic.key,
+        message: `The questionnaire says to add "${topic.label}" whenever this comes up: "${topic.trigger.condition}". This interview decides what to cover once, after the opening questions — so "${topic.label}" is only included when that is already clear by then, not if it first comes up later.`,
+      });
+    }
+    // A trigger on a topic everyone is asked anyway can never do anything, whatever happens to
+    // triggers later: the topic is already in scope for every respondent. Usually a mis-read of the
+    // document — the block was conditional and landed on an always-run phase.
+    if (topic.trigger && ALWAYS_PHASES.includes(topic.phase)) {
+      issues.push({
+        severity: 'warning',
+        code: 'trigger_on_always_topic',
+        topicKey: topic.key,
+        message: `"${topic.label}" is asked of everyone, so the questionnaire's instruction to add it when something comes up can never change anything. If it should only be asked sometimes, make it conditional.`,
+      });
+    }
+    // A trigger with no words to listen for records the instruction but not what would satisfy it.
+    // Harmless today — nothing reads them — and worth flagging while the document is still to hand,
+    // because the words are much cheaper to supply now than to reconstruct later.
+    if (topic.trigger && topic.trigger.cues.length === 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'trigger_without_cues',
+        topicKey: topic.key,
+        message: `"${topic.label}" records what the questionnaire said to watch for, but no words to listen for. Nothing depends on them yet.`,
+      });
+    }
     // Light depth on a topic EVERYONE gets does not sample — it deletes. `membersAtDepth`
     // (scope/resolve.ts) applies depth to every phase, not just conditional ones, so the members it
     // drops from an always-run topic are asked of nobody. Reported regardless of `enabled` for the

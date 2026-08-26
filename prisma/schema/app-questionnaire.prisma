@@ -1575,6 +1575,17 @@ model AppQuestionnaireTopic {
   /// Read by the admin surface to mark which topics are still untouched auto-seeds.
   source String @default("seeded")
 
+  /// F17.31a. What the INSTRUMENT says to watch for during the conversation, when it asks for this
+  /// topic to be added on something that surfaces rather than on how the opening went:
+  /// `{ condition: string, cues: string[], sourceQuote?: string }` — TopicTrigger (scope/types.ts).
+  ///
+  /// **Recorded, not yet acted on.** Scope is still settled once, when the opening completes, and
+  /// `criteria` above is still what decides this topic. This column exists so the difference between
+  /// what the document asked for and what the product does is visible on the topic itself instead of
+  /// inferred from the analyst's gap list. Null on every topic scoped from the opening, which is
+  /// nearly all of them.
+  trigger Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

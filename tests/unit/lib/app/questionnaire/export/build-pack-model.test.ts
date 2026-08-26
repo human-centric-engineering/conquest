@@ -229,6 +229,7 @@ const SCOPE_TOPICS: Topic[] = [
     members: { dataSlotKeys: ['engagement'], questionKeys: ['q1'] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
   },
   {
     id: 'top-conditional',
@@ -241,6 +242,7 @@ const SCOPE_TOPICS: Topic[] = [
     members: { dataSlotKeys: [], questionKeys: ['q1'] },
     ordinal: 1,
     source: 'analyst',
+    trigger: null,
   },
   {
     id: 'top-check',
@@ -253,6 +255,7 @@ const SCOPE_TOPICS: Topic[] = [
     members: { dataSlotKeys: ['engagement'], questionKeys: [] },
     ordinal: 2,
     source: 'manual',
+    trigger: null,
   },
 ];
 

@@ -113,6 +113,9 @@ export async function acceptTopicDraft(
           ordinal: i,
           source: 'analyst',
           ...(t.description !== null ? { description: t.description } : {}),
+          // F17.31a — what the document asked for where the opening cannot decide it. Recorded on
+          // accept so the record survives the review, not just the proposal.
+          ...(t.trigger ? { trigger: jsonInput(t.trigger) } : {}),
         })),
       });
     }

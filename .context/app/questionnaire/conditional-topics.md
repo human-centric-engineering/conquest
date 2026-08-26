@@ -282,6 +282,54 @@ The amendment is recorded on the plan (`InterviewPlan.amendments`) _and_ the add
 topic as a good selection would make the planner look better the worse it got. The acknowledgement
 rides the same one-turn briefing seam as the original announcement, matched on `atTurn`.
 
+### What the document asked for, when the opening cannot decide it (F17.31a)
+
+Some instruments say a section is added on something said **during** the conversation, not on how
+the opening went — _"if the applicant discloses, at any stage, that they are fleeing abuse"_,
+_"whenever they surface, at any point in the review"_. Scope is settled once, so the product cannot
+do that. Three of the ten routing-corpus documents ask for it.
+
+A topic can now **record** the instruction, on `AppQuestionnaireTopic.trigger`:
+
+```ts
+{ condition: 'The applicant discloses that they are fleeing abuse',
+  cues: ['abuse', 'fleeing'],
+  sourceQuote: 'If the applicant discloses, at any stage, that they are fleeing abuse' }
+```
+
+**Nothing reads it at interview time, and that is the design, not a gap in it.** The topic is still
+selected by its `criteria` — the opening-time approximation — exactly as before. Recording a
+trigger changes no respondent's experience, and a topic whose only routing lived in a trigger would
+be selected by nothing and asked of nobody, which is why the analyst is told to write **both**.
+
+What it buys:
+
+- **The limitation shows up where the decision is made.** `validateConditionalTopics` raises
+  `trigger_settled_at_opening` — a warning, never an error, because nothing is misconfigured and no
+  edit clears it — saying what the questionnaire asked for and what will actually happen. Before
+  this, an admin could only infer it from a gap in the analyst's list, which is a different screen
+  and a different frame of mind. Two more checks catch mis-reads: `trigger_on_always_topic` (a
+  trigger on a topic everyone is asked can never change anything) and `trigger_without_cues`. The
+  first two are mutually exclusive — on an always-run topic the settled-at-opening wording would be
+  false, not just redundant, and two warnings contradicting each other on one topic teach an admin
+  to distrust the panel.
+- **The author's real intent is captured while the document is still to hand.** The cues are words
+  from the instrument, in the instrument's language — cheap to lift now, expensive to reconstruct
+  later, and they are what would make an evaluator affordable if one is ever built.
+
+The field is carried through every write path — the analyst's draft and its acceptance, the bulk
+save from the Topics tab, a version fork, and definition export/import. That is deliberate and
+tested: the bulk save **replaces** the whole set from what the tab sends back, so a field any of
+those dropped would be deleted by an admin renaming an unrelated topic.
+
+Honouring a trigger at all is a separate, larger piece of work — a per-turn evaluator, a `'trigger'`
+decision source, and real consequences for report reproducibility, cohort comparability and the run
+budget. It is specced in
+[`.context/app/planning/features/f17-mid-interview-triggers.md`](../planning/features/f17-mid-interview-triggers.md)
+and nothing here prejudges it. Termination ("stop the review") and mutual exclusivity ("one of these
+three, not several") are different missing mechanisms again, and the analyst still reports both as
+gaps.
+
 ### A plan may ask part of a topic (C6, F17.29)
 
 `depth` is a dial with two stops — all of it, or the two highest-weight members — and no way to say

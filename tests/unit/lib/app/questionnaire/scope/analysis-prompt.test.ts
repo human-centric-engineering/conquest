@@ -44,6 +44,7 @@ function existingTopic(over: Partial<Topic> = {}): Topic {
     members: { dataSlotKeys: [], questionKeys: [] },
     ordinal: 0,
     source: 'analyst',
+    trigger: null,
     ...over,
   };
 }
@@ -517,5 +518,52 @@ describe('the rubric the analyst kept getting wrong (F17.23)', () => {
       expect(text).toContain('"fallbackTopicKeys": [');
       expect(text).toContain('"checkTopicPreference": [');
     });
+  });
+});
+
+describe('the trigger record, and the voice its cues have to be in (F17.31a)', () => {
+  const rubric = () => buildRoutingAnalysisPrompt({ questions: QUESTIONS })[0].content;
+
+  it('asks for the trigger alongside the gap, not instead of it', () => {
+    const text = rubric();
+    expect(text).toContain('ALSO fill the topic\'s "trigger" field');
+    expect(text).toContain('does not replace the gap');
+  });
+
+  it("sends the instruction's own words to condition and sourceQuote", () => {
+    expect(rubric()).toContain("the instruction's own words belong in");
+  });
+
+  it("demands cues in the RESPONDENT's voice, and forbids lifting the instruction", () => {
+    // The first live run of doc 07 came back with "someone they live with", "have lived with" and
+    // "tenancy block has already been completed" — faithful to the document, and not one of them a
+    // phrase anybody says while answering a question. Cue voice is what an eventual gate's recall
+    // rests on, so the instruction is pinned here rather than left to drift.
+    const text = rubric();
+    expect(text).toContain('the words the RESPONDENT would say');
+    expect(text).toContain('Do NOT lift phrases from the instruction');
+    expect(text).toContain('third person');
+  });
+
+  it('teaches the transformation with an example from no domain the corpus measures', () => {
+    // A worked example is what makes this land, and a housing- or safeguarding-flavoured one would
+    // hand the routing corpus' hardest documents their own answer. Deliberately unrelated.
+    expect(rubric()).toContain('dietary restriction');
+  });
+
+  it('carries "trigger" in the output shape, not only in the prose above it', () => {
+    // Models follow the literal JSON template far more reliably than an instruction a hundred lines
+    // earlier. With the field absent from the template the analyst emits it inconsistently or not
+    // at all, and every other part of F17.31a is downstream of it being emitted.
+    const content = rubric();
+    const text = typeof content === 'string' ? content : '';
+    const template = text.slice(text.indexOf('Output ONLY a single JSON object'));
+
+    expect(template).toContain('"trigger"');
+    expect(template).toContain('"condition"');
+    expect(template).toContain('"cues"');
+    // Nearly every topic has no trigger, so the template must say so — otherwise the shape reads
+    // as required and the analyst invents one per topic.
+    expect(template).toContain('OMIT ENTIRELY unless TIMING applies');
   });
 });

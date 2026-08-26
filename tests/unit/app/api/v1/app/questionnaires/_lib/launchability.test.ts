@@ -61,6 +61,7 @@ function topic(key: string, questionKeys: string[]): Topic {
     members: { dataSlotKeys: [], questionKeys },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 

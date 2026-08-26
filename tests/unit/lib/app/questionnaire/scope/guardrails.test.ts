@@ -28,6 +28,7 @@ function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Top
     members: { dataSlotKeys: [], questionKeys: [`${key}_q`] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
     ...over,
   };
 }
