@@ -110,9 +110,15 @@ const COHERENT_EXTRACTION: ExtractQuestionnaireStructureData = {
   changes: [],
 };
 
+/**
+ * The source `COHERENT_EXTRACTION` was extracted from — and it really does contain that question,
+ * wrapped across two lines the way a document is. `unattributedPromptCount` compares every prompt
+ * to this text, so a placeholder body would make the shared baseline a permanently unfaithful
+ * ingest and leave the counter with nothing to be zero against.
+ */
 const PARSED_DOC = {
   title: 'Onboarding',
-  fullText: '# Form\n1. Name',
+  fullText: '# Form\n\n## About You\n\n1. What is your\n   name?\n',
 } as unknown as ExtractedDocument['parsed'];
 
 const UPLOAD = { file: { name: 'form.md' } } as unknown as GuardedUpload;
@@ -611,5 +617,161 @@ describe('orchestrateExtraction — coherence after the (fail-soft) verify/repai
       'ingest extraction incoherent after repair',
       expect.objectContaining({ orphanSectionOrdinals: [9] })
     );
+  });
+});
+
+// ─── Unattributed prompt edits ────────────────────────────────────────────────
+
+/**
+ * The counter that notices wording the author never wrote and the extractor never admitted to.
+ *
+ * Corpus doc 03 is why it exists: three ingests of one file reworded 8, 12 and 10 of its 23
+ * questions, and 1, 1 and 2 of those edits arrived with no change record at all — invisible on the
+ * review surface, un-revertable, and marked `ok` by the per-question fidelity critic every time
+ * (correctly: a reworded question still asks the same thing). Only the source can catch this.
+ */
+describe('orchestrateExtraction — unattributed prompt edits', () => {
+  /** Hand back an extraction whose single question carries `prompt`, plus optional changes. */
+  function extractionWithPrompt(
+    prompt: string,
+    changes: ExtractQuestionnaireStructureData['changes'] = []
+  ): void {
+    (extractFromDocument as Mock).mockResolvedValue({
+      ok: true,
+      value: {
+        extraction: {
+          sections: [{ ordinal: 0, title: 'About You' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'name',
+              prompt,
+              suggestedType: 'free_text',
+              extractionConfidence: 0.9,
+            },
+          ],
+          changes,
+        },
+        parsed: PARSED_DOC,
+      },
+    });
+  }
+
+  /** A clean verifier pass, so nothing but the counter is under test. */
+  function cleanCritic(): void {
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: { result: { verdicts: [{ key: 'name', verdict: 'ok' }], matrixGroups: [] } },
+      },
+    });
+  }
+
+  it('counts zero when the prompt is a span of the source, despite the source hard-wrapping it', async () => {
+    // PARSED_DOC breaks "What is your name?" across a line and an indent. A raw substring test
+    // fails here, which would report every long verbatim question as an edit.
+    cleanCritic();
+    const { ctx, log } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('counts a reworded prompt that no change record claims, and warns', async () => {
+    cleanCritic();
+    extractionWithPrompt('Please tell me what your name is.');
+    const { ctx, log } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      'ingest reworded question prompts without recording the edit',
+      expect.objectContaining({ unattributedPromptCount: 1, totalQuestions: 1 })
+    );
+  });
+
+  it('counts zero when the same rewording IS declared in the editorial log', async () => {
+    cleanCritic();
+    extractionWithPrompt('Please tell me what your name is.', [
+      {
+        changeType: 'rewrite_prompt',
+        targetEntityType: 'question',
+        beforeJson: { prompt: 'What is your name?' },
+        afterJson: { prompt: 'Please tell me what your name is.' },
+        rationale: 'Rephrased for conversational delivery.',
+      },
+    ]);
+    const { ctx, log } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('reads the declared prompt off any change type, not a hard-coded list', async () => {
+    // `correct_spelling` also lands a new prompt. Keying on the shape rather than the change type
+    // is what keeps a change type added later from reading as an undeclared edit.
+    cleanCritic();
+    extractionWithPrompt('What is your naem?', [
+      {
+        changeType: 'correct_spelling',
+        targetEntityType: 'question',
+        beforeJson: { prompt: 'What is your name?' },
+        afterJson: { prompt: 'What is your naem?' },
+      },
+    ]);
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+  });
+
+  it('does not let a record for a DIFFERENT wording attribute this one', async () => {
+    // The log is matched against the prompt that was actually persisted. A record whose `after`
+    // says something else describes an edit that did not survive, and must not launder this one.
+    cleanCritic();
+    extractionWithPrompt('Please tell me what your name is.', [
+      {
+        changeType: 'rewrite_prompt',
+        targetEntityType: 'question',
+        beforeJson: { prompt: 'What is your name?' },
+        afterJson: { prompt: 'And your name is?' },
+      },
+    ]);
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
+  });
+
+  it('is not fooled by a change record that carries no prompt at all', async () => {
+    // `infer_type` records a type decision and nothing about wording — the shape the repair
+    // specialist's `correct` record also has. It must not attribute a prompt it never mentions.
+    cleanCritic();
+    extractionWithPrompt('Please tell me what your name is.', [
+      {
+        changeType: 'infer_type',
+        targetEntityType: 'question',
+        afterJson: { key: 'name', suggestedType: 'free_text' },
+      },
+    ]);
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
   });
 });

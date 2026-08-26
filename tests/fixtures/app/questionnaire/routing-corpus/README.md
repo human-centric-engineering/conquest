@@ -173,9 +173,21 @@ falls past the candidacy cap.
 
 Recorded here so a run can be scored without re-deriving intent.
 
+> **"Always-asked" is three phases, and exactly one of them is required.** `TOPIC_PHASES` is
+> `opening | core | conditional | closing`, and a config with no `opening` topic fails validation
+> with an **error**, not a warning — `no_opening_topic` in `scope/validate.ts`: _"nothing gathers the
+> signal the agent needs before it can choose."_ So an always-asked topic proposed as `opening`
+> rather than `core` is not a miss, and a proposal where every always-topic is `core` is the one
+> that would be wrong. Score membership (conditional vs always) strictly and the split within
+> always-asked as a judgement, unless the entry below names a phase specifically.
+>
+> This paragraph is a correction. It resolves **T04**, raised against doc 02 in R002 and seen again
+> on doc 03 in R004: the ground truth below asked for `core` where the product requires `opening`,
+> so the pipeline was being marked down for the only output that validates.
+
 - **01** — 7 conditional topics (Adherence, Inhaler, Anticoagulation, Pain, Falls, Cost, plus none for the always-asked blocks). `fromDocument: true`, every criterion quotable.
-- **02** — Parts A, B core; G closing; C–F conditional. `fromDocument: true`.
-- **03** — Sections 1 and 8 always; 2–7 conditional, six criteria all quotable.
+- **02** — Parts A, B, G always-asked (one of A/B is the `opening`, G `closing`); C–F conditional. `fromDocument: true`.
+- **03** — Sections 1 and 8 always (1 the `opening`, 8 `closing`); 2–7 conditional, six criteria all quotable. No cap, depth dial or fallback is stated anywhere, so **inventing one is the failure to watch for** — `maxConditionalTopics`, `fallbackTopicKeys` and `checkTopicPreference` should all be omitted.
 - **04** — Sections 1, 2, 8 core; 3–7 conditional. **`sourceQuote` should be the heading itself.** Watch for the analyst inferring and correctly omitting quotes it cannot support.
 - **05** — Domains 1, 2, 4, 10 core; 3, 5, 6, 7, 8, 9 conditional; `maxConditionalTopics: 4`. **The scoring note in Appendix B must not become a routing rule.** If candidacy misses this document, the 20k cap is implicated.
 - **06** — All core. Zero conditional. `fromDocument: false`. Any conditional topic is a false positive.

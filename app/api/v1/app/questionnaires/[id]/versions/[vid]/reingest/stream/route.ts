@@ -256,12 +256,17 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
           durationMs: fidelity.durationMs,
           detail: {
             flaggedCount: fidelity.flaggedCount,
-            // The two count-level signals, on the row a corpus run reads. `flaggedCount` says how
-            // many questions look wrong; these say whether the SET is — which every per-question
-            // verdict can be `ok` and still get wrong.
+            // The three count-level signals, on the row a corpus run reads. `flaggedCount` says how
+            // many questions look wrong; these say whether the SET is, and whether its wording is
+            // the author's — both of which every per-question verdict can be `ok` and still miss.
+            // Omitted when zero so a clean re-ingest's row stays readable and a present key means
+            // something happened.
             ...(fidelity.coverage ? { coverage: fidelity.coverage } : {}),
             ...(fidelity.disallowedEditCount > 0
               ? { disallowedEditCount: fidelity.disallowedEditCount }
+              : {}),
+            ...(fidelity.unattributedPromptCount > 0
+              ? { unattributedPromptCount: fidelity.unattributedPromptCount }
               : {}),
             totalCount: fidelity.totalCount,
             repairOutcome: fidelity.repairOutcome,
