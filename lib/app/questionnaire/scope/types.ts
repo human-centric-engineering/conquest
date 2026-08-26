@@ -201,6 +201,32 @@ export const SCOPE_DECISION_SOURCE_LABELS: Record<ScopeDecisionSource, string> =
 /* -------------------------------------------------------------------------- */
 
 export const TOPIC_KEY_MAX_LENGTH = 64;
+
+/**
+ * How long a REFERENCE to a question or data-slot key may be.
+ *
+ * Deliberately not {@link TOPIC_KEY_MAX_LENGTH}. That bounds a *topic* key — a slug the analyst or
+ * the admin surface MINTS, and which the `^[a-z0-9_]+$` recipe keeps short by construction. Question
+ * and data-slot keys are minted somewhere else entirely and **nothing bounds them at 64**:
+ * `persist.ts` writes an extracted key straight through, and an imported definition's key goes
+ * through `nextAvailableKey` untruncated. A prose question yields a long slug, and long prose
+ * questions are normal.
+ *
+ * Borrowing the topic bound for them broke three things at once, all found by corpus doc 08 (whose
+ * first Vulnerability question keys out at 78 characters):
+ *
+ * 1. the Routing Analyst's reply failed schema validation outright, and the retry could not help,
+ *    because the only way to satisfy a 64-character bound is to shorten a key — and a shortened key
+ *    matches no question;
+ * 2. the admin's own topic save would 400 on the same version; and
+ * 3. worst, the read path silently truncated to a 64-character prefix, which matches no question,
+ *    which orphans it — and an orphaned question "can never be asked, and nothing else in the system
+ *    would ever tell you" (`validate.ts`).
+ *
+ * Generous here and permissive downstream, which is the call the topics preview route already made
+ * and wrote down: a key that resolves to nothing is dropped per item rather than failing the request.
+ */
+export const MEMBER_KEY_MAX_LENGTH = 512;
 export const TOPIC_LABEL_MAX_LENGTH = 200;
 export const TOPIC_DESCRIPTION_MAX_LENGTH = 1_000;
 export const TOPIC_CRITERIA_MAX_LENGTH = 2_000;
@@ -744,13 +770,19 @@ function asSecondsMap(value: unknown): Record<string, number> {
   return out;
 }
 
-/** Trimmed, de-duplicated, bounded string list. Drops blanks — an empty key is never a key. */
+/**
+ * Trimmed, de-duplicated, bounded string list. Drops blanks — an empty key is never a key.
+ *
+ * Bounded by {@link MEMBER_KEY_MAX_LENGTH}, not the topic bound: every caller passes question or
+ * data-slot keys, and truncating one of those to 64 characters does not shorten it, it *changes* it
+ * into a key that resolves to nothing and silently orphans the question.
+ */
 function asKeyList(value: unknown, max = 64): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const raw of value) {
     if (typeof raw !== 'string') continue;
-    const key = raw.trim().slice(0, TOPIC_KEY_MAX_LENGTH);
+    const key = raw.trim().slice(0, MEMBER_KEY_MAX_LENGTH);
     if (key.length === 0 || out.includes(key)) continue;
     out.push(key);
     if (out.length >= max) break;
@@ -785,7 +817,7 @@ export function narrowTopicMembers(value: unknown): TopicMembers {
 /** Project one stored rule. Returns null when it could never match anything useful. */
 function narrowScopeRule(value: unknown, index: number): ScopeRule | null {
   if (!isRecord(value)) return null;
-  const dataSlotKey = asText(value.dataSlotKey, TOPIC_KEY_MAX_LENGTH, '');
+  const dataSlotKey = asText(value.dataSlotKey, MEMBER_KEY_MAX_LENGTH, '');
   const topicKey = asText(value.topicKey, TOPIC_KEY_MAX_LENGTH, '');
   // A rule naming no slot or no topic is unresolvable by construction — drop it rather than keep a
   // row that can only ever no-op, which would read to an admin as a rule that is quietly failing.
@@ -1045,7 +1077,7 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
   const rules: ProposedScopeRule[] = Array.isArray(value.rules)
     ? value.rules.flatMap((r): ProposedScopeRule[] => {
         if (!isRecord(r)) return [];
-        const dataSlotKey = asText(r.dataSlotKey, TOPIC_KEY_MAX_LENGTH, '');
+        const dataSlotKey = asText(r.dataSlotKey, MEMBER_KEY_MAX_LENGTH, '');
         const topicKey = asText(r.topicKey, TOPIC_KEY_MAX_LENGTH, '');
         if (dataSlotKey.length === 0 || topicKey.length === 0) return [];
         const rawValue = asText(r.value, SCOPE_RULE_VALUE_MAX_LENGTH, '');

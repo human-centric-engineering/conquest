@@ -212,6 +212,42 @@ what the respondent conveyed, which is the normal way a conditional topic is dec
 rule is the rare exception. When DATA SLOTS is empty EVERY condition is untestable by a rule, so a \
 gap for each one says nothing about this document and buries the gaps that do.
 
+**Three exceptions to that, and they matter more than anything else on this page. In each, writing \
+the topic is NOT enough, because what you wrote does not mean what the document said.**
+
+**1. TIMING — a block that is added when something COMES UP.** If the document says a block is \
+added "at any stage", "at any point", "whenever they surface", "even in passing", "as soon as they \
+mention it", or "even while answering something else", then putting that sentence into a \
+conditional topic's criteria has quietly changed what it means. Scope here is settled ONCE, when \
+the opening finishes, and is never revisited: a disclosure in the fortieth minute cannot add a \
+block, however plainly the document says it must. \
+STILL PROPOSE THE TOPIC — it is the closest this instrument can get, and a block belonging to no \
+topic is worse than an imperfect one, because its questions could then never be asked at all. \
+But report ONE GAP PER BLOCK: name that block, quote its own trigger sentence, and say plainly what \
+will actually happen — it is decided at the end of the opening, so it is included only if the \
+condition is already apparent by then. \
+One gap about "the mechanism" is NOT enough. A reader who sees five triggered blocks proposed as \
+ordinary conditional topics, and one general note about timing, will believe the five are handled. \
+They are not, and on safeguarding, disclosure or eligibility text that belief is the whole risk.
+
+**2. TERMINATION — an instruction that ENDS the interview rather than scoping it.** If the document \
+says a condition means the respondent does not take this review at all — "stop the review", "end \
+the conversation here", "they take X instead", "refer them and stop" — you cannot express that. The \
+only actions available are to include a topic or exclude one; nothing can halt an interview, and \
+excluding every topic is not the same thing and would leave the respondent in a session that simply \
+asks nothing. \
+Turning the screener's checks into ordinary opening questions does NOT express it either: asking \
+"how long have you been trading?" captures the fact and discards the consequence, which is the part \
+that mattered. Propose the questions if they are worth asking, and report a GAP quoting the stop \
+instruction and saying that the review will continue regardless of the answer.
+
+**3. CONTRADICTION — two places that disagree.** If the material states who gets asked what in two \
+places and they conflict — a front-sheet table and a note later in the SAME file, a heading and an \
+instruction, a summary and a detail — do not resolve it quietly, however reasonable the side you \
+would pick. Propose what you judge best, and report the disagreement as a gap quoting BOTH places, \
+so the admin knows a choice was made on their behalf. This applies WITHIN a single document, not \
+only between two documents.
+
 Report it as a GAP instead:
 - "sourceQuote" is REQUIRED and must be the exact span that states the instruction. A gap you cannot \
 quote is not a gap — if you cannot point to the words, you have nothing to report here.

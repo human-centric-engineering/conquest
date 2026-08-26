@@ -337,6 +337,121 @@ describe('buildRoutingAnalysisPrompt', () => {
       expect(text).toContain('too vague to act on');
     });
   });
+
+  /**
+   * T07 — the corpus's one confirmed-critical finding, and the reason the rule above needed two
+   * exceptions carved out of it.
+   *
+   * The R005 fix ("a condition you DID express is not a gap") was right for what it was aimed at,
+   * and it also told the analyst not to declare a trigger it had just converted. Doc 07 coerced all
+   * five triggered blocks on four runs across two builds, doc 08 coerced its estate-planning
+   * trigger, and doc 10 coerced four escalation triggers — every run filing ONE gap about "the
+   * mechanism" and then presenting the blocks as ordinary conditional topics.
+   *
+   * These tests do NOT assert that the coercion stops. It cannot stop until scope can be revisited
+   * mid-interview, which is a product decision and a feature, not a prompt. They pin the half that
+   * is fixable now: that the coercion is DECLARED, per block, in the array the corpus scores.
+   */
+  describe('a trigger that fires mid-interview must be declared per block (T07)', () => {
+    const rubric = () => {
+      const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+      return typeof system.content === 'string' ? system.content : '';
+    };
+
+    it('carves the timing case out of the "expressed is not a gap" rule', () => {
+      const text = rubric();
+      expect(text).toContain('Three exceptions to that');
+      expect(text).toContain('what you wrote does not mean what the document said');
+    });
+
+    it('names the trigger phrasings the corpus actually contains', () => {
+      const text = rubric();
+      // Doc 07 ("at any stage", "even while answering something else"), doc 10 ("whenever they
+      // surface", "even in passing"), doc 08 ("only ever asked where the client raises it").
+      for (const phrase of [
+        'at any stage',
+        'at any point',
+        'whenever they surface',
+        'even in passing',
+        'even while answering something else',
+      ]) {
+        expect(text).toContain(phrase);
+      }
+    });
+
+    it('still tells it to propose the topic, because an orphaned block is worse', () => {
+      const text = rubric();
+      expect(text).toContain('STILL PROPOSE THE TOPIC');
+      // validate.ts: with scope active a question belonging to no topic can never be asked.
+      expect(text).toContain('could then never be asked at all');
+    });
+
+    it('demands one gap per block, not one about the mechanism', () => {
+      const text = rubric();
+      expect(text).toContain('ONE GAP PER BLOCK');
+      expect(text).toContain('One gap about "the mechanism" is NOT enough');
+    });
+
+    it('makes the analyst state what will actually happen at runtime', () => {
+      const text = rubric();
+      expect(text).toContain('settled ONCE, when the opening finishes');
+      expect(text).toContain('included only if the condition is already apparent by then');
+    });
+  });
+
+  /**
+   * The doc 10 half. Its critical failure is "the terminating screener absent from gaps[] — a stop
+   * condition discarded", and R010 saw exactly that: the screener became an `opening` topic WITH
+   * QUESTIONS on both runs, so the facts were captured and the consequence ("stop the review") was
+   * thrown away. SCOPE_RULE_ACTIONS is `include | exclude` — nothing can halt an interview — so this
+   * is inexpressible under the existing bar; the analyst simply did not recognise it as such.
+   */
+  describe('an instruction that ends the interview must be gapped (T07, doc 10)', () => {
+    const rubric = () => {
+      const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+      return typeof system.content === 'string' ? system.content : '';
+    };
+
+    it('names the stop phrasings doc 10 uses', () => {
+      const text = rubric();
+      expect(text).toContain('stop the review');
+      expect(text).toContain('end the conversation here');
+    });
+
+    it('says why excluding every topic is not the same thing', () => {
+      expect(rubric()).toContain('excluding every topic is not the same thing');
+    });
+
+    it('closes the loophole of turning a screener into ordinary opening questions', () => {
+      const text = rubric();
+      expect(text).toContain('captures the fact and discards the consequence');
+      expect(text).toContain('the review will continue regardless of the answer');
+    });
+  });
+
+  /**
+   * The doc 08 half of the same finding. "Do not pick a side quietly" existed, but only in the
+   * branch that fires when a SUPPLEMENTARY document is attached — so a document that contradicts
+   * itself (doc 08's front-sheet table versus its page-2 adviser notes, four times) never triggered
+   * it, and the analyst resolved all four in favour of the notes without ever saying they conflict.
+   */
+  describe('a document that contradicts itself must surface the conflict (T07, doc 08)', () => {
+    const rubric = () => {
+      const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+      return typeof system.content === 'string' ? system.content : '';
+    };
+
+    it('applies the no-quiet-resolution rule inside one document', () => {
+      const text = rubric();
+      expect(text).toContain('WITHIN a single document, not only between two documents');
+    });
+
+    it('requires both sides quoted, so the admin can see the choice made for them', () => {
+      const text = rubric();
+      expect(text).toContain('quoting BOTH places');
+      expect(text).toContain('a choice was made on their behalf');
+    });
+  });
 });
 
 describe('buildRoutingAnalysisRetryMessage', () => {

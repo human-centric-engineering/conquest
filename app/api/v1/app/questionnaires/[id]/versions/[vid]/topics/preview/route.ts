@@ -49,7 +49,10 @@ import {
   type ScopeAnswer,
 } from '@/lib/app/questionnaire/scope/planner';
 import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
-import { SCOPE_RATIONALE_MAX_LENGTH } from '@/lib/app/questionnaire/scope/types';
+import {
+  MEMBER_KEY_MAX_LENGTH,
+  SCOPE_RATIONALE_MAX_LENGTH,
+} from '@/lib/app/questionnaire/scope/types';
 import type { PlanPreviewResult } from '@/lib/app/questionnaire/scope/views';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
@@ -77,8 +80,13 @@ const PREVIEW_ANSWER_MAX_LENGTH = 4_000;
  * the two together would 400 the whole preview, with a generic "Invalid request body", on a version
  * whose only sin is one long key. Generous here and permissive downstream: a key that resolves to
  * nothing is dropped per item rather than failing the request.
+ *
+ * This reasoning was right and this route was the only place that had it. It is now
+ * {@link MEMBER_KEY_MAX_LENGTH}, shared with the analyst schema, the admin save schema and the
+ * read path — all three of which were still borrowing the topic bound, and all three of which broke
+ * on one questionnaire because of it. Aliased rather than inlined so the name reads locally.
  */
-const PREVIEW_KEY_MAX_LENGTH = 512;
+const PREVIEW_KEY_MAX_LENGTH = MEMBER_KEY_MAX_LENGTH;
 
 const bodySchema = z.object({
   /** What the respondent "said", keyed by opening question. */

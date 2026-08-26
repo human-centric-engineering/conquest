@@ -550,7 +550,26 @@ async function runRepair(
   }
 }
 
-/** Build a revertible change intent for a `correct` repair (type change vs config-only). */
+/**
+ * Build a revertible change intent for a `correct` repair (type change vs config-only).
+ *
+ * Two things here are load-bearing and were both wrong until the corpus caught them:
+ *
+ * **The `key`.** `targetEntityId` is null for every question/section change by design (the planner
+ * reconciles by value), but the key is what ties the row to a question in the admin's change list —
+ * `changeForMerge` below has always written one. Without it the row that actually changed the
+ * question names no question, and the earlier `infer_type` row it overrides stays `applied` and
+ * un-superseded. Corpus doc 08 showed the result: three questions whose visible rationale read
+ * "captured as free text to avoid inventing choices" against stored `single_choice` slots WITH
+ * invented choices.
+ *
+ * **The field names.** `planInferType` (`extraction-review/planner.ts`) restores from
+ * `beforeJson.type` / `beforeJson.typeConfig`, which is the shape every other change type uses.
+ * Writing `suggestedType` here meant the two never met, so the planner took its documented "no prior
+ * type recorded" branch and reverted to `free_text` with no config — silent data loss on the one
+ * operation whose entire promise is that it can be undone. The planner now also accepts the old
+ * spelling, so rows written before this fix revert correctly rather than needing a backfill.
+ */
 function changeForCorrect(
   original: ExtractedQuestion,
   candidate: ExtractedQuestion
@@ -560,12 +579,14 @@ function changeForCorrect(
     changeType: typeChanged ? 'infer_type' : 'augment_question',
     targetEntityType: 'question',
     beforeJson: {
-      suggestedType: original.suggestedType,
-      suggestedTypeConfig: original.suggestedTypeConfig ?? null,
+      key: original.key,
+      type: original.suggestedType,
+      typeConfig: original.suggestedTypeConfig ?? null,
     },
     afterJson: {
-      suggestedType: candidate.suggestedType,
-      suggestedTypeConfig: candidate.suggestedTypeConfig ?? null,
+      key: candidate.key,
+      type: candidate.suggestedType,
+      typeConfig: candidate.suggestedTypeConfig ?? null,
     },
     rationale: 'Repaired by the scales/matrix specialist during ingestion.',
     ...(typeof candidate.extractionConfidence === 'number'

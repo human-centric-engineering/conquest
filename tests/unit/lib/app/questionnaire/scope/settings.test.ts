@@ -4,6 +4,7 @@ import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   DEFAULT_SECONDS_PER_DATA_SLOT,
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MEMBER_KEY_MAX_LENGTH,
   MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
@@ -12,6 +13,7 @@ import {
   narrowInterviewPlan,
   narrowProposedTopicSet,
   narrowTopicMembers,
+  TOPIC_KEY_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 
 describe('narrowConditionalTopicsSettings', () => {
@@ -129,6 +131,32 @@ describe('narrowTopicMembers', () => {
       dataSlotKeys: [],
       questionKeys: ['q1', 'q2'],
     });
+  });
+
+  /**
+   * T13, the quietest of its three faces. This list was bounded by the TOPIC key length (64), but
+   * every key in it is a REFERENCE to a question or data slot minted elsewhere, and nothing bounds
+   * those at 64 — corpus doc 08 produced one of 78 characters. Truncating such a key does not
+   * shorten it, it changes it into a key that resolves to nothing, which orphans the question. Per
+   * `validate.ts`, an orphaned question "can never be asked, and nothing else in the system would
+   * ever tell you" — so this silently deleted a question from the interview.
+   */
+  it('preserves a long question key rather than truncating it into one that matches nothing', () => {
+    const longKey =
+      'is_there_anything_about_your_circumstances_that_makes_dealing_with_this_harder';
+    expect(longKey.length).toBeGreaterThan(TOPIC_KEY_MAX_LENGTH);
+
+    const members = narrowTopicMembers({ questionKeys: [longKey], dataSlotKeys: [longKey] });
+
+    expect(members.questionKeys).toEqual([longKey]);
+    expect(members.dataSlotKeys).toEqual([longKey]);
+  });
+
+  it('still bounds a key that no realistic minter would produce', () => {
+    const absurd = 'x'.repeat(MEMBER_KEY_MAX_LENGTH + 50);
+    expect(narrowTopicMembers({ questionKeys: [absurd] }).questionKeys[0]).toHaveLength(
+      MEMBER_KEY_MAX_LENGTH
+    );
   });
 });
 

@@ -28,6 +28,7 @@ import {
   TOPIC_CRITERIA_MAX_LENGTH,
   TOPIC_DEPTHS,
   TOPIC_DESCRIPTION_MAX_LENGTH,
+  MEMBER_KEY_MAX_LENGTH,
   TOPIC_KEY_MAX_LENGTH,
   TOPIC_LABEL_MAX_LENGTH,
   TOPIC_PHASES,
@@ -41,7 +42,11 @@ export const topicKeySchema = z
   .max(TOPIC_KEY_MAX_LENGTH)
   .regex(/^[a-z0-9_]+$/, 'Key may use lowercase letters, numbers and underscores only');
 
-const keyListSchema = z.array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH)).max(500);
+/**
+ * Question / data-slot key references. MEMBER_KEY_MAX_LENGTH, not the topic bound — see that
+ * constant: these keys are minted by the extractor and by import, and neither bounds them at 64.
+ */
+const keyListSchema = z.array(z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH)).max(500);
 
 /** One topic as the admin surface submits it. */
 export const topicInputSchema = z.object({
@@ -75,7 +80,7 @@ export const saveTopicsSchema = z.object({
 /** One hard rule as the admin surface submits it. */
 export const scopeRuleInputSchema = z.object({
   id: z.string().trim().max(64).optional(),
-  dataSlotKey: z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH),
+  dataSlotKey: z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH),
   operator: z.enum(SCOPE_RULE_OPERATORS),
   value: z.string().trim().max(SCOPE_RULE_VALUE_MAX_LENGTH).nullable().default(null),
   action: z.enum(SCOPE_RULE_ACTIONS),

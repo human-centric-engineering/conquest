@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { TOPIC_KEY_MAX_LENGTH } from '@/lib/app/questionnaire/scope/types';
+
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
   ROUTING_ANALYSIS_MAX_SETTING_KEYS,
@@ -269,5 +271,64 @@ describe('validateRoutingAnalysis — the two settings the analyst may now propo
     // runtime, so refusing the whole response over one would throw away a good proposal and pay
     // for a retry to fix a hint.
     expect(validateRoutingAnalysis(proposal({ fallbackTopicKeys: ['not_a_topic'] })).ok).toBe(true);
+  });
+
+  /**
+   * T13, found by corpus doc 08 — the only routing analysis of forty to fail outright.
+   *
+   * `questionKeys` are REFERENCES to keys the extractor minted, and the extractor bounds them at
+   * nothing. Validating them against the *topic* key bound (64) rejected an analysis that had
+   * faithfully echoed back two real question keys of 70 and 78 characters, and no retry could fix
+   * it: satisfying the bound means shortening a key, and a shortened key matches no question. The
+   * failure is durable — a failed routing_analysis is the "already tried" signal the Topics tab
+   * reads — so the admin got no routing and no reason.
+   */
+  const LONG_QUESTION_KEY =
+    'is_there_anything_about_your_circumstances_that_makes_dealing_with_this_harder';
+
+  it('accepts a questionKey longer than a topic key may be — it is a reference, not a slug', () => {
+    expect(LONG_QUESTION_KEY.length).toBeGreaterThan(TOPIC_KEY_MAX_LENGTH);
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [
+          {
+            key: 'vulnerability',
+            label: 'Vulnerability',
+            phase: 'closing',
+            criteria: null,
+            depth: 'full',
+            questionKeys: [LONG_QUESTION_KEY],
+            dataSlotKeys: [LONG_QUESTION_KEY],
+            rationale: 'Every client, at the end, without exception.',
+          },
+        ],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Preserved whole. A truncated key does not resolve, which orphans the question, and an
+    // orphaned question can never be asked.
+    expect(result.value.topics[0]?.questionKeys).toEqual([LONG_QUESTION_KEY]);
+  });
+
+  it('still holds the TOPIC key to the shorter bound — that one the analyst mints', () => {
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [
+          {
+            key: 'k'.repeat(TOPIC_KEY_MAX_LENGTH + 1),
+            label: 'Too long',
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            questionKeys: [],
+            dataSlotKeys: [],
+            rationale: 'r',
+          },
+        ],
+      })
+    );
+    expect(result.ok).toBe(false);
   });
 });
