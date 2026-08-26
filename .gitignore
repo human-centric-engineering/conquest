@@ -212,5 +212,8 @@ public/uploads/
 # Playwright MCP debug output
 .playwright-mcp/
 
+# Design canvas scratch output (/design skill) — local only
+.design/
+
 # Sentry Config File
 .env.sentry-build-plugin
