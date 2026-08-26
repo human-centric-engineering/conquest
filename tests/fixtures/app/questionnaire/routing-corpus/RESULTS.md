@@ -10,10 +10,16 @@ an unrun document is left blank rather than estimated, and a run that was abando
 half-way is recorded as such. A ledger that guesses is worse than no ledger, because the
 trend line it draws is fiction.
 
-> **Status: four partial runs recorded (R001 — doc 01, R002 — doc 02, R003 — verification,
-> R004 — doc 03; all 2026-08-26).** No full corpus run has been performed, so there is no corpus
-> score and the restraint band — the band that decides shippability — is still untouched. Three of
-> the ten documents have now been run, all of them from the easy end (difficulty 1, 2, 2).
+> **Status: five partial runs recorded (R001 — doc 01, R002 — doc 02, R003 — verification,
+> R004 — doc 03, R005 — doc 04; all 2026-08-26).** No full corpus run has been performed, so there
+> is no corpus score. Four of the ten documents have been scored, all from the extraction band
+> (difficulty 1, 2, 2, 3).
+>
+> **The restraint band has still never been scored — and the one control run into it found a
+> critical failure.** R005 ran doc 07 twice as a control for a prompt change and both runs coerced
+> all five of its mid-interview triggered blocks into opening-time criteria. See **T07**. A rising
+> extraction band against an unscored restraint band is exactly the pattern the two-band split
+> exists to expose.
 
 ---
 
@@ -148,6 +154,22 @@ shippable regardless of its number**:
 | **08** | A contradiction resolved by quietly picking a side, rather than surfaced as a gap                              |
 | **10** | The terminating screener absent from `gaps[]` — a stop condition discarded                                     |
 
+### Compare a quote with markdown normalised, or you will report a failure that is not one
+
+A fabricated `sourceQuote` is the corpus's most severe finding, so the test for one has to be right.
+**Substring search against the raw file is not it.** Models re-render markdown emphasis as they
+quote, and R005 saw both spellings on one document: the gap quote on doc 07 was the trigger passage
+with its `**bold**` markers **stripped**, and candidacy signal 2 was `**Standing conditions**`
+rendered as `“Standing conditions”`. Both are faithful to the word; a raw substring check calls both
+critical failures.
+
+Before comparing, normalise BOTH sides: collapse whitespace (documents hard-wrap, quotes do not),
+strip `**` and `_`, and fold curly quotes to straight ones. Nothing beyond that — case, punctuation
+and hyphens must survive, because "near-misses" → "near misses" is a real edit and a looser matcher
+launders it.
+
+A quote that still does not match after that normalisation is the real thing, and it is critical.
+
 One watch item that is **not** critical but is worth recording in the notes: on **05**,
 Appendix B's scoring note reads like a rule and is not one. If it becomes a routing rule,
 say so.
@@ -231,6 +253,150 @@ that turns the trend table into an explanation rather than a graph.>
 ## Run log
 
 _Newest first._
+
+### R005 — 2026-08-26 · **PARTIAL (doc 04 ×4, plus doc 07 twice as a control)**
+
+| Field                      | Value                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Commit                     | `bbfbd28d1` + the gaps-prompt fix on `fix/ingest-fidelity-phase-2`                  |
+| Ran by                     | Claude (agent), driven by John                                                      |
+| How                        | streaming ingest via `POST /questionnaires/stream` · doc 04 ×4, doc 07 ×2 (control) |
+| Extractor model            | `openai/gpt-5.4`                                                                    |
+| Critic model               | `openai/gpt-5.4`                                                                    |
+| Candidacy model            | `openai/gpt-5.4-mini`                                                               |
+| Analyst model              | `openai/gpt-5.4`                                                                    |
+| Conditional topics enabled | no (fresh version each ingest)                                                      |
+| Total cost / wall time     | ~$0.28 across six ingests (`ai_cost_log`) · 45–70s each                             |
+| Environment                | local dev DB, dev server on :3020                                                   |
+
+| Doc | Difficulty | P   | C   | T   | G   | R   | /10 | Failed at | Critical | Note                                                              |
+| --- | ---------- | --- | --- | --- | --- | --- | --- | --------- | -------- | ----------------------------------------------------------------- |
+| 01  | 1          |     |     |     |     |     |     |           |          | not run (see R001)                                                |
+| 02  | 2          |     |     |     |     |     |     |           |          | not run (see R002)                                                |
+| 03  | 2          |     |     |     |     |     |     |           |          | not run (see R004)                                                |
+| 04  | 3          | 2   | 2   | 2   | 2   | 2   | 10  | none      | none     | Clean on every axis, twice before a prompt change and twice after |
+| 05  | 3          |     |     |     |     |     |     |           |          | not run                                                           |
+| 06  | 3          |     |     |     |     |     |     |           |          | not run                                                           |
+| 07  | 5          |     |     |     |     |     |     |           |          | **control only — NOT scored.** See "The doc 07 control" below     |
+| 08  | 4          |     |     |     |     |     |     |           |          | not run                                                           |
+| 09  | 3          |     |     |     |     |     |     |           |          | not run                                                           |
+| 10  | 5          |     |     |     |     |     |     |           |          | not run                                                           |
+
+**Corpus score:** _n/a — partial_ · **Extraction band:** _n/a_ · **Restraint band:** _still not scored_
+**Verdict:** doc 04 is not shippable evidence on its own, and the doc 07 control below is the reason
+that sentence matters more than the 10.
+
+**Doc 04 — the first 10/10, and it earned it on the axis the document exists to test.** Doc 04
+contains no instruction sentence anywhere: its conditionality is carried entirely by section
+headings, and the README's named failure mode is a fabricated quote — an invented "applicants
+requesting over £50,000 should complete Section 3" that appears in no line of the file. Nothing of
+the kind happened. Every topic's `sourceQuote` is the heading itself, byte-exact, on all four runs,
+and every one of the five candidacy signals quotes a real span too.
+
+Everything else was deterministic across the four: 8 sections, 27 questions, one `opening` (Section
+1), one `core` (Section 2), five `conditional` (Sections 3–7), one `closing` (Section 8) — exactly
+the ground truth. Type inference was identical and sensible both sides of the prompt change ("What
+is the total amount you are requesting?" → `numeric`, "When were your last accounts independently
+examined or audited?" → `date`, everything else `free_text`). No cap, depth dial or fallback was
+invented where the document is silent. `fromDocument: true`.
+
+Extraction fidelity was markedly better than doc 03: 5, 1, 5 and 5 prompts differed from the source
+across the four runs and **`unattributedPromptCount` was zero on every one** — every edit was
+declared. The rewrites are mild ("money" → "funding") with one worth noting: _"Which community does
+the work serve, and roughly how many people?"_ → _"…and roughly how many people **will it reach**?"_
+shifts served to reached. Filed under T05, which already covers the class.
+
+#### What broke
+
+**Nothing in doc 04's own scoring — the finding is one the rubric cannot see.** Run 1 filed **five**
+gaps; run 2, same file, same build, filed **none**. The five all said a version of _"the document
+clearly routes this topic by requested amount, but there are no data slots to test that amount
+mechanically, so no hard include rule can be formalized."_
+
+That is a tautology, and provably so: `buildRoutingAnalysisInput` reads `version.dataSlots`, and
+data slots are generated by a **separate, later** pass — verified, every version created during
+these runs had zero. **At ingest the analyst can never propose a single hard rule**, so "no data
+slot for this" is true of every conditional topic in every ingest-time analysis that will ever run.
+A gap saying it describes the platform, not the document.
+
+Both readings were available in the prompt, which is why it went both ways on one build. The gaps
+section opened with _"you cannot turn it into a clean topic **or hard rule** — the condition names
+something not in DATA SLOTS"_, and with DATA SLOTS empty every conditional topic satisfies that
+test. Run 1 followed the letter of the instruction. Run 2 followed _"Zero is the common and correct
+answer"_ six lines later.
+
+It matters because `gaps[]` is the load-bearing restraint signal: three of the four entries in the
+critical-failure table are "did this land in `gaps[]`". A gaps array that routinely fills with
+platform tautologies on easy documents trains a reader — and a scorer — to skim it, and doc 10's
+dropped stop condition is one line in the same array.
+
+#### The doc 07 control — and a critical failure found while running it
+
+Doc 07 was run **twice, purely to check the gaps fix had not over-suppressed** the gaps that must
+survive: once on the committed prompt, once on the fixed one. It is **not scored** and doc 07's row
+stays blank. Two runs of a difficulty-5 document is a control, not a result.
+
+**The fix passed its control.** Both runs filed exactly one gap, and the fixed prompt's version is
+the better-aimed of the two: pre-fix it blamed _"there are no data slots"_; post-fix it names the
+mechanism — _"the mid-interview requirement to insert it immediately, reorder the remainder, and
+still ask it if disclosed very late"_ — quoting the trigger passage. So the change removes the
+tautology without silencing a real gap.
+
+**But both runs coerced all five triggered blocks, which is doc 07's named critical failure.** Every
+one of them was proposed as a `conditional` topic:
+
+| Topic                                | Criteria proposed                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------ |
+| `triggered_block_domestic_abuse`     | "If the applicant discloses, **at any stage**, that they are…fleeing abuse"    |
+| `triggered_block_care_leaver`        | "If it emerges **at any stage** that the applicant has been looked after…"     |
+| `triggered_block_health_disability`  | "…**at any stage** — including **in passing** while answering something else"  |
+| `triggered_block_immigration_status` | "If the applicant's immigration or residence status comes up **at any point**" |
+| `triggered_block_rent_arrears`       | "If arrears of more than two months are mentioned **at any stage**"            |
+
+Conditional Topics settles scope **once**, when the opening completes. So a criterion reading "at
+any stage" is decided at the end of the opening and never revisited: a disclosure of abuse in minute
+40 does not add the block. The document goes out of its way to forbid exactly this — _"A trigger
+that fires in the final five minutes still means the block is asked. Do not defer a triggered block
+to a second appointment"_ — and the interviewer would simply not ask.
+
+It is a gentler failure than the README feared. The criteria are **verbatim quotes**, "at any stage"
+included, rather than the silently reworded _"include when the opening mentions abuse"_ — so the
+coercion is legible to an admin who knows the engine plans once. It is the same failure all the
+same, on the most safety-critical block in the corpus.
+
+**This is not caused by the prompt change** — it is identical on both sides of it, which is the
+whole reason the pre-fix baseline was run. Filed as **T07**, and it is the one entry in this table
+that is a product decision rather than a prompt tweak. See the README's "⚠️ Mid-interview triggers
+are not expressible today", which anticipated it.
+
+#### A scoring trap found while checking the quotes
+
+Two of doc 07's quotes appear nowhere in the file as literal substrings — which is the corpus's
+single most severe critical failure — and **neither is fabricated**:
+
+- The gap's quote is the trigger passage with its `**bold**` markers **stripped**.
+- Candidacy signal 2 is `**Standing conditions**` rendered as `“Standing conditions”` — the markdown
+  emphasis translated into typographic quotation marks.
+
+Both are faithful to the word. A scorer checking quotes by substring search will report a critical
+failure on the restraint band and be wrong. **Normalise markdown emphasis before comparing** — strip
+`**`/`_` and fold curly quotes — as well as whitespace. Written into the Scoring section above.
+
+#### Changed since last run
+
+- **The gaps rubric no longer offers "not in DATA SLOTS" as a stand-alone reason to gap.** The bar
+  is now "cannot express it AT ALL — not as a conditional topic's criteria, and not as a hard rule",
+  with an explicit line that a condition you DID express as criteria is not also a gap, and that an
+  empty DATA SLOTS list (i.e. every ingest) makes the old test true of everything. "Fires
+  mid-interview rather than at the opening" was added as a named gap reason, which it never was.
+  Five regression tests in `analysis-prompt.test.ts`, including one asserting the old clause is
+  gone.
+- **Evidence, stated honestly:** doc 04 gaps went 5 and 0 before, 0 and 0 after. Three of four
+  post-change observations are zero against one of two before — consistent with the fix, not proof
+  of it, since run 2 was already zero. The doc 07 control is the stronger signal, because it shows
+  the change does not cost a legitimate gap.
+
+---
 
 ### R004 — 2026-08-26 · **PARTIAL (doc 03 only — first scored run of it)**
 
@@ -571,14 +737,16 @@ or judged correct as-is).
 > cannot see a wrong question set) rather than a case of the critic judging badly. Both are the
 > "plain bug" exception at the bottom of this section.
 
-| ID  | Raised     | Docs   | Status   | What was seen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Candidate tweak                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| --- | ---------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T06 | R004       | 02, 03 | open     | Every one of doc 03's six criteria turns on a site fact (lifting above 20kg, a confined-space register, COSHH storage, night shifts) that **no question in the instrument captures**. The opening topic asks about visitor routes, permits, drills and near-misses, so the planner decides six topics on an opening that cannot evidence any of them. The analyst noticed — its `summary` says "no hard rules are possible because there are no data slots to test against" — but put it in prose, and `gaps` came back empty on all six runs. R002 recorded the same shape on doc 02 as an aside inside T04 ("none of C–F's criteria are answerable from any question in the instrument anyway"), which is why two documents are listed. | Undecided, and deliberately so — the analyst's output here is _good_, and the two obvious fixes both make it worse. Turning the six into gaps would discard six correct, quotable conditional topics. Widening the opening is not the analyst's to do. The candidate is a **third** thing: keep the topics and add a gap saying the criteria are not answerable from this instrument, which needs the prompt to distinguish "cannot formalise" from "formalised, but nothing can evidence it". Do not touch the prompt until a third document shows the same shape.                                                                                                                                                                                                 |
-| T05 | R004       | 03     | open     | The extractor reworded 8, 12, 10, 10, 10 and 12 of one file's 23 prompts across six ingests, in three distinct classes: **self-containing** ("Who maintains the register…" → "…the confined-space register…", needed, because a question is delivered outside its heading), **cosmetic** ("Walk me through" → "Please walk me through", pure churn and most of the `changeCount` variance), and **meaning-narrowing** ("if the weather turns mid-task" → "if the weather changes during a work-at-height task", on 3 of 6 runs). All were filed as `rewrite_prompt` with a rationale asserting meaning was preserved, and the fidelity critic marked every one `ok`.                                                                      | Decide the policy before touching anything, exactly as T02 forced for splitting. The three classes want different answers and the prompt currently gives them one: self-containing is arguably required, cosmetic is noise, narrowing is a fidelity fault. A per-class instruction is the candidate ("resolve a pronoun or an elided noun the section heading supplied; change nothing else"), but see [`question-fidelity.md`](../../../../../.context/app/questionnaire/question-fidelity.md) first — the product already has a per-question ask-as-written dial, and ingest-time rewriting may be the wrong layer for this entirely. Separately from the policy: **unrecorded** rewrites were a plain bug and were actioned in R004 (`unattributedPromptCount`). |
-| T04 | R002, R004 | 02, 03 | actioned | Part A (doc 02) and Section 1 (doc 03) proposed at `phase: opening` where the README's ground truth said `core`. Seen on two documents, two runs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | **README error, and the answer was in the code the whole time.** `no_opening_topic` in `scope/validate.ts` is an **error**-severity issue: a config where every always-asked topic is `core` fails validation, because nothing gathers the signal the planner reads. `opening` was not a defensible alternative reading — it was the only output that validates. Ground truth for 02 and 03 corrected, and the rule stated once above the per-document list rather than repeated ten times. The analyst was never wrong here.                                                                                                                                                                                                                                       |
-| T03 | R002       | 02     | actioned | The fidelity critic checked all 28 extracted questions, flagged 3, and never noticed that 6 of the 28 did not exist in a 22-question source. It is a per-question faithfulness check with no count or coverage dimension.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Give the critic a coverage/count check so extraction drift is caught at ingest, where it is cheap, rather than by a human reading the Structure editor. Pairs with T02.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| T02 | R002       | 02     | actioned | Six ingests of one file on one build produced 22, 28, 23, 28, 28, 28 questions. The extractor splits compound questions — which `extraction-prompt.ts:182` instructs and which is recorded as a revertable `split_question` change — but does so inconsistently.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Decide the policy, then make it deterministic. Splitting improves completion accuracy (each half gets its own satisfaction bar) and costs nothing in interview length; not splitting keeps a 1:1 mirror of the source. **Either way, non-determinism is the defect** — two ingests of one document that disagree on question count are not comparable in a cohort.                                                                                                                                                                                                                                                                                                                                                                                                  |
-| T01 | R001       | 01     | open     | All three Adherence questions swept into one `conditional` topic criteria'd _"Only where PC2 is 4 or more"_, though the source marks AD1 `Always`. The analyst filed an honest `gap` naming the mix, then resolved it by widening. **An earlier run of the same document (via a `.txt` copy) split it correctly**, so this is variance on a hard case, not a deterministic fault.                                                                                                                                                                                                                                                                                                                                                         | Teach the analyst to prefer **splitting a mixed section into two topics** (one core, one conditional) over widening one criterion across a question the source says to always ask. Silently gating an `Always` question is the worse failure of the two.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ID  | Raised     | Docs   | Status                   | What was seen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Candidate tweak                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------- | ------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T08 | R005       | 04     | open                     | Run 2 of doc 04 proposed five conditional topics and its `summary` — the prose the admin reads on the Topics tab — said "**four** conditional due-diligence sections". Run 1's said five and was right. Nothing about the routing is wrong; the sentence describing it is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Low severity, recorded because it is cheap to check and corrodes trust in the one paragraph an admin actually reads. Watch whether it recurs before considering a prompt line telling the analyst to count its own output. Do not act on one sighting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| T07 | R005       | 07     | **confirmed — critical** | All five of doc 07's triggered blocks were proposed as `conditional` topics with criteria quoting "at any stage" / "at any point" / "in passing". Identical on both runs, and identical on both sides of the R005 prompt change, so it is neither variance nor a regression. Conditional Topics settles scope once, at the end of the opening, so every one of these is decided before the disclosure it waits for can happen — on safeguarding, care-leaver, health, immigration and arrears text. The analyst DID file one honest gap naming the mid-interview mechanism, so it is not unaware; it gapped the mechanism and then converted the blocks anyway.                                                                           | **A product decision, not a prompt tweak — do not fix this from the prompt without deciding the behaviour first.** The two obvious options are both bad on their own: gapping the five blocks means an abuse-disclosure block is never asked at all (worse than asking it when the opening mentioned abuse), and leaving them as-is ships an instrument that silently behaves differently from what its author wrote. The README's "⚠️ Mid-interview triggers are not expressible today" is the standing analysis; the real options are a mid-interview re-scope mechanism (with the report-reproducibility consequences it names) or an explicit refusal path that keeps the blocks visible to the admin as not-routable. Needs John.                              |
+| T06 | R004       | 02, 03 | open                     | Every one of doc 03's six criteria turns on a site fact (lifting above 20kg, a confined-space register, COSHH storage, night shifts) that **no question in the instrument captures**. The opening topic asks about visitor routes, permits, drills and near-misses, so the planner decides six topics on an opening that cannot evidence any of them. The analyst noticed — its `summary` says "no hard rules are possible because there are no data slots to test against" — but put it in prose, and `gaps` came back empty on all six runs. R002 recorded the same shape on doc 02 as an aside inside T04 ("none of C–F's criteria are answerable from any question in the instrument anyway"), which is why two documents are listed. | Undecided, and deliberately so — the analyst's output here is _good_, and the two obvious fixes both make it worse. Turning the six into gaps would discard six correct, quotable conditional topics. Widening the opening is not the analyst's to do. The candidate is a **third** thing: keep the topics and add a gap saying the criteria are not answerable from this instrument, which needs the prompt to distinguish "cannot formalise" from "formalised, but nothing can evidence it". Do not touch the prompt until a third document shows the same shape.                                                                                                                                                                                                 |
+| T05 | R004       | 03     | open                     | The extractor reworded 8, 12, 10, 10, 10 and 12 of one file's 23 prompts across six ingests, in three distinct classes: **self-containing** ("Who maintains the register…" → "…the confined-space register…", needed, because a question is delivered outside its heading), **cosmetic** ("Walk me through" → "Please walk me through", pure churn and most of the `changeCount` variance), and **meaning-narrowing** ("if the weather turns mid-task" → "if the weather changes during a work-at-height task", on 3 of 6 runs). All were filed as `rewrite_prompt` with a rationale asserting meaning was preserved, and the fidelity critic marked every one `ok`.                                                                      | Decide the policy before touching anything, exactly as T02 forced for splitting. The three classes want different answers and the prompt currently gives them one: self-containing is arguably required, cosmetic is noise, narrowing is a fidelity fault. A per-class instruction is the candidate ("resolve a pronoun or an elided noun the section heading supplied; change nothing else"), but see [`question-fidelity.md`](../../../../../.context/app/questionnaire/question-fidelity.md) first — the product already has a per-question ask-as-written dial, and ingest-time rewriting may be the wrong layer for this entirely. Separately from the policy: **unrecorded** rewrites were a plain bug and were actioned in R004 (`unattributedPromptCount`). |
+| T04 | R002, R004 | 02, 03 | actioned                 | Part A (doc 02) and Section 1 (doc 03) proposed at `phase: opening` where the README's ground truth said `core`. Seen on two documents, two runs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | **README error, and the answer was in the code the whole time.** `no_opening_topic` in `scope/validate.ts` is an **error**-severity issue: a config where every always-asked topic is `core` fails validation, because nothing gathers the signal the planner reads. `opening` was not a defensible alternative reading — it was the only output that validates. Ground truth for 02 and 03 corrected, and the rule stated once above the per-document list rather than repeated ten times. The analyst was never wrong here.                                                                                                                                                                                                                                       |
+| T03 | R002       | 02     | actioned                 | The fidelity critic checked all 28 extracted questions, flagged 3, and never noticed that 6 of the 28 did not exist in a 22-question source. It is a per-question faithfulness check with no count or coverage dimension.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Give the critic a coverage/count check so extraction drift is caught at ingest, where it is cheap, rather than by a human reading the Structure editor. Pairs with T02.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| T02 | R002       | 02     | actioned                 | Six ingests of one file on one build produced 22, 28, 23, 28, 28, 28 questions. The extractor splits compound questions — which `extraction-prompt.ts:182` instructs and which is recorded as a revertable `split_question` change — but does so inconsistently.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Decide the policy, then make it deterministic. Splitting improves completion accuracy (each half gets its own satisfaction bar) and costs nothing in interview length; not splitting keeps a 1:1 mirror of the source. **Either way, non-determinism is the defect** — two ingests of one document that disagree on question count are not comparable in a cohort.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| T01 | R001       | 01     | open                     | All three Adherence questions swept into one `conditional` topic criteria'd _"Only where PC2 is 4 or more"_, though the source marks AD1 `Always`. The analyst filed an honest `gap` naming the mix, then resolved it by widening. **An earlier run of the same document (via a `.txt` copy) split it correctly**, so this is variance on a hard case, not a deterministic fault.                                                                                                                                                                                                                                                                                                                                                         | Teach the analyst to prefer **splitting a mixed section into two topics** (one core, one conditional) over widening one criterion across a question the source says to always ask. Silently gating an `Always` question is the worse failure of the two.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Working the table
 
@@ -600,12 +768,13 @@ or judged correct as-is).
 One row per run. The three percentages and the critical-failure count are the whole point
 of the file; everything above exists to make them mean the same thing each time.
 
-| Run            | Date       | Commit            | Analyst model    | Corpus | Extraction band | Restraint band | Critical failures | Verdict                        |
-| -------------- | ---------- | ----------------- | ---------------- | ------ | --------------- | -------------- | ----------------- | ------------------------------ |
-| R004 (partial) | 2026-08-26 | `0d129065f`+ph2   | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 03 only          |
-| R003 (partial) | 2026-08-26 | `2478d3586`+ph2   | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | verification only — not scored |
-| R002 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 02 only          |
-| R001 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 01 only          |
+| Run            | Date       | Commit            | Analyst model    | Corpus | Extraction band | Restraint band | Critical failures   | Verdict                        |
+| -------------- | ---------- | ----------------- | ---------------- | ------ | --------------- | -------------- | ------------------- | ------------------------------ |
+| R005 (partial) | 2026-08-26 | `bbfbd28d1`+gaps  | `openai/gpt-5.4` | _n/a_  | _n/a_           | not scored     | 1 (doc 07, control) | partial — doc 04 only scored   |
+| R004 (partial) | 2026-08-26 | `0d129065f`+ph2   | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                   | partial — doc 03 only          |
+| R003 (partial) | 2026-08-26 | `2478d3586`+ph2   | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                   | verification only — not scored |
+| R002 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                   | partial — doc 02 only          |
+| R001 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                   | partial — doc 01 only          |
 
 ### Reading it honestly
 

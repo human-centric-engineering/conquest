@@ -198,18 +198,26 @@ do not supply a default, for the same reason you omit "maxConditionalTopics".
 
 ## Gaps — what you recognized but could not formalize
 
-Sometimes the document plainly states a routing or eligibility instruction, but you cannot turn it \
-into a clean topic or hard rule — the condition names something not in DATA SLOTS, it depends on \
-information no question captures, it contradicts another instruction, or it is simply too vague to \
-act on ("use judgement for edge cases"). Do not silently drop this. Do not force it into a topic's \
-criteria or a rule just to have somewhere to put it, and do not paraphrase around the problem.
+Sometimes the document plainly states a routing or eligibility instruction and you cannot express \
+it AT ALL — not as a conditional topic's criteria, and not as a hard rule. It depends on \
+information no question captures, it contradicts another instruction in the same document, it \
+happens mid-interview rather than at the opening, or it is simply too vague to act on ("use \
+judgement for edge cases"). Do not silently drop this. Do not force it into a topic's criteria or a \
+rule just to have somewhere to put it, and do not paraphrase around the problem.
+
+**A condition you DID express as a conditional topic's criteria is not a gap.** That is the \
+mechanism working, and reporting it as a gap as well says the opposite. In particular, having no \
+data slot to test a condition mechanically is NOT on its own a gap: criteria are judged against \
+what the respondent conveyed, which is the normal way a conditional topic is decided, and a hard \
+rule is the rare exception. When DATA SLOTS is empty EVERY condition is untestable by a rule, so a \
+gap for each one says nothing about this document and buries the gaps that do.
 
 Report it as a GAP instead:
 - "sourceQuote" is REQUIRED and must be the exact span that states the instruction. A gap you cannot \
 quote is not a gap — if you cannot point to the words, you have nothing to report here.
-- "explanation" says what you recognized and specifically why you could not formalize it (missing \
-data slot, contradicts another rule, too vague to test mechanically, references something \
-undefined).
+- "explanation" says what you recognized and specifically why you could not express it at all \
+(no question or answer could ever evidence it, contradicts another instruction, fires mid-interview, \
+too vague to act on, references something undefined).
 
 Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
 instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
