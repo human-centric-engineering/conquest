@@ -10,9 +10,9 @@ an unrun document is left blank rather than estimated, and a run that was abando
 half-way is recorded as such. A ledger that guesses is worse than no ledger, because the
 trend line it draws is fiction.
 
-> **Status: two partial runs recorded (R001 — doc 01, R002 — doc 02; both 2026-08-26).** No full
-> corpus run has been performed, so there is no corpus score and the restraint band — the band that
-> decides shippability — is still untouched.
+> **Status: three partial runs recorded (R001 — doc 01, R002 — doc 02, R003 — verification;
+> all 2026-08-26).** No full corpus run has been performed, so there is no corpus score and the
+> restraint band — the band that decides shippability — is still untouched.
 
 ---
 
@@ -231,6 +231,41 @@ that turns the trend table into an explanation rather than a graph.>
 
 _Newest first._
 
+### R003 — 2026-08-26 · **PARTIAL (doc 02 only — verification of the T02/T03 fixes)**
+
+| Field                      | Value                                                                     |
+| -------------------------- | ------------------------------------------------------------------------- |
+| Commit                     | `2478d3586` + the Phase 2 changes on `fix/ingest-fidelity`                |
+| Ran by                     | Claude (agent), driven by John                                            |
+| How                        | streaming ingest via `POST /questionnaires/stream` · doc 02 ×4, doc 03 ×1 |
+| Extractor model            | `openai/gpt-5.4`                                                          |
+| Critic model               | `openai/gpt-5.4`                                                          |
+| Candidacy model            | `openai/gpt-5.4-mini`                                                     |
+| Analyst model              | `openai/gpt-5.4`                                                          |
+| Conditional topics enabled | no (fresh version each ingest)                                            |
+| Environment                | local dev DB, dev server on :3020                                         |
+
+**Not scored.** This run existed to verify that faithful ingest holds, not to score the corpus. The
+scoreable row for doc 02 is R002's.
+
+**Question count, four ingests of doc 02: 22, 22, 22, 22.** Against R002's 22, 28, 23, 28, 28, 28 on
+the same file. The extractor is now forbidden to split compound questions, and `disallowedEditCount`
+was absent (zero) on all four — the instruction is landing, not merely present. Sections 7/7 and the
+analyst's proposal (7 topics, 4 conditional) were identical on every run.
+
+**The critic's new coverage read was right on both shapes.** Doc 02: `{"assessment": "matches",
+"sourceQuestionCount": 22}` four times out of four. Doc 03, which numbers nothing, was run as a
+control to check the critic counts rather than echoes — it found the bullet list and reported
+`"The source contains 23 bullet-point questions across sections 1-8, and 23 questions were
+extracted"`, matching the 23 extracted.
+
+**What this run did NOT establish.** No `extra_questions` or `missing_questions` verdict was
+observed live — only `matches`. The vocabulary is covered by prompt-level unit tests, and the doc-03
+control shows the count is independently derived, but the discriminating case has not been seen in
+the wild. Worth watching on the first full corpus run.
+
+---
+
 ### R002 — 2026-08-26 · **PARTIAL (doc 02 only)**
 
 | Field                      | Value                                                                               |
@@ -424,12 +459,19 @@ Statuses: **open** (seen once, watching) · **confirmed** (seen on ≥2 runs, wo
 **actioned** (changed — say in which run's "Changed since last run") · **dropped** (did not recur,
 or judged correct as-is).
 
-| ID  | Raised | Docs | Status | What was seen                                                                                                                                                                                                                                                                                                                                                                     | Candidate tweak                                                                                                                                                                                                                                                                                                                                                    |
-| --- | ------ | ---- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| T04 | R002   | 02   | open   | Part A proposed at `phase: opening` where the README's ground truth says `core`. The rationale given ("the universal baseline before any situational parts are considered") is defensible, and it changes nothing about routing: none of C–F's criteria are answerable from any question in the instrument anyway.                                                                | Decide whether this is a pipeline error or a README error. If `opening` is a reasonable reading, fix the ground truth rather than the analyst. Do not touch the prompt on one observation.                                                                                                                                                                         |
-| T03 | R002   | 02   | open   | The fidelity critic checked all 28 extracted questions, flagged 3, and never noticed that 6 of the 28 did not exist in a 22-question source. It is a per-question faithfulness check with no count or coverage dimension.                                                                                                                                                         | Give the critic a coverage/count check so extraction drift is caught at ingest, where it is cheap, rather than by a human reading the Structure editor. Pairs with T02.                                                                                                                                                                                            |
-| T02 | R002   | 02   | open   | Six ingests of one file on one build produced 22, 28, 23, 28, 28, 28 questions. The extractor splits compound questions — which `extraction-prompt.ts:182` instructs and which is recorded as a revertable `split_question` change — but does so inconsistently.                                                                                                                  | Decide the policy, then make it deterministic. Splitting improves completion accuracy (each half gets its own satisfaction bar) and costs nothing in interview length; not splitting keeps a 1:1 mirror of the source. **Either way, non-determinism is the defect** — two ingests of one document that disagree on question count are not comparable in a cohort. |
-| T01 | R001   | 01   | open   | All three Adherence questions swept into one `conditional` topic criteria'd _"Only where PC2 is 4 or more"_, though the source marks AD1 `Always`. The analyst filed an honest `gap` naming the mix, then resolved it by widening. **An earlier run of the same document (via a `.txt` copy) split it correctly**, so this is variance on a hard case, not a deterministic fault. | Teach the analyst to prefer **splitting a mixed section into two topics** (one core, one conditional) over widening one criterion across a question the source says to always ask. Silently gating an `Always` question is the worse failure of the two.                                                                                                           |
+> **T02 and T03 skipped the queue deliberately.** The parking rule exists because a prompt edit made
+> from one observation is as likely to encode noise as fix a fault. Neither of these was a judgement
+> call: T02 was **non-determinism** (one file, one build, six different question counts), which is a
+> defect whatever the right count is, and T03 was a **structural blind spot** (a per-question critic
+> cannot see a wrong question set) rather than a case of the critic judging badly. Both are the
+> "plain bug" exception at the bottom of this section.
+
+| ID  | Raised | Docs | Status   | What was seen                                                                                                                                                                                                                                                                                                                                                                     | Candidate tweak                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ------ | ---- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| T04 | R002   | 02   | open     | Part A proposed at `phase: opening` where the README's ground truth says `core`. The rationale given ("the universal baseline before any situational parts are considered") is defensible, and it changes nothing about routing: none of C–F's criteria are answerable from any question in the instrument anyway.                                                                | Decide whether this is a pipeline error or a README error. If `opening` is a reasonable reading, fix the ground truth rather than the analyst. Do not touch the prompt on one observation.                                                                                                                                                                         |
+| T03 | R002   | 02   | actioned | The fidelity critic checked all 28 extracted questions, flagged 3, and never noticed that 6 of the 28 did not exist in a 22-question source. It is a per-question faithfulness check with no count or coverage dimension.                                                                                                                                                         | Give the critic a coverage/count check so extraction drift is caught at ingest, where it is cheap, rather than by a human reading the Structure editor. Pairs with T02.                                                                                                                                                                                            |
+| T02 | R002   | 02   | actioned | Six ingests of one file on one build produced 22, 28, 23, 28, 28, 28 questions. The extractor splits compound questions — which `extraction-prompt.ts:182` instructs and which is recorded as a revertable `split_question` change — but does so inconsistently.                                                                                                                  | Decide the policy, then make it deterministic. Splitting improves completion accuracy (each half gets its own satisfaction bar) and costs nothing in interview length; not splitting keeps a 1:1 mirror of the source. **Either way, non-determinism is the defect** — two ingests of one document that disagree on question count are not comparable in a cohort. |
+| T01 | R001   | 01   | open     | All three Adherence questions swept into one `conditional` topic criteria'd _"Only where PC2 is 4 or more"_, though the source marks AD1 `Always`. The analyst filed an honest `gap` naming the mix, then resolved it by widening. **An earlier run of the same document (via a `.txt` copy) split it correctly**, so this is variance on a hard case, not a deterministic fault. | Teach the analyst to prefer **splitting a mixed section into two topics** (one core, one conditional) over widening one criterion across a question the source says to always ask. Silently gating an `Always` question is the worse failure of the two.                                                                                                           |
 
 ### Working the table
 
@@ -451,10 +493,11 @@ or judged correct as-is).
 One row per run. The three percentages and the critical-failure count are the whole point
 of the file; everything above exists to make them mean the same thing each time.
 
-| Run            | Date       | Commit            | Analyst model    | Corpus | Extraction band | Restraint band | Critical failures | Verdict               |
-| -------------- | ---------- | ----------------- | ---------------- | ------ | --------------- | -------------- | ----------------- | --------------------- |
-| R002 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 02 only |
-| R001 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 01 only |
+| Run            | Date       | Commit            | Analyst model    | Corpus | Extraction band | Restraint band | Critical failures | Verdict                        |
+| -------------- | ---------- | ----------------- | ---------------- | ------ | --------------- | -------------- | ----------------- | ------------------------------ |
+| R003 (partial) | 2026-08-26 | `2478d3586`+ph2   | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | verification only — not scored |
+| R002 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 02 only          |
+| R001 (partial) | 2026-08-26 | `e0a966ea6`+fixes | `openai/gpt-5.4` | _n/a_  | _n/a_           | not run        | 0                 | partial — doc 01 only          |
 
 ### Reading it honestly
 

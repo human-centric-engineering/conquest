@@ -38,6 +38,7 @@ import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import {
   normaliseBinding,
   readResolvedBinding,
+  readResolvedCost,
 } from '@/lib/app/questionnaire/ai-run/resolved-binding';
 import {
   buildGlossaryAnalysisInput,
@@ -182,6 +183,7 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
         // Read off the dispatch, not the agent row — this agent's configured model is empty by
         // design, so the row used to record a placeholder for a call that really ran on a model.
         ...readResolvedBinding(dispatch.data),
+        costUsd: readResolvedCost(dispatch.data),
         outputSnapshot: result,
         durationMs: Date.now() - startedAt,
         detail: {

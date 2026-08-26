@@ -2,7 +2,8 @@
  * Authoritative definitions document — definitions / glossary (P16).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/glossary/document  (multipart: `file`)
- *   Admin-only. Parses an uploaded document (.pdf / .docx / .md / .txt) to plain text and attaches
+ *   Admin-only. Parses an uploaded document (see `PARSEABLE_UPLOAD_EXTENSIONS` — everything the
+ *   parser router reads unaided, i.e. every upload format except `.xlsx`) to plain text and attaches
  *   it to the version as the AUTHORITATIVE source the Glossary Analyst prefers over anything it
  *   infers. One per version — a second upload replaces the first.
  *

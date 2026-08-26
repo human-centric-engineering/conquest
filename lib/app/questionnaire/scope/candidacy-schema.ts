@@ -43,8 +43,17 @@ const clippedString = (max: number) =>
 const candidacySignalSchema = z.object({
   /** One short reason this signal counts, in the check's own words. Clipped, never rejected. */
   note: clippedString(SIGNAL_NOTE_MAX_LENGTH).pipe(z.string().min(1)),
-  /** The exact span that said so. Absent when the note is an inference rather than a quote. */
-  sourceQuote: clippedString(SOURCE_QUOTE_MAX_LENGTH).optional(),
+  /**
+   * The exact span that said so. Absent when the note is an inference rather than a quote.
+   *
+   * An explicit `null` is accepted as "absent". The prompt says to OMIT the key, but models
+   * routinely spell the same thing as `"sourceQuote": null` — and a plain `.optional()` rejects
+   * that, taking the whole verdict (and with it the Conditional Topics chain) down over a JSON
+   * idiom. Normalised to `undefined` so consumers keep one shape for "no quote".
+   */
+  sourceQuote: clippedString(SOURCE_QUOTE_MAX_LENGTH)
+    .nullish()
+    .transform((value) => value ?? undefined),
 });
 export type CandidacySignal = z.infer<typeof candidacySignalSchema>;
 
@@ -56,10 +65,17 @@ export const scopeCandidacySchema = z.object({
    * Trimmed to the cap rather than rejected, for the reason on {@link clippedString}: `gpt-5.4`
    * reliably returns nine or ten signals on a richly-signposted document, and throwing the verdict
    * away over the ninth is the worst possible trade.
+   *
+   * **The slice happens BEFORE the items are validated, and the order is the whole point.**
+   * Validating first and slicing after — the obvious spelling — checks all ten signals and then
+   * discards two, so a malformed NINTH signal still rejects the entire verdict. That is exactly
+   * the over-cap output this is here to tolerate, so the obvious spelling leaves the original
+   * failure reachable while looking like it fixed it.
    */
   signals: z
-    .array(candidacySignalSchema)
+    .array(z.unknown())
     .transform((items) => items.slice(0, MAX_CANDIDACY_SIGNALS))
+    .pipe(z.array(candidacySignalSchema))
     .default([]),
   /** One or two sentences: what was found, or why nothing was. */
   summary: clippedString(SUMMARY_MAX_LENGTH).pipe(z.string().min(1)),
@@ -77,9 +93,11 @@ export type ScopeCandidacyResult = z.infer<typeof scopeCandidacySchema>;
  * where the malformed output was observed, which would have made wiring the schema pointless.
  *
  * Kept honest by `candidacy-schema.test.ts`, which asserts the serialised shape still exposes the
- * signal item's properties and that both schemas accept the same well-formed verdict.
+ * signal item's properties and that both schemas accept the same well-formed verdict. Exported for
+ * exactly that second test: the two can only be checked for drift from outside if both are
+ * reachable, and drift between them is the failure this split creates.
  */
-const candidacyWireSchema = z.object({
+export const candidacyWireSchema = z.object({
   isCandidate: z.boolean(),
   confidence: z.number().min(0).max(1),
   signals: z

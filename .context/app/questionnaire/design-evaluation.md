@@ -388,16 +388,17 @@ The quality ceiling is whether a suggestion arrives _already actionable_. So F5.
 the F5.1 findings contract: alongside the prose `proposedChange`, a judge may attach a structured
 **`proposedEdit`** — a discriminated union on `op` keyed to the same `targetKey` addressing:
 
-| `op`              | Target            | Dimensions             | Apply effect                                  |
-| ----------------- | ----------------- | ---------------------- | --------------------------------------------- |
-| `replace_prompt`  | slot `key`        | clarity                | rewrite the prompt                            |
-| `edit_guidelines` | slot `key`        | clarity, audience      | set/clear author guidelines                   |
-| `change_type`     | slot `key`        | type_fit               | change answer type (config revalidated/reset) |
-| `delete_question` | slot `key`        | duplicates, goal_match | remove the question                           |
-| `reorder`         | slot `key`        | ordering               | move to a 0-based ordinal (± section)         |
-| `edit_goal`       | `goal`            | goal_match             | replace the version goal                      |
-| `edit_audience`   | `audience`        | audience_match         | merge-patch the named audience sub-fields     |
-| `add_question`    | `goal`/`section:` | coverage               | create the drafted question (or refine first) |
+| `op`              | Target            | Dimensions             | Apply effect                                         |
+| ----------------- | ----------------- | ---------------------- | ---------------------------------------------------- |
+| `replace_prompt`  | slot `key`        | clarity                | rewrite the prompt                                   |
+| `split_question`  | slot `key`        | clarity                | one question becomes two (target keeps its identity) |
+| `edit_guidelines` | slot `key`        | clarity, audience      | set/clear author guidelines                          |
+| `change_type`     | slot `key`        | type_fit               | change answer type (config revalidated/reset)        |
+| `delete_question` | slot `key`        | duplicates, goal_match | remove the question                                  |
+| `reorder`         | slot `key`        | ordering               | move to a 0-based ordinal (± section)                |
+| `edit_goal`       | `goal`            | goal_match             | replace the version goal                             |
+| `edit_audience`   | `audience`        | audience_match         | merge-patch the named audience sub-fields            |
+| `add_question`    | `goal`/`section:` | coverage               | create the drafted question (or refine first)        |
 
 The op is an **accelerator, never a trust boundary**: it is prompt-guided, _not_
 provider-enforced (the JSON schema is never sent to the model — `runStructuredCompletion` is plain
@@ -405,6 +406,36 @@ prompt + Zod parse). So it is optional (a nuanced finding stays prose-only), sof
 `null` on malform at persist (`coerceProposedEdit`, the `parseAudienceShape` posture), and
 **re-validated at apply time exactly like a hand authoring edit**. There is intentionally no
 `merge` op — duplicates emit `delete_question` on the weaker slot.
+
+### `split_question` — closing a gap the Clarity judge already had
+
+The Clarity judge was always instructed to propose splits it had no way to express. Its rubric
+scores questions on being "single-barrelled"; its prompt gives _"Split into: 'What is your role?'
+and 'How long have you been in it?'"_ as the model example of a good finding; and
+`reconcile-prompt.ts` listed splitting among the fixes **no wording can deliver**. Every such
+finding therefore landed prose-only, and the admin retyped it in the Structure editor.
+
+Unlike `merge`, split has a clean write path, so it earns an op:
+
+- **The target keeps its identity** — same id, key, type, config, ordinal — and takes the first
+  half. That is what makes it safe on a version with answers already against it: nothing that
+  referenced the slot stops resolving, and the second half is purely additive. Writing both halves
+  as two new slots would orphan every existing answer.
+- **The new sibling is inserted directly after**, shifting the rest of the section down one.
+  Adjacency is part of the contract: two halves separated by six unrelated questions read worse
+  than the compound they replaced, so the `add_question` convention of appending to the end of the
+  section is deliberately not reused here.
+- **Type, config, `required`, `weight` and `fidelity` are inherited**, not defaulted — a compound
+  question's two halves almost always want the same answer type, and an author who set a fidelity
+  stop meant it for both asks. Guidelines are inherited for the reason the extractor keeps
+  ambiguous spans: duplicated guidance is visible and deletable, dropped guidance is not.
+
+**This op is why ingest stopped splitting.** The extractor used to be told "split a compound
+question into separate ones", and doing it silently made the same document extract to a different
+question count on different runs — routing-corpus doc 02 produced 22, 28, 23, 28, 28 and 28
+questions across six ingests of one 22-question file, and two ingests that disagree on the count
+cannot be compared in a cohort. The edit is a good one; it just needs an author's eye, which is
+what this panel is. Ingest is now faithful and the judge proposes the split.
 
 ### Apply — reuse the fork-if-launched seam
 

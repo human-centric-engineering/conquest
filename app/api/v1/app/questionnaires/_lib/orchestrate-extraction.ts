@@ -34,7 +34,7 @@ import { validateTypeConfig } from '@/lib/app/questionnaire/authoring/type-confi
 import { nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import type { ExtractedQuestion } from '@/lib/app/questionnaire/ingestion/extraction-schema';
-import type { ChangeRecordIntent } from '@/lib/app/questionnaire/ingestion/types';
+import type { ChangeRecordIntent, ChangeType } from '@/lib/app/questionnaire/ingestion/types';
 import {
   validateVerifyResult,
   type VerifyResult,
@@ -231,6 +231,29 @@ export async function* orchestrateExtraction(
     throw err;
   }
 
+  // Two count-level checks the per-question verdicts structurally cannot make. Neither blocks the
+  // ingest: by the time either is readable the questions already exist, and refusing a document
+  // over a fidelity nicety is worse than persisting it with the discrepancy on record. They are
+  // logged and carried onto the `extraction_verify` provenance row so a corpus run — or anyone
+  // asking "did that prompt change take?" — can see it without re-reading the Structure editor.
+  const disallowedEditCount = countDisallowedEdits(extraction);
+  if (disallowedEditCount > 0) {
+    ctx.log.warn('ingest extractor made edits it is instructed not to make', {
+      disallowedEditCount,
+      kinds: [...DISALLOWED_EXTRACTOR_EDITS],
+    });
+  }
+
+  const coverage = verification.result.coverage ?? null;
+  if (coverage && coverage.assessment !== 'matches' && coverage.assessment !== 'uncountable') {
+    ctx.log.warn('ingest question count disagrees with the source', {
+      assessment: coverage.assessment,
+      sourceQuestionCount: coverage.sourceQuestionCount,
+      extractedQuestionCount: total,
+      detail: coverage.detail,
+    });
+  }
+
   return {
     ok: true,
     value: {
@@ -248,6 +271,8 @@ export async function* orchestrateExtraction(
         totalCount: total,
         repairOutcome,
         costUsd: verification.costUsd,
+        coverage,
+        disallowedEditCount,
         durationMs: verification.durationMs,
       },
     },
@@ -266,6 +291,32 @@ interface VerificationOutcome {
   /** USD billed for the verify call; null when it never reached a provider. */
   costUsd: number | null;
   durationMs: number;
+}
+
+/**
+ * Editorial change types the extractor is instructed NOT to make (see `extraction-prompt.ts`).
+ *
+ * Both splitting a compound question and merging duplicates are genuine improvements — and both
+ * belong to the judge panel, where an author reviews them before they land, rather than to a silent
+ * ingest. Left at ingest they make the SAME document extract to a different question count on
+ * different runs; corpus doc 02 produced 22, 28, 23, 28, 28 and 28 questions across six ingests of
+ * one file. Counting them is how we can tell whether the instruction actually landed.
+ */
+const DISALLOWED_EXTRACTOR_EDITS: ReadonlySet<ChangeType> = new Set<ChangeType>([
+  'split_question',
+  'merge_questions',
+]);
+
+/**
+ * Count the editorial edits the extractor was told not to make. Deterministic — no model involved.
+ *
+ * Typed against `ChangeType` rather than reading `changes` through a structural cast. The cast
+ * would have been the more dangerous shortcut of the two available: this counter exists to notice
+ * silent drift, so a rename of `changes` or `changeType` making it always return 0 — with no
+ * compile error — is precisely the failure it is supposed to catch, arriving by the back door.
+ */
+function countDisallowedEdits(extraction: ExtractQuestionnaireStructureData): number {
+  return extraction.changes.filter((c) => DISALLOWED_EXTRACTOR_EDITS.has(c.changeType)).length;
 }
 
 async function runVerification(

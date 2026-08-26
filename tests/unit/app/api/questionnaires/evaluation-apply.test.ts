@@ -14,8 +14,10 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireVersion: { findFirst: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() },
   appQuestionSlot: {
     findFirst: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
     findMany: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     delete: vi.fn(),
     create: vi.fn(),
     count: vi.fn(),
@@ -498,6 +500,190 @@ describe('applyFinding — fork-lineage convergence', () => {
       forked: false,
       versionNumber: 2,
     });
+    expect(prismaMock.appQuestionSlot.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'slot-on-v2' } })
+    );
+  });
+});
+
+describe('applyFinding — split_question', () => {
+  const SPLIT = {
+    op: 'split_question' as const,
+    prompt: 'Who is the designated safeguarding lead this year?',
+    secondPrompt: 'When did they last complete advanced training?',
+    secondKey: 'lead_last_advanced_training',
+  };
+
+  beforeEach(() => {
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
+    prismaMock.appQuestionSlot.findUniqueOrThrow.mockResolvedValue({
+      sectionId: 'sec-1',
+      ordinal: 2,
+      type: 'free_text',
+      typeConfig: { commentAggregation: 'isolated' },
+      required: true,
+      weight: 0.75,
+      fidelity: 1,
+      guidelines: 'Name the person and the date.',
+    });
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q_role' },
+      { key: 'lead_last_advanced_training' },
+    ]);
+  });
+
+  async function applySplit() {
+    return applyFinding({
+      finding: finding({ proposedEdit: SPLIT }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+  }
+
+  // The load-bearing property. Rewriting BOTH halves as new slots would orphan every answer already
+  // mapped to this question; keeping the target's id means nothing that referenced it stops
+  // resolving, and the second half is purely additive.
+  it('keeps the target slot and gives it the first half', async () => {
+    const res = await applySplit();
+
+    expect(res.status).toBe('applied');
+    expect(prismaMock.appQuestionSlot.update).toHaveBeenCalledWith({
+      where: { id: 'slot-1' },
+      data: { prompt: SPLIT.prompt },
+    });
+    expect(prismaMock.appQuestionSlot.delete).not.toHaveBeenCalled();
+  });
+
+  // Adjacency is part of the contract: two halves separated by six unrelated questions read worse
+  // than the compound they replaced, which is why `add_question`'s append-to-end is not reused.
+  it('inserts the second half directly after the target, shifting its siblings down', async () => {
+    await applySplit();
+
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { sectionId: 'sec-1', ordinal: { gt: 2 } },
+      data: { ordinal: { increment: 1 } },
+    });
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sectionId: 'sec-1',
+          ordinal: 3,
+          prompt: SPLIT.secondPrompt,
+        }),
+      })
+    );
+  });
+
+  // A compound question's two halves almost always want the same answer type, and an author who set
+  // `required`, a weight or a fidelity stop meant it for both asks — defaulting them would silently
+  // drop authored intent on one half.
+  it('inherits the target settings rather than defaulting them', async () => {
+    await applySplit();
+
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'free_text',
+          typeConfig: { commentAggregation: 'isolated' },
+          required: true,
+          weight: 0.75,
+          fidelity: 1,
+          guidelines: 'Name the person and the date.',
+        }),
+      })
+    );
+  });
+
+  // `versionId_key` is unique, so a judge proposing a key that already exists must be disambiguated
+  // rather than 409'd — a suggestion is never an admin-chosen explicit key.
+  it('collision-suffixes a proposed key that is already taken', async () => {
+    await applySplit();
+
+    const created = prismaMock.appQuestionSlot.create.mock.calls[0][0] as {
+      data: { key: string };
+    };
+    expect(created.data.key).not.toBe('lead_last_advanced_training');
+    expect(created.data.key).toMatch(/^lead_last_advanced_training/);
+  });
+
+  it('marks the finding applied in the same transaction', async () => {
+    await applySplit();
+
+    expect(prismaMock.$transaction).toHaveBeenCalled();
+    expect(prismaMock.appQuestionnaireEvaluationFinding.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'applied' }) })
+    );
+  });
+
+  it('is unapplicable when the target question is gone', async () => {
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue(null);
+
+    const res = await applySplit();
+
+    expect(res.status).toBe('unapplicable');
+    expect(prismaMock.appQuestionSlot.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyFinding — which version, and whose op', () => {
+  beforeEach(() => {
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
+  });
+
+  // `resolveEffectiveOp` is documented as "the admin's edited override wins over the judge's
+  // draft", and every fixture in this file left `editedOverride` null — so the precedence itself
+  // was never exercised. Inverting it would be invisible: the judge's original op would be applied
+  // while the UI showed the admin's edit, which is a silent write of something nobody approved.
+  it('applies the admin edited override in preference to the judge draft', async () => {
+    await applyFinding({
+      finding: finding({
+        proposedEdit: { op: 'replace_prompt', prompt: 'The judge wording' },
+        editedOverride: { op: 'replace_prompt', prompt: 'The admin wording' },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+
+    expect(prismaMock.appQuestionSlot.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: 'The admin wording' } })
+    );
+  });
+
+  // Every other test in this file mocks the fork as a no-op returning the SAME version id, so the
+  // launched path — where the write must be retargeted onto a brand-new draft — never ran. Getting
+  // this wrong writes the edit straight into a launched version that respondents are answering.
+  it('retargets the write onto the fork when the version was launched', async () => {
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    prismaMock.appQuestionSlot.findFirst
+      // The pre-fork validation lookup, against the launched original…
+      .mockResolvedValueOnce({ id: 'slot-1' })
+      // …then the retarget lookup, against the new draft. Distinct ids so the assertion can tell
+      // which one the write used.
+      .mockResolvedValueOnce({ id: 'slot-on-v2' });
+
+    const res = await applyFinding({
+      finding: finding(),
+      runId: 'run-1',
+      scoped: { ...scoped, status: 'launched' as const },
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+
+    expect(res).toMatchObject({ status: 'applied', forked: true, appliedToVersionId: 'v2' });
+    expect(prismaMock.appQuestionSlot.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ versionId: 'v2' }) })
+    );
     expect(prismaMock.appQuestionSlot.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'slot-on-v2' } })
     );

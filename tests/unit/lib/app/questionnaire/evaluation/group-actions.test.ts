@@ -10,7 +10,12 @@ import { describe, it, expect } from 'vitest';
 
 import { summariseGroupActions } from '@/lib/app/questionnaire/evaluation/group-actions';
 import { groupFindingsByTarget } from '@/lib/app/questionnaire/evaluation/group-findings';
-import type { EvaluationDimension, ProposedEdit } from '@/lib/app/questionnaire/evaluation';
+import { PROPOSED_EDIT_OPS } from '@/lib/app/questionnaire/evaluation';
+import type {
+  EvaluationDimension,
+  ProposedEdit,
+  ProposedEditOp,
+} from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationFindingView } from '@/lib/app/questionnaire/views';
 
 let seq = 0;
@@ -62,6 +67,30 @@ function summarise(findings: EvaluationFindingView[]) {
 const REWORD: ProposedEdit = { op: 'replace_prompt', prompt: 'Better?' };
 const DELETE: ProposedEdit = { op: 'delete_question' };
 const MOVE: ProposedEdit = { op: 'reorder', ordinal: 0 };
+const SPLIT: ProposedEdit = {
+  op: 'split_question',
+  prompt: 'What is your role?',
+  secondPrompt: 'How long have you been in it?',
+};
+
+/**
+ * One representative op per entry in `PROPOSED_EDIT_OPS` — the fixture the parity test below walks.
+ * A new op that isn't added here fails that test, which is the point: adding `split_question`
+ * needed edits in FIVE places (the union, the Zod schema, `actionForOp`, the label/tone/consequence
+ * maps, and the review component's `describeOp`) and only the exhaustive `switch`es caught the
+ * misses — at type-check time, and only for the two that happened to be exhaustive.
+ */
+const OP_FIXTURES: Record<ProposedEditOp, ProposedEdit> = {
+  replace_prompt: REWORD,
+  split_question: SPLIT,
+  edit_guidelines: { op: 'edit_guidelines', guidelines: 'Keep it short.' },
+  change_type: { op: 'change_type', type: 'single_choice' },
+  delete_question: DELETE,
+  reorder: MOVE,
+  edit_goal: { op: 'edit_goal', goal: 'Understand morale.' },
+  edit_audience: { op: 'edit_audience', audience: { expertiseLevel: 'novice' } },
+  add_question: { op: 'add_question', prompt: 'Anything else?', type: 'free_text' },
+};
 
 describe('summariseGroupActions', () => {
   it('leads with the action the most judges proposed', () => {
@@ -179,5 +208,33 @@ describe('summariseGroupActions', () => {
 
     expect(first.primary?.kind).toBe(second.primary?.kind);
     expect(first.others.map((o) => o.kind)).toEqual(second.others.map((o) => o.kind));
+  });
+});
+
+describe('op → action parity', () => {
+  it('maps every proposed-edit op to a real verb, never the prose-only fallback', () => {
+    for (const op of PROPOSED_EDIT_OPS) {
+      const summary = summarise([finding('clarity', OP_FIXTURES[op])]);
+
+      // `review` is what an op-less, prose-only finding gets. An op reaching it means the op has a
+      // structured fix the UI is failing to name — the admin is told to go and look rather than
+      // offered the one-click apply that exists.
+      expect(summary.primary?.kind, `${op} fell through to the prose-only verb`).not.toBe('review');
+      expect(summary.primary?.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives split_question its own verb rather than folding it into reword', () => {
+    const summary = summarise([finding('clarity', SPLIT)]);
+    expect(summary.primary?.kind).toBe('split');
+    // Splitting reshapes the instrument — one question becomes two, so coverage arithmetic and
+    // completion both move. An admin skimming a verdict must not read it as a wording tweak.
+    expect(summary.primary?.label).toBe('Split it into two questions');
+  });
+
+  it('ranks a split above a reword when judges are split evenly', () => {
+    // Equal backing, so consequence order decides. The more consequential edit must surface.
+    const summary = summarise([finding('clarity', SPLIT), finding('goal_match', REWORD)]);
+    expect(summary.primary?.kind).toBe('split');
   });
 });

@@ -16,7 +16,14 @@
  *  2. **Say what you could not fix.** A phrasing that quietly ignores a concern reads to the admin
  *     as consensus. `unresolved` is how the model admits that wording alone will not close
  *     something out — usually because the real fix is structural (split the question, change its
- *     answer type), which is not this step's to make.
+ *     answer type, move it to another section), which is not this step's to make.
+ *
+ *     **Splitting stays unresolved here even though `split_question` now exists as a judge op.**
+ *     The two are different steps: a judge PROPOSES the split, and an admin applies it. This
+ *     reconciler's only output is a single rewritten `prompt` (`reconciledAlternativeSchema`) — it
+ *     has no way to express a split, so calling one resolved would claim `addresses: ['clarity']`
+ *     for a phrasing that does not split the question, and drop clarity from `unresolved`. That is
+ *     the exact line the admin relies on to see a structural change is still outstanding.
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';

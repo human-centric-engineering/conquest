@@ -66,7 +66,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
     ignore:
       'Whether the question is the RIGHT question for the goal (Coverage/Goal-Match judge that), its answer type (Type-Fit), or its position (Ordering). Score wording only.',
     editGuidance:
-      'When you propose a clearer wording, attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<the full rewritten question>" }`. If the fix is to the author guidance rather than the prompt, use `{ "op": "edit_guidelines", "guidelines": "<new guidance, or null to clear>" }`.',
+      'When you propose a clearer wording, attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<the full rewritten question>" }`. If the fix is to the author guidance rather than the prompt, use `{ "op": "edit_guidelines", "guidelines": "<new guidance, or null to clear>" }`. ' +
+      'For a DOUBLE-BARRELLED question — one that smuggles in two asks — attach `{ "op": "split_question", "prompt": "<the first ask, as its own question>", "secondPrompt": "<the second ask, as its own question>", "secondKey": "<concise snake_case key for the second>" }`. Split rather than reword whenever both asks are worth keeping: rewording one away loses an answer the author wanted. Between them the two prompts must cover everything the original asked and add nothing it did not — a split is a reshaping of one question, not a licence to write a third.',
   },
   coverage: {
     focus:

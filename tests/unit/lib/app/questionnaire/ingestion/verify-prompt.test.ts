@@ -87,3 +87,43 @@ describe('buildVerifyRetryMessage', () => {
     expect(message).toMatch(/no code fences/i);
   });
 });
+
+describe('coverage — the axis per-question verdicts cannot see', () => {
+  // The critic checked all 28 questions on a run of routing-corpus doc 02, flagged 3 sensibly, and
+  // never remarked that the source had 22 numbered items. Every verdict can be `ok` while the
+  // question SET is wrong: a compound split in two, a heading promoted to a question, a page
+  // missed. That is a different question from "is this question faithful?" and needs asking
+  // separately.
+  const prompt = buildVerifyPrompt({
+    questions: [{ key: 'q1', prompt: 'Anything?', suggestedType: 'free_text' }],
+    documentText: '1. Anything?',
+  })
+    .map((m) => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+
+  it('asks for a count assessment alongside the per-question verdicts', () => {
+    expect(prompt).toContain('"coverage"');
+    for (const assessment of ['matches', 'extra_questions', 'missing_questions', 'uncountable']) {
+      expect(prompt).toContain(assessment);
+    }
+  });
+
+  it('names the compound split as the usual cause of extra questions', () => {
+    // The specific drift this exists to catch, named so the critic recognises it rather than
+    // reporting a bare count mismatch the reader has to diagnose.
+    expect(prompt).toMatch(/compound question/i);
+  });
+
+  it('licenses "uncountable" instead of pushing the critic to guess', () => {
+    // Most instruments do not number their questions. Without this the critic invents a count to
+    // avoid an apparent non-answer, and a fabricated number is worse than an honest shrug — it
+    // would make every unnumbered document look like a coverage failure.
+    expect(prompt).toMatch(/perfectly good answer/i);
+    expect(prompt).toMatch(/Never guess a count/i);
+  });
+
+  it('forbids reasoning backwards from the extracted count', () => {
+    // Without this the check is circular: told 28 questions, the critic concludes the source has 28.
+    expect(prompt).toMatch(/Do not reason backwards/i);
+  });
+});

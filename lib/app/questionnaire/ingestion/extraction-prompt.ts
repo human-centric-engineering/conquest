@@ -179,7 +179,12 @@ question is a SECTION-WIDE comment that should reflect the whole section's discu
 provide comments to support your scores", "Any other comments on this section?", "Anything else \
 about the above?"); otherwise "isolated" for a self-contained free-text question (e.g. "What is your \
 job title?", "Describe your biggest challenge"). When unsure, use "isolated".
-- Merge duplicate questions; split a compound question into separate ones.
+- Do NOT merge two questions into one, and do NOT split a compound question ("Who is the lead, \
+and when did they last train?") into two. One question in the document is one question here, \
+however many things it asks. Both edits are real improvements and both are somebody else's job — \
+the Clarity and Duplicates judges propose them after ingestion, where an author reviews them \
+before they land. Making them here means a 22-question document silently becomes a 28-question \
+questionnaire, and the same document ingested twice does not agree with itself.
 - Add a section to group loose questions when the document implies one.
 - Infer the questionnaire's overall goal and its intended audience.
 - Mark a question "required": true ONLY when the source explicitly flags it mandatory \

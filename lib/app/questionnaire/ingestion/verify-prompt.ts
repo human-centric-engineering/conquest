@@ -64,10 +64,35 @@ re-read the whole grid.
 
 The valid "issue" values are: ${VERIFY_ISSUES.join(', ')}.
 
+## Also check the COUNT, not just each question
+
+Every verdict above can be "ok" while the question SET is still wrong — a compound question split \
+into two, a heading promoted to a question, a page of the source missed. Per-question checking \
+cannot see any of that, so assess it separately in "coverage".
+
+Count what the SOURCE says it contains — its own numbering ("1." … "22."), an explicit statement \
+("this review has 20 questions"), or a complete visible list — and compare that to the number of \
+extracted questions you were given.
+
+- "matches" — the counts agree.
+- "extra_questions" — more were extracted than the source contains. The usual cause is a compound \
+question ("Who is the lead, AND when did they last train?") turned into two, which the extractor \
+is instructed NOT to do. Name the extracted keys that look invented in "detail".
+- "missing_questions" — the source contains questions that are not in the extracted set. Name what \
+is missing in "detail".
+- "uncountable" — the source does not state how many questions it has. Set \
+"sourceQuestionCount": null. **This is a perfectly good answer and often the right one** — many \
+documents simply do not number their questions. Never guess a count to avoid saying this; a \
+fabricated number is worse than an honest "uncountable".
+
+Judge the count from the source alone. Do not reason backwards from the number of questions you \
+were given to a count that would make it match.
+
 Output ONLY a single JSON object — no prose, no code fences:
 {
   "verdicts": [ { "key": "<question key>", "verdict": "ok" | "suspect", "issue": "<one of the issues, only when suspect>", "detail": "<short reason, optional>" } ],
-  "matrixGroups": [ { "label": "<grid heading>", "sourceSpanQuote": "<the full grid block from the source>", "memberKeys": ["<key>", ...] } ]
+  "matrixGroups": [ { "label": "<grid heading>", "sourceSpanQuote": "<the full grid block from the source>", "memberKeys": ["<key>", ...] } ],
+  "coverage": { "sourceQuestionCount": <integer or null>, "assessment": "matches" | "extra_questions" | "missing_questions" | "uncountable", "detail": "<short line, optional>" }
 }`;
 
 /** Render one extracted question as a compact, model-readable block. */

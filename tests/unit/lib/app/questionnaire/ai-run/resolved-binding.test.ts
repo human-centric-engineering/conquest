@@ -4,6 +4,7 @@ import {
   UNRESOLVED_BINDING,
   normaliseBinding,
   readResolvedBinding,
+  readResolvedCost,
 } from '@/lib/app/questionnaire/ai-run/resolved-binding';
 
 /**
@@ -96,5 +97,38 @@ describe('normaliseBinding', () => {
     // run-worker.ts and the edit-agent apply seam already write 'n/a'; a second spelling
     // ('resolved-at-runtime') would fragment any "runs by provider" rollup.
     expect(UNRESOLVED_BINDING).toBe('n/a');
+  });
+});
+
+describe('readResolvedCost', () => {
+  it('reads the cost a capability reported', () => {
+    expect(readResolvedCost({ provider: 'openai', model: 'gpt-5.4-mini', costUsd: 0.0009 })).toBe(
+      0.0009
+    );
+  });
+
+  // `null`, not `0`. Zero is a real answer meaning "this call was free", and a provenance row that
+  // cannot price itself must say so rather than under-report the bill as nothing. This is the
+  // whole reason the return type is nullable.
+  it('returns null when the dispatch reported no cost', () => {
+    expect(readResolvedCost({ provider: 'openai', model: 'gpt-5.4-mini' })).toBeNull();
+  });
+
+  it('preserves a genuine zero rather than flattening it to null', () => {
+    expect(readResolvedCost({ costUsd: 0 })).toBe(0);
+  });
+
+  // A capability that predates the wider data type, or a malformed one, must degrade to "unknown"
+  // inside a provenance write rather than throw — the same defensive posture as readResolvedBinding.
+  it.each([
+    ['a non-object', 'nope'],
+    ['null', null],
+    ['undefined', undefined],
+    ['a numeric string', { costUsd: '0.0009' }],
+    ['NaN', { costUsd: Number.NaN }],
+    ['Infinity', { costUsd: Number.POSITIVE_INFINITY }],
+    ['a negative cost', { costUsd: -1 }],
+  ])('returns null for %s', (_label, input) => {
+    expect(readResolvedCost(input)).toBeNull();
   });
 });

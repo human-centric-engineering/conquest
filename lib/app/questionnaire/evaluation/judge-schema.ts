@@ -49,6 +49,12 @@ const KEY_MAX = 80;
 export const proposedEditSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('replace_prompt'), prompt: z.string().min(1).max(EDIT_TEXT_MAX) }),
   z.object({
+    op: z.literal('split_question'),
+    prompt: z.string().min(1).max(EDIT_TEXT_MAX),
+    secondPrompt: z.string().min(1).max(EDIT_TEXT_MAX),
+    secondKey: z.string().min(1).max(KEY_MAX).optional(),
+  }),
+  z.object({
     op: z.literal('edit_guidelines'),
     guidelines: z.string().min(1).max(EDIT_TEXT_MAX).nullable(),
   }),

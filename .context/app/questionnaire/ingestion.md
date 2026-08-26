@@ -6,6 +6,40 @@
 > on `/admin/questionnaires` (header button + empty-state CTA), which POSTs to the
 > endpoint below. Every surface here is always on.
 
+## Ingest is faithful — the editorial calls belong to the judges
+
+One question in the document is one question in the questionnaire, however many things it asks. The
+extractor is explicitly forbidden to **split** a compound question ("Who is the lead, _and_ when did
+they last train?") or to **merge** two into one.
+
+Both are real improvements. Neither is ingest's to make. Done silently at extraction they made the
+same file produce a different question count on different runs — routing-corpus doc 02 gave 22, 28,
+23, 28, 28 and 28 questions across six ingests of one 22-question document, and two ingests that
+disagree on the count cannot be compared in a cohort. They now belong to the judge panel, where an
+author reviews them before they land: `split_question` from the Clarity judge, `delete_question`
+from the Duplicates judge. See [design evaluation](./design-evaluation.md).
+
+`split_question` and `merge_questions` remain in `CHANGE_TYPES` — historical versions carry rows
+with those types and must keep reading.
+
+### The two count-level checks
+
+Per-question verdicts structurally cannot see a wrong question SET: every question can be faithful
+while one was split in two, a heading was promoted, or a page was missed. Two checks run alongside
+them, and **neither blocks the ingest** — by the time either is readable the questions already
+exist, and refusing a document over a fidelity nicety is worse than persisting it with the
+discrepancy on record. Both land on the `extraction_verify` `AppAiRun.detail`.
+
+| Check                 | How                                                                                               | Says                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `disallowedEditCount` | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
+| `coverage`            | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+
+`uncountable` is a first-class answer and should be common: plenty of instruments do not number
+their questions, and the prompt explicitly tells the critic that a guessed count is worse than an
+honest shrug. It is also told not to reason backwards from the number of questions it was given,
+without which the check is circular.
+
 ## The endpoint
 
 `POST /api/v1/app/questionnaires` — multipart upload of one questionnaire

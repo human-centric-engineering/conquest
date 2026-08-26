@@ -119,6 +119,8 @@ function describeOp(op: ProposedEdit): string {
   switch (op.op) {
     case 'replace_prompt':
       return 'Rewrite the question prompt';
+    case 'split_question':
+      return 'Split into two questions';
     case 'edit_guidelines':
       return op.guidelines === null ? 'Clear the author guidelines' : 'Set the author guidelines';
     case 'change_type':
@@ -242,6 +244,7 @@ export function FindingReviewCard({
   const statusBadge = findingReviewStatusBadge(finding.status);
   const op = finding.editedOverride ?? finding.proposedEdit;
   const addOp = op && op.op === 'add_question' ? op : null;
+  const splitOp = op && op.op === 'split_question' ? op : null;
   const isTerminal = finding.status === 'applied' || finding.status === 'declined';
   // The target earns its own named block in the header only when its label is real content and the
   // surrounding heading doesn't already carry it. Non-null here also means the badge row drops its
@@ -429,6 +432,32 @@ export function FindingReviewCard({
                 {addOp.guidelines}
               </p>
             )}
+          </div>
+        )}
+
+        {/* A split rewrites the question AND creates a second one, so both halves must be visible
+            before the admin applies it. Without this the one-click Apply writes two prompts and a
+            new question key they have never seen — the same reason `add_question` previews its
+            draft above. Numbered rather than bulleted because the order is real: the first half
+            stays on the existing question (keeping its id, type and any answers already mapped to
+            it) and the second becomes a new question directly after. */}
+        {splitOp && (
+          <div className="bg-background rounded-md border p-2.5">
+            <FieldLabel>Splits into two questions</FieldLabel>
+            <ol className="mt-0.5 space-y-1.5">
+              <li className={cn(QUESTION_FACE, 'max-w-[54ch] text-base')}>
+                <span className="text-muted-foreground mr-1.5 text-xs">1.</span>
+                {splitOp.prompt}
+              </li>
+              <li className={cn(QUESTION_FACE, 'max-w-[54ch] text-base')}>
+                <span className="text-muted-foreground mr-1.5 text-xs">2.</span>
+                {splitOp.secondPrompt}
+              </li>
+            </ol>
+            <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1.5 text-xs')}>
+              The first keeps this question and its answer type; the second is added straight after
+              it.
+            </p>
           </div>
         )}
 

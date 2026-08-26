@@ -38,6 +38,7 @@ import { effectiveOp, type FindingGroup } from '@/lib/app/questionnaire/evaluati
 export const GROUP_ACTION_KINDS = [
   'delete',
   'retype',
+  'split',
   'move',
   'reword',
   'guidance',
@@ -60,19 +61,25 @@ export type GroupActionKind = (typeof GROUP_ACTION_KINDS)[number];
 const CONSEQUENCE: Record<GroupActionKind, number> = {
   delete: 0,
   retype: 1,
-  move: 2,
-  add: 3,
-  goal: 4,
-  audience: 5,
-  reword: 6,
-  guidance: 7,
-  review: 8,
+  // Above `move` and well above `reword`: a split changes the SHAPE of the instrument — one
+  // question becomes two, so coverage arithmetic, completion and any cohort comparison all move
+  // with it. It is not as drastic as destroying authored work or invalidating a config, which is
+  // why it sits below delete and retype.
+  split: 2,
+  move: 3,
+  add: 4,
+  goal: 5,
+  audience: 6,
+  reword: 7,
+  guidance: 8,
+  review: 9,
 };
 
 /** Short verb phrases. Imperative — this is a thing to do, not a category the finding belongs to. */
 const ACTION_LABELS: Record<GroupActionKind, string> = {
   delete: 'Delete this question',
   retype: 'Change the answer type',
+  split: 'Split it into two questions',
   move: 'Move it',
   reword: 'Reword it',
   guidance: 'Revise the guidance',
@@ -96,6 +103,8 @@ function actionForOp(op: ProposedEdit | null): GroupActionKind {
       return 'move';
     case 'replace_prompt':
       return 'reword';
+    case 'split_question':
+      return 'split';
     case 'edit_guidelines':
       return 'guidance';
     case 'add_question':

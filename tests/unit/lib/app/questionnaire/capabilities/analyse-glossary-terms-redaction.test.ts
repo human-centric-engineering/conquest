@@ -75,6 +75,7 @@ describe('AppAnalyseGlossaryTermsCapability.redactProvenance', () => {
         },
         provider: 'openai',
         model: 'gpt-5.4',
+        costUsd: 0.0134,
       },
     });
 

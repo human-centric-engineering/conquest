@@ -300,3 +300,40 @@ describe('buildExtractionRetryMessage', () => {
     expect(message).toMatch(/sections.*questions.*changes/i);
   });
 });
+
+describe('editorial boundary — what ingest must NOT decide', () => {
+  // Ingest used to be told "Merge duplicate questions; split a compound question into separate
+  // ones." Both are real improvements, and doing them silently at extraction made the SAME document
+  // produce a different question count on different runs — routing-corpus doc 02 gave 22, 28, 23,
+  // 28, 28 and 28 questions across six ingests of one 22-question file. Two ingests that disagree
+  // on the count cannot be compared in a cohort. Both edits now belong to the judge panel, where an
+  // author reviews them before they land (`split_question` / `delete_question`).
+  const prompt = buildExtractionPrompt({ documentText: 'Q1. Anything?', fileName: 'review.md' })
+    .map((m) => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+
+  it('forbids splitting a compound question', () => {
+    expect(prompt).toMatch(/do NOT split a compound question/i);
+  });
+
+  it('forbids merging two questions into one', () => {
+    expect(prompt).toMatch(/do NOT merge two questions into one/i);
+  });
+
+  it('states the invariant plainly, not just the prohibition', () => {
+    // The rule has to survive a model that reads past a "do not". Saying what one question IS gives
+    // it something to follow rather than only something to avoid.
+    //
+    // Matched loosely on purpose: the contract is that the invariant is stated, not that it is
+    // stated in today's words. Pinning the literal sentence would fail CI on a typo fix that
+    // preserves the rule completely — testing the prose rather than the promise.
+    expect(prompt).toMatch(/one question in the document is one question/i);
+  });
+
+  it('still allows the editorial acts that ARE ingest-time', () => {
+    // Scope check on the change above: grouping loose questions and inferring goal/audience were
+    // never in question and must not have been removed with the split rule.
+    expect(prompt).toMatch(/Add a section to group loose questions/i);
+    expect(prompt).toMatch(/Infer the questionnaire's overall goal/i);
+  });
+});

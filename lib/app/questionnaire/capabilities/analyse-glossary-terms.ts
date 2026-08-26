@@ -88,6 +88,8 @@ export interface AnalyseGlossaryTermsData {
   provider: string;
   /** Resolved model id, post-fallback. */
   model: string;
+  /** USD billed across both attempts, so the provenance row can price itself. */
+  costUsd: number;
 }
 
 /** Read the dispatched analyst agent's binding from the dispatch context (empty → system default). */
@@ -248,6 +250,11 @@ export class AppAnalyseGlossaryTermsCapability extends BaseCapability<
       });
     });
 
-    return this.success({ result: completion.value, provider: providerSlug, model });
+    return this.success({
+      result: completion.value,
+      provider: providerSlug,
+      model,
+      costUsd: completion.costUsd,
+    });
   }
 }

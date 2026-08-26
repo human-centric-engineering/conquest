@@ -296,6 +296,22 @@ describe('redactProvenance', () => {
     expect(args).toMatchObject({ documentFileName: 'survey.pdf' });
   });
 
+  // The other half of the ternary. `redactProvenance` writes the audit preview for BOTH outcomes,
+  // and a failed dispatch is the one the operator is most likely to be reading — so a preview that
+  // invented a success shape there would be worse than useless. The sibling analyst capability has
+  // this test; this one did not.
+  it('passes a failed result through without inventing a success preview', () => {
+    const { resultPreview } = capability.redactProvenance(ARGS, {
+      success: false,
+      error: { message: 'no provider resolved', code: 'no_provider_configured' },
+    });
+    const parsed = JSON.parse(resultPreview) as { success: boolean; data?: unknown };
+
+    expect(parsed.success).toBe(false);
+    expect(parsed.data).toBeUndefined();
+    expect(resultPreview).toContain('no_provider_configured');
+  });
+
   it('includes verdict counts but never a raw sourceQuote or summary in the preview', () => {
     const { resultPreview } = capability.redactProvenance(ARGS, {
       success: true,

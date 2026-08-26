@@ -12,7 +12,9 @@ import { describe, it, expect } from 'vitest';
 
 import {
   CANDIDACY_LIMITS,
+  candidacyWireSchema,
   scopeCandidacyJsonSchema,
+  scopeCandidacySchema,
   validateScopeCandidacy,
 } from '@/lib/app/questionnaire/scope/candidacy-schema';
 
@@ -123,6 +125,41 @@ describe('validateScopeCandidacy', () => {
     expect(result.value.signals[0].note).toHaveLength(300);
   });
 
+  // The slice has to happen BEFORE the items are validated. Validating first and slicing after —
+  // the obvious spelling — checks all ten and then discards two, so a malformed NINTH signal still
+  // rejects the whole verdict. That is precisely the over-cap output the clipping exists to
+  // tolerate, which makes the wrong order look fixed while leaving the original failure reachable.
+  it('tolerates a malformed signal that sits beyond the cap', () => {
+    const good = { note: 'A real signal' };
+    const malformed = { note: '' };
+    const res = validateScopeCandidacy(
+      candidacy({ signals: [...Array.from({ length: 8 }, () => good), malformed, malformed] })
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.signals).toHaveLength(8);
+  });
+
+  // The floor still holds: leniency about what falls off the end is not leniency about what stays.
+  it('still rejects a malformed signal INSIDE the cap', () => {
+    expect(validateScopeCandidacy(candidacy({ signals: [{ note: '' }] })).ok).toBe(false);
+  });
+
+  // The prompt says to omit the key, but models routinely spell "no quote" as an explicit null.
+  // A plain `.optional()` rejects that, taking the verdict — and the Conditional Topics chain —
+  // down over a JSON idiom rather than anything wrong with the answer.
+  it('reads an explicit null sourceQuote as absent rather than rejecting', () => {
+    const res = validateScopeCandidacy(
+      candidacy({ signals: [{ note: 'Inferred, not quoted', sourceQuote: null }] })
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Normalised to undefined so consumers keep ONE shape for "no quote".
+    expect(res.value.signals[0].sourceQuote).toBeUndefined();
+  });
+
   it('clips an over-long summary rather than rejecting the verdict', () => {
     const result = validateScopeCandidacy(candidacy({ summary: 'a'.repeat(501) }));
     expect(result.ok).toBe(true);
@@ -179,5 +216,45 @@ describe('validateScopeCandidacy', () => {
       sourceQuoteChars: 500,
       summaryChars: 500,
     });
+  });
+});
+
+describe('the wire schema and the parse schema', () => {
+  // The split is deliberate — strict going out, lenient coming back — but it creates one failure
+  // the single-schema version could not have: the two drifting apart. A field added to the parse
+  // schema and forgotten on the wire schema is invisible, because the provider is then never told
+  // to produce it and nothing errors; the field just never arrives.
+  it('both accept the same well-formed verdict', () => {
+    const verdict = {
+      isCandidate: true,
+      confidence: 0.9,
+      signals: [{ note: 'Part C is situational', sourceQuote: 'only complete a part where…' }],
+      summary: 'Parts C to F are conditional on the school circumstance.',
+    };
+
+    expect(validateScopeCandidacy(verdict).ok).toBe(true);
+    expect(candidacyWireSchema.safeParse(verdict).success).toBe(true);
+  });
+
+  it('describe the same field set', () => {
+    const wireKeys = Object.keys(candidacyWireSchema.shape).sort();
+    const parseKeys = Object.keys(scopeCandidacySchema.shape).sort();
+
+    expect(wireKeys).toEqual(parseKeys);
+  });
+
+  // The one asymmetry that IS intended, pinned so it reads as a decision rather than an oversight:
+  // the wire schema rejects what the parse schema clips. That is the whole point — constrain the
+  // model tightly, then accept generously whatever it actually sends.
+  it('differ only in strictness: the wire schema rejects what the parse schema clips', () => {
+    const overCap = {
+      isCandidate: true,
+      confidence: 1,
+      signals: [{ note: 'x', sourceQuote: 'a'.repeat(501) }],
+      summary: 'ok',
+    };
+
+    expect(candidacyWireSchema.safeParse(overCap).success).toBe(false);
+    expect(validateScopeCandidacy(overCap).ok).toBe(true);
   });
 });

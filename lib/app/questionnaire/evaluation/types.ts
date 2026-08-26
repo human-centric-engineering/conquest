@@ -59,6 +59,7 @@ export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
  */
 export const PROPOSED_EDIT_OPS = [
   'replace_prompt',
+  'split_question',
   'edit_guidelines',
   'change_type',
   'delete_question',
@@ -89,10 +90,27 @@ export type ProposedEditOp = (typeof PROPOSED_EDIT_OPS)[number];
  * create form. There is intentionally **no `merge` op**: the authoring surface has no
  * single-slot merge write path, so a duplicates finding emits `delete_question` on the
  * weaker slot plus prose.
+ *
+ * `split_question` is the exception that proves the rule — it exists because the Clarity judge
+ * was already instructed to propose splits it had no way to express. Its rubric scores questions
+ * on being "single-barrelled", its prompt gives *"Split into: 'What is your role?' and 'How long
+ * have you been in it?'"* as the model example of a good finding, and `reconcile-prompt.ts` listed
+ * splitting among the fixes **no wording can deliver**. Every such finding therefore landed
+ * prose-only and the admin retyped it in the editor. Unlike merge, split has a clean write path:
+ * rewrite the target's prompt and insert one sibling after it.
  */
 export type ProposedEdit =
   /** Rewrite a question's prompt in place. Target: slot `key`. (clarity) */
   | { op: 'replace_prompt'; prompt: string }
+  /**
+   * Split one double-barrelled question into two. Target: slot `key`. (clarity)
+   *
+   * The target keeps its identity, type, config and position and takes `prompt`; `secondPrompt`
+   * becomes a new sibling inserted directly after it, inheriting the target's type and settings.
+   * Adjacency is part of the contract — two halves that end up at opposite ends of a section read
+   * worse than the compound they replaced.
+   */
+  | { op: 'split_question'; prompt: string; secondPrompt: string; secondKey?: string }
   /** Set or clear a question's author guidelines. Target: slot `key`. (clarity, audience_match) */
   | { op: 'edit_guidelines'; guidelines: string | null }
   /** Change a question's answer type (config reset/revalidated at apply). Target: slot `key`. (type_fit) */

@@ -9,7 +9,8 @@
  *   `_lib/list.ts`.
  *
  * POST /api/v1/app/questionnaires
- *   Multipart upload of a questionnaire document (.pdf / .docx / .md / .txt). The
+ *   Multipart upload of a questionnaire document (see `UPLOAD_EXTENSIONS` — this route flattens
+ *   workbooks first, so `.xlsx` is accepted here). The
  *   route parses the bytes to text, dispatches the extractor capability for an
  *   opinionated structured extraction (sections, questions, inferred goal/
  *   audience, and a per-decision editorial change log), and persists the whole

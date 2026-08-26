@@ -24,10 +24,20 @@ import { QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG } from '@/lib/app/questionnair
  * frontier `gpt-5.4` was measurably WORSE here (17/20) as well as six times dearer: it returns more
  * signals than the contract allows. Cheap was never the problem; the wrong tier was.
  *
- * Provider-agnosticism is preserved by the resolver, not by emptiness: clear `model`/`provider` on
- * the agent row and `agent-resolver.ts` falls back to the `routing` tier exactly as before. An
- * Anthropic-only fork does that once. Idempotent — `update` re-asserts `isSystem` and fills the
- * binding ONLY when it is still empty, so re-seeding never clobbers an operator's chosen model.
+ * **How a fork opts out — and the one way that does NOT work.** `update` re-asserts `isSystem` and
+ * fills the binding only when BOTH fields are still empty, so any row showing a sign of operator
+ * intent is left alone. Setting `provider` (with `model` empty, to keep the tier default) is
+ * therefore the durable opt-out, and it is what a non-OpenAI fork would do anyway.
+ *
+ * Wiping both fields back to empty is NOT durable, and the distinction is easy to miss: the seed
+ * runner re-runs a unit whenever its source hash changes, and "both empty" is indistinguishable
+ * from "never configured", so the next `db:seed` re-imposes this binding. On an Anthropic-only
+ * deployment that would dispatch candidacy to a provider with no key — and because the check is
+ * fail-soft, it would fail silently. Set `provider` rather than clearing it.
+ *
+ * The guard is deliberately `!model && !provider` rather than `!model`: a fork that set
+ * `provider: 'anthropic', model: ''` means "Anthropic, tier default", and filling just the model
+ * would stamp an OpenAI id over a deliberate choice.
  */
 
 const SLUG = QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG;
