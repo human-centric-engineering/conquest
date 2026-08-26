@@ -174,10 +174,18 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
           status: fidelity.repairOutcome === 'verifier_unavailable' ? 'failed' : 'succeeded',
           provider: fidelity.provider,
           model: fidelity.model,
+          costUsd: fidelity.costUsd,
           outputSnapshot: fidelity.verdicts,
           durationMs: fidelity.durationMs,
           detail: {
             flaggedCount: fidelity.flaggedCount,
+            // The two count-level signals, on the row a corpus run reads. `flaggedCount` says how
+            // many questions look wrong; these say whether the SET is — which every per-question
+            // verdict can be `ok` and still get wrong.
+            ...(fidelity.coverage ? { coverage: fidelity.coverage } : {}),
+            ...(fidelity.disallowedEditCount > 0
+              ? { disallowedEditCount: fidelity.disallowedEditCount }
+              : {}),
             totalCount: fidelity.totalCount,
             repairOutcome: fidelity.repairOutcome,
             fileName: file.name,

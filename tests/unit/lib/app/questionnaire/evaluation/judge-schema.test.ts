@@ -181,3 +181,45 @@ describe('coerceProposedEdit', () => {
     expect(op).toMatchObject({ op: 'add_question', key: 'work_morale', type: 'free_text' });
   });
 });
+
+describe('coerceProposedEdit — split_question', () => {
+  // The Clarity judge has always been TOLD to propose splits: its rubric scores questions on being
+  // "single-barrelled" and its prompt gives "Split into: 'What is your role?' and 'How long have
+  // you been in it?'" as the model example of a good finding. It had no op to say it with, so every
+  // such finding landed prose-only and the admin retyped it in the editor. This op is that gap.
+  it('accepts a well-formed split', () => {
+    expect(
+      coerceProposedEdit({
+        op: 'split_question',
+        prompt: 'Who is the designated safeguarding lead this year?',
+        secondPrompt: 'When did they last complete advanced training?',
+        secondKey: 'lead_last_advanced_training',
+      })
+    ).toEqual({
+      op: 'split_question',
+      prompt: 'Who is the designated safeguarding lead this year?',
+      secondPrompt: 'When did they last complete advanced training?',
+      secondKey: 'lead_last_advanced_training',
+    });
+  });
+
+  it('accepts a split without a proposed key — apply slugifies the second prompt instead', () => {
+    const op = coerceProposedEdit({
+      op: 'split_question',
+      prompt: 'What is your role?',
+      secondPrompt: 'How long have you been in it?',
+    });
+    expect(op).toMatchObject({ op: 'split_question' });
+    expect(op && 'secondKey' in op ? op.secondKey : undefined).toBeUndefined();
+  });
+
+  // A half-formed split is the dangerous shape: applied, it would blank one of the two questions.
+  // Degrading to null makes the finding prose-only, which is the safe failure.
+  it('degrades a split missing its second half to null', () => {
+    expect(coerceProposedEdit({ op: 'split_question', prompt: 'What is your role?' })).toBeNull();
+    expect(
+      coerceProposedEdit({ op: 'split_question', secondPrompt: 'How long have you been in it?' })
+    ).toBeNull();
+    expect(coerceProposedEdit({ op: 'split_question', prompt: 'a', secondPrompt: '' })).toBeNull();
+  });
+});

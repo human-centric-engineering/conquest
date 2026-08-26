@@ -2,7 +2,8 @@
  * Round Additional Context — document parse endpoint (round Additional Context, phase 3).
  *
  * POST /api/v1/app/rounds/:id/context/parse  (multipart: `file`)
- *   Admin-only. Extracts plain text from an uploaded document (.pdf / .docx / .md / .txt) so the
+ *   Admin-only. Extracts plain text from an uploaded document (`PARSEABLE_UPLOAD_EXTENSIONS` —
+ *   every upload format except `.xlsx`, which this route cannot flatten) so the
  *   admin can use it as briefing content (or feed it to AI-suggest). Returns the extracted text,
  *   trimmed and capped — it does NOT persist; the admin reviews, edits, and saves it via create. No
  *   LLM call: a pure parse, reusing the intro-background upload guard + the knowledge-base parser.

@@ -41,6 +41,17 @@ instead of one "matrix" question with rows.
 scale with no range, a matrix with no rows).
 - other — an unfaithful extraction not covered above.
 
+NEVER flag these — they are CORRECT extractions, not problems:
+- An UNANCHORED rating typed "numeric". When the source gives a bare range and no qualitative \
+wording for its points ("Rating 1-5", "score 0-10", "out of 100"), "numeric" is the RIGHT type and \
+"likert" is the wrong one — a likert must carry meaning, via named points or both endpoint anchors, \
+and the authoring schema REJECTS an unlabelled one. Flagging these as type_mismatch sends the \
+repair step to build a likert that cannot validate, so the fix is discarded and the round-trip is \
+wasted. Only call a rating mis-typed when the source DOES anchor it and the extractor still \
+chose numeric.
+- A "numeric" carrying no "labels". Numeric questions never have labels; that is not a missing \
+config.
+
 Otherwise the verdict is "ok". Be specific but conservative: only flag a real, source-evidenced \
 problem — a faithful, well-typed question is "ok". Cover EVERY question you are given, each exactly \
 once, using its exact "key".
@@ -53,10 +64,35 @@ re-read the whole grid.
 
 The valid "issue" values are: ${VERIFY_ISSUES.join(', ')}.
 
+## Also check the COUNT, not just each question
+
+Every verdict above can be "ok" while the question SET is still wrong — a compound question split \
+into two, a heading promoted to a question, a page of the source missed. Per-question checking \
+cannot see any of that, so assess it separately in "coverage".
+
+Count what the SOURCE says it contains — its own numbering ("1." … "22."), an explicit statement \
+("this review has 20 questions"), or a complete visible list — and compare that to the number of \
+extracted questions you were given.
+
+- "matches" — the counts agree.
+- "extra_questions" — more were extracted than the source contains. The usual cause is a compound \
+question ("Who is the lead, AND when did they last train?") turned into two, which the extractor \
+is instructed NOT to do. Name the extracted keys that look invented in "detail".
+- "missing_questions" — the source contains questions that are not in the extracted set. Name what \
+is missing in "detail".
+- "uncountable" — the source does not state how many questions it has. Set \
+"sourceQuestionCount": null. **This is a perfectly good answer and often the right one** — many \
+documents simply do not number their questions. Never guess a count to avoid saying this; a \
+fabricated number is worse than an honest "uncountable".
+
+Judge the count from the source alone. Do not reason backwards from the number of questions you \
+were given to a count that would make it match.
+
 Output ONLY a single JSON object — no prose, no code fences:
 {
   "verdicts": [ { "key": "<question key>", "verdict": "ok" | "suspect", "issue": "<one of the issues, only when suspect>", "detail": "<short reason, optional>" } ],
-  "matrixGroups": [ { "label": "<grid heading>", "sourceSpanQuote": "<the full grid block from the source>", "memberKeys": ["<key>", ...] } ]
+  "matrixGroups": [ { "label": "<grid heading>", "sourceSpanQuote": "<the full grid block from the source>", "memberKeys": ["<key>", ...] } ],
+  "coverage": { "sourceQuestionCount": <integer or null>, "assessment": "matches" | "extra_questions" | "missing_questions" | "uncountable", "detail": "<short line, optional>" }
 }`;
 
 /** Render one extracted question as a compact, model-readable block. */

@@ -41,6 +41,7 @@ import {
   type ExtractionProgressSink,
 } from '@/lib/app/questionnaire/ingestion/extraction-progress-context';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
+import type { VerifyCoverage } from '@/lib/app/questionnaire/ingestion/verify-schema';
 import {
   ALLOWED_EXTENSIONS,
   getExtension,
@@ -103,6 +104,29 @@ export interface FidelityRecord {
   /** What happened to the flagged ones. */
   repairOutcome:
     'none_flagged' | 'repaired' | 'repair_failed' | 'skipped_systemic' | 'verifier_unavailable';
+  /**
+   * USD billed for the verify call, so the `extraction_verify` provenance row can price itself.
+   * `null` when the critic never reached a provider (unavailable agent, dispatch failure) — a real
+   * answer, distinct from a call that genuinely cost nothing.
+   */
+  costUsd: number | null;
+  /**
+   * The critic's read on the question COUNT — the axis its per-question verdicts cannot see.
+   * `null` when the critic did not run or did not report one. See {@link VerifyCoverage}.
+   */
+  coverage: VerifyCoverage | null;
+  /**
+   * How many editorial changes the extractor made that it is instructed NOT to make — splitting a
+   * compound question in two, or merging two into one. Both are real improvements and both belong
+   * to the judge panel, where an author reviews them; done silently at ingest they make the same
+   * document extract to a different question count on different runs (22 vs 28, measured).
+   *
+   * Deterministic, unlike `coverage`: it counts the extractor's own change entries rather than
+   * asking a model. It cannot be un-done here — the halves are already separate by the time this is
+   * read — so it is reported, not enforced. A non-zero value on a build carrying the "do not split"
+   * instruction means the instruction is not landing.
+   */
+  disallowedEditCount: number;
   durationMs: number;
 }
 

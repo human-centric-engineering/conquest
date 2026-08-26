@@ -6,6 +6,40 @@
 > on `/admin/questionnaires` (header button + empty-state CTA), which POSTs to the
 > endpoint below. Every surface here is always on.
 
+## Ingest is faithful — the editorial calls belong to the judges
+
+One question in the document is one question in the questionnaire, however many things it asks. The
+extractor is explicitly forbidden to **split** a compound question ("Who is the lead, _and_ when did
+they last train?") or to **merge** two into one.
+
+Both are real improvements. Neither is ingest's to make. Done silently at extraction they made the
+same file produce a different question count on different runs — routing-corpus doc 02 gave 22, 28,
+23, 28, 28 and 28 questions across six ingests of one 22-question document, and two ingests that
+disagree on the count cannot be compared in a cohort. They now belong to the judge panel, where an
+author reviews them before they land: `split_question` from the Clarity judge, `delete_question`
+from the Duplicates judge. See [design evaluation](./design-evaluation.md).
+
+`split_question` and `merge_questions` remain in `CHANGE_TYPES` — historical versions carry rows
+with those types and must keep reading.
+
+### The two count-level checks
+
+Per-question verdicts structurally cannot see a wrong question SET: every question can be faithful
+while one was split in two, a heading was promoted, or a page was missed. Two checks run alongside
+them, and **neither blocks the ingest** — by the time either is readable the questions already
+exist, and refusing a document over a fidelity nicety is worse than persisting it with the
+discrepancy on record. Both land on the `extraction_verify` `AppAiRun.detail`.
+
+| Check                 | How                                                                                               | Says                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `disallowedEditCount` | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
+| `coverage`            | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+
+`uncountable` is a first-class answer and should be common: plenty of instruments do not number
+their questions, and the prompt explicitly tells the critic that a guessed count is worse than an
+honest shrug. It is also told not to reason backwards from the number of questions it was given,
+without which the check is circular.
+
 ## The endpoint
 
 `POST /api/v1/app/questionnaires` — multipart upload of one questionnaire
@@ -31,21 +65,39 @@ the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProg
 contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
 [Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
-| Field              | In       | Notes                                                                              |
-| ------------------ | -------- | ---------------------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.xlsx`. Extension is the source of truth.     |
-| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).    |
-| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.          |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                     |
-| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.** |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.            |
-| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.          |
-| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.      |
+| Field              | In       | Notes                                                                                   |
+| ------------------ | -------- | --------------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth. |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).         |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.               |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                          |
+| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**      |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                 |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.               |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.           |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
 200-char cap is `400`. When `title` is absent the server falls back to the parsed
 document title, else the filename.
+
+### Accepted formats — one list, two flavours
+
+Both lists live in `lib/app/questionnaire/constants.ts` and **nothing may re-declare them**.
+The server guards and every admin file picker's `accept` attribute derive from the same
+constants, because seven hand-kept literals had already drifted: the Conditional Topics
+supporting-documents picker offered `.csv` that the server then rejected with a `400`.
+
+| Constant                                                | Contents                         | For                                                                                                            |
+| ------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_EXTENSIONS` / `UPLOAD_ACCEPT_ATTR`              | `.pdf .docx .md .txt .csv .xlsx` | Routes that flatten workbooks first: ingest, re-ingest, supplementary documents                                |
+| `PARSEABLE_UPLOAD_EXTENSIONS` / `PARSEABLE_ACCEPT_ATTR` | the same, **minus `.xlsx`**      | Routes that call `parseDocument` directly: intro-background parse, scoring-schema extract, round-context parse |
+
+The `.xlsx` split is load-bearing rather than cosmetic. `parseDocument` has no workbook branch
+and **throws** on one, so a route without a `flattenWorkbook` step must reject `.xlsx` at the
+boundary (`hasParseableExtension` → clean `415`) rather than let the parser router blow up two
+lines later. Server-side the pair are `hasAllowedExtension` and `hasParseableExtension`, both in
+`_lib/upload-input.ts`.
 
 ### Requiredness (`requiredMode`)
 

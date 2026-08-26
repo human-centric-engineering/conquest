@@ -53,6 +53,8 @@ function judgeNames(dimensions: EvaluationDimension[]): string {
 const ACTION_TONE: Record<GroupActionKind, string> = {
   delete: 'border-destructive/50',
   retype: 'border-amber-500/60',
+  // Amber with `move` and `retype`: it reshapes the instrument rather than merely rewording it.
+  split: 'border-amber-500/60',
   move: 'border-amber-500/60',
   add: 'border-emerald-500/60',
   reword: 'border-primary/40',

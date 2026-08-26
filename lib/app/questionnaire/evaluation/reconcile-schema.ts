@@ -68,8 +68,13 @@ export const reconciledSuggestionSchema = z.object({
   alternatives: z.array(reconciledAlternativeSchema).min(1).max(MAX_ALTERNATIVES_PER_TARGET),
   /**
    * Concerns no proposed phrasing resolves — usually because the fix is structural (split the
-   * question in two, change its answer type) rather than a matter of wording. Empty is the normal
-   * case; a populated list is a signal to the admin that wording alone will not close this out.
+   * question in two, change its answer type, move it to another section) rather than a matter of
+   * wording. Empty is the normal case; a populated list is a signal to the admin that wording alone
+   * will not close this out.
+   *
+   * A split belongs here even though `split_question` exists as a judge op: that op is how a JUDGE
+   * proposes the split, not something this reconciler can emit. Its only output is one rewritten
+   * `prompt`, so a split-shaped concern is still not something a wording of its can close.
    */
   unresolved: z.array(z.enum(EVALUATION_DIMENSIONS)).default([]),
 });

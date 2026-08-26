@@ -255,6 +255,34 @@ describe('buildExtractionPrompt — admin instructions', () => {
   });
 });
 
+/**
+ * A "Rating 1-5" in the routing corpus was extracted as `numeric` with an EMPTY config: the type
+ * was right (an unanchored rating is not a likert) but the 1–5 bound was dropped, leaving the
+ * respondent an unbounded box and the report no scale to read the answer against. The prompt
+ * taught `min`/`max` for likert and matrix and said nothing about numeric.
+ */
+describe('buildExtractionPrompt — numeric bounds', () => {
+  const system = (): string =>
+    systemContent(buildExtractionPrompt({ documentText: 'Q1', fileName: 'survey.pdf' }));
+
+  it('instructs the extractor to carry a stated range into min/max', () => {
+    const rules = system();
+    expect(rules).toMatch(/for "numeric"/i);
+    expect(rules).toMatch(/Rating 1-5/);
+    expect(rules).toMatch(/\{"min":1,"max":5\}/);
+  });
+
+  it('still tells it to leave an unbounded quantity empty', () => {
+    expect(system()).toMatch(/unbounded|does not bound/i);
+  });
+
+  it('demonstrates the numeric config in the output example, not only in prose', () => {
+    // The likert and matrix shapes are both taught by example; numeric was described nowhere.
+    const example = system().slice(system().indexOf('"suggestedTypeConfig"'));
+    expect(example).toMatch(/numeric with a bounded range/i);
+  });
+});
+
 describe('buildExtractionRetryMessage', () => {
   it('names the failing issue paths when provided', () => {
     const message = buildExtractionRetryMessage([
@@ -270,5 +298,42 @@ describe('buildExtractionRetryMessage', () => {
     const message = buildExtractionRetryMessage([]);
     expect(message).toMatch(/not valid JSON/i);
     expect(message).toMatch(/sections.*questions.*changes/i);
+  });
+});
+
+describe('editorial boundary — what ingest must NOT decide', () => {
+  // Ingest used to be told "Merge duplicate questions; split a compound question into separate
+  // ones." Both are real improvements, and doing them silently at extraction made the SAME document
+  // produce a different question count on different runs — routing-corpus doc 02 gave 22, 28, 23,
+  // 28, 28 and 28 questions across six ingests of one 22-question file. Two ingests that disagree
+  // on the count cannot be compared in a cohort. Both edits now belong to the judge panel, where an
+  // author reviews them before they land (`split_question` / `delete_question`).
+  const prompt = buildExtractionPrompt({ documentText: 'Q1. Anything?', fileName: 'review.md' })
+    .map((m) => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+
+  it('forbids splitting a compound question', () => {
+    expect(prompt).toMatch(/do NOT split a compound question/i);
+  });
+
+  it('forbids merging two questions into one', () => {
+    expect(prompt).toMatch(/do NOT merge two questions into one/i);
+  });
+
+  it('states the invariant plainly, not just the prohibition', () => {
+    // The rule has to survive a model that reads past a "do not". Saying what one question IS gives
+    // it something to follow rather than only something to avoid.
+    //
+    // Matched loosely on purpose: the contract is that the invariant is stated, not that it is
+    // stated in today's words. Pinning the literal sentence would fail CI on a typo fix that
+    // preserves the rule completely — testing the prose rather than the promise.
+    expect(prompt).toMatch(/one question in the document is one question/i);
+  });
+
+  it('still allows the editorial acts that ARE ingest-time', () => {
+    // Scope check on the change above: grouping loose questions and inferring goal/audience were
+    // never in question and must not have been removed with the split rule.
+    expect(prompt).toMatch(/Add a section to group loose questions/i);
+    expect(prompt).toMatch(/Infer the questionnaire's overall goal/i);
   });
 });

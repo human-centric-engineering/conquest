@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { CohortEmptyState } from '@/components/admin/cohorts/cohort-ui';
+import { PARSEABLE_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 import type {
   BriefableQuestionnaire,
   RoundContextEntryView,
@@ -459,7 +460,7 @@ function EntryForm({
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.md,.txt"
+            accept={PARSEABLE_ACCEPT_ATTR}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -642,7 +643,7 @@ function SuggestForm({
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.md,.txt"
+            accept={PARSEABLE_ACCEPT_ATTR}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];

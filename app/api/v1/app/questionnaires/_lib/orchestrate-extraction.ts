@@ -34,7 +34,7 @@ import { validateTypeConfig } from '@/lib/app/questionnaire/authoring/type-confi
 import { nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import type { ExtractedQuestion } from '@/lib/app/questionnaire/ingestion/extraction-schema';
-import type { ChangeRecordIntent } from '@/lib/app/questionnaire/ingestion/types';
+import type { ChangeRecordIntent, ChangeType } from '@/lib/app/questionnaire/ingestion/types';
 import {
   validateVerifyResult,
   type VerifyResult,
@@ -45,6 +45,11 @@ import {
   type RepairResult,
 } from '@/lib/app/questionnaire/ingestion/repair-schema';
 import type { ExtractionPhaseEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
+import {
+  normaliseBinding,
+  readResolvedBinding,
+  readResolvedCost,
+} from '@/lib/app/questionnaire/ai-run/resolved-binding';
 
 import {
   extractFromDocument,
@@ -226,21 +231,48 @@ export async function* orchestrateExtraction(
     throw err;
   }
 
+  // Two count-level checks the per-question verdicts structurally cannot make. Neither blocks the
+  // ingest: by the time either is readable the questions already exist, and refusing a document
+  // over a fidelity nicety is worse than persisting it with the discrepancy on record. They are
+  // logged and carried onto the `extraction_verify` provenance row so a corpus run — or anyone
+  // asking "did that prompt change take?" — can see it without re-reading the Structure editor.
+  const disallowedEditCount = countDisallowedEdits(extraction);
+  if (disallowedEditCount > 0) {
+    ctx.log.warn('ingest extractor made edits it is instructed not to make', {
+      disallowedEditCount,
+      kinds: [...DISALLOWED_EXTRACTOR_EDITS],
+    });
+  }
+
+  const coverage = verification.result.coverage ?? null;
+  if (coverage && coverage.assessment !== 'matches' && coverage.assessment !== 'uncountable') {
+    ctx.log.warn('ingest question count disagrees with the source', {
+      assessment: coverage.assessment,
+      sourceQuestionCount: coverage.sourceQuestionCount,
+      extractedQuestionCount: total,
+      detail: coverage.detail,
+    });
+  }
+
   return {
     ok: true,
     value: {
       extraction,
       parsed,
       fidelity: {
-        // 'n/a' is the codebase's existing sentinel for a provider/model-less run (see the
-        // evaluation rollup in run-worker.ts and the edit-agent apply seam). Using a second
-        // spelling here would split any "runs by provider" grouping in two.
-        provider: verification.provider ?? 'n/a',
-        model: verification.model ?? 'n/a',
+        // `??` was the bug here, not the sentinel: a verifier that resolves its model at call time
+        // reported an EMPTY STRING, which is not nullish, so the fallback never fired and the
+        // column stored ''. `normaliseBinding` treats empty and nullish alike, and keeps 'n/a' —
+        // the codebase's existing spelling (run-worker.ts, the edit-agent apply seam) — so a
+        // "runs by provider" grouping isn't split across two spellings.
+        ...normaliseBinding(verification.provider, verification.model),
         verdicts: flags.verdicts,
         flaggedCount: flagged.length,
         totalCount: total,
         repairOutcome,
+        costUsd: verification.costUsd,
+        coverage,
+        disallowedEditCount,
         durationMs: verification.durationMs,
       },
     },
@@ -256,7 +288,35 @@ interface VerificationOutcome {
   /** Resolved verifier binding; null when the agent wasn't available. */
   provider: string | null;
   model: string | null;
+  /** USD billed for the verify call; null when it never reached a provider. */
+  costUsd: number | null;
   durationMs: number;
+}
+
+/**
+ * Editorial change types the extractor is instructed NOT to make (see `extraction-prompt.ts`).
+ *
+ * Both splitting a compound question and merging duplicates are genuine improvements — and both
+ * belong to the judge panel, where an author reviews them before they land, rather than to a silent
+ * ingest. Left at ingest they make the SAME document extract to a different question count on
+ * different runs; corpus doc 02 produced 22, 28, 23, 28, 28 and 28 questions across six ingests of
+ * one file. Counting them is how we can tell whether the instruction actually landed.
+ */
+const DISALLOWED_EXTRACTOR_EDITS: ReadonlySet<ChangeType> = new Set<ChangeType>([
+  'split_question',
+  'merge_questions',
+]);
+
+/**
+ * Count the editorial edits the extractor was told not to make. Deterministic — no model involved.
+ *
+ * Typed against `ChangeType` rather than reading `changes` through a structural cast. The cast
+ * would have been the more dangerous shortcut of the two available: this counter exists to notice
+ * silent drift, so a rename of `changes` or `changeType` making it always return 0 — with no
+ * compile error — is precisely the failure it is supposed to catch, arriving by the back door.
+ */
+function countDisallowedEdits(extraction: ExtractQuestionnaireStructureData): number {
+  return extraction.changes.filter((c) => DISALLOWED_EXTRACTOR_EDITS.has(c.changeType)).length;
 }
 
 async function runVerification(
@@ -270,6 +330,7 @@ async function runVerification(
     result: EMPTY_VERIFY,
     provider: null,
     model: null,
+    costUsd: null,
     durationMs: Date.now() - startedAt,
   });
   try {
@@ -327,10 +388,15 @@ async function runVerification(
       );
       return unavailable();
     }
+    // The binding the capability resolved and used — NOT `agent.provider`/`agent.model`, which are
+    // empty on this agent by design (it resolves to the reasoning tier at call time). Recording the
+    // agent row's blanks is what made `extraction_verify` rows store an empty provider.
+    const binding = readResolvedBinding(dispatch.data);
     return {
       result: validated.value,
-      provider: agent.provider,
-      model: agent.model,
+      provider: binding.provider,
+      model: binding.model,
+      costUsd: readResolvedCost(dispatch.data),
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {

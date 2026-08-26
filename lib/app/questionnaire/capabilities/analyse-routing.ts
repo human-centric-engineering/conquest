@@ -121,9 +121,21 @@ const argsSchema = z.object({
 
 export type AnalyseRoutingArgs = z.infer<typeof argsSchema>;
 
-/** What the capability returns: the analyst's proposal. Nothing is persisted here. */
+/**
+ * What the capability returns: the analyst's proposal, plus the binding that actually served it.
+ * Nothing is persisted here.
+ *
+ * See {@link DetectScopeCandidacyData} for why the binding travels with the result — the analyst
+ * agent likewise ships with an empty `model`, so the caller cannot learn it from the agent row.
+ */
 export interface AnalyseRoutingData {
   result: RoutingAnalysisResult;
+  /** Resolved provider slug, post-fallback — what actually answered. */
+  provider: string;
+  /** Resolved model id, post-fallback. */
+  model: string;
+  /** USD billed across both attempts, so the provenance row can price itself. */
+  costUsd: number;
 }
 
 /** Read the dispatched analyst agent's binding from the dispatch context (empty → system default). */
@@ -299,6 +311,11 @@ export class AppAnalyseRoutingCapability extends BaseCapability<
       });
     });
 
-    return this.success({ result: completion.value });
+    return this.success({
+      result: completion.value,
+      provider: providerSlug,
+      model,
+      costUsd: completion.costUsd,
+    });
   }
 }

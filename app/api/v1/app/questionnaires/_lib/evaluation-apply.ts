@@ -413,6 +413,68 @@ async function writeOp(
         data: { prompt: op.prompt },
       });
       return;
+    case 'split_question': {
+      // The target KEEPS its identity — same id, key, type, config, ordinal — and takes the first
+      // half. That is what makes a split safe to apply to a version with answers already against
+      // it: nothing that referenced this slot stops resolving, and the second half is additive.
+      // Rewriting both halves as two new slots would orphan every existing answer instead.
+      const target = await tx.appQuestionSlot.findUniqueOrThrow({
+        where: { id: ctx.editSlotId! },
+        select: {
+          sectionId: true,
+          ordinal: true,
+          type: true,
+          typeConfig: true,
+          required: true,
+          weight: true,
+          fidelity: true,
+          guidelines: true,
+        },
+      });
+
+      // Make room directly after the target. Adjacency is the point: two halves separated by six
+      // unrelated questions read worse than the compound they replaced, and appending to the end of
+      // the section (the `add_question` convention) would do exactly that.
+      await tx.appQuestionSlot.updateMany({
+        where: { sectionId: target.sectionId, ordinal: { gt: target.ordinal } },
+        data: { ordinal: { increment: 1 } },
+      });
+
+      const existingKeys = await tx.appQuestionSlot.findMany({
+        where: { versionId: ctx.editVersionId },
+        select: { key: true },
+      });
+      const key = nextAvailableKey(
+        slugifyKey(op.secondKey ?? op.secondPrompt),
+        new Set(existingKeys.map((e) => e.key))
+      );
+
+      await tx.appQuestionSlot.update({
+        where: { id: ctx.editSlotId! },
+        data: { prompt: op.prompt },
+      });
+
+      await tx.appQuestionSlot.create({
+        data: {
+          versionId: ctx.editVersionId,
+          sectionId: target.sectionId,
+          ordinal: target.ordinal + 1,
+          key,
+          prompt: op.secondPrompt,
+          // Inherited, not defaulted. A compound question's two halves almost always want the same
+          // answer type, and an author who set `required`, a weight or a fidelity stop meant it for
+          // both asks. Guidelines are inherited for the conservative reason the extractor uses for
+          // ambiguous spans: duplicated guidance is visible and deletable, dropped guidance is not.
+          type: target.type,
+          typeConfig: target.typeConfig == null ? Prisma.JsonNull : jsonInput(target.typeConfig),
+          required: target.required,
+          weight: target.weight,
+          fidelity: target.fidelity,
+          ...(target.guidelines != null ? { guidelines: target.guidelines } : {}),
+        },
+      });
+      return;
+    }
     case 'edit_guidelines':
       await tx.appQuestionSlot.update({
         where: { id: ctx.editSlotId! },

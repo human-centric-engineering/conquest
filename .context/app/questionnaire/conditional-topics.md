@@ -770,6 +770,42 @@ for. Questions are read through their sections rather than version-wide, because
 `AppQuestionSlot.ordinal` is only globally ordered by ingestion's own convention — the Structure
 editor counts within a section — and the prompt tells the model these are in document order.
 
+### Cheap was never the problem — the wrong tier was
+
+The check was left unbound on purpose, so it resolved the **routing** tier at call time and ran on
+`gpt-4.1-nano`, on the reasoning that something firing on every upload must be cheap. Measured over
+the ten-document routing corpus, that model returned malformed JSON on roughly **one call in six** —
+a stray brace after each signal object. Both attempts failing means the ingest completes having
+silently skipped Conditional Topics: no proposal, no `AppAiRun` row, and an admin who watched
+"Checking for conditional routing…" and then saw nothing. It happened on corpus doc 02 and is the
+reason this section exists.
+
+Three things were wrong, in ascending order of importance:
+
+1. **The shape was never enforced.** `scopeCandidacyJsonSchema` was exported and unit-tested from
+   the start but wired to nothing — the cheapest model in the stack was hand-writing its JSON from
+   the prose contract alone. It is now forwarded as `responseSchema`, on the first attempt and the
+   temp-0 retry alike.
+2. **The model.** The agent is now bound explicitly to `openai/gpt-5.4-mini`, which was clean on 60
+   of 60 corpus calls and was also the **fastest** of the five tried (~1.6s against nano's ~2.6s),
+   for $0.0009 per uploaded document — beside the extractor's ~$0.12 on the same upload. The
+   frontier `gpt-5.4` was measurably _worse_ here (17/20) as well as six times dearer: it returns
+   more signals than the contract allows. Clear `model`/`provider` on the agent row and the resolver
+   falls back to the routing tier exactly as before, so a non-OpenAI fork is one edit away.
+3. **The caps rejected instead of clipping — and this was the big one.** `sourceQuote` was bounded
+   at 500 characters and `signals` at 8, neither stated anywhere in the prompt, and a violation
+   discarded the _entire verdict_. Corpus doc 05 failed this way **3 times out of 3 on every model
+   tested**, small and frontier alike: not variance, a deterministic loss of the feature over a
+   limit the model was never told about. The prompt now states all three caps, and
+   `candidacy-schema.ts` clips rather than rejects. Leniency has a floor — a blank summary or an
+   empty note is still a failure, because that is a reply with no verdict in it.
+
+The two-schema split is deliberate and load-bearing: `z.toJSONSchema` cannot serialise a
+`.transform()`, so pointing it at the lenient parse schema silently emitted
+`"signals": { "default": [] }` — no item shape at all, at precisely the field where the malformed
+output was observed. What goes to the provider is a separate un-transformed **wire** schema; what
+comes back is parsed by the lenient one. `candidacy-schema.test.ts` fails if they are collapsed.
+
 **One failure disabled it forever.** `resolveAutoTriggerPending` treated any prior
 `routing_analysis` `AppAiRun` as "already tried" — including one the analyse route itself logged as
 `status: 'failed'`. A single provider blip during the first tab visit switched the automation off

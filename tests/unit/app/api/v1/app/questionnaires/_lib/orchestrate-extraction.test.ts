@@ -153,10 +153,27 @@ function seedAgents(opts: { verifier?: boolean; repair?: boolean } = {}) {
 }
 
 /** Route `capabilityDispatcher.dispatch` responses by capability slug. */
+/**
+ * Mock the dispatcher per capability slug.
+ *
+ * A successful dispatch is topped up with the resolved binding the real capabilities return
+ * beside their result, so a test does not have to restate it to get realistic provenance. Pass an
+ * explicit `provider`/`model` (including an empty one) to override — the fidelity record's
+ * fallback behaviour is exercised that way.
+ */
 function mockDispatch(byCapability: Record<string, unknown>) {
   (capabilityDispatcher.dispatch as DispatchMock).mockImplementation(async (slug) => {
-    if (slug in byCapability) return byCapability[slug];
-    throw new Error(`unmocked dispatch for capability "${slug}"`);
+    if (!(slug in byCapability)) throw new Error(`unmocked dispatch for capability "${slug}"`);
+    const mocked = byCapability[slug];
+    if (
+      typeof mocked === 'object' &&
+      mocked !== null &&
+      (mocked as { success?: unknown }).success === true
+    ) {
+      const { data, ...rest } = mocked as { success: true; data?: Record<string, unknown> };
+      return { ...rest, data: { provider: 'openai', model: 'gpt-5.4', ...data } };
+    }
+    return mocked;
   });
 }
 
@@ -441,6 +458,57 @@ describe('orchestrateExtraction — fidelity record repairOutcome', () => {
         provider: 'n/a',
         model: 'n/a',
       });
+    }
+  });
+
+  it('falls back to the n/a sentinel when the capability reports an EMPTY binding', async () => {
+    // The `??` bug this pins. The fidelity record used `verification.provider ?? 'n/a'`, and a
+    // verifier that resolves its model at call time reports an empty string — which is not
+    // nullish — so the fallback never fired and the `extraction_verify` row stored ''. Empty and
+    // nullish must both mean "unresolved", or the provenance column is neither a model nor a
+    // legible sentinel.
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: { verdicts: [{ key: 'name', verdict: 'ok' }], matrixGroups: [] },
+          provider: '',
+          model: '',
+        },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fidelity).toMatchObject({ provider: 'n/a', model: 'n/a' });
+    }
+  });
+
+  it('records the model the verifier actually resolved, not the agent row value', async () => {
+    // The verifier agent ships with an empty configured model and binds to the reasoning tier at
+    // call time, so the binding has to come off the dispatch.
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: { verdicts: [{ key: 'name', verdict: 'ok' }], matrixGroups: [] },
+          provider: 'openai',
+          model: 'gpt-5.4-turbo',
+        },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fidelity).toMatchObject({ provider: 'openai', model: 'gpt-5.4-turbo' });
     }
   });
 

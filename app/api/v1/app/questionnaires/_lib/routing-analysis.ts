@@ -35,6 +35,12 @@ import {
 import { narrowProposedTopicSet, type ProposedTopicSet } from '@/lib/app/questionnaire/scope/types';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import {
+  normaliseBinding,
+  readResolvedBinding,
+  readResolvedCost,
+  type ResolvedRunBinding,
+} from '@/lib/app/questionnaire/ai-run/resolved-binding';
+import {
   buildRoutingAnalysisInput,
   saveTopicDraft,
   type RoutingAnalysisRouteInput,
@@ -133,7 +139,20 @@ export interface DispatchRoutingAnalysisParams {
 }
 
 export type DispatchRoutingAnalysisOutcome =
-  { ok: true; result: RoutingAnalysisResult } | { ok: false; code: string; message: string };
+  | {
+      ok: true;
+      result: RoutingAnalysisResult;
+      /**
+       * The binding that actually served the call. Carried out of the dispatch because the agent
+       * row cannot supply it — the analyst ships with an empty `model` so it resolves to the
+       * reasoning tier at call time, and recording the row's blank made `AppAiRun` unable to
+       * answer "which model produced this proposal?".
+       */
+      binding: ResolvedRunBinding;
+      /** USD billed for the call, for the same reason — `null` when the dispatch did not report it. */
+      costUsd: number | null;
+    }
+  | { ok: false; code: string; message: string };
 
 /**
  * Run the analyst and validate what came back. Records a **failed** `AppAiRun` on either failure
@@ -155,8 +174,11 @@ export async function dispatchRoutingAnalysis(
       versionId,
       kind: 'routing_analysis',
       status: 'failed',
-      provider: agent.provider || 'resolved-at-runtime',
-      model: agent.model || 'resolved-at-runtime',
+      // Deliberately the sentinel, not a resolved binding: both failure paths can fire before a
+      // provider was ever reached (dispatch error) or after a response that could not be trusted,
+      // so there is no model this run can honestly claim to have used. Do not "fix" this to match
+      // the success path below.
+      ...normaliseBinding(agent.provider, agent.model),
       durationMs: Date.now() - startedAt,
       error: message,
       triggeredByUserId: adminId,
@@ -210,7 +232,12 @@ export async function dispatchRoutingAnalysis(
     return { ok: false, code: 'ROUTING_ANALYSIS_INVALID', message };
   }
 
-  return { ok: true, result: parsed.value };
+  return {
+    ok: true,
+    result: parsed.value,
+    binding: readResolvedBinding(dispatch.data),
+    costUsd: readResolvedCost(dispatch.data),
+  };
 }
 
 export interface PersistRoutingAnalysisParams {
@@ -218,9 +245,18 @@ export interface PersistRoutingAnalysisParams {
   versionId: string;
   adminId: string;
   clientIp: string;
-  agent: RoutingAnalystAgent;
   input: RoutingAnalysisRouteInput;
   result: RoutingAnalysisResult;
+  /**
+   * The binding that served the call, from {@link dispatchRoutingAnalysis}'s outcome.
+   *
+   * This replaced an `agent: RoutingAnalystAgent` field that existed only to be recorded as
+   * provenance — and recorded it wrongly, since the analyst's configured provider/model are empty
+   * by design. Nothing else here needed the agent, so it is gone rather than left unused.
+   */
+  binding: ResolvedRunBinding;
+  /** USD billed for the analyst call, recorded alongside the binding. `null` when unreported. */
+  costUsd: number | null;
   startedAt: number;
   log: RouteLogger;
   /**
@@ -250,9 +286,10 @@ export async function persistRoutingAnalysis(
     versionId,
     adminId,
     clientIp,
-    agent,
     input,
     result,
+    binding,
+    costUsd,
     startedAt,
     log,
     trigger,
@@ -277,8 +314,9 @@ export async function persistRoutingAnalysis(
     versionId,
     kind: 'routing_analysis',
     status: 'succeeded',
-    provider: agent.provider || 'resolved-at-runtime',
-    model: agent.model || 'resolved-at-runtime',
+    provider: binding.provider,
+    model: binding.model,
+    costUsd,
     outputSnapshot: result,
     durationMs: Date.now() - startedAt,
     detail: {
@@ -419,9 +457,10 @@ export async function proposeScopeDuringIngest(
       versionId,
       adminId,
       clientIp,
-      agent,
       input,
       result: outcome.result,
+      binding: outcome.binding,
+      costUsd: outcome.costUsd,
       startedAt,
       log,
       trigger: 'ingest',

@@ -167,6 +167,9 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
           summary: 'Found one conditional section gated on channel structure.',
           fromDocument: true,
         },
+        provider: 'openai',
+        model: 'gpt-5.4',
+        costUsd: 0.0042,
       },
     });
 

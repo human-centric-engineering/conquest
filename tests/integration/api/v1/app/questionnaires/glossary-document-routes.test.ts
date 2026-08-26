@@ -207,10 +207,31 @@ describe('POST …/glossary/document', () => {
     expect(upsertGlossaryDocument).not.toHaveBeenCalled();
   });
 
-  it('rejects an unsupported file type', async () => {
-    const res = await POST(uploadReq('rates.csv'), ctx(PARAMS));
+  // `.xlsx`, not `.csv`. This route guards on PARSEABLE_UPLOAD_EXTENSIONS and hands the buffer
+  // straight to `parseDocument`, which has no workbook branch and THROWS on one — so a workbook is
+  // the boundary that still matters here, and the one whose regression would turn a clean 415 into
+  // a 500. `.csv` used to sit on the wrong side of this line: the parser router has always had a
+  // `.csv` branch, but the upload allowlist never listed it, so the corpus' easiest document could
+  // not be ingested at all. Now that it can, asserting a `.csv` rejection would be pinning the bug.
+  it('rejects a workbook — this route parses directly and cannot flatten one', async () => {
+    const res = await POST(uploadReq('terms.xlsx'), ctx(PARAMS));
     expect(res.status).toBe(415);
     expect(upsertGlossaryDocument).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file type no parser handles', async () => {
+    const res = await POST(uploadReq('glossary.exe'), ctx(PARAMS));
+    expect(res.status).toBe(415);
+    expect(upsertGlossaryDocument).not.toHaveBeenCalled();
+  });
+
+  it('accepts a .csv glossary — the parser router reads one', async () => {
+    const res = await POST(
+      uploadReq('terms.csv', 'term,definition\nHigher self,The observer'),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(200);
+    expect(upsertGlossaryDocument).toHaveBeenCalled();
   });
 
   it('caps the stored text and reports the truncation', async () => {

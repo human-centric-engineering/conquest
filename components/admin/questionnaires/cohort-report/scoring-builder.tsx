@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { slugifyKey } from '@/lib/app/questionnaire/authoring/key';
+import { PARSEABLE_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 import type {
   ScoringSchemaContent,
   ScoringScale,
@@ -228,7 +229,7 @@ export function ScoringBuilder({
         <input
           ref={fileRef}
           type="file"
-          accept=".pdf,.docx,.md,.txt"
+          accept={PARSEABLE_ACCEPT_ATTR}
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];

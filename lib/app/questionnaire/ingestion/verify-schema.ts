@@ -48,9 +48,38 @@ const matrixGroupHintSchema = z.object({
 });
 export type MatrixGroupHint = z.infer<typeof matrixGroupHintSchema>;
 
+/**
+ * What the critic concluded about the question COUNT, as opposed to any individual question.
+ *
+ * Added because the critic had no way to notice the one thing it most needed to: on a run of
+ * routing-corpus doc 02 it checked all 28 extracted questions, flagged 3 sensibly, and never
+ * remarked that the source had 22 numbered items. Every per-question verdict can be `ok` while the
+ * question SET is wrong — a compound split in two, a stray heading promoted to a question, a page
+ * of the source missed entirely. Per-question faithfulness simply cannot see any of those.
+ *
+ * `uncountable` is a first-class answer and should be the common one: plenty of instruments do not
+ * number their questions, and a guessed count is worse than an honest shrug. Only a document that
+ * states its own count — through numbering, an explicit "20 questions", or a complete visible list
+ * — supports anything else.
+ */
+const coverageSchema = z.object({
+  /** The count the SOURCE claims, when it says. Null whenever `assessment` is `uncountable`. */
+  sourceQuestionCount: z.number().int().nonnegative().nullable(),
+  assessment: z.enum(['matches', 'extra_questions', 'missing_questions', 'uncountable']),
+  /** One line naming the discrepancy — which questions look invented, or which look missed. */
+  detail: z.string().optional(),
+});
+export type VerifyCoverage = z.infer<typeof coverageSchema>;
+
 export const verifyResultSchema = z.object({
   verdicts: z.array(questionVerdictSchema),
   matrixGroups: z.array(matrixGroupHintSchema).default([]),
+  /**
+   * Optional so an older verifier reply (or one that omits it) still parses — the same fail-soft
+   * posture the rest of the ingest chain uses. A missing coverage read is "not assessed", never a
+   * reason to discard verdicts that are otherwise good.
+   */
+  coverage: coverageSchema.optional(),
 });
 export type VerifyResult = z.infer<typeof verifyResultSchema>;
 

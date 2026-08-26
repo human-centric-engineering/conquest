@@ -144,6 +144,12 @@ high") rather than forcing agreement.
 - Use "likert" ONLY when the scale carries qualitative meaning — named points OR endpoint anchors. \
 If a question asks for a purely numeric rating with NO qualitative anchors at all (e.g. "rate 0–10", \
 a count, an age, a percentage), use "numeric" instead — numeric questions need no labels.
+- For "numeric", when the source states a RANGE, always carry it into "suggestedTypeConfig" as \
+integer "min" and "max" ("Rating 1-5" → {"min":1,"max":5}; "score out of 10" → {"min":0,"max":10}). \
+The bound is part of what the source said, and dropping it leaves the respondent an unbounded box \
+and the report no scale to read the answer against. Add "unit" when the source names one ("%", \
+"mg", "days"). Leave the config empty ONLY for a genuinely open quantity the source does not bound \
+(a count, an age).
 - When a question offers a fixed list of answer options — radio buttons, checkboxes (☐ / ☑ / □), \
 "select one" / "select all that apply", a lettered or numbered answer list, or a named-level \
 rubric — classify it as "single_choice" (pick exactly one) or "multi_choice" (pick several) and \
@@ -173,7 +179,12 @@ question is a SECTION-WIDE comment that should reflect the whole section's discu
 provide comments to support your scores", "Any other comments on this section?", "Anything else \
 about the above?"); otherwise "isolated" for a self-contained free-text question (e.g. "What is your \
 job title?", "Describe your biggest challenge"). When unsure, use "isolated".
-- Merge duplicate questions; split a compound question into separate ones.
+- Do NOT merge two questions into one, and do NOT split a compound question ("Who is the lead, \
+and when did they last train?") into two. One question in the document is one question here, \
+however many things it asks. Both edits are real improvements and both are somebody else's job — \
+the Clarity and Duplicates judges propose them after ingestion, where an author reviews them \
+before they land. Making them here means a 22-question document silently becomes a 28-question \
+questionnaire, and the same document ingested twice does not agree with itself.
 - Add a section to group loose questions when the document implies one.
 - Infer the questionnaire's overall goal and its intended audience.
 - Mark a question "required": true ONLY when the source explicitly flags it mandatory \
@@ -209,7 +220,7 @@ these top-level keys, using EXACTLY these field names:
       "key": "<stable unique slug>",
       "prompt": "<the question text shown to the respondent — REQUIRED>",
       "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}], "allowOther": true (only if an "Other" escape hatch was present)} — required, ≥2 objects; likert with full labels: {"min":1,"max":5,"labels":["…","…","…","…","…"]}, OR endpoint-anchored likert: {"min":1,"max":5,"minLabel":"Not at all","maxLabel":"Very much"} — one of the two is required for likert; matrix: {"rows":[{"key":"fuel_efficiency","label":"Fuel efficiency"},{"key":"reliability","label":"Reliability"}],"scale":{"min":1,"max":5,"minLabel":"Not important","maxLabel":"Essential"}} — rows (≥1, distinct keys) + a shared likert-style scale> },
+      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}], "allowOther": true (only if an "Other" escape hatch was present)} — required, ≥2 objects; likert with full labels: {"min":1,"max":5,"labels":["…","…","…","…","…"]}, OR endpoint-anchored likert: {"min":1,"max":5,"minLabel":"Not at all","maxLabel":"Very much"} — one of the two is required for likert; matrix: {"rows":[{"key":"fuel_efficiency","label":"Fuel efficiency"},{"key":"reliability","label":"Reliability"}],"scale":{"min":1,"max":5,"minLabel":"Not important","maxLabel":"Essential"}} — rows (≥1, distinct keys) + a shared likert-style scale; numeric with a bounded range: {"min":1,"max":5} (add "unit" when the source names one) — required whenever the source states a range, omit only for an unbounded quantity> },
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,

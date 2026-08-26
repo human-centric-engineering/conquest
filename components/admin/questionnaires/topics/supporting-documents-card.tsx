@@ -27,11 +27,16 @@ import {
   AuthoringError,
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
-import { MAX_SUPPLEMENTARY_DOCUMENTS } from '@/lib/app/questionnaire/constants';
+import { MAX_SUPPLEMENTARY_DOCUMENTS, UPLOAD_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 import type { SourceDocumentView } from '@/lib/app/questionnaire/ingestion/source-documents';
 
-/** File types `parseDocument` can read, plus the workbook flattener's `.xlsx`. */
-const ACCEPT = '.pdf,.docx,.md,.txt,.csv,.xlsx';
+/**
+ * File types this route accepts — it flattens workbooks, so `.xlsx` is in.
+ *
+ * Derived, not hand-written: this picker used to offer `.csv` that the server's allowlist then
+ * rejected with a 400. Both ends now read the same list.
+ */
+const ACCEPT = UPLOAD_ACCEPT_ATTR;
 
 export interface SupportingDocumentsCardProps {
   questionnaireId: string;

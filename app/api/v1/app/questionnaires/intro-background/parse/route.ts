@@ -2,7 +2,8 @@
  * Intro-background document parse endpoint (F12.2).
  *
  * POST /api/v1/app/questionnaires/intro-background/parse  (multipart: `file`)
- *   Admin-only. Extracts plain text from an uploaded document (.pdf / .docx / .md / .txt) so the
+ *   Admin-only. Extracts plain text from an uploaded document (`PARSEABLE_UPLOAD_EXTENSIONS` —
+ *   every upload format except `.xlsx`, which this route cannot flatten) so the
  *   admin can use it as the respondent intro "about this questionnaire" background. Returns the
  *   extracted text (trimmed, capped to the intro length) — it does NOT persist; the admin reviews,
  *   edits, and saves it via the config / cohort PATCH. No LLM call: a pure parse.

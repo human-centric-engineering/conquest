@@ -51,9 +51,13 @@ import {
   AUDIENCE_SENSITIVITY_LEVELS,
 } from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
+import { UPLOAD_ACCEPT_ATTR } from '@/lib/app/questionnaire/constants';
 
-/** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
-const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx';
+/**
+ * Allowed upload extensions — DERIVED from the server's list, not a copy of it. This literal
+ * used to be maintained by hand alongside six others and they drifted apart.
+ */
+const ACCEPT = UPLOAD_ACCEPT_ATTR;
 
 /**
  * Sentinel for "let the extractor infer" on the enum selects. Radix Select forbids
@@ -312,11 +316,11 @@ export function UploadQuestionnaireDialog({
             <Label htmlFor={fileInputId}>
               Source document{' '}
               <FieldHelp title="Source document">
-                A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>, or
-                <code>.xlsx</code> file (max 25 MB). The extractor reads it and builds the
-                questionnaire’s sections and questions. For a multi-tab spreadsheet the agent works
-                out which tab holds the questions and how the tabs relate — use the instructions
-                field below to steer it if needed.
+                A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>,{' '}
+                <code>.csv</code>, or <code>.xlsx</code> file (max 25 MB). The extractor reads it
+                and builds the questionnaire’s sections and questions. For a multi-tab spreadsheet
+                the agent works out which tab holds the questions and how the tabs relate — use the
+                instructions field below to steer it if needed.
               </FieldHelp>
             </Label>
             <Input

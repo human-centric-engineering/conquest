@@ -7,6 +7,7 @@
  * (`analysis-prompt.ts`) does the actual proposal work, and only runs when this check says yes.
  */
 
+import { CANDIDACY_LIMITS } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
 const SYSTEM_RULES = `You are a fast triage check for a conversational questionnaire platform. You \
@@ -51,6 +52,11 @@ given can be evidence either way — say what you found in what you were given.
 
 - When you quote the document, put the exact span in "sourceQuote". When a signal is inferred \
 rather than quoted, OMIT "sourceQuote" entirely — never invent one.
+- Keep within these limits: at most ${CANDIDACY_LIMITS.maxSignals} entries in "signals"; \
+"note" at most ${CANDIDACY_LIMITS.noteChars} characters; "sourceQuote" at most \
+${CANDIDACY_LIMITS.sourceQuoteChars} characters (quote the sentence that states the rule, not the \
+paragraph around it); "summary" at most ${CANDIDACY_LIMITS.summaryChars} characters. Pick your \
+strongest signals rather than listing every one — the limits are the reason to choose.
 - "confidence" reflects how directly the document states this, not how interesting the document is.
 - "summary" is one or two sentences: what you found, or why you found nothing.
 
