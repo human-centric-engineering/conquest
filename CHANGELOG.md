@@ -18,6 +18,20 @@ release process.
 
 ### Added
 
+- **`AppCohortMember` and `AppWaitlistSignup` are now subject-access sources**
+  (`APP_SUBJECT_DATA_SOURCES`). Both hold a name and an email address and were
+  reachable by neither an account id nor an export — a roster entry is not a
+  login, and a waitlist sign-up predates any account, so neither was visible to
+  a scan keyed on `userId`. Both are matched on the subject's address, the way
+  `AppQuestionnaireInvitation` already was. Surfaced by Sunrise 0.10.0's
+  fork-accounting rule, which asks a fork to declare a disposition for **every**
+  model in its schema rather than only the user-linked ones.
+
+- **`APP_EXCLUDED_SOURCES` is populated** — 31 rows, each with a reason a data
+  subject reads in `meta.excluded`. Three kinds, and only three: rows delivered
+  inside an exported parent, questionnaire structure an admin authored, and
+  aggregates over many respondents that are k-anonymity-gated by design.
+
 - **`APP_SUBJECT_DATA_SOURCES` (`lib/app/questionnaire/privacy/export-sources.ts`)** — ConQuest's
   subject-access manifest (GDPR Art. 15), the app-tier mirror of Sunrise's
   `SUBJECT_DATA_SOURCES`. Sunrise 0.8.0 shipped the export service and the
@@ -48,6 +62,28 @@ release process.
   dependency, and localises the swap if the storage layer ever changes.
 
 ### Changed
+
+- **BREAKING (deployment): `NEXT_PUBLIC_APP_NAME` and `NEXT_PUBLIC_LEGAL_NAME`
+  no longer do anything.** ConQuest's brand identity is now committed code in
+  `lib/app/brand.ts` (Sunrise 0.11.0 / #661). Remove both from any `.env` —
+  a boot warning names each one still set. `appBrandDescription` is newly set
+  and reaches the 404 and error pages, which previously served Sunrise's
+  starter blurb.
+
+- **`AppQuestionnaireSession` exports its child rows.** The source's `scopeNote`
+  has always told the subject that their turns, answers, scores and report "are
+  reached through the session and included with it"; the query did not include
+  them, so a subject-access bundle was missing the respondent's own words. The
+  Art. 15 exclusion reasons for those tables now depend on this being true.
+
+- **The public footer carries the attribution line again.** It was deleted in
+  this fork because it shipped as a dedicated centred row and the `(public)`
+  group also hosts the full-height respondent surfaces (`/q`, `/x`, `/m`), where
+  a second footer line is pure vertical cost. Sunrise #561 inlined it, which was
+  the whole complaint, so the local platform edit is reverted. To remove it
+  again, use the seam — `footerCopyright = false` in `lib/app/footer.ts` — which
+  also governs `ProtectedFooter`.
+
 
 - **The video-embed `frame-src` origins moved from `lib/security/headers.ts` to the
   `lib/app/csp.ts` seam.** Sunrise 0.8.0 (#450) opened the seam this fork had been patching the
