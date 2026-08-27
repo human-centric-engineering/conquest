@@ -46,6 +46,7 @@ import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/res
 import type {
   AnswerSlotPanelScope,
   PresentationMode,
+  RespondentLayout,
   ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
@@ -98,6 +99,8 @@ interface AnonymousSessionBootProps {
    * form view itself fetches client-side here (no SSR seed — the token is client-only).
    */
   presentationMode?: PresentationMode;
+  /** How the surface is ARRANGED (F-layouts); defaults to Classic downstream. */
+  respondentLayout?: RespondentLayout;
   /**
    * Answer-panel scope (F7.2) — `hidden` is the chat-only surface (no panel beside the
    * conversation, no mobile review sheet). Resolved server-side and forwarded to the workspace so
@@ -249,6 +252,7 @@ export function AnonymousSessionBoot({
   preview = false,
   inviteToken,
   presentationMode = 'both',
+  respondentLayout,
   answerPanelScope,
   reasoningPlacement,
   reasoningDwellMs,
@@ -510,6 +514,7 @@ export function AnonymousSessionBoot({
       initialInspectorTurns={state.initialInspectorTurns}
       autoStart={state.autoStart}
       presentationMode={presentationMode}
+      respondentLayout={respondentLayout}
       answerPanelScope={answerPanelScope}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}

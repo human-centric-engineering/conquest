@@ -298,6 +298,10 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
 
     // Every config column, with its storage type.
     expect(getField(model, 'selectionStrategy').type).toBe('String');
+    // F-layouts. A String column with an app-layer enum, per house style (never a Prisma enum).
+    // Its 'classic' default is asserted against the migration SQL, since the DMMF omits defaults.
+    expect(getField(model, 'respondentLayout').type).toBe('String');
+    expect(getField(model, 'respondentChrome').type).toBe('String');
     expect(getField(model, 'minQuestionsAnswered').type).toBe('Int');
     expect(getField(model, 'coverageThreshold').type).toBe('Float');
     expect(getField(model, 'costBudgetUsd').type).toBe('Float');
@@ -1271,5 +1275,62 @@ describe('app_respondent_profile_snapshot datamodel + migration SQL (F8.3)', () 
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');
     expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+/**
+ * F-layouts: how the respondent surface is arranged, per version.
+ *
+ * The default is the whole safety story for this feature — there is no backfill, so every
+ * questionnaire that existed before this column keeps its appearance purely because the column
+ * defaults to 'classic'. Asserted against the SQL rather than the DMMF, which omits defaults.
+ */
+describe('app_questionnaire_config respondentLayout migration', () => {
+  const sql = readMigrationSql('_app_questionnaire_respondent_layout');
+
+  it('adds the column defaulting to classic, so no existing version changes shape', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_config" ADD COLUMN\s+"respondentLayout" TEXT NOT NULL DEFAULT 'classic'/
+    );
+  });
+
+  it('carries no phantom pgvector DDL', () => {
+    // `migrate dev` re-emitted five DROP INDEX and a DROP DEFAULT for the raw-SQL vector indexes it
+    // cannot see. Applying those destroys the knowledge-base and semantic-matching indexes; they
+    // were stripped by hand, and this fails if a regeneration ever leaks them back in.
+    const executable = sql
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n');
+    expect(executable).not.toContain('DROP INDEX');
+    expect(executable).not.toContain('DROP DEFAULT');
+  });
+});
+
+/**
+ * F-chrome: how much of ConQuest shows AROUND the respondent surface, per version.
+ *
+ * Same safety story as the layout, and the same reason to assert the SQL rather than the DMMF:
+ * there is no backfill, so every questionnaire that existed before this column keeps its header and
+ * footer purely because the column defaults to 'full'.
+ */
+describe('app_questionnaire_config respondentChrome migration', () => {
+  const sql = readMigrationSql('_app_questionnaire_respondent_chrome');
+
+  it('adds the column defaulting to full, so no existing version loses its chrome', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_config" ADD COLUMN\s+"respondentChrome" TEXT NOT NULL DEFAULT 'full'/
+    );
+  });
+
+  it('carries no phantom pgvector DDL', () => {
+    // `migrate dev --create-only` re-emitted the same five DROP INDEX and the DROP DEFAULT it emits
+    // for every app migration. Stripped by hand; this fails if a regeneration leaks them back in.
+    const executable = sql
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n');
+    expect(executable).not.toContain('DROP INDEX');
+    expect(executable).not.toContain('DROP DEFAULT');
   });
 });

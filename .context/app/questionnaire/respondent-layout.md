@@ -10,20 +10,25 @@ them alone makes the surface worse rather than better.
 
 ## Where it's wired
 
-| Concern              | Location                                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------------------- |
-| Shell + split        | `lib/app/questionnaire/layout.ts` (`RESPONDENT_SHELL`, `RESPONDENT_SPLIT`)                               |
-| Host pages           | `app/(public)/q/[versionId]`, `app/(public)/x/[publicRef]`, `app/(protected)/questionnaires/[sessionId]` |
-| Split application    | `components/app/questionnaire/session-workspace.tsx` (`chatSurface`)                                     |
-| Reading measure      | `app/globals.css` → `.cq-chat-measure`, applied in `chat/questionnaire-chat.tsx`                         |
-| Viewport text factor | `app/globals.css` → `.cq-respondent-shell` media queries                                                 |
-| The reference width  | `components/layouts/app-header.tsx`, `public-footer.tsx` (`container mx-auto px-4`)                      |
+| Concern               | Location                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Shell + split         | `lib/app/questionnaire/layout/index.ts` (`RESPONDENT_SHELL`, `RESPONDENT_SPLIT`)                                                                 |
+| Host pages            | `app/(respondent)/q/[versionId]`, `app/(respondent)/x/[publicRef]`, `app/(respondent)/m/[joinRef]`, `app/(protected)/questionnaires/[sessionId]` |
+| Who applies the shell | `components/app/questionnaire/chrome/respondent-chrome.tsx` (the three standalone pages), the page itself (signed-in)                            |
+| Split application     | `components/app/questionnaire/session-workspace.tsx` (`chatSurface`)                                                                             |
+| Reading measure       | `app/globals.css` → `.cq-chat-measure`, applied in `chat/questionnaire-chat.tsx`                                                                 |
+| Viewport text factor  | `app/globals.css` → `.cq-respondent-shell` media queries                                                                                         |
+| The reference width   | `components/layouts/app-header.tsx`, `public-footer.tsx` (`container mx-auto px-4`)                                                              |
 
 ## The three moves
 
 **1. The shell is the header's container.** `RESPONDENT_SHELL` is `container mx-auto` —
 the exact geometry the site header and footer use — and each host page adds the matching
 `px-4` (the signed-in surface inherits it from the protected layout's own `container`).
+Since the chrome became a setting, `RespondentChrome` applies the shell for the three
+standalone pages rather than each of them remembering to — which is how `/m` got it back
+after quietly running on its own `max-w-4xl` and losing the text-scale ladder. See
+[respondent-chrome.md](./respondent-chrome.md).
 So the conversation's left and right edges line up with the logo and the account button
 above it, and with the footer links below it, at every breakpoint.
 

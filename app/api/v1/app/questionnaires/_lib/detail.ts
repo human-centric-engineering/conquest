@@ -26,6 +26,8 @@ import {
   ACCESS_MODES,
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
+  RESPONDENT_CHROMES,
+  RESPONDENT_LAYOUTS,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   narrowQuestionFidelity,
@@ -39,6 +41,8 @@ import {
   type ContradictionMode,
   type FieldProvenance,
   type PresentationMode,
+  type RespondentChrome,
+  type RespondentLayout,
   type ProfileFieldConfig,
   type ReasoningPlacement,
   type SelectionStrategy,
@@ -128,6 +132,8 @@ export const CONFIG_SELECT = {
   captureMode: true,
   answerSlotPanelScope: true,
   presentationMode: true,
+  respondentLayout: true,
+  respondentChrome: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
   showProgressPercentText: true,
@@ -183,6 +189,8 @@ type ConfigRow = {
   captureMode: string;
   answerSlotPanelScope: string;
   presentationMode: string;
+  respondentLayout: string;
+  respondentChrome: string;
   inlineCorrectionEnabled: boolean;
   sessionResumeEnabled: boolean;
   showProgressPercentText: boolean;
@@ -273,6 +281,32 @@ function asPresentationMode(value: string): PresentationMode {
     : DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode;
 }
 
+/**
+ * Narrow a stored `respondentLayout` to the enum (default when unknown).
+ *
+ * The unknown branch is the one that matters: a version saved by a build that had a layout this
+ * one does not (a rollback, a fork that dropped one) must render Classic rather than a blank
+ * surface. `resolveLayout` repeats the same fallback at the component boundary.
+ */
+function asRespondentLayout(value: string): RespondentLayout {
+  return (RESPONDENT_LAYOUTS as readonly string[]).includes(value)
+    ? (value as RespondentLayout)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout;
+}
+
+/**
+ * Narrow a stored `respondentChrome` to the enum (default when unknown).
+ *
+ * Same asymmetry as the layout: the PATCH validator rejects an unknown value because an admin
+ * sending one is a caller bug, while every read accepts it and falls back, because a stored unknown
+ * value is a rollback artefact a live respondent has to survive.
+ */
+function asRespondentChrome(value: string): RespondentChrome {
+  return (RESPONDENT_CHROMES as readonly string[]).includes(value)
+    ? (value as RespondentChrome)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.respondentChrome;
+}
+
 /** Narrow a stored `accessMode` to the enum (default when unknown). */
 function asAccessMode(value: string): AccessMode {
   return (ACCESS_MODES as readonly string[]).includes(value)
@@ -328,6 +362,8 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     captureMode: asCaptureMode(row.captureMode),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
+    respondentLayout: asRespondentLayout(row.respondentLayout),
+    respondentChrome: asRespondentChrome(row.respondentChrome),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     sessionResumeEnabled: row.sessionResumeEnabled,
     showProgressPercentText: row.showProgressPercentText,

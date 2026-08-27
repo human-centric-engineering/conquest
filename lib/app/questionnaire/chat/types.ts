@@ -96,3 +96,24 @@ export const BLOCKING_STATUSES: readonly QuestionnaireChatStatus[] = [
   'completed',
   'expired',
 ];
+
+/**
+ * Statuses after which no further input is possible at all — {@link BLOCKING_STATUSES} minus the
+ * merely-transient `streaming`.
+ *
+ * Declared here rather than inline because two places now decide on it and they must not drift:
+ * the conversation context (which reports `isTerminal` to both halves of the chat) and
+ * `SessionWorkspace` (which decides whether to build a composer node for the layout at all). A
+ * terminal session that still shows a composer offers the respondent an input that cannot send.
+ */
+export const TERMINAL_STATUSES: readonly QuestionnaireChatStatus[] = [
+  'cost_capped',
+  'not_active',
+  'completed',
+  'expired',
+];
+
+/** True when the session has reached a state no further respondent input can change. */
+export function isTerminalStatus(status: QuestionnaireChatStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}

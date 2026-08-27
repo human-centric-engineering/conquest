@@ -291,7 +291,11 @@ export function MeetingParticipantBoot({
   }
 
   const body = (
-    <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl flex-col gap-3 px-4 py-4">
+    // Height and width both come from `RespondentChrome` above (`/m/[joinRef]`), like every other
+    // respondent surface. This used to carry `h-[calc(100vh-8rem)] max-w-4xl mx-auto` — its own
+    // guess at the chrome's height, and a width nobody else used, which is how the participant
+    // surface silently lost the viewport text-scale ladder that keys off `cq-respondent-shell`.
+    <div className="flex h-full min-h-0 flex-col gap-3 px-4 py-4">
       {/* The room's clock, above whatever they are doing. During grace the instruction changes —
           "30 seconds to finish and send" is a different thing from "30 seconds left". */}
       {answering && live?.currentStepTitle && (
@@ -333,6 +337,7 @@ export function MeetingParticipantBoot({
               voiceInputEnabled={activeSurface?.voiceInputEnabled}
               attachmentInputEnabled={activeSurface?.attachmentInputEnabled}
               presentationMode={activeSurface?.presentationMode}
+              respondentLayout={activeSurface?.respondentLayout}
               answerPanelScope={activeSurface?.answerPanelScope}
               reasoningPlacement={activeSurface?.reasoningPlacement}
               reasoningDwellMs={activeSurface?.reasoningDwellMs}

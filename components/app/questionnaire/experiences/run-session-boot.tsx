@@ -34,6 +34,7 @@ import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/res
 import type {
   AnswerSlotPanelScope,
   PresentationMode,
+  RespondentLayout,
   ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
 
@@ -55,6 +56,8 @@ export interface RunSessionBootProps {
   attachmentInputEnabled?: boolean;
   anonymous?: boolean;
   presentationMode?: PresentationMode;
+  /** How the surface is ARRANGED (F-layouts); defaults to Classic downstream. */
+  respondentLayout?: RespondentLayout;
   /**
    * Answer-panel scope (F7.2) — `hidden` is the chat-only surface (no panel beside the
    * conversation, no mobile review sheet). Resolved server-side and forwarded to the workspace so
@@ -91,6 +94,7 @@ export function RunSessionBoot({
   attachmentInputEnabled = false,
   anonymous = false,
   presentationMode,
+  respondentLayout,
   answerPanelScope,
   reasoningPlacement,
   reasoningDwellMs,
@@ -157,6 +161,7 @@ export function RunSessionBoot({
       initialInspectorTurns={state.initialInspectorTurns}
       autoStart={state.autoStart}
       presentationMode={presentationMode}
+      respondentLayout={respondentLayout}
       answerPanelScope={answerPanelScope}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}

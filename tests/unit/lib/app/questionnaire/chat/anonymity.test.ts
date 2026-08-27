@@ -32,6 +32,8 @@ import {
   resolveVoiceEnabledForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveRespondentLayoutForVersion,
+  resolveRespondentChromeForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -54,6 +56,100 @@ function findUniqueArg(): {
 } {
   return vi.mocked(prisma.appQuestionnaireVersion.findUnique).mock.calls[0]?.[0] as never;
 }
+
+describe('resolveRespondentLayoutForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored layout', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentLayout: 'focus' },
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('focus');
+  });
+
+  it('falls back to classic when there is no config row', async () => {
+    // A version that has never been saved renders exactly as it always did.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('classic');
+  });
+
+  it('falls back to classic for a layout this build does not know', async () => {
+    // The rollback case, and the reason this boundary is forgiving where the PATCH validator is
+    // strict: a row naming a layout that no longer exists must render Classic, not nothing.
+    // The example name has to be one no build registers — it was 'broadsheet' until Broadsheet
+    // shipped, at which point this quietly started asserting that a real layout resolves to Classic.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentLayout: 'kiosk' },
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('classic');
+  });
+
+  it('selects the column it reads', async () => {
+    // Without this the resolver would silently return 'classic' forever, whatever the admin chose.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await resolveRespondentLayoutForVersion('ver-abc');
+
+    expect(findUniqueArg().select.config.select).toHaveProperty('respondentLayout', true);
+  });
+});
+
+describe('resolveRespondentChromeForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored chrome', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentChrome: 'white_label' },
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('white_label');
+  });
+
+  it('falls back to full when there is no config row', async () => {
+    // A version saved before the column existed keeps the header and footer it has always had.
+    // There is no backfill, so this fallback IS the reason nothing changed appearance.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('full');
+  });
+
+  it('falls back to full for a chrome mode this build does not know', async () => {
+    // The rollback case. A build that shipped a fourth mode and was rolled back leaves rows naming
+    // it; a respondent mid-questionnaire must not find the page around them stripped bare. Same
+    // asymmetry as the layout: forgiving here, strict at the PATCH validator.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentChrome: 'kiosk_mode' },
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('full');
+  });
+
+  it('selects the column it reads', async () => {
+    // Without this the resolver returns 'full' forever, whatever the admin chose — and a
+    // white-labelled questionnaire would quietly keep showing our header to the client's
+    // respondents, which is the one failure this feature exists to prevent.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await resolveRespondentChromeForVersion('ver-abc');
+
+    expect(findUniqueArg().select.config.select).toHaveProperty('respondentChrome', true);
+  });
+});
 
 describe('resolveAnonymousForVersion', () => {
   beforeEach(() => {

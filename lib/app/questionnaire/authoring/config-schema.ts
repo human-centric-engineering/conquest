@@ -46,6 +46,8 @@ import {
   PERSONA_KEY_MAX_LENGTH,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
+  RESPONDENT_CHROMES,
+  RESPONDENT_LAYOUTS,
   MAX_REPORT_RESEARCH_RESULTS,
   MAX_REPORT_RESEARCH_ROUNDS,
   PROFILE_FIELD_TYPES,
@@ -475,6 +477,10 @@ export const updateConfigSchema = z
     // How the respondent completes the session: chat (conversation), form (raw sectioned
     // form), or both (toggle between them). Defaults to chat for existing versions.
     presentationMode: z.enum(PRESENTATION_MODES).optional(),
+    // How the respondent surface is ARRANGED (F-layouts) — orthogonal to presentationMode.
+    // Defaults to classic, which is what every questionnaire has always looked like.
+    respondentLayout: z.enum(RESPONDENT_LAYOUTS).optional(),
+    respondentChrome: z.enum(RESPONDENT_CHROMES).optional(),
     // Inline answer correction (Variant B): let respondents fix a just-captured answer inline
     // (in the chat + on the answer panel) instead of sending a fresh turn. On by default.
     inlineCorrectionEnabled: z.boolean().optional(),

@@ -116,6 +116,13 @@ export interface AnswerSlotPanelProps {
    */
   hideNativeScrollbar?: boolean;
   /**
+   * Something is overlaid on the panel's top-right corner — inset the header's own actions so the
+   * two do not stack. The answers DRAWER puts its close button there, and the header's "How this
+   * works" help icon landed underneath it: two round targets in the same 32px of corner, with the
+   * one you want to hit behind the one you do not.
+   */
+  headerInsetEnd?: boolean;
+  /**
    * Inline answer correction (Variant B): when provided, an "Edit" affordance on each answered row
    * opens the shared {@link InlineAnswerEditor} so the respondent can fix a captured answer in place.
    * `undefined` hides it (toggle off / read-only / blocked session).
@@ -124,7 +131,7 @@ export interface AnswerSlotPanelProps {
   className?: string;
 }
 
-function ProgressHeading({ view }: { view: AnswerPanelView }) {
+function ProgressHeading({ view, insetEnd }: { view: AnswerPanelView; insetEnd?: boolean }) {
   const dataSlotMode = view.dataSlotGroups !== undefined;
   // How many context slots we've actually captured. Deliberately NOT a "% complete" anymore: the
   // single completion figure lives in the labelled "Through the questionnaire" bar up top. Showing a
@@ -169,7 +176,9 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
     >
       {/* Title row: the heading on the left, with the "How this works" explainer tucked into a compact
           top-right modal link so it never costs vertical space in the header. */}
-      <div className="flex items-start justify-between gap-2">
+      {/* `pr-9` when something is overlaid on the corner (the drawer's close button), so the help
+          icon steps aside instead of sitting underneath it. */}
+      <div className={cn('flex items-start justify-between gap-2', insetEnd && 'pr-9')}>
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <span
             aria-hidden
@@ -411,6 +420,7 @@ export function AnswerSlotPanel({
   onRefine,
   newlyFilledKeys,
   hideNativeScrollbar = false,
+  headerInsetEnd = false,
   correction,
   className,
 }: AnswerSlotPanelProps) {
@@ -639,7 +649,7 @@ export function AnswerSlotPanel({
         </div>
       ) : (
         <>
-          <ProgressHeading view={view} />
+          <ProgressHeading view={view} insetEnd={headerInsetEnd} />
           {/* Quiet announcement of navigation jumps for screen readers. */}
           <p className="sr-only" role="status" aria-live="polite">
             {announce}

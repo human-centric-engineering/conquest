@@ -13,12 +13,13 @@
 
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, cleanup } from '@testing-library/react';
 import { useRouter } from 'next/navigation';
 import { createMockRouter } from '@/tests/types/mocks';
 
 import type { PanelSlotView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
 import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
+import type { RespondentLayout } from '@/lib/app/questionnaire/types';
 
 const sendMessage = vi.fn();
 const applyStatus = vi.fn();
@@ -93,9 +94,27 @@ vi.mock('@/components/app/questionnaire/persona/interviewer-switcher', () => ({
 
 // Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap. The chat
 // stub surfaces `readOnly` so the read-only-mode tests can assert it's threaded through.
+// The read-only takeover still renders the conversation as one assembled component.
 vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
   QuestionnaireChat: ({ readOnly }: { readOnly?: boolean }) => (
     <div data-testid="chat" data-read-only={String(Boolean(readOnly))} />
+  ),
+}));
+// The active surface builds the conversation as independently-placeable slots. Stubbed separately
+// so the tests can see which of them the workspace actually handed to the layout — the composer is
+// `null` on a terminal session and the history is `null` until there IS one, and both of those are
+// decisions made here rather than inside the components.
+vi.mock('@/components/app/questionnaire/chat/chat-history', () => ({
+  ChatHistory: () => <div data-testid="chat-history" />,
+}));
+vi.mock('@/components/app/questionnaire/chat/current-exchange', () => ({
+  CurrentExchange: () => <div data-testid="chat" />,
+}));
+vi.mock('@/components/app/questionnaire/chat/chat-composer', () => ({
+  // `fillHeight` is surfaced because deriving it from the layout's `placements.composer.fills` is
+  // the CONTAINER's job — a layout places a node it did not build and cannot style its insides.
+  ChatComposer: ({ fillHeight }: { fillHeight?: boolean }) => (
+    <div data-testid="composer" data-fill-height={String(Boolean(fillHeight))} />
   ),
 }));
 // Lifecycle-bar stub surfaces the Pause/Resume handlers as buttons so the test can verify
@@ -268,13 +287,18 @@ vi.mock('@/components/app/questionnaire/panel/answer-review-drawer', () => ({
     open,
     onRevisit,
     onRefine,
+    panelReturnsAtLg,
   }: {
     open: boolean;
     onRevisit: (slot: PanelSlotView) => void;
     onRefine?: (slot: DataSlotPanelSlot) => void;
+    panelReturnsAtLg?: boolean;
   }) =>
     open ? (
-      <div role="dialog">
+      // `panelReturnsAtLg` is surfaced because the CONTAINER's job is to derive it from the
+      // layout's placement — the same reading that drives the trigger's own `lg:hidden`. What the
+      // drawer then does with it is answer-review-drawer.test.tsx's business.
+      <div role="dialog" data-panel-returns-at-lg={String(Boolean(panelReturnsAtLg))}>
         <div data-testid="panel">
           <button type="button" onClick={() => onRevisit(SLOT)}>
             revisit
@@ -356,6 +380,10 @@ function setup(
   lifecycleOver: Record<string, unknown> = {}
 ) {
   streamHook.mockReturnValue({
+    // `turns` is not optional on the real hook, and the conversation provider the workspace now
+    // mounts reads it on mount (it seeds the reveal queue). An empty transcript is the honest
+    // default for a session that has not started.
+    turns: [],
     canSend: true,
     status: 'idle',
     sendMessage,
@@ -395,7 +423,14 @@ beforeEach(() => {
   // size leaks into the next case.
   window.localStorage.clear();
   // Sensible defaults so a render in any mode doesn't crash; mode tests override as needed.
-  streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, kickoff, applyStatus });
+  streamHook.mockReturnValue({
+    turns: [],
+    canSend: true,
+    status: 'idle',
+    sendMessage,
+    kickoff,
+    applyStatus,
+  });
   panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
   lifecycleHook.mockReturnValue(lifecycleReturn());
   formHook.mockReturnValue(formReturn());
@@ -438,6 +473,7 @@ describe('SessionWorkspace', () => {
 
   it('fires the kickoff exactly once on mount when autoStart is set', () => {
     streamHook.mockReturnValue({
+      turns: [],
       canSend: true,
       status: 'idle',
       sendMessage,
@@ -500,6 +536,7 @@ describe('SessionWorkspace', () => {
 
     it('lands on the Intro surface and DEFERS the kickoff while it shows', () => {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -517,6 +554,7 @@ describe('SessionWorkspace', () => {
 
     it('fires the kickoff once the respondent leaves the intro', () => {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -533,6 +571,7 @@ describe('SessionWorkspace', () => {
 
     it('on a resume (autoStart off) keeps the Intro tab but lands on the conversation, no kickoff', () => {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -548,6 +587,7 @@ describe('SessionWorkspace', () => {
 
     it('weaves an Intro toggle into a chat-only session (no form) and defers the kickoff', () => {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -582,6 +622,7 @@ describe('SessionWorkspace', () => {
 
     const setStreamIdle = () =>
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -741,7 +782,13 @@ describe('SessionWorkspace', () => {
   });
 
   it('threads the session id and access token into all three hooks', () => {
-    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      applyStatus,
+    });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
     lifecycleHook.mockReturnValue(lifecycleReturn());
     render(<SessionWorkspace sessionId="s1" accessToken="tok-9" />);
@@ -752,7 +799,13 @@ describe('SessionWorkspace', () => {
   });
 
   it('seeds useAnswerPanel with the SSR-resolved initialPanel view', () => {
-    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      applyStatus,
+    });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
     lifecycleHook.mockReturnValue(lifecycleReturn());
     const seed = {
@@ -768,7 +821,13 @@ describe('SessionWorkspace', () => {
   });
 
   it('seeds useSessionLifecycle with the SSR-resolved initialStatusView', () => {
-    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      applyStatus,
+    });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
     lifecycleHook.mockReturnValue(lifecycleReturn());
     const statusSeed = {
@@ -794,7 +853,13 @@ describe('SessionWorkspace', () => {
   });
 
   it('seeds the stream hook with the SSR-resolved initialStatus', () => {
-    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      applyStatus,
+    });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
     lifecycleHook.mockReturnValue(lifecycleReturn());
     render(<SessionWorkspace sessionId="s1" initialStatus="not_active" />);
@@ -840,6 +905,7 @@ describe('SessionWorkspace', () => {
       progressPercent: 0,
     };
     streamHook.mockReturnValue({
+      turns: [],
       canSend: true,
       status: 'idle',
       sendMessage,
@@ -1045,7 +1111,13 @@ describe('SessionWorkspace', () => {
     });
 
     it('shows the conversation (not the completion screen) for a completed session', () => {
-      streamHook.mockReturnValue({ canSend: false, status: 'completed', sendMessage, applyStatus });
+      streamHook.mockReturnValue({
+        turns: [],
+        canSend: false,
+        status: 'completed',
+        sendMessage,
+        applyStatus,
+      });
       render(<SessionWorkspace sessionId="s1" readOnly />);
       expect(screen.getByTestId('chat')).toBeInTheDocument();
       expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
@@ -1148,6 +1220,80 @@ describe('SessionWorkspace', () => {
       totalCount: 8,
     };
     const dataSlotView = { ...questionView, dataSlotGroups: [], progressPercent: 40 };
+
+    /**
+     * Drive the `(min-width: 1024px)` listener the review-sheet auto-close registers.
+     *
+     * happy-dom has no real viewport, so the media query is stubbed and its `change` listeners are
+     * captured — firing them is how a tablet rotating into landscape, or a window dragged past
+     * 1024px, is reproduced here.
+     */
+    /** `setup()` always renders the default layout, and these two tests turn on which one it is. */
+    function renderWithLayoutAndPanel(layout: RespondentLayout, view: Record<string, unknown>) {
+      streamHook.mockReturnValue({
+        turns: [],
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view, loading: false, error: false, refetch });
+      // The lifecycle view is a different shape from the panel's (`completion.answeredCount`), so
+      // it keeps its own default rather than being handed the panel fixture.
+      lifecycleHook.mockReturnValue(lifecycleReturn());
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />);
+    }
+
+    function stubViewport(matches: boolean) {
+      const listeners: Array<() => void> = [];
+      const mq = {
+        matches,
+        addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+        removeEventListener: vi.fn(),
+      };
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn(() => mq)
+      );
+      return {
+        widen: () => {
+          mq.matches = true;
+          for (const fn of listeners) fn();
+        },
+      };
+    }
+
+    it('retires the sheet at lg under Classic, where the panel takes over', () => {
+      // The sheet is the narrow twin of the side panel. Once the panel is back on screen, a sheet
+      // still open over it is two copies of the same thing.
+      const viewport = stubViewport(false);
+      renderWithLayoutAndPanel('classic', questionView);
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      act(() => viewport.widen());
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      vi.unstubAllGlobals();
+    });
+
+    it('does NOT retire the sheet at lg in a layout that has no panel', () => {
+      // The bug this guards. Focus, Broadsheet and Horizon all omit `answersPanel` and keep the
+      // review affordance at every width — the sheet becomes a side drawer rather than retiring.
+      // Closing it there takes away the ONLY route to the captured answers: a respondent opens
+      // their answers on a tablet in portrait, rotates to landscape, and watches them vanish
+      // mid-read, with nothing behind them.
+      const viewport = stubViewport(false);
+      renderWithLayoutAndPanel('focus', questionView);
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      act(() => viewport.widen());
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      vi.unstubAllGlobals();
+    });
 
     it('renders a mobile-only trigger (lg:hidden) in chat mode', () => {
       setup({}, { view: questionView });
@@ -1326,6 +1472,7 @@ describe('SessionWorkspace', () => {
     // the exact same callback handed to StitchedContinuation, so one route is enough to pin it.
     function renderCompletedLeg(experienceOver: Record<string, unknown>, accessToken?: string) {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: false,
         status: 'completed',
         sendMessage,
@@ -1413,6 +1560,7 @@ describe('SessionWorkspace', () => {
 
     function renderWithChip(switcher: 'indicator' | 'both' = 'indicator', accessToken?: string) {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -1560,6 +1708,7 @@ describe('SessionWorkspace', () => {
   describe('a held reconciliation probe (onHeld)', () => {
     function renderWithOnHeld(appendAgentTurn = vi.fn()) {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -1629,6 +1778,7 @@ describe('SessionWorkspace', () => {
     function renderHeldEarly(lifecycleOver: Record<string, unknown> = {}) {
       const appendAgentTurn = vi.fn();
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -1692,6 +1842,7 @@ describe('SessionWorkspace', () => {
 
     it('advances off the intro to the first real surface and releases the deferred kickoff', () => {
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -1723,6 +1874,7 @@ describe('SessionWorkspace', () => {
         satisfied: false,
       };
       streamHook.mockReturnValue({
+        turns: [],
         canSend: true,
         status: 'idle',
         sendMessage,
@@ -1751,5 +1903,216 @@ describe('SessionWorkspace', () => {
       expect(screen.getByRole('tabpanel', { name: 'Details' })).not.toHaveAttribute('inert');
       expect(kickoff).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * F-layouts: the workspace hands the parts to the chosen arrangement.
+ *
+ * These assert the ONE behaviour that distinguishes "relocated" from "dropped", which is the
+ * promise the whole layout feature is sold on. Focus takes the answer panel off screen, so the
+ * captured answers have to remain reachable by the only route left — the review sheet — at every
+ * width, not just below `lg` where Classic hides its trigger.
+ *
+ * The arrangement itself (grids, carousel mechanics) is asserted in the layout suite; what is
+ * under test here is the container reading each layout's placement declaration instead of
+ * re-deciding, which is what stops the two drifting apart.
+ */
+describe('respondent layout', () => {
+  function renderWithLayout(layout: RespondentLayout) {
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    return render(
+      <SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />
+    );
+  }
+
+  it('renders the answer panel under Classic', () => {
+    renderWithLayout('classic');
+    expect(screen.queryByTestId('panel')).not.toBeNull();
+  });
+
+  it('does not render the answer panel under Focus', () => {
+    // Focus declares `answersPanel` omitted, so the container builds no node at all rather than
+    // handing the layout one to hide — a hidden panel would still fetch and still be in the a11y
+    // tree.
+    renderWithLayout('focus');
+    expect(screen.queryByTestId('panel')).toBeNull();
+  });
+
+  it('keeps the review trigger at every width under Focus', () => {
+    // With no panel on screen, this button is the ONLY route to the captured answers. Classic's
+    // `lg:hidden` here would strand them on a desktop.
+    renderWithLayout('focus');
+    const trigger = screen.getByRole('button', { name: /Review answers/ });
+    expect(trigger.className).not.toContain('lg:hidden');
+  });
+
+  it('hides the review trigger at lg under Classic, where the panel returns', () => {
+    renderWithLayout('classic');
+    const trigger = screen.getByRole('button', { name: /Review answers/ });
+    expect(trigger.className).toContain('lg:hidden');
+  });
+
+  it.each(['focus', 'broadsheet'] as const)(
+    'reaches the captured answers through the sheet under %s, so nothing is lost',
+    (layout) => {
+      // The actual promise, end to end: no panel on screen, but the answers are one tap away. Driven
+      // through the trigger rather than asserting the drawer is mounted, because a drawer that
+      // renders but cannot be opened would satisfy the weaker check and strand the respondent.
+      renderWithLayout(layout);
+      expect(screen.queryByRole('dialog')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: /Review answers/ }));
+
+      const sheet = screen.queryByRole('dialog');
+      expect(sheet).not.toBeNull();
+      // ...and the container must tell it not to retire at `lg`. This is the part the click alone
+      // could not check: jsdom applies no media queries, so a sheet that hides itself on a desktop
+      // opens perfectly here while showing the real respondent a dimmed page and nothing else.
+      // That shipped once, behind exactly this passing click.
+      expect(sheet).toHaveAttribute('data-panel-returns-at-lg', 'false');
+    }
+  );
+
+  it('retires the sheet at lg under Classic, where the panel takes over', () => {
+    // The other half of the same wiring: the container reads ONE placement for both the trigger's
+    // `lg:hidden` and the sheet's, so the pair cannot disagree about whether review has a home at
+    // `lg`. They disagreed once, and the sheet was the half that lost.
+    renderWithLayout('classic');
+    fireEvent.click(screen.getByRole('button', { name: /Review answers/ }));
+    expect(screen.queryByRole('dialog')).toHaveAttribute('data-panel-returns-at-lg', 'true');
+  });
+
+  it('falls back to Classic when the stored layout is unrecognised', () => {
+    // A rollback leaves rows naming layouts this build has never heard of. The surface must render
+    // — and render CLASSIC, which is why the assertion is on the answer panel: it is the one part
+    // only Classic places on screen. The example name must therefore be one no build registers.
+    streamHook.mockReturnValue({
+      turns: [],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(
+      <SessionWorkspace
+        sessionId="s1"
+        presentationMode="chat"
+        respondentLayout={'kiosk' as never}
+      />
+    );
+    expect(screen.queryByTestId('panel')).not.toBeNull();
+  });
+
+  it('does not render the answer panel under Broadsheet either — the margin holds the composer', () => {
+    // Same outcome as Focus, different reason (see the registry's `because`): there is one margin
+    // and the answer box is in it. The container reads the placement, so it builds no panel node.
+    renderWithLayout('broadsheet');
+    expect(screen.queryByTestId('panel')).toBeNull();
+    expect(screen.getByRole('button', { name: /Review answers/ }).className).not.toContain(
+      'lg:hidden'
+    );
+  });
+
+  it('hands every layout a composer while the session can still take input', () => {
+    for (const layout of ['classic', 'focus', 'broadsheet'] as const) {
+      const { unmount } = renderWithLayout(layout);
+      expect(screen.queryByTestId('composer'), `${layout}`).not.toBeNull();
+      unmount();
+    }
+  });
+
+  it('gives the composer the whole margin under Broadsheet, and only there', () => {
+    // Broadsheet's margin is a full-height column with nothing else in it, so the answer box takes
+    // the rest of it — a three-line box adrift in a tall empty rail says "jot something down", and
+    // a document-shaped layout exists for answers that run long. The stacked layouts keep the
+    // content-sized box that grows with what is typed.
+    renderWithLayout('broadsheet');
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-fill-height', 'true');
+    cleanup();
+
+    for (const layout of ['classic', 'focus', 'horizon'] as const) {
+      renderWithLayout(layout);
+      expect(screen.getByTestId('composer'), layout).toHaveAttribute('data-fill-height', 'false');
+      cleanup();
+    }
+  });
+
+  it('hands the layout NO history until there is one', () => {
+    // `null` rather than an empty node, because a layout that puts the history behind a gesture
+    // (Horizon) must not offer the gesture when it would open onto nothing. A fresh session's
+    // opening burst is all current exchange: a greeting and the first question, with no respondent
+    // message before them.
+    streamHook.mockReturnValue({
+      turns: [
+        { role: 'assistant', content: 'Welcome.' },
+        { role: 'assistant', content: 'What brought you here?' },
+      ],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+    expect(screen.queryByTestId('chat-history')).toBeNull();
+    cleanup();
+
+    // ...and hands one over the moment the respondent has said something.
+    streamHook.mockReturnValue({
+      turns: [
+        { role: 'assistant', content: 'Welcome.' },
+        { role: 'user', content: 'I run a bakery.' },
+        { role: 'assistant', content: 'What made you start?' },
+      ],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+    expect(screen.getByTestId('chat-history')).toBeInTheDocument();
+  });
+
+  it('hands every layout NO composer once the session is terminal', () => {
+    // Decided in the container, not inside the composer, so a layout receives a real `null` and can
+    // leave out the frame around it — a bordered rail wrapping an invisible box, or a hairline seam
+    // under nothing, is what the alternative looks like.
+    for (const layout of ['classic', 'focus', 'broadsheet', 'horizon'] as const) {
+      streamHook.mockReturnValue({
+        turns: [],
+        canSend: false,
+        // A capped session, not a completed one: `completed` takes the completion-screen takeover
+        // before any layout renders, so it could never exercise this. Capped is terminal for input
+        // and still hands the respondent their conversation.
+        status: 'cost_capped',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(lifecycleReturn());
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />);
+      expect(screen.queryByTestId('chat'), `${layout} lost the conversation`).not.toBeNull();
+      expect(screen.queryByTestId('composer'), `${layout} kept a composer`).toBeNull();
+      cleanup();
+    }
   });
 });

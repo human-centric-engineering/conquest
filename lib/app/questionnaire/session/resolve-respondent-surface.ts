@@ -30,6 +30,7 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
+  RESPONDENT_LAYOUTS,
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
 import type { RespondentSurfaceConfig } from '@/lib/app/questionnaire/session/respondent-surface';
@@ -112,6 +113,11 @@ export async function resolveRespondentSurfaceConfig(
       config?.presentationMode ?? DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode,
       PRESENTATION_MODES,
       DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode
+    ),
+    respondentLayout: narrowToEnum(
+      config?.respondentLayout ?? DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout,
+      RESPONDENT_LAYOUTS,
+      DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout
     ),
     answerPanelScope: narrowToEnum(
       config?.answerSlotPanelScope ?? DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,

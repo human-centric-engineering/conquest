@@ -46,7 +46,8 @@ single JSON column for the profile fields:
 | Support resource URL                  | `supportResourceUrl`        | String (URL)           | `''`                |
 | Session-start profile fields          | `profileFields`             | Json (array)           | `[]`                |
 | Answer panel scope                    | `answerSlotPanelScope`      | String (enum)          | `'full_progress'`   |
-| Presentation mode                     | `presentationMode`          | String (enum)          | `'chat'`            |
+| Presentation mode                     | `presentationMode`          | String (enum)          | `'both'`            |
+| Respondent layout                     | `respondentLayout`          | String (enum)          | `'classic'`         |
 | Inline answer correction              | `inlineCorrectionEnabled`   | Boolean                | `true`              |
 | Session resume                        | `sessionResumeEnabled`      | Boolean                | `true`              |
 | Show percent-completed text           | `showProgressPercentText`   | Boolean                | `true`              |
@@ -85,6 +86,32 @@ access-mode migration backfilled `accessMode` from it. `inviteeFields`
 (`InviteeFieldConfig[]`) is the admin-configurable set of per-invitee detail fields the
 Invitations surface captures — `email` is always shown + required; see
 [invitations.md](./invitations.md).
+
+`respondentLayout` (F-layouts) chooses how the respondent surface is ARRANGED — where the
+conversation, the captured answers and the controls sit. Orthogonal to `presentationMode`
+below, which decides what the respondent completes rather than where it sits; every
+combination is valid. `classic` (the default) is the conversation with the answer panel
+beside it; `focus` is one column at every width with the answers a tap away in a sheet;
+`broadsheet` reads the conversation as a document with the answer box held still in the
+margin; `horizon` shows one question at a time with the conversation so far folded into a
+disclosure above it.
+Whichever is chosen, every feature stays reachable — the layout registry enforces that at
+compile time. Both the read path and the component resolver fall back to `classic` for an
+absent or unrecognised value, so no existing questionnaire changes appearance and a rollback
+cannot blank a live surface. See `.context/app/questionnaire/respondent-layouts.md`.
+
+`respondentChrome` (F-chrome) chooses how much of ConQuest shows AROUND the respondent
+surface: `full` (the default — the site header and footer every respondent page has always
+had), `co_branded` (a slim ConQuest line above the client's own brand band, nothing below),
+or `white_label` (the questionnaire alone, including the browser tab). Orthogonal to
+`respondentLayout`, which arranges the questionnaire's own parts inside whatever chrome this
+leaves. It applies to the three standalone respondent pages (`/q`, `/x`, `/m`), which now
+live in the `app/(respondent)` route group so they inherit no chrome by default; the
+signed-in `/questionnaires/[sessionId]` surface keeps the app's own navigation whatever this
+says, since a respondent with an account is inside the product and hiding it would strand
+them. Both the read path and the component resolve an absent or unrecognised value to
+`full`, so no existing questionnaire changes appearance and a rollback cannot strip a live
+page of its chrome. See `.context/app/questionnaire/respondent-chrome.md`.
 
 `presentationMode` (F9.7) chooses how the respondent completes the session: `chat`
 (the streaming conversation), `form` (a raw, sectioned form rendering each question

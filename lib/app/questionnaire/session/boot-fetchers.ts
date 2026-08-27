@@ -32,6 +32,7 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
+  RESPONDENT_LAYOUTS,
   PROFILE_FIELD_TYPES,
   PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
@@ -272,6 +273,10 @@ const surfaceConfigSchema = z.object({
   voiceInputEnabled: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled),
   attachmentInputEnabled: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.attachmentsEnabled),
   presentationMode: z.enum(PRESENTATION_MODES).catch(DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode),
+  // `.catch` rather than a required field: a boot payload from a build that knows a layout this
+  // one does not must still render — as Classic — instead of failing the whole parse and leaving
+  // the respondent with a dead surface.
+  respondentLayout: z.enum(RESPONDENT_LAYOUTS).catch(DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout),
   answerPanelScope: z
     .enum(ANSWER_SLOT_PANEL_SCOPES)
     .catch(DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope),

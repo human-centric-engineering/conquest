@@ -20,6 +20,16 @@ import { ALLOWED_AUDIO_PREFIXES, MAX_TRANSCRIBE_BYTES } from '@/lib/validations/
 /** ISO 639-1 language hint pattern (e.g. `en`, `es`, `pt-BR`) — mirrors the platform validator. */
 const LANGUAGE_PATTERN = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})?$/;
 
+/**
+ * Language hint used when the client sends none.
+ *
+ * Whisper auto-detects the spoken language when it gets no hint, and on short or noisy respondent
+ * clips that detection is unreliable — we saw an English answer come back transcribed (and
+ * translated) as Welsh. Defaulting the hint to English pins the common case; a client that knows
+ * better still overrides it by sending an explicit `language` field.
+ */
+export const DEFAULT_TRANSCRIBE_LANGUAGE = 'en';
+
 export interface AudioUploadOk {
   ok: true;
   value: {

@@ -27,6 +27,8 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
+  RESPONDENT_LAYOUTS,
+  DEFAULT_RESPONDENT_LAYOUT,
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
@@ -109,6 +111,13 @@ export default async function QuestionnaireSessionPage({
     'both'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
+  // How the surface is ARRANGED (F-layouts). Narrowed here so the SSR paint is already the right
+  // arrangement rather than reflowing once the client resolves it.
+  const respondentLayout = narrowToEnum(
+    row.config?.respondentLayout ?? DEFAULT_RESPONDENT_LAYOUT,
+    RESPONDENT_LAYOUTS,
+    DEFAULT_RESPONDENT_LAYOUT
+  );
   // Answer-panel scope (F7.2) — `hidden` renders the chat-only surface (no side panel, no mobile
   // review sheet). Resolved here so the layout is right in the SSR paint.
   const answerPanelScope = narrowToEnum(
@@ -203,6 +212,7 @@ export default async function QuestionnaireSessionPage({
           initialStatusView={status?.view}
           initialFormView={formPanel?.view}
           presentationMode={presentationMode}
+          respondentLayout={respondentLayout}
           answerPanelScope={answerPanelScope}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}

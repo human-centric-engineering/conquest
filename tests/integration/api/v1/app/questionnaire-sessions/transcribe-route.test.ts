@@ -312,6 +312,18 @@ describe('happy path', () => {
     );
   });
 
+  it('defaults the language hint to English when the client sends none', async () => {
+    // Regression: with no hint Whisper auto-detects, and a short English clip was transcribed
+    // (and translated) as Welsh. The route must always pin a language.
+    const audio = resolveTranscribe({ text: 'hello', durationMs: 1000 });
+    await POST(req(makeAudioFormData()), ctx);
+
+    expect(audio.provider.transcribe).toHaveBeenCalledWith(
+      expect.any(File),
+      expect.objectContaining({ language: 'en' })
+    );
+  });
+
   it('falls back to audio.webm when the upload has no filename', async () => {
     const audio = resolveTranscribe({ text: 'ok', durationMs: 1000 });
     const file = new File([new Uint8Array([1, 2])], '', { type: 'audio/webm' });

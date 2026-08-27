@@ -292,6 +292,137 @@
     margin-inline: auto;
   }
 
+  /* ==== The answers drawer ================================================================
+     The review panel's own motion, and its brand edge.
+
+     Real CSS because the Tailwind animation utilities this was written against DO NOT EXIST in
+     this project: `animate-in`, `slide-in-from-right`, `fade-in-0` and friends come from
+     `tailwindcss-animate`, which is not installed and has no equivalent in this stylesheet. Every
+     one of those class names was inert, which is why the drawer appeared rather than slid. (The
+     same dead vocabulary is all over `components/ui/*` — dialog, popover, select, dropdown — but
+     those are Sunrise platform files and the fix belongs upstream, not patched here.)
+
+     Keyed on Radix's `[data-state]`, which is the same hook the class names were reaching for.
+     Direction is a custom property so the two forms — a bottom sheet on a phone, a side drawer from
+     `lg` — can differ without two competing animations landing on one element and sending it in
+     diagonally, which is the bug the `max-lg:` scoping existed to prevent. */
+  .cq-answer-drawer {
+    --cq-drawer-from-x: 0;
+    --cq-drawer-from-y: 100%;
+    animation: cq-drawer-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  .cq-answer-drawer[data-state='open'] {
+    /* Slightly slower in than out, and eased to a stop rather than linearly: a panel that arrives
+       gently and leaves briskly reads as responsive; the reverse reads as laggy. */
+    animation: cq-drawer-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes cq-drawer-in {
+    from {
+      opacity: 0;
+      transform: translate3d(var(--cq-drawer-from-x), var(--cq-drawer-from-y), 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes cq-drawer-out {
+    from {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      opacity: 0;
+      transform: translate3d(var(--cq-drawer-from-x), var(--cq-drawer-from-y), 0);
+    }
+  }
+
+  /* The side form: in from the right, not up from the floor. */
+  @media (min-width: 1024px) {
+    .cq-answer-drawer-side {
+      --cq-drawer-from-x: 100%;
+      --cq-drawer-from-y: 0;
+    }
+  }
+
+  /* Motion is the whole point of a drawer, but not at the cost of someone who asked for less of it:
+     the panel still fades, it just stops travelling. */
+  @media (prefers-reduced-motion: reduce) {
+    .cq-answer-drawer,
+    .cq-answer-drawer[data-state='open'] {
+      --cq-drawer-from-x: 0;
+      --cq-drawer-from-y: 0;
+      animation-duration: 120ms;
+    }
+  }
+
+  /* The brand edge. The panel inside already wears the client's accent in its header; the drawer
+     itself was plain `bg-background` with a grey hairline, so at the moment it slides in — the one
+     moment it is the whole subject of the screen — it looked like a system panel rather than part
+     of the questionnaire. A 3px leading edge in the client's accent ties the two together and, on
+     the side form, marks the seam the shadow alone was carrying. */
+  .cq-answer-drawer {
+    --cq-drawer-accent: var(--app-accent-color, var(--color-primary));
+    border-top: 3px solid var(--cq-drawer-accent);
+  }
+
+  @media (min-width: 1024px) {
+    .cq-answer-drawer-side {
+      border-top: 0;
+      border-left: 3px solid var(--cq-drawer-accent);
+    }
+  }
+
+  /* ==== The answer box ====================================================================
+     The composer's single bordered surface: the field and its controls share one rounded box,
+     and this paints it.
+
+     Real CSS rather than Tailwind arbitrary values, for one concrete reason: every colour here
+     is a `color-mix()` over a custom property, and `color-mix(in_srgb,var(--x)_30%,var(--y))`
+     inside a class name is a parse away from silently producing nothing. It did exactly that —
+     the brand border and focus ring vanished, and what the respondent saw on focus was the
+     browser's own blue outline showing through the gap. Declared here it is ordinary CSS that
+     either works or fails loudly in devtools.
+
+     Findability is the point of the resting state. This is the one place a respondent acts, and
+     under a document-shaped layout it sits alone in a margin with nothing to mark it — so the
+     border carries a little of the client's brand at rest and commits to it on focus. Every
+     colour resolves from `--app-accent-color` with a platform fallback, so it wears whatever
+     brand the questionnaire is dressed in. */
+  .cq-composer {
+    --cq-composer-accent: var(--app-accent-color, var(--color-primary));
+    border-color: color-mix(in srgb, var(--cq-composer-accent) 30%, var(--color-border));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease;
+  }
+
+  .cq-composer:focus-within {
+    border-color: var(--cq-composer-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cq-composer-accent) 16%, transparent);
+  }
+
+  /* The field fills the surface, so the surface owns the focus treatment and the field must show
+     none of its own — otherwise the browser's default ring traces almost the same rectangle a
+     pixel inside the brand one, which is what made the focused box look broken. Belt and braces
+     across `:focus` and `:focus-visible`, since a textarea matches both on a plain click. */
+  .cq-composer textarea:focus,
+  .cq-composer textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  /* Held shut (a reply streaming, or still typing itself in): recede, rather than look broken. */
+  .cq-composer:has(textarea:disabled) {
+    border-color: var(--color-border);
+    box-shadow: none;
+    opacity: 0.7;
+  }
+
   /* The viewport half of the scale, set on the respondent shell so both the transcript and the
      composer inherit it. Deliberately gentle — the aim is a conversation that reads comfortably at
      the greater viewing distance a large monitor implies, not a blown-up demo screen. Below 1536px

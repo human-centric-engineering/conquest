@@ -56,6 +56,7 @@ function makeDbRow(
           : {
               anonymousMode: false,
               presentationMode: 'chat',
+              respondentLayout: 'classic',
               answerSlotPanelScope: 'full_progress',
               voiceEnabled: false,
               attachmentsEnabled: false,
@@ -107,6 +108,7 @@ describe('loadSessionSurfaceConfig', () => {
                   select: {
                     anonymousMode: true,
                     presentationMode: true,
+                    respondentLayout: true,
                     answerSlotPanelScope: true,
                     inlineCorrectionEnabled: true,
                     voiceEnabled: true,
@@ -134,6 +136,7 @@ describe('loadSessionSurfaceConfig', () => {
         config: {
           anonymousMode: true,
           presentationMode: 'form',
+          respondentLayout: 'classic',
           answerSlotPanelScope: 'answered_only',
           inlineCorrectionEnabled: false,
           voiceEnabled: true,
@@ -155,6 +158,7 @@ describe('loadSessionSurfaceConfig', () => {
       expect(result!.config).toEqual({
         anonymousMode: true,
         presentationMode: 'form',
+        respondentLayout: 'classic',
         answerSlotPanelScope: 'answered_only',
         inlineCorrectionEnabled: false,
         voiceEnabled: true,
@@ -208,6 +212,7 @@ describe('loadSessionSurfaceConfig', () => {
       const expectedConfig: SessionSurfaceConfig['config'] = {
         anonymousMode: false,
         presentationMode: 'chat',
+        respondentLayout: 'classic',
         // Chat-only surface: the page passes this straight to the workspace as `answerPanelScope`.
         answerSlotPanelScope: 'hidden',
         inlineCorrectionEnabled: true,
