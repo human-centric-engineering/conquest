@@ -10,6 +10,8 @@ export {
   type DemoClientTheme,
   type ResolvedTheme,
   CONQUEST_THEME_DEFAULTS,
+  MIN_CONTRAST_RATIO,
+  contrastRatio,
   cssUrl,
   readableTextColor,
   resolveTheme,
@@ -27,9 +29,24 @@ export {
 
 export {
   BRAND_BANNER_SPEC,
+  BRAND_IMAGE_SPECS,
   BRAND_LOGO_SPEC,
+  BRAND_MARK_SPEC,
+  type BrandImageKind,
   isBrandImageSrc,
   recommendedSize,
   validateImageDimensions,
   type BrandImageSpec,
 } from '@/lib/app/questionnaire/theming/brand-image';
+
+export { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming/select';
+
+export {
+  DEFAULT_FONT_PAIRING,
+  FONT_PAIRINGS,
+  FONT_PAIRING_COPY,
+  FONT_PAIRING_STACKS,
+  NEUTRAL_FONT_STACK,
+  resolveFontPairing,
+  type FontPairing,
+} from '@/lib/app/questionnaire/theming/fonts';

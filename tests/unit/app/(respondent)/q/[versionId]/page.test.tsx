@@ -144,6 +144,17 @@ const MOCK_THEME: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: false,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 function makeParams(versionId: string = VERSION_ID) {

@@ -68,6 +68,15 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
         ...(body.logoBackgroundEnabled !== undefined
           ? { logoBackgroundEnabled: body.logoBackgroundEnabled }
           : {}),
+        // Brand kit: the ground, the type, and the marks.
+        ...(body.canvasColor !== undefined ? { canvasColor: body.canvasColor } : {}),
+        ...(body.inkColor !== undefined ? { inkColor: body.inkColor } : {}),
+        ...(body.canvasColorDark !== undefined ? { canvasColorDark: body.canvasColorDark } : {}),
+        ...(body.inkColorDark !== undefined ? { inkColorDark: body.inkColorDark } : {}),
+        ...(body.accentColorEnd !== undefined ? { accentColorEnd: body.accentColorEnd } : {}),
+        ...(body.logoMarkUrl !== undefined ? { logoMarkUrl: body.logoMarkUrl } : {}),
+        ...(body.logoDarkUrl !== undefined ? { logoDarkUrl: body.logoDarkUrl } : {}),
+        ...(body.fontPairing !== undefined ? { fontPairing: body.fontPairing } : {}),
       },
       select: DEMO_CLIENT_SELECT,
     });

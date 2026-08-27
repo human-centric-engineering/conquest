@@ -3,7 +3,14 @@ import { Suspense } from 'react';
 import { headers } from 'next/headers';
 import '@/app/globals.css';
 import '@/app/brand-theme.css'; // fork-owned per-surface palette; must cascade after globals
-import { Fraunces, Hanken_Grotesk } from 'next/font/google';
+import {
+  Bricolage_Grotesque,
+  Fraunces,
+  Hanken_Grotesk,
+  Instrument_Serif,
+  Newsreader,
+  Space_Grotesk,
+} from 'next/font/google';
 import { ThemeProvider } from '@/hooks/use-theme';
 import { ErrorHandlingProvider } from '@/app/error-handling-provider';
 import { ConsentProvider } from '@/lib/consent';
@@ -30,6 +37,56 @@ const bodyFont = Hanken_Grotesk({
   variable: '--font-sans-cq',
   display: 'swap',
 });
+
+// Demo-client BRAND fonts: the two non-default pairings a questionnaire can be set in
+// (lib/app/questionnaire/theming/fonts.ts). Loaded here because `next/font` must be called
+// at module scope, and the root layout is the one module every respondent surface passes
+// through — but APPLIED only where a client has chosen a pairing, via the `--app-font-*`
+// variables the theming module emits onto that questionnaire's surface.
+//
+// `preload: false` on all four, deliberately: preloading would have every page in the
+// product fetch four typefaces it almost certainly does not use, to serve the minority of
+// questionnaires that pick one. They load on demand instead, and `display: 'swap'` means
+// the surface renders immediately in the fallback while they do.
+//
+// The `variable` names here are the contract FONT_PAIRING_STACKS references by name; a
+// rename on either side degrades silently to the fallback stack, so a parity test asserts
+// the two agree.
+const editorialDisplayFont = Instrument_Serif({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-brand-editorial-display',
+  display: 'swap',
+  preload: false,
+});
+const editorialBodyFont = Newsreader({
+  subsets: ['latin'],
+  variable: '--font-brand-editorial-body',
+  display: 'swap',
+  preload: false,
+});
+const contemporaryDisplayFont = Bricolage_Grotesque({
+  subsets: ['latin'],
+  variable: '--font-brand-contemporary-display',
+  display: 'swap',
+  preload: false,
+});
+const contemporaryBodyFont = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-brand-contemporary-body',
+  display: 'swap',
+  preload: false,
+});
+
+/** Every font variable this layout declares, in one place for the <html> className. */
+const FONT_VARIABLES = [
+  displayFont.variable,
+  bodyFont.variable,
+  editorialDisplayFont.variable,
+  editorialBodyFont.variable,
+  contemporaryDisplayFont.variable,
+  contemporaryBodyFont.variable,
+].join(' ');
 
 // Root metadata, driven entirely by the BRAND seam (#519). The `template`
 // gives every page that sets only a plain string title consistent branding;
@@ -70,12 +127,7 @@ export default async function RootLayout({
   const surface = headersList.get('x-surface') ?? DEFAULT_SURFACE;
 
   return (
-    <html
-      lang="en"
-      data-surface={surface}
-      className={`${displayFont.variable} ${bodyFont.variable}`}
-      suppressHydrationWarning
-    >
+    <html lang="en" data-surface={surface} className={FONT_VARIABLES} suppressHydrationWarning>
       <head>
         <script
           nonce={nonce}

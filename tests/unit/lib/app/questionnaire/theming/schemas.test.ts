@@ -70,3 +70,42 @@ describe('themeFieldsSchema — all fields optional', () => {
     expect(parsed).toEqual({});
   });
 });
+
+describe('themeFieldsSchema — the brand-kit fields', () => {
+  it.each(['canvasColor', 'inkColor', 'canvasColorDark', 'inkColorDark', 'accentColorEnd'])(
+    '%s validates as a hex colour',
+    (field) => {
+      expect(themeFieldsSchema.parse({ [field]: '#0b1f3a' })[field as 'canvasColor']).toBe(
+        '#0b1f3a'
+      );
+      expect(themeFieldsSchema.parse({ [field]: '  ' })[field as 'canvasColor']).toBeNull();
+      expect(themeFieldsSchema.safeParse({ [field]: 'navy' }).success).toBe(false);
+    }
+  );
+
+  it.each(['logoMarkUrl', 'logoDarkUrl'])('%s takes an https URL or an upload path', (field) => {
+    expect(themeFieldsSchema.safeParse({ [field]: 'https://acme.example/m.png' }).success).toBe(
+      true
+    );
+    expect(
+      themeFieldsSchema.safeParse({ [field]: '/uploads/demo-clients/x/mark.png' }).success
+    ).toBe(true);
+    expect(themeFieldsSchema.safeParse({ [field]: 'http://acme.example/m.png' }).success).toBe(
+      false
+    );
+  });
+
+  it('accepts the three known font pairings and clears an empty one to null', () => {
+    for (const pairing of ['neutral', 'editorial', 'contemporary']) {
+      expect(themeFieldsSchema.parse({ fontPairing: pairing }).fontPairing).toBe(pairing);
+    }
+    expect(themeFieldsSchema.parse({ fontPairing: '' }).fontPairing).toBeNull();
+  });
+
+  it('REJECTS an unknown pairing, unlike the read path which resolves it to neutral', () => {
+    // Strict on write, forgiving on read, deliberately: a typo from an admin should be told,
+    // while a value already sitting in the column (a rollback, a seed) must still render.
+    expect(themeFieldsSchema.safeParse({ fontPairing: 'gothic' }).success).toBe(false);
+    expect(themeFieldsSchema.safeParse({ fontPairing: 'Editorial' }).success).toBe(false);
+  });
+});

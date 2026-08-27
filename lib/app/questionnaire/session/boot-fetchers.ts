@@ -38,6 +38,7 @@ import {
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
+import { DEFAULT_FONT_PAIRING, FONT_PAIRINGS } from '@/lib/app/questionnaire/theming';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 
 function authHeaders(accessToken: string): Record<string, string> {
@@ -274,6 +275,22 @@ const resolvedThemeSchema = z.object({
   ctaColorEnd: z.string().nullable(),
   logoBackgroundColor: z.string().nullable(),
   hasBrandIdentity: z.boolean(),
+  // The brand kit. Every field here is a hand-written mirror of `ResolvedTheme` and a
+  // MISSING one is silently stripped on the client — the resolver would have filled it
+  // server-side and the respondent would simply never see it. `.catch()` on the two
+  // derived fields rather than a bare default, so a payload from a build that resolves
+  // them differently degrades that one affordance instead of failing the whole parse.
+  canvasColor: z.string().nullable(),
+  onCanvas: z.string().nullable(),
+  canvasColorDark: z.string().nullable(),
+  onCanvasDark: z.string().nullable(),
+  canvasIsDark: z.boolean().catch(false),
+  accentColorEnd: z.string().nullable(),
+  logoMarkUrl: z.string().nullable(),
+  logoDarkUrl: z.string().nullable(),
+  bandLogoUrl: z.string().nullable(),
+  bandLogoDarkUrl: z.string().nullable(),
+  fontPairing: z.enum(FONT_PAIRINGS).catch(DEFAULT_FONT_PAIRING),
 });
 
 /**

@@ -27,7 +27,7 @@ import {
   buildReportMethodView,
   type ReportMethodClientView,
 } from '@/lib/app/questionnaire/report/method-view';
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-export-model';
 
 /**
@@ -156,7 +156,7 @@ export async function buildRespondentReportClientView(
               title: true,
               // The four required theme columns; `resolveTheme` fills accent/logo defaults.
               demoClient: {
-                select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+                select: DEMO_CLIENT_THEME_SELECT,
               },
             },
           },

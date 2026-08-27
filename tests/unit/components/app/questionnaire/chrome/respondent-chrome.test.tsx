@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 // Stubbed so the test does not drag the session/auth tree in behind the header, and so "is the
 // ConQuest chrome present" is a single unambiguous query rather than a hunt for marketing copy.
@@ -36,12 +36,18 @@ vi.mock('@/components/layouts/public-footer', () => ({
 }));
 
 import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';
+import { ThemeProvider } from '@/hooks/use-theme';
 
+// The real provider, not a stub: the theme switch these modes now carry reads `useTheme`, which
+// throws outside one. In the product it comes from the root layout, so wrapping here reproduces
+// the tree rather than papering over it — and it lets the switch actually flip below.
 function renderChrome(mode: 'full' | 'co_branded' | 'white_label', shell?: boolean) {
   return render(
-    <RespondentChrome mode={mode} shell={shell}>
-      <div data-testid="surface" />
-    </RespondentChrome>
+    <ThemeProvider>
+      <RespondentChrome mode={mode} shell={shell}>
+        <div data-testid="surface" />
+      </RespondentChrome>
+    </ThemeProvider>
   );
 }
 
@@ -115,5 +121,51 @@ describe('the shell that replaced the arithmetic', () => {
     // measure is meaningless there.
     const main = renderChrome('full', false).container.querySelector('main');
     expect(main?.className).not.toContain('cq-respondent-shell');
+  });
+});
+
+describe('the theme switch', () => {
+  // These three pages left the `(public)` group to shed the marketing header, and lost the
+  // light/dark switch with it — in the one place in the product where somebody reads continuous
+  // prose for twenty minutes, possibly at night. It lives in the chrome rather than in a layout
+  // so that all four layouts get it and none of them has to remember.
+
+  it('is offered in co_branded and white_label', () => {
+    for (const mode of ['co_branded', 'white_label'] as const) {
+      const { unmount } = renderChrome(mode);
+      expect(
+        screen.getByRole('button', { name: /switch to (light|dark) mode/i }),
+        mode
+      ).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('is NOT duplicated in full, where the site header already carries one', () => {
+    // Two toggles in one viewport is worse than none: they would disagree about which is current.
+    renderChrome('full');
+    expect(screen.queryByRole('button', { name: /switch to (light|dark) mode/i })).toBeNull();
+  });
+
+  it('names the mode it switches TO, not the one in force', () => {
+    // "Dark mode" alone leaves a screen-reader user guessing whether it describes the button or
+    // the page. The document starts light in this environment, so the button offers dark.
+    renderChrome('white_label');
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+  });
+
+  it('actually flips the document, which is what the CSS keys off', () => {
+    // Every canvas, ink and lockup variable is chosen by a `.dark` rule on <html>. If the switch
+    // does not move that class, a client's dark canvas is unreachable however well it resolves.
+    renderChrome('white_label');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('does not put ConQuest branding back on a white-label page', () => {
+    // The switch is a sun and a moon; it is not our identity. This is the assertion that keeps it
+    // that way if anyone ever reaches for the platform's bordered, wordmarked header control.
+    const { container } = renderChrome('white_label');
+    expect(container.textContent).not.toContain('ConQuest');
   });
 });

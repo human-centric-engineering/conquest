@@ -71,6 +71,42 @@ the viewport text-scale ladder that keys off `cq-respondent-shell` — by constr
 ladder. A page that genuinely sets its own width (the `/x` "we can't open this here" card) passes
 `shell={false}`.
 
+## The theme switch rides here too
+
+Every other surface in the product offers light/dark, because they all render `HeaderActions`.
+These three pages left the `(public)` group precisely to shed that header — and took the switch
+with them, in the one place in the product where somebody reads continuous prose for twenty
+minutes, possibly at night.
+
+It lives in the **chrome**, not in a layout. The chrome wraps all four layouts and all three
+modes, so one control serves every combination and no layout can omit it or has to remember it.
+(The alternative — a slot in the layout contract, which is how the questionnaire's own parts are
+guaranteed — would have made each of the four place it. That shape is right for a questionnaire
+feature and wrong for a viewing preference that has nothing to do with the questionnaire.)
+
+| Mode          | Where the switch is                                                      |
+| ------------- | ------------------------------------------------------------------------ |
+| `full`        | Already there, inside `AppHeader`'s actions — this adds nothing          |
+| `co_branded`  | Opposite the wordmark in the slim bar                                    |
+| `white_label` | A bar of its own, carrying nothing else, right-aligned above the surface |
+
+Two decisions inside that:
+
+- **A row, not a floating control.** The shell is a flex column whose surface takes exactly what
+  the chrome leaves. A floating button would sit over a layout that has no idea it is there —
+  Horizon is full-bleed, and the answers-drawer trigger already owns a corner. A row cannot
+  overlap anything, and the surface shrinks to fit it by construction.
+- **It is not a white-label violation.** A sun and a moon are not our branding. The mode exists
+  to keep ConQuest's identity off the client's page, not to strip the respondent of a preference
+  every other surface offers. `RespondentThemeToggle` is deliberately not the platform's
+  `ThemeToggle`: that one is a bordered `outline` button sized for a header row, and under
+  white-label chrome it sits alone on the client's own canvas, where a boxed button reads as UI
+  someone forgot to remove. Same behaviour, `currentColor`, no border.
+
+The switch is also what makes the brand kit's **dark canvas** reachable: a demo client's ground
+resolves per mode, and the `.dark` class this button toggles is what chooses between them. See
+[demo-clients.md](./demo-clients.md) § "The brand kit".
+
 ## The default is load-bearing
 
 There is no backfill. Every questionnaire that predates the column keeps its header and footer

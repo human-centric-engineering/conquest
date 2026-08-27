@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import type { DemoClientDetail, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import { APP_QUESTIONNAIRE_STATUSES, narrowToEnum } from '@/lib/app/questionnaire/types';
+import { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 
 /**
  * Selection shared by every demo-client read/write serializer — identity columns
@@ -25,18 +26,10 @@ export const DEMO_CLIENT_SELECT = {
   name: true,
   description: true,
   isActive: true,
-  // DEMO-ONLY (F3.4): theme columns — the edit form prefills from these and the
-  // invitation send seam resolves them. Nullable; null = Sunrise default.
-  ctaColor: true,
-  accentColor: true,
-  logoUrl: true,
-  bannerUrl: true,
-  welcomeCopy: true,
-  // DEMO-ONLY (F7.1+): respondent-session chrome columns.
-  surfaceColor: true,
-  ctaColorEnd: true,
-  logoBackgroundColor: true,
-  logoBackgroundEnabled: true,
+  // DEMO-ONLY: every theme column, from the one fragment the whole product selects with
+  // (see lib/app/questionnaire/theming/select.ts). The admin form prefills from these and
+  // the invitation / respondent seams resolve them. Nullable; null = ConQuest default.
+  ...DEMO_CLIENT_THEME_SELECT,
   createdAt: true,
   updatedAt: true,
   _count: { select: { questionnaires: true } },
@@ -78,6 +71,14 @@ export function toDemoClientView(row: DemoClientRow): DemoClientView {
     ctaColorEnd: row.ctaColorEnd,
     logoBackgroundColor: row.logoBackgroundColor,
     logoBackgroundEnabled: row.logoBackgroundEnabled,
+    canvasColor: row.canvasColor,
+    inkColor: row.inkColor,
+    canvasColorDark: row.canvasColorDark,
+    inkColorDark: row.inkColorDark,
+    accentColorEnd: row.accentColorEnd,
+    logoMarkUrl: row.logoMarkUrl,
+    logoDarkUrl: row.logoDarkUrl,
+    fontPairing: row.fontPairing,
     questionnaireCount: row._count.questionnaires,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

@@ -24,7 +24,7 @@ import {
   resolveGlossaryForHints,
 } from '@/lib/app/questionnaire/glossary/resolve';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -58,17 +58,7 @@ export async function resolveRespondentSurfaceConfig(
     demoClientId
       ? prisma.appDemoClient.findUnique({
           where: { id: demoClientId },
-          select: {
-            ctaColor: true,
-            accentColor: true,
-            logoUrl: true,
-            bannerUrl: true,
-            welcomeCopy: true,
-            surfaceColor: true,
-            ctaColorEnd: true,
-            logoBackgroundColor: true,
-            logoBackgroundEnabled: true,
-          },
+          select: DEMO_CLIENT_THEME_SELECT,
         })
       : Promise.resolve(null),
     // `roundId` is a plain String (no Prisma relation — UG-1 identity-firewall posture), so the

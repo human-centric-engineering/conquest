@@ -12,25 +12,17 @@
 
 import { prisma } from '@/lib/db/client';
 import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
-import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
+import {
+  resolveTheme,
+  type ResolvedTheme,
+  DEMO_CLIENT_THEME_SELECT,
+} from '@/lib/app/questionnaire/theming';
 
 async function loadClientTheme(demoClientId: string | null): Promise<ResolvedTheme> {
   if (!demoClientId) return resolveTheme(null);
   const client = await prisma.appDemoClient.findUnique({
     where: { id: demoClientId },
-    select: {
-      ctaColor: true,
-      accentColor: true,
-      logoUrl: true,
-      // The banner is respondent-surface only — the emails and export PDFs deliberately
-      // keep rendering the logo, where a 4:1 full-bleed image has no place.
-      bannerUrl: true,
-      welcomeCopy: true,
-      surfaceColor: true,
-      ctaColorEnd: true,
-      logoBackgroundColor: true,
-      logoBackgroundEnabled: true,
-    },
+    select: DEMO_CLIENT_THEME_SELECT,
   });
   return resolveTheme(client);
 }

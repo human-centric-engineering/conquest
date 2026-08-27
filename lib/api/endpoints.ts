@@ -928,6 +928,10 @@ export const API = {
       logo: (id: string): string => `/api/v1/app/demo-clients/${id}/logo`,
       /** DEMO-ONLY (F7.2): full-bleed header banner — upload (POST, multipart) / remove (DELETE). */
       banner: (id: string): string => `/api/v1/app/demo-clients/${id}/banner`,
+      /** DEMO-ONLY (brand kit): square brand mark — upload (POST, multipart) / remove (DELETE). */
+      mark: (id: string): string => `/api/v1/app/demo-clients/${id}/mark`,
+      /** DEMO-ONLY (brand kit): light-on-dark lockup — upload (POST, multipart) / remove (DELETE). */
+      logoDark: (id: string): string => `/api/v1/app/demo-clients/${id}/logo-dark`,
       /** The client's private knowledge corpus (GET — client-scoped list, grounds its reports). */
       knowledge: (id: string): string => `/api/v1/app/demo-clients/${id}/knowledge`,
     },

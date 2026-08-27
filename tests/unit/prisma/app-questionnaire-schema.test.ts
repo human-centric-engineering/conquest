@@ -76,7 +76,7 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(demoClient.type).toBe('AppDemoClient');
   });
 
-  it('AppDemoClient maps app_demo_client with the identity + F3.4 theme fields', () => {
+  it('AppDemoClient maps app_demo_client with the identity + theme + brand-kit fields', () => {
     const model = getModel('AppDemoClient');
     expect(model.dbName).toBe('app_demo_client');
 
@@ -93,6 +93,24 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     // resolveTheme() fills nulls with Sunrise defaults.
     for (const themeField of ['ctaColor', 'accentColor', 'logoUrl', 'welcomeCopy']) {
       const field = getField(model, themeField);
+      expect(field.type).toBe('String');
+      expect(field.kind).toBe('scalar');
+    }
+
+    // Brand kit: the ground the conversation is drawn on, the type it is set in, and the two
+    // extra marks. Nullable String scalars like the four above — the NULLABILITY is the whole
+    // no-backfill story, since every null resolves to today's look in resolveTheme().
+    for (const kitField of [
+      'canvasColor',
+      'inkColor',
+      'canvasColorDark',
+      'inkColorDark',
+      'accentColorEnd',
+      'logoMarkUrl',
+      'logoDarkUrl',
+      'fontPairing',
+    ]) {
+      const field = getField(model, kitField);
       expect(field.type).toBe('String');
       expect(field.kind).toBe('scalar');
     }
@@ -910,6 +928,60 @@ describe('app_questionnaire_invitation_branding migration SQL (F3.4)', () => {
     expect(executableSql).not.toContain('searchVector');
     // Additive only — no CREATE TABLE in this migration.
     expect(executableSql).not.toContain('CREATE TABLE');
+  });
+});
+
+describe('app_demo_client_brand_kit migration SQL', () => {
+  const sql = readMigrationSql('_app_demo_client_brand_kit');
+  const executableSql = executableLines(sql);
+
+  it('adds the six brand-kit columns to app_demo_client, all nullable', () => {
+    // Nullability is the entire no-backfill story: every null resolves to today's look in
+    // resolveTheme(), so an existing demo client renders exactly as it did before the column
+    // existed. A NOT NULL here would need a value for every row and change what they look like.
+    for (const col of [
+      'canvasColor',
+      'inkColor',
+      'accentColorEnd',
+      'logoMarkUrl',
+      'logoDarkUrl',
+      'fontPairing',
+    ]) {
+      expect(sql).toMatch(new RegExp(`ADD COLUMN\\s+"${col}" TEXT(?!\\s+NOT NULL)`));
+    }
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev --create-only` re-emitted the five pgvector DROP INDEX statements and the
+    // GENERATED searchVector ALTER, as it does for every app migration. Stripped by hand;
+    // this guard fails if a regeneration leaks them back in and destroys the KB indexes.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+    // Additive only.
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP COLUMN');
+  });
+});
+
+describe('app_demo_client_dark_canvas migration SQL', () => {
+  const sql = readMigrationSql('_app_demo_client_dark_canvas');
+  const executableSql = executableLines(sql);
+
+  it('adds the two dark-ground columns, both nullable', () => {
+    // Nullable is the common case, not the edge case: resolveTheme DERIVES the dark ground from
+    // the light one, so these exist only for a brand with its own dark palette.
+    for (const col of ['canvasColorDark', 'inkColorDark']) {
+      expect(sql).toMatch(new RegExp(`ADD COLUMN\\s+"${col}" TEXT(?!\\s+NOT NULL)`));
+    }
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP COLUMN');
   });
 });
 

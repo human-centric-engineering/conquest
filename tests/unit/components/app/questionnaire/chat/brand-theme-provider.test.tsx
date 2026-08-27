@@ -24,10 +24,33 @@ const BASE: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: true,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 /** A client with no visual identity at all — the ConQuest fallback path. */
 const UNBRANDED: ResolvedTheme = { ...BASE, hasBrandIdentity: false };
+
+/**
+ * A theme carrying a logo, set on BOTH fields the way the resolver always sets them.
+ *
+ * The band draws `bandLogoUrl` — the lockup already chosen for the ground it paints, which
+ * is the dark artwork on a dark brand colour. Setting only `logoUrl` on a hand-built fixture
+ * describes a state `resolveTheme` cannot produce, and the band would correctly render no
+ * logo at all, so the assertions below would be testing the empty case by accident.
+ */
+function withLogo<T extends ResolvedTheme>(base: T, logoUrl: string): T {
+  return { ...base, logoUrl, bandLogoUrl: logoUrl, bandLogoDarkUrl: logoUrl };
+}
 
 /** A header far enough inside an open window to read "Open · closes in N days". */
 function openHeader(over: Partial<BandHeader['round'] & object> = {}): BandHeader {
@@ -70,16 +93,23 @@ describe('BrandThemeProvider', () => {
     expect(screen.queryByRole('img', { name: 'Brand logo' })).not.toBeInTheDocument();
   });
 
-  it('renders the logo box (and sets --app-logo-url) when a logo is set', () => {
+  it('renders the logo box (and sets the per-mode logo sources) when a logo is set', () => {
     const { container } = render(
-      <BrandThemeProvider theme={{ ...BASE, logoUrl: 'https://example.com/logo.png' }}>
+      <BrandThemeProvider theme={withLogo(BASE, 'https://example.com/logo.png')}>
         <span>child</span>
       </BrandThemeProvider>
     );
     const wrapper = container.firstChild as HTMLElement;
 
     expect(screen.getByRole('img', { name: 'Brand logo' })).toBeInTheDocument();
-    expect(wrapper.style.getPropertyValue('--app-logo-url')).toBe(
+    // `--app-logo-url` — the variable the band actually paints from — is published by
+    // app/brand-theme.css, which picks between these two per mode. It cannot be resolved here:
+    // the respondent flips the mode client-side, so the inline style carries BOTH lockups and
+    // the stylesheet chooses. Asserting the sources is asserting what this component controls.
+    expect(wrapper.style.getPropertyValue('--app-logo-src')).toBe(
+      'url("https://example.com/logo.png")'
+    );
+    expect(wrapper.style.getPropertyValue('--app-logo-src-dark')).toBe(
       'url("https://example.com/logo.png")'
     );
   });
@@ -164,7 +194,7 @@ describe('BrandThemeProvider', () => {
 
       const hairline = render(
         <BrandThemeProvider
-          theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}
+          theme={withLogo(BASE, 'https://acme.example/logo.png')}
           header={openHeader()}
         >
           <span>child</span>
@@ -180,7 +210,7 @@ describe('BrandThemeProvider', () => {
       // one line without crushing the title to a sliver — the band drops to two rows instead.
       const { container } = render(
         <BrandThemeProvider
-          theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}
+          theme={withLogo(BASE, 'https://acme.example/logo.png')}
           header={openHeader()}
         >
           <span>child</span>
@@ -218,7 +248,7 @@ describe('BrandThemeProvider', () => {
       // The banner is the client's own composition; we do not draw our chrome over it.
       const { container } = render(
         <BrandThemeProvider
-          theme={{ ...BANNERED, logoUrl: 'https://acme.example/logo.png' }}
+          theme={withLogo(BANNERED, 'https://acme.example/logo.png')}
           header={openHeader()}
         >
           <span>child</span>
@@ -371,7 +401,7 @@ describe('BrandThemeProvider', () => {
 
     it('yields to a client logo — the wordmark never competes with real branding', () => {
       const { container } = render(
-        <BrandThemeProvider theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}>
+        <BrandThemeProvider theme={withLogo(BASE, 'https://acme.example/logo.png')}>
           <span>child</span>
         </BrandThemeProvider>
       );

@@ -22,7 +22,7 @@
 import { prisma } from '@/lib/db/client';
 import { env } from '@/lib/env';
 import { sendEmail, type SendEmailResult } from '@/lib/email/send';
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 import {
   experienceRunPublicPath,
   respondentPublicPath,
@@ -54,18 +54,7 @@ async function sessionContext(sessionId: string): Promise<ReportEmailContext> {
           questionnaire: {
             select: {
               title: true,
-              demoClient: {
-                select: {
-                  ctaColor: true,
-                  accentColor: true,
-                  logoUrl: true,
-                  welcomeCopy: true,
-                  surfaceColor: true,
-                  ctaColorEnd: true,
-                  logoBackgroundColor: true,
-                  logoBackgroundEnabled: true,
-                },
-              },
+              demoClient: { select: DEMO_CLIENT_THEME_SELECT },
             },
           },
         },

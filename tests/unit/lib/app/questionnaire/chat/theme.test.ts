@@ -29,7 +29,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/app/questionnaire/theming', () => ({
+// Partial mock: only `resolveTheme` is stubbed (these tests assert WHAT is handed to it,
+// not what it returns). `DEMO_CLIENT_THEME_SELECT` — the shared select fragment the loader
+// passes to Prisma — must stay real, or the query is built with `undefined` and the
+// assertion about the selected columns tests nothing.
+vi.mock('@/lib/app/questionnaire/theming', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/app/questionnaire/theming')>()),
   resolveTheme: vi.fn(),
 }));
 
@@ -39,7 +44,7 @@ vi.mock('@/lib/app/questionnaire/theming', () => ({
 
 import { resolveThemeForVersion, resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { prisma } from '@/lib/db/client';
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { DEMO_CLIENT_THEME_SELECT, resolveTheme } from '@/lib/app/questionnaire/theming';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 
 const mockVersionFindUnique = vi.mocked(prisma.appQuestionnaireVersion.findUnique);
@@ -58,6 +63,17 @@ const SENTINEL_THEME: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: false,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 // ---------------------------------------------------------------------------
@@ -147,7 +163,7 @@ describe('resolveThemeForVersion', () => {
     expect(mockResolveTheme).toHaveBeenCalledWith(clientRow);
   });
 
-  it('fetches appDemoClient with the expected theme column selection', async () => {
+  it('fetches appDemoClient with the SHARED theme selection, not a local column list', async () => {
     // Arrange
     mockVersionFindUnique.mockResolvedValue({
       questionnaire: { demoClientId: 'client-99' },
@@ -163,22 +179,14 @@ describe('resolveThemeForVersion', () => {
     // Act
     await resolveThemeForVersion('ver-003');
 
-    // Assert: the select matches what the source code requests.
+    // Assert against the shared fragment BY IDENTITY rather than by re-listing the columns.
+    // This test used to hardcode the list, which meant it passed for as long as the two lists
+    // agreed and then had to be edited every time a column was added — the same drift that
+    // left four other selects stuck on the original four columns. Pointing at the fragment
+    // instead makes it assert the thing that actually matters: this loader does not keep its
+    // own list. What the fragment CONTAINS is guarded at compile time in select.ts.
     expect(mockDemoClientFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: {
-          ctaColor: true,
-          accentColor: true,
-          logoUrl: true,
-          // Respondent-surface only; the emails and export PDFs keep using the logo.
-          bannerUrl: true,
-          welcomeCopy: true,
-          surfaceColor: true,
-          ctaColorEnd: true,
-          logoBackgroundColor: true,
-          logoBackgroundEnabled: true,
-        },
-      })
+      expect.objectContaining({ select: DEMO_CLIENT_THEME_SELECT })
     );
   });
 
