@@ -292,6 +292,53 @@
     margin-inline: auto;
   }
 
+  /* ==== The answer box ====================================================================
+     The composer's single bordered surface: the field and its controls share one rounded box,
+     and this paints it.
+
+     Real CSS rather than Tailwind arbitrary values, for one concrete reason: every colour here
+     is a `color-mix()` over a custom property, and `color-mix(in_srgb,var(--x)_30%,var(--y))`
+     inside a class name is a parse away from silently producing nothing. It did exactly that —
+     the brand border and focus ring vanished, and what the respondent saw on focus was the
+     browser's own blue outline showing through the gap. Declared here it is ordinary CSS that
+     either works or fails loudly in devtools.
+
+     Findability is the point of the resting state. This is the one place a respondent acts, and
+     under a document-shaped layout it sits alone in a margin with nothing to mark it — so the
+     border carries a little of the client's brand at rest and commits to it on focus. Every
+     colour resolves from `--app-accent-color` with a platform fallback, so it wears whatever
+     brand the questionnaire is dressed in. */
+  .cq-composer {
+    --cq-composer-accent: var(--app-accent-color, var(--color-primary));
+    border-color: color-mix(in srgb, var(--cq-composer-accent) 30%, var(--color-border));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease;
+  }
+
+  .cq-composer:focus-within {
+    border-color: var(--cq-composer-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cq-composer-accent) 16%, transparent);
+  }
+
+  /* The field fills the surface, so the surface owns the focus treatment and the field must show
+     none of its own — otherwise the browser's default ring traces almost the same rectangle a
+     pixel inside the brand one, which is what made the focused box look broken. Belt and braces
+     across `:focus` and `:focus-visible`, since a textarea matches both on a plain click. */
+  .cq-composer textarea:focus,
+  .cq-composer textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  /* Held shut (a reply streaming, or still typing itself in): recede, rather than look broken. */
+  .cq-composer:has(textarea:disabled) {
+    border-color: var(--color-border);
+    box-shadow: none;
+    opacity: 0.7;
+  }
+
   /* The viewport half of the scale, set on the respondent shell so both the transcript and the
      composer inherit it. Deliberately gentle — the aim is a conversation that reads comfortably at
      the greater viewing distance a large monitor implies, not a blown-up demo screen. Below 1536px

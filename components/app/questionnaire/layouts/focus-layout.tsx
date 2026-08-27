@@ -22,9 +22,10 @@
 
 import type { CSSProperties } from 'react';
 
-import { cn } from '@/lib/utils';
-import { VIEW_META } from '@/components/app/questionnaire/layouts/view-meta';
+import { ConversationFrame } from '@/components/app/questionnaire/chat/conversation-frame';
+import { SurfaceCarousel } from '@/components/app/questionnaire/layouts/surface-carousel';
 import type { RespondentLayoutProps } from '@/components/app/questionnaire/layouts/types';
+import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
 
 /**
  * A tighter reading measure than the 42rem default.
@@ -39,13 +40,17 @@ const FOCUS_MEASURE: CSSProperties & Record<'--cq-chat-measure', string> = {
 };
 
 export function FocusLayout({ slots, state }: RespondentLayoutProps) {
-  const { showForm, views, activeView, activeIndex, swipe, carouselRef } = state;
-
-  // No panel track at any width — the conversation simply takes the column.
+  // No panel track at any width — the conversation simply takes the column. Its two halves stay
+  // stacked in one card, exactly as in Classic: Focus narrows the measure, it does not relocate the
+  // composer (that is Broadsheet's move, with the same two slots).
   const chatSurface = (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {slots.completionOffer}
-      {slots.conversation}
+      <ConversationFrame
+        className="min-h-0 flex-1"
+        transcript={slots.transcript}
+        composer={slots.composer}
+      />
     </div>
   );
 
@@ -56,7 +61,7 @@ export function FocusLayout({ slots, state }: RespondentLayoutProps) {
     </div>
   );
 
-  const surfaceFor = (view: (typeof views)[number]) => {
+  const surfaceFor = (view: WorkspaceView) => {
     switch (view) {
       case 'intro':
         return slots.splash;
@@ -78,42 +83,7 @@ export function FocusLayout({ slots, state }: RespondentLayoutProps) {
       {slots.lifecycleBar}
       {slots.answersDrawer}
 
-      {views.length > 1 ? (
-        // Same carousel mechanics as Classic, and for the same reasons: `overflow-clip` (not
-        // `hidden`) so a focus/`scrollIntoView` inside an off-screen cell cannot scroll the frame
-        // sideways, and absolutely-positioned cells so there is no percentage width maths to
-        // misfire.
-        <div
-          ref={carouselRef}
-          className="relative min-h-0 flex-1 overflow-clip"
-          style={{ overscrollBehaviorX: 'contain' }}
-          onTouchStart={swipe.onTouchStart}
-          onTouchMove={swipe.onTouchMove}
-          onTouchEnd={swipe.onTouchEnd}
-        >
-          {views.map((view, i) => {
-            const offset = (i - activeIndex) * 100;
-            return (
-              <div
-                key={view}
-                role="tabpanel"
-                aria-label={VIEW_META[view].label}
-                className={cn(
-                  'absolute inset-0 overflow-clip will-change-transform motion-reduce:transition-none',
-                  (swipe.animating || swipe.dragPx === 0) &&
-                    'transition-transform duration-300 ease-out'
-                )}
-                style={{ transform: `translateX(calc(${offset}% + ${swipe.dragPx}px))` }}
-                inert={activeView !== view}
-              >
-                {surfaceFor(view)}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1">{showForm ? formSurface : chatSurface}</div>
-      )}
+      <SurfaceCarousel state={state} surfaceFor={surfaceFor} />
     </div>
   );
 }

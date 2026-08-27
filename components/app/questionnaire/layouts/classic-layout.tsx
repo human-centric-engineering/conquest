@@ -6,8 +6,10 @@
  *
  * A lifecycle strip across the top, then a carousel of surfaces: the pre-conversation gates
  * (intro, details, interviewer) followed by the conversation and the form. The conversation
- * surface is itself a split — transcript on the left, live answer panel on the right from `lg`
- * up, with the panel's mobile twin (a bottom sheet) standing in below that.
+ * surface is itself a split — conversation on the left, live answer panel on the right from `lg`
+ * up, with the panel's mobile twin (a bottom sheet) standing in below that. The conversation's own
+ * two halves stay stacked in one card here (see `ConversationFrame`); placing them apart is what
+ * Broadsheet does with the same two slots.
  *
  * This file is a faithful extraction, not a redesign: it is the JSX that used to live inside
  * `SessionWorkspace`, moved behind the layout contract with no behavioural change. Anything that
@@ -21,18 +23,29 @@
 
 import { cn } from '@/lib/utils';
 import { RESPONDENT_SPLIT } from '@/lib/app/questionnaire/layout';
-import { VIEW_META } from '@/components/app/questionnaire/layouts/view-meta';
+import { ConversationFrame } from '@/components/app/questionnaire/chat/conversation-frame';
+import { SurfaceCarousel } from '@/components/app/questionnaire/layouts/surface-carousel';
 import type { RespondentLayoutProps } from '@/components/app/questionnaire/layouts/types';
+import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
 
 export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
-  const { showPanel, showForm, views, activeView, activeIndex, swipe, carouselRef } = state;
+  const { showPanel } = state;
 
   // The conversation column: the submit/finish affordance above the transcript. Takes the full
   // height only when there is no panel beside it — with a panel, the grid track governs.
+  //
+  // `transcript` and `composer` are separate slots so that a layout CAN put them apart; Classic
+  // does not, so it stacks them back into the single card they have always shared. The card, and
+  // the hairline seam between the two, come from `ConversationFrame` rather than being drawn here,
+  // so Classic and Focus cannot drift apart on a detail neither of them means to own.
   const chatColumn = (
     <div className={cn('flex min-h-0 flex-col gap-3', !showPanel && 'h-full')}>
       {slots.completionOffer}
-      {slots.conversation}
+      <ConversationFrame
+        className="min-h-0 flex-1"
+        transcript={slots.transcript}
+        composer={slots.composer}
+      />
     </div>
   );
 
@@ -57,7 +70,7 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
     </div>
   );
 
-  const surfaceFor = (view: (typeof views)[number]) => {
+  const surfaceFor = (view: WorkspaceView) => {
     switch (view) {
       case 'intro':
         return slots.splash;
@@ -79,53 +92,7 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
       {slots.lifecycleBar}
       {slots.answersDrawer}
 
-      {views.length > 1 ? (
-        // Carousel: each surface is an absolutely-positioned cell pinned to the clipped frame
-        // (`absolute inset-0` → exactly one frame wide, no flex/percentage width maths to misfire),
-        // slid horizontally by its distance from the active surface. The active cell sits at 0; the
-        // rest are parked one (or more) frame-widths to the left/right and clipped away. Sliding the
-        // toggle re-computes every offset, so the whole set animates as one track.
-        //
-        // `overflow-clip`, NOT `overflow-hidden`: `hidden` leaves the frame programmatically
-        // scrollable, so when an off-screen cell's content grabs focus or calls `scrollIntoView`
-        // (the chat composer autofocus, the message auto-scroll), the browser scrolls the frame
-        // sideways to "reveal" it and drags the whole carousel off-screen. `clip` clips identically
-        // but establishes no scroll container, so nothing can shift it.
-        <div
-          ref={carouselRef}
-          className="relative min-h-0 flex-1 overflow-clip"
-          style={{ overscrollBehaviorX: 'contain' }}
-          onTouchStart={swipe.onTouchStart}
-          onTouchMove={swipe.onTouchMove}
-          onTouchEnd={swipe.onTouchEnd}
-        >
-          {views.map((view, i) => {
-            const offset = (i - activeIndex) * 100;
-            return (
-              <div
-                key={view}
-                role="tabpanel"
-                aria-label={VIEW_META[view].label}
-                className={cn(
-                  'absolute inset-0 overflow-clip will-change-transform motion-reduce:transition-none',
-                  // Animate every settled move (toggle, arrow keys, gesture release) — i.e. whenever the
-                  // track is at rest (`dragPx === 0`) or actively springing back (`animating`). Only an
-                  // in-progress finger/wheel drag (non-zero `dragPx`, not yet settled) skips the
-                  // transition so the surface tracks the gesture 1:1.
-                  (swipe.animating || swipe.dragPx === 0) &&
-                    'transition-transform duration-300 ease-out'
-                )}
-                style={{ transform: `translateX(calc(${offset}% + ${swipe.dragPx}px))` }}
-                inert={activeView !== view}
-              >
-                {surfaceFor(view)}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1">{showForm ? formSurface : chatSurface}</div>
-      )}
+      <SurfaceCarousel state={state} surfaceFor={surfaceFor} />
     </div>
   );
 }

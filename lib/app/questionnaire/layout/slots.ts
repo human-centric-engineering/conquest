@@ -26,12 +26,15 @@
  * Pure: no React, no Prisma, no DOM. The keys are a vocabulary, not components.
  *
  * GRANULARITY NOTE. The keys below describe the parts as they are *actually composable today*.
- * `conversation` is one slot because `QuestionnaireChat` owns its transcript, notices, question
- * card, correction strip and composer together. Splitting it into `transcript` + `composer` is
- * real work, wanted by the Broadsheet layout (composer in the margin) and required by Horizon
- * (no transcript at all) — so it lands with them, not speculatively here. When it does, the
- * `satisfies` gate forces every existing layout to re-classify. That is the mechanism working,
- * not a migration to dread.
+ * `conversation` was ONE slot until Broadsheet arrived and wanted the composer in the margin; it is
+ * now `transcript` + `composer`, and the split landed with the layout that needed it rather than
+ * speculatively ahead of it. Doing it that way was cheap exactly as designed: the `satisfies` gate
+ * failed the build until Classic and Focus had each re-classified both halves, so no layout could
+ * quietly inherit an arrangement nobody had thought about.
+ *
+ * The next candidate is the same shape. A one-question-at-a-time layout (Horizon) needs the
+ * transcript itself divisible — the current turn apart from the history behind it — and that lands
+ * with Horizon, not here.
  */
 
 /**
@@ -78,8 +81,26 @@ export const RESPONDENT_SLOTS = [
   'personaPicker',
 
   /* ── The work itself ──────────────────────────────────────────────────────── */
-  /** The conversation: transcript, reasoning, question card, correction strip, notices, composer. */
-  'conversation',
+  /**
+   * The conversation as it reads: turns, reasoning traces, side-band notices, the question card and
+   * the inline correction strip. Scrolls internally; draws no card chrome of its own, so whichever
+   * layout places it supplies the frame.
+   *
+   * Note that the question card lives here rather than with `composer`, even though it is an
+   * input: it belongs to the turn it answers, and moving it away from that turn would ask the
+   * respondent to answer a question they can no longer see.
+   */
+  'transcript',
+  /**
+   * Where the respondent writes: the input, voice, attachments and send. A separate slot since
+   * Broadsheet, which puts it in a margin beside the transcript rather than beneath it, so that it
+   * stays put while the conversation scrolls.
+   *
+   * Stacking it back under the transcript is the common case and is NOT open-coded per layout —
+   * `ConversationFrame` is the shared arrangement, and it owns the hairline seam between the two
+   * (a `border-t` is right in a shared card and wrong on a composer that is a card of its own).
+   */
+  'composer',
   /** The raw form surface (`presentationMode` `form` / `both`). */
   'formView',
   /** The live captured-answers panel. */
@@ -109,13 +130,32 @@ export type RespondentSlotKey = (typeof RESPONDENT_SLOTS)[number];
  *   - `region`  — on screen, in a named area of this layout. `region` is layout-local prose
  *                 ('margin', 'spine', 'foot'), except `takeover`, which is reserved: it means the
  *                 container renders this instead of the layout, full-surface (see `complete`).
+ *                 `fills` says the region hands the slot its whole height rather than sizing to
+ *                 its content — see below.
  *   - `overlay` — reachable, but not on screen until the respondent asks. Still counts as
  *                 available; a sheet one tap away is a design decision, not a missing feature.
  *   - `omitted` — deliberately absent, with the reason recorded. Illegal for {@link ESSENTIAL_SLOTS}.
  *                 `because` is required precisely so "we forgot" cannot masquerade as a choice.
  */
 export type SlotPlacement =
-  | { kind: 'region'; region: string }
+  | {
+      kind: 'region';
+      region: string;
+      /**
+       * This region gives the slot its FULL height, rather than sizing to its content.
+       *
+       * Declared rather than styled from the layout because a layout places nodes it did not
+       * build: it cannot reach inside the composer and tell the textarea to grow. The container
+       * reads this the same way it reads `answersPanel.kind` — one declaration driving both the
+       * arrangement and the node that has to cooperate with it.
+       *
+       * Broadsheet sets it on `composer`: the margin is a full-height column with nothing else in
+       * it, so the answer box may as well BE the column and give the respondent room to talk. A
+       * content-sized region (every stacked composer) leaves it unset and keeps the auto-grow
+       * behaviour, where the box grows with what is typed up to a cap.
+       */
+      fills?: boolean;
+    }
   | { kind: 'overlay'; via: 'sheet' | 'drawer' | 'modal' | 'gesture' }
   | { kind: 'omitted'; because: string };
 
@@ -123,8 +163,11 @@ export type SlotPlacement =
  * Slots no layout may omit.
  *
  * The test is not "is it important" — everything here is important — but "can the respondent
- * finish, correctly, without it". Without the conversation or the composer there is nothing to
- * answer; without the completion offer they cannot submit; without the gates a blocking capture
+ * finish, correctly, without it". Without the transcript there is no question to read and without
+ * the composer no way to answer it — and note that BOTH are required even though a layout could
+ * technically hide one behind a gesture: `overlay` is legal for either, `omitted` is not, because a
+ * conversation with half of itself deleted is not an arrangement, it is a broken session. Without
+ * the completion offer they cannot submit; without the gates a blocking capture
  * or an intro the author configured silently never appears; without `complete` a finished session
  * has nowhere to land. `answersPanel` is NOT here: `answerSlotPanelScope: 'hidden'` is a supported
  * configuration today, and a layout may legitimately move review behind a gesture.
@@ -134,7 +177,8 @@ export type SlotPlacement =
  * particular session has one.
  */
 export const ESSENTIAL_SLOTS = [
-  'conversation',
+  'transcript',
+  'composer',
   'formView',
   'completionOffer',
   'finalCheck',

@@ -34,6 +34,10 @@ import { ShieldCheck } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
+import {
+  RespondentSurfaceProvider,
+  type RespondentSurfaceAttrs,
+} from '@/components/app/questionnaire/chat/respondent-surface-context';
 import { themeToCssVariables, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import { buildScheduleView, type ScheduleStatus } from '@/lib/app/questionnaire/header/schedule';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
@@ -137,6 +141,15 @@ export function BrandThemeProvider({
   // An unbranded questionnaire ALWAYS gets one: the ConQuest wordmark is the whole point,
   // so it must not depend on a title being present.
   const showBand = hasSurface || hasMark || Boolean(title) || anonymous;
+
+  // Handed to portalled descendants so they can re-apply the surface at their own root — see
+  // respondent-surface-context.tsx. A plain object, not memoised: this is a server component, and
+  // it renders once per request rather than on every streamed token.
+  const surfaceAttrs: RespondentSurfaceAttrs = {
+    'data-surface': 'respondent',
+    ...(isConquest ? { 'data-brand': 'conquest' as const } : {}),
+    style,
+  };
 
   return (
     // `data-surface="respondent"` re-scopes the central questionnaire area to a
@@ -331,7 +344,13 @@ export function BrandThemeProvider({
           </header>
         )
       )}
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="min-h-0 flex-1">
+        {/* Portalled descendants (the answer drawer, the interviewer switcher, the final-check
+            modal) land on document.body, outside the div above, and would otherwise inherit the
+            surrounding ConQuest consumer brand instead of this one. The context hands them what
+            they need to re-apply it at their own root. */}
+        <RespondentSurfaceProvider attrs={surfaceAttrs}>{children}</RespondentSurfaceProvider>
+      </div>
     </div>
   );
 }

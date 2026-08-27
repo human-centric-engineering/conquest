@@ -34,6 +34,11 @@ export const RESPONDENT_LAYOUT_META: Record<RespondentLayout, RespondentLayoutMe
     description:
       'One calm column at every screen size, with the captured answers a tap away rather than alongside. Good on a phone, in an embed, or when the conversation deserves the whole page.',
   },
+  broadsheet: {
+    label: 'Broadsheet',
+    description:
+      'The conversation reads as a document, with the answer box held still in the margin beside it instead of moving with the text. Good for long questions people need to read and re-read, on a laptop or larger.',
+  },
 };
 
 /** Just the labels, for the places that show a name without room for the description. */

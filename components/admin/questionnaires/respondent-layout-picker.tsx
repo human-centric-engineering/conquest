@@ -4,9 +4,9 @@
  * RespondentLayoutPicker — choose how the respondent surface is arranged.
  *
  * A card per layout rather than a `<Select>`, because this is the one setting on the tab whose
- * value is a *shape*. "ConQuest Classic" and "Focus" in a dropdown tell an admin nothing about
- * what changes; a wireframe tells them immediately, and this setting is chosen most often by
- * someone preparing a demo who wants to see what the client will see.
+ * value is a *shape*. "ConQuest Classic", "Focus" and "Broadsheet" in a dropdown tell an admin
+ * nothing about what changes; a wireframe tells them immediately, and this setting is chosen most
+ * often by someone preparing a demo who wants to see what the client will see.
  *
  * The thumbnails are deliberately abstract — grey blocks, no colour. The client's brand is a
  * separate axis (it lives on the demo client, not here), so tinting them would imply this control
@@ -54,9 +54,33 @@ function FocusThumb() {
   );
 }
 
+/**
+ * A wide document with the answer box held in the margin beside it.
+ *
+ * The rail is drawn as a filled block rather than lines: it is the one part of this wireframe that
+ * is a control rather than text, and an admin comparing three grey thumbnails needs the difference
+ * from Classic — whose right-hand track is *also* a bordered column — to be legible at 56px.
+ */
+function BroadsheetThumb() {
+  return (
+    <div className="bg-muted/60 flex h-full w-full gap-1 rounded-sm p-1.5">
+      <div className="bg-background flex flex-[3] flex-col gap-1 rounded-[3px] border p-1">
+        <span className="bg-muted-foreground/25 h-1 w-full rounded-full" />
+        <span className="bg-muted-foreground/40 ml-auto h-1 w-1/2 rounded-full" />
+        <span className="bg-muted-foreground/25 h-1 w-5/6 rounded-full" />
+        <span className="bg-muted-foreground/25 h-1 w-2/3 rounded-full" />
+      </div>
+      <div className="flex flex-1 flex-col rounded-[3px]">
+        <span className="bg-muted-foreground/30 h-3.5 w-full rounded-[3px]" />
+      </div>
+    </div>
+  );
+}
+
 const THUMBS: Record<RespondentLayout, () => React.ReactElement> = {
   classic: ClassicThumb,
   focus: FocusThumb,
+  broadsheet: BroadsheetThumb,
 };
 
 export interface RespondentLayoutPickerProps {

@@ -37,11 +37,10 @@ describe('RESPONDENT_SLOTS', () => {
 
   it('covers the parts a respondent actually interacts with', () => {
     // Spot-check rather than a frozen snapshot: the list is meant to grow, but losing any of these
-    // would mean a feature stopped being placeable at all. The composer is deliberately absent —
-    // it lives inside `conversation` until a layout needs the two apart (see the granularity note
-    // in slots.ts), and listing it here would assert a granularity that does not exist yet.
+    // would mean a feature stopped being placeable at all.
     for (const key of [
-      'conversation',
+      'transcript',
+      'composer',
       'answersPanel',
       'completionOffer',
       'splash',
@@ -49,6 +48,15 @@ describe('RESPONDENT_SLOTS', () => {
     ] as const) {
       expect(RESPONDENT_SLOTS).toContain(key);
     }
+  });
+
+  it('keeps the conversation divisible into a transcript and a composer', () => {
+    // The granularity Broadsheet needs. Collapsing these back into one key would not fail a type
+    // check anywhere — every layout would simply place the pair — so the loss would be silent, and
+    // the next layout that wants the composer elsewhere would have to redo the split.
+    expect(RESPONDENT_SLOTS).toContain('transcript');
+    expect(RESPONDENT_SLOTS).toContain('composer');
+    expect(RESPONDENT_SLOTS).not.toContain('conversation');
   });
 });
 
@@ -102,8 +110,17 @@ describe('missingEssentialSlots', () => {
 
   it('names the essential slot a layout dropped', () => {
     const placements = allPlaced();
-    placements.conversation = { kind: 'omitted', because: 'oops' };
-    expect(missingEssentialSlots(placements)).toEqual(['conversation']);
+    placements.transcript = { kind: 'omitted', because: 'oops' };
+    expect(missingEssentialSlots(placements)).toEqual(['transcript']);
+  });
+
+  it('refuses a layout that keeps the transcript but drops the composer', () => {
+    // The failure the split makes newly possible: before it, omitting the composer meant omitting
+    // the whole conversation, which no author would do by accident. Now it is one line in a
+    // placement map, and a respondent with nothing to type into cannot finish.
+    const placements = allPlaced();
+    placements.composer = { kind: 'omitted', because: 'the margin was full' };
+    expect(missingEssentialSlots(placements)).toEqual(['composer']);
   });
 
   it('names every dropped slot, not just the first', () => {

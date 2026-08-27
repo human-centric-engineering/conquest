@@ -18,15 +18,16 @@ was fine while there was one. The moment a second exists, two things go wrong on
 2. A layout quietly drops a feature. Nobody notices until a demo, because the feature still exists
    — it just has nowhere to render.
 
-## The three parts
+## The parts
 
-| Part            | File                                                 | Role                                                           |
-| --------------- | ---------------------------------------------------- | -------------------------------------------------------------- |
-| Slot vocabulary | `lib/app/questionnaire/layout/slots.ts`              | The named parts, the placement types, the essential set        |
-| Behaviour       | `lib/hooks/use-session-workspace.ts`                 | Every hook, gate and piece of session state. Headless.         |
-| Container       | `components/app/questionnaire/session-workspace.tsx` | Runs the hook, handles takeovers, builds slot nodes, delegates |
-| Layouts         | `components/app/questionnaire/layouts/*-layout.tsx`  | Arrangement, and nothing else                                  |
-| Registry        | `components/app/questionnaire/layouts/registry.ts`   | Name → definition, plus the placement declarations             |
+| Part            | File                                                          | Role                                                           |
+| --------------- | ------------------------------------------------------------- | -------------------------------------------------------------- |
+| Slot vocabulary | `lib/app/questionnaire/layout/slots.ts`                       | The named parts, the placement types, the essential set        |
+| Behaviour       | `lib/hooks/use-session-workspace.ts`                          | Every hook, gate and piece of session state. Headless.         |
+| Container       | `components/app/questionnaire/session-workspace.tsx`          | Runs the hook, handles takeovers, builds slot nodes, delegates |
+| Layouts         | `components/app/questionnaire/layouts/*-layout.tsx`           | Arrangement, and nothing else                                  |
+| Registry        | `components/app/questionnaire/layouts/registry.ts`            | Name → definition, plus the placement declarations             |
+| Shared pieces   | `layouts/surface-carousel.tsx`, `chat/conversation-frame.tsx` | Arrangement a layout reuses rather than re-derives             |
 
 A layout receives `{ slots, state }` and returns JSX. It never constructs a feature, never touches
 a hook, never learns what a session is. So it **cannot break a feature, only misplace one** — and
@@ -46,7 +47,10 @@ shipped silent omissions here.
 **2. The essential set.** `ESSENTIAL_SLOTS` may never be `omitted`, by any layout. The test is not
 "is this important" — everything is — but "can the respondent finish, correctly, without it".
 `answersPanel` is deliberately **not** essential: `answerSlotPanelScope: 'hidden'` is a supported
-configuration today, and a layout may legitimately move review behind a gesture.
+configuration today, and a layout may legitimately move review behind a gesture. `transcript` and
+`composer` both **are**, even though a layout could technically hide one behind a gesture: `overlay`
+is legal for either, `omitted` is not, because a conversation with half of itself deleted is not an
+arrangement.
 
 **3. The tests.** A declaration can drift from the JSX beside it, and a declaration that drifts is
 worse than none — it reads like a guarantee. `registry.test.tsx` renders each layout with a
@@ -87,10 +91,68 @@ walks all of it in one file.
 
 ### The placement declaration is load-bearing too
 
-It is not documentation. The container reads `placements.answersPanel.kind` to decide both whether
-to build the panel node at all and whether the review trigger carries `lg:hidden` — so a layout
-that changes its mind about the panel changes both at once, and the declaration cannot drift from
-the behaviour it describes.
+It is not documentation. The container reads `placements.answersPanel.kind` to decide **three**
+things at once — whether to build the panel node at all, whether the review trigger carries
+`lg:hidden`, and whether the review _sheet_ retires at `lg` (`panelReturnsAtLg`) — so a layout that
+changes its mind about the panel changes all of them together, and the declaration cannot drift
+from the behaviour it describes.
+
+That third reading was missing when Focus shipped, and the bug it caused is the argument for the
+rule. The trigger's `lg:hidden` became conditional; the sheet's stayed hard-coded in
+`AnswerReviewDrawer`. So on a desktop under Focus the trigger appeared, the Radix overlay dimmed
+the page — the overlay has no breakpoint — and the content was `display: none`. A modal that opens
+onto nothing, and the only route to the captured answers in that layout.
+
+It survived a full phase because the obvious test cannot see it: jsdom applies no media queries, so
+"click the trigger, assert a dialog appears" passes while the real respondent sees a dimmed page.
+The assertions that catch it are on the class (`answer-review-drawer.test.tsx`) and on the prop the
+container derives (`session-workspace.test.tsx`). **Any new behaviour keyed off a breakpoint needs
+the same treatment** — assert the declaration, not just the interaction.
+
+## Shared arrangement, and why it is not a violation
+
+Two pieces of arrangement are declared once and reused by every layout that wants them:
+
+- **`SurfaceCarousel`** (`layouts/surface-carousel.tsx`) — the sliding track the surfaces ride.
+  Extracted at the third layout, not the second: two copies of a block this subtle are watchable,
+  three is where one of them loses the `overflow-clip` and a stray `scrollIntoView` starts dragging
+  the whole track sideways. A layout still supplies `surfaceFor`, so it owns everything visible.
+- **`ConversationFrame`** (`chat/conversation-frame.tsx`) — the transcript and the composer stacked
+  in one card, which is what `conversation` used to be. Classic, Focus and the read-only replay all
+  want exactly that. It also owns the hairline seam between the two, because the seam belongs to the
+  arrangement: a `border-t` is right in a shared card and wrong on a composer that is a card of its
+  own in a rail. Drawn on a wrapper rather than passed to the composer as a class, so a `null`
+  composer leaves no line hanging under nothing.
+
+Neither builds a feature, fetches anything, or reads session state — they take ready-made nodes and
+position them. That is arrangement, shared, and it is the opposite of the thing the contract
+forbids (a layout constructing a feature for itself).
+
+## The conversation is two slots
+
+`transcript` and `composer`, since Broadsheet. They are the one pair that genuinely needs care,
+because they share a clock:
+
+> The composer must stay shut until **both** the HTTP stream has closed **and** the transcript's
+> reveal queue has finished typing the reply in. Gating on `canSend` alone re-opens the box
+> mid-reveal, letting a respondent answer a question they have not finished reading — or, during
+> the opening burst, one still entirely hidden.
+
+While the two lived in one component that gate was a local variable. Now a layout may place them
+with no common ancestor between them, so the shared state rides `ConversationProvider`, mounted by
+`SessionWorkspace` **above the whole layout** — for exactly the reason `--cq-chat-scale` is set
+there: so no layout has to remember it.
+
+The provider carries only what genuinely cannot be derived twice — the reveal cursor, `composerReady`,
+`isTerminal` and the wait cue. Everything else stays a prop (`glossary` and the reasoning placement
+belong to the transcript; the voice and attachment flags to the composer), because a context that
+also carries those becomes a second, competing props channel and costs the type-checking that
+catches a missing one. `useConversation` **throws** without a provider rather than defaulting: a
+composer that silently decided it was ready would open mid-reveal, which is the precise failure the
+queue exists to prevent.
+
+`tests/unit/components/app/questionnaire/chat/conversation-split.test.tsx` mounts the two as
+unrelated siblings and asserts the gate still crosses between them.
 
 ## Placement vocabulary
 
@@ -127,7 +189,9 @@ conversation, not the respondent's completion screen.
 
 1. Add its name to `RESPONDENT_LAYOUTS` in `lib/app/questionnaire/types.ts`. **The tuple grows only
    as layouts land** — a name with no entry in the registry is a compile error, which is exactly
-   what stops a setting offering a blank surface.
+   what stops a setting offering a blank surface. (`registry.test.tsx` and
+   `respondent-layout-default.test.ts` each use the name of the _next_ designed layout as their
+   "unknown value" example, so check whether the one you are adding is that name.)
 2. Add its label + description to `lib/app/questionnaire/layout/catalog.ts`.
 3. Write `components/app/questionnaire/layouts/<name>-layout.tsx`. Read `slots` and `state`; fetch
    nothing.
@@ -170,16 +234,48 @@ Distinct from `answerSlotPanelScope: 'hidden'`, a different decision at a differ
 removes the answers surface altogether. The two compose — a Focus questionnaire with the scope
 hidden simply has no review affordance, exactly as under Classic.
 
-## Known granularity limit
+### Broadsheet
 
-`conversation` is **one** slot today, covering the transcript, reasoning trace, question card,
-correction strip, notices _and_ the composer — because `QuestionnaireChat` owns them together.
-Splitting it into `transcript` + `composer` is wanted by a document-shaped layout (composer in the
-margin) and required by a one-question-at-a-time layout (no transcript at all), so it lands with the
-first of those rather than speculatively. When it does, the `satisfies` gate forces every existing
-layout to re-classify — the mechanism working as designed.
+The conversation as a **document**, with the answer box held still in the **margin** beside it
+rather than welded to the foot of the transcript. A fixed rail from `lg` up that does not move while
+the document scrolls; below `lg` the rail folds underneath, and the composer stays a card of its own
+rather than rejoining the transcript, so the layout reads the same way at every width.
 
-Likewise `brandBand` is declared but rendered by the page's `BrandThemeProvider`, above the
+It exists for questions long enough to _read_ — a policy consultation, a due-diligence pack —
+where the respondent scrolls back to check what was asked three questions ago and, under Classic,
+finds the box they were typing in has scrolled away with them. The measure goes the other way from
+Focus for the same reason: `--cq-chat-measure: 52rem`, a document line rather than a chat line, from
+the same one custom property.
+
+Two placements are Broadsheet-specific and worth stating:
+
+- **`completionOffer` is in the margin**, above the composer, rather than above the conversation.
+  Answering and finishing are the two things the respondent _does_; the document is the thing they
+  read.
+- **`answersPanel` is `omitted`** — same outcome as Focus, different reason: there is exactly one
+  margin and the composer is in it. Review stays one tap away in the sheet at every width, which is
+  why the review trigger loses Classic's `lg:hidden` here too.
+
+This is the layout the slot split was made for, and it could not have been written before it: not
+without reaching inside `QuestionnaireChat` and re-deriving the reveal-queue gate — the second
+derivation the whole contract exists to prevent.
+
+## Known granularity limits
+
+**The transcript is still one slot.** It covers the turns, reasoning traces, notices, question card
+and correction strip together. A one-question-at-a-time layout (Horizon) needs the current turn
+apart from the history behind it, so that split lands with Horizon — the same way `transcript` /
+`composer` landed with Broadsheet rather than ahead of it. When it does, the `satisfies` gate forces
+every existing layout to re-classify, which is the mechanism working rather than a migration to
+dread.
+
+**The lifecycle strip cannot yet be decomposed.** `lifecycleBar` is deliberately not essential so a
+layout can omit it and place the atoms instead — but pause / resume and the lifecycle action errors
+live only inside the composed strip and have no slot of their own. A layout that dropped the bar
+today would drop them silently, so every layout so far renders it, Broadsheet included, and says so
+in its placement map. The atoms land with the first layout that genuinely cannot use the strip.
+
+**`brandBand` is declared but drawn elsewhere** — by the page's `BrandThemeProvider`, above the
 workspace. Extracting it so a layout can substitute its own masthead belongs with the first layout
 that needs a different one.
 

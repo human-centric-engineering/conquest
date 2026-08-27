@@ -9,7 +9,10 @@
  *   2. Handle the whole-surface takeovers — the read-only admin replay, an Experience handoff,
  *      and the completion screen — which replace the workspace rather than sitting inside it.
  *   3. Build each part as a ready-to-render node and hand the set to the questionnaire's chosen
- *      layout, which decides where things go and nothing else.
+ *      layout, which decides where things go and nothing else. That includes mounting the one
+ *      provider two of those parts share: `transcript` and `composer` may be placed with nothing
+ *      between them, so the clock that keeps the composer shut until a reply has finished revealing
+ *      rides above the whole layout — for the same reason `--cq-chat-scale` is set here.
  *
  * This used to be one 1200-line component that did all of that plus the arrangement. Splitting it
  * is what makes a second layout possible without re-deriving the gates — and the gates are subtle
@@ -27,6 +30,9 @@ import { ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
+import { ChatTranscript } from '@/components/app/questionnaire/chat/chat-transcript';
+import { ChatComposer } from '@/components/app/questionnaire/chat/chat-composer';
+import { ConversationProvider } from '@/components/app/questionnaire/chat/conversation-context';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import { AnswerReviewDrawer } from '@/components/app/questionnaire/panel/answer-review-drawer';
 import { Button } from '@/components/ui/button';
@@ -55,9 +61,10 @@ import type { RespondentSlots } from '@/components/app/questionnaire/layouts/typ
 import { stepScaleIndex } from '@/lib/app/questionnaire/chat/text-scale';
 import { useSessionWorkspace, type WorkspaceView } from '@/lib/hooks/use-session-workspace';
 import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
-import type {
-  QuestionnaireChatStatus,
-  QuestionnaireTurn,
+import {
+  isTerminalStatus,
+  type QuestionnaireChatStatus,
+  type QuestionnaireTurn,
 } from '@/lib/app/questionnaire/chat/types';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
@@ -399,6 +406,10 @@ export function SessionWorkspace({
   // stops the two drifting — a layout that changes its mind about the panel changes both at once.
   const { Component: Layout, placements } = resolveLayout(respondentLayout);
   const panelInline = placements.answersPanel.kind === 'region';
+  // Does this layout's composer region hand it the whole height of its column? Broadsheet's margin
+  // does. Read here rather than styled in the layout because a layout places nodes it did not build
+  // — it cannot reach inside the composer and tell the textarea to grow.
+  const composerFills = placements.composer.kind === 'region' && placements.composer.fills === true;
 
   const showReviewTrigger =
     showChat &&
@@ -583,25 +594,39 @@ export function SessionWorkspace({
         />
       ) : null,
 
-    conversation: (
-      <QuestionnaireChat
+    // The conversation, as two independently-placeable halves. Stacking them back into one card is
+    // the common case and belongs to `ConversationFrame`, which Classic and Focus both use — the
+    // split exists for Broadsheet, which runs the transcript as a document and the composer in the
+    // margin beside it. Their shared timing (the reveal queue, and the `composerReady` gate it
+    // feeds) travels through the `ConversationProvider` mounted above the layout below, since the
+    // two may now have no closer common ancestor.
+    transcript: (
+      <ChatTranscript
         sessionId={sessionId}
         glossary={glossary}
         accessToken={accessToken}
         stream={stream}
-        voiceInputEnabled={voiceInputEnabled}
-        attachmentInputEnabled={attachmentInputEnabled}
         reasoningPlacement={reasoningPlacement}
         reasoningDwellMs={reasoningDwellMs}
         reasoningPerItemMs={reasoningPerItemMs}
-        // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
-        // resumes render their history instantly.
-        animateOpening={autoStart}
         correctionTargets={correctionTargets}
         onCorrected={onTurnSettled}
         stitchedHistory={stitchedHistory}
         stitchedSeamLabel={stitchedSeamLabel}
-        className="min-h-0 flex-1"
+      />
+    ),
+
+    // `null` once no further input is possible (capped, paused, submitted, expired) — a real
+    // absence rather than a hidden node, so a layout's frame draws no seam above nothing and a
+    // margin-placed composer leaves no empty rail.
+    composer: isTerminalStatus(stream.status) ? null : (
+      <ChatComposer
+        sessionId={sessionId}
+        accessToken={accessToken}
+        stream={stream}
+        voiceInputEnabled={voiceInputEnabled}
+        attachmentInputEnabled={attachmentInputEnabled}
+        fillHeight={composerFills}
       />
     ),
 
@@ -640,12 +665,16 @@ export function SessionWorkspace({
         />
       ) : null,
 
-    // The mobile answers sheet is the below-`lg` twin of the side panel — chat-only mode drops
-    // both, so it never mounts there.
+    // The answers sheet. In Classic it is the below-`lg` twin of the side panel; in a layout that
+    // relocates review into the sheet it is the only route to the answers at any width. Same
+    // `panelInline` reading as the trigger above, so the two cannot disagree about which it is —
+    // they did once, and the result was a trigger that dimmed the screen and revealed nothing.
+    // Chat-only mode (`answerSlotPanelScope: 'hidden'`) drops panel, sheet and trigger alike.
     answersDrawer: showPanel ? (
       <AnswerReviewDrawer
         open={reviewOpen}
         onOpenChange={setReviewOpen}
+        panelReturnsAtLg={panelInline}
         view={panel.view}
         loading={panel.loading}
         canRevisit={stream.canSend}
@@ -713,7 +742,14 @@ export function SessionWorkspace({
       // nearest styled ancestor, which silently retargets the moment any styled wrapper is added.
       data-testid="workspace-scale-root"
     >
-      <Layout slots={slots} state={state} />
+      {/* The transcript and the composer are separate slots, and a layout may place them with no
+          common ancestor between them (Broadsheet's composer lives in the margin). The clock they
+          share — the reveal queue, and the `composerReady` gate it feeds — therefore rides a
+          provider mounted here, above every layout, for the same reason `--cq-chat-scale` does: so
+          no layout has to remember it, and so the composer can never open mid-reveal. */}
+      <ConversationProvider stream={stream} animateOpening={autoStart}>
+        <Layout slots={slots} state={state} />
+      </ConversationProvider>
     </div>
   );
 }

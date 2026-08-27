@@ -342,12 +342,12 @@ export type PresentationMode = (typeof PRESENTATION_MODES)[number];
  * This tuple grows only as layouts are actually implemented, never ahead of them: the layout
  * registry is `satisfies Record<RespondentLayout, LayoutDefinition>`, so adding a value here
  * without a layout to back it is a compile error rather than a runtime blank surface. That is why
- * the two designed alternatives (Broadsheet, Horizon) are absent until they land.
+ * the remaining designed alternative (Horizon, one question at a time) is absent until it lands.
  *
  * Whichever layout is chosen, EVERY respondent feature stays reachable — the parts move, they do
  * not disappear. See `lib/app/questionnaire/layout/slots.ts` for how that is enforced.
  */
-export const RESPONDENT_LAYOUTS = ['classic', 'focus'] as const;
+export const RESPONDENT_LAYOUTS = ['classic', 'focus', 'broadsheet'] as const;
 export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
 
 /** The layout every questionnaire gets unless it says otherwise. Referenced wherever a layout is narrowed. */
