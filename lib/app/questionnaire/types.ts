@@ -333,6 +333,27 @@ export const PRESENTATION_MODES = ['chat', 'form', 'both'] as const;
 export type PresentationMode = (typeof PRESENTATION_MODES)[number];
 
 /**
+ * How the respondent surface is ARRANGED (F-layouts) — orthogonal to
+ * {@link PresentationMode}, which decides *what* the respondent completes (conversation, form or
+ * both). A layout decides where the same parts sit: `classic` is the split conversation ⇄ answer
+ * panel that shipped first and is the default everywhere, forever — an absent or unrecognised
+ * value resolves to it, so no existing questionnaire changes appearance.
+ *
+ * This tuple grows only as layouts are actually implemented, never ahead of them: the layout
+ * registry is `satisfies Record<RespondentLayout, LayoutDefinition>`, so adding a value here
+ * without a layout to back it is a compile error rather than a runtime blank surface. That is why
+ * the two designed alternatives (Broadsheet, Horizon) are absent until they land.
+ *
+ * Whichever layout is chosen, EVERY respondent feature stays reachable — the parts move, they do
+ * not disappear. See `lib/app/questionnaire/layout/slots.ts` for how that is enforced.
+ */
+export const RESPONDENT_LAYOUTS = ['classic'] as const;
+export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
+
+/** The layout every questionnaire gets unless it says otherwise. Referenced wherever a layout is narrowed. */
+export const DEFAULT_RESPONDENT_LAYOUT: RespondentLayout = 'classic';
+
+/**
  * Who may START a session over a launched version (the access axis — ORTHOGONAL to
  * {@link QuestionnaireConfigShape.anonymousMode}, which is the identity axis). `invitation_only`
  * (default): a valid per-invitee token is required to begin. `public`: anyone with the link can
