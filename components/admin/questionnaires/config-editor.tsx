@@ -62,6 +62,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { RespondentLayoutPicker } from '@/components/admin/questionnaires/respondent-layout-picker';
 import { FieldHelp } from '@/components/ui/field-help';
 import {
   detectConfigConflicts,
@@ -115,6 +116,7 @@ import {
   type ContradictionMode,
   type InviteeFieldConfig,
   type PresentationMode,
+  type RespondentLayout,
   type ProfileFieldConfig,
   type ProfileFieldType,
   type ProfileFieldValidationMode,
@@ -617,6 +619,9 @@ export function ConfigEditor({
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(
     config.presentationMode
   );
+  const [respondentLayout, setRespondentLayout] = useState<RespondentLayout>(
+    config.respondentLayout
+  );
   const [captureMode, setCaptureMode] = useState<CaptureMode>(config.captureMode);
   const [inlineCorrectionEnabled, setInlineCorrectionEnabled] = useState(
     config.inlineCorrectionEnabled
@@ -732,6 +737,7 @@ export function ConfigEditor({
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
+    setRespondentLayout(config.respondentLayout);
     setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setSessionResumeEnabled(config.sessionResumeEnabled);
@@ -994,6 +1000,7 @@ export function ConfigEditor({
         supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
         presentationMode,
+        respondentLayout,
         // Inline answer correction (Variant B): respondent-facing UX.
         inlineCorrectionEnabled,
         // Session resume: device-remember + Continue/Start-new chooser + by-ref resume.
@@ -1499,6 +1506,25 @@ export function ConfigEditor({
             description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
             conflicts={conflictsFor('experience')}
           >
+            <div className="mb-4 space-y-1.5">
+              <Label className="text-sm font-medium">
+                Layout{' '}
+                <FieldHelp title="Respondent layout">
+                  How the respondent&apos;s screen is arranged — where the conversation, the
+                  captured answers and the controls sit. Separate from presentation mode, which
+                  decides what they complete rather than where it sits; every combination works.
+                  ConQuest Classic is the default and is what every questionnaire has always looked
+                  like. Whichever you choose, no feature is lost: a layout that has no room for
+                  something moves it (Focus keeps the captured answers a tap away in a sheet) rather
+                  than dropping it.
+                </FieldHelp>
+              </Label>
+              <RespondentLayoutPicker
+                value={respondentLayout}
+                onChange={setRespondentLayout}
+                disabled={busy}
+              />
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium">

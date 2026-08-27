@@ -28,10 +28,13 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
+  RESPONDENT_LAYOUTS,
+  DEFAULT_RESPONDENT_LAYOUT,
   REASONING_PLACEMENTS,
   type AccessMode,
   type AnswerSlotPanelScope,
   type PresentationMode,
+  type RespondentLayout,
   type ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
 
@@ -87,6 +90,23 @@ export async function resolvePresentationModeForVersion(
 ): Promise<PresentationMode> {
   const version = await loadVersionSurface(versionId);
   return narrowToEnum(version?.config?.presentationMode ?? 'both', PRESENTATION_MODES, 'both');
+}
+
+/**
+ * Resolve `respondentLayout` for a launched version. Absent config, or a name this build does not
+ * know, → `classic`: a rollback or a fork that dropped a layout must never blank the surface a
+ * respondent is mid-session on. `resolveLayout` repeats the same fallback at the component
+ * boundary, so neither layer alone is load-bearing.
+ */
+export async function resolveRespondentLayoutForVersion(
+  versionId: string
+): Promise<RespondentLayout> {
+  const version = await loadVersionSurface(versionId);
+  return narrowToEnum(
+    version?.config?.respondentLayout ?? DEFAULT_RESPONDENT_LAYOUT,
+    RESPONDENT_LAYOUTS,
+    DEFAULT_RESPONDENT_LAYOUT
+  );
 }
 
 /**

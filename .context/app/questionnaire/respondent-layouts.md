@@ -53,6 +53,45 @@ worse than none — it reads like a guarantee. `registry.test.tsx` renders each 
 sentinel per slot and asserts every `region`-placed part reaches the DOM, naming the layout, the
 slot and the declared region on failure.
 
+## Choosing one
+
+`config.respondentLayout` on the questionnaire version — a `String` column defaulting to
+`'classic'`, narrowed through `narrowToEnum` like every other enum here. The admin picks it in the
+config editor's **Respondent experience** section, above presentation mode, as a card per layout
+rather than a dropdown (the value is a _shape_; a name in a `<select>` conveys nothing).
+
+Human copy for a layout lives in **one** place, `lib/app/questionnaire/layout/catalog.ts`, read by
+the picker, the settings registry (and so the Questionnaire Pack's client-facing table) and the
+layout registry alike. The codebase already shows the cost of not doing this —
+`PRESENTATION_MODE_LABELS`, `ANSWER_SLOT_PANEL_SCOPE_LABELS` and `REASONING_PLACEMENT_LABELS` each
+exist twice today, verbatim, with nothing linking the copies.
+
+### The default is load-bearing
+
+There is no backfill. Every questionnaire that predates the column keeps its appearance purely
+because five separate layers all resolve an absent or unrecognised value to Classic:
+
+| Layer            | Where                                    | Behaviour                          |
+| ---------------- | ---------------------------------------- | ---------------------------------- |
+| Column default   | the migration                            | `DEFAULT 'classic'`                |
+| Config default   | `DEFAULT_QUESTIONNAIRE_CONFIG`           | `'classic'`                        |
+| DB → view        | `asRespondentLayout` in `_lib/detail.ts` | unknown → default                  |
+| Version read     | `resolveRespondentLayoutForVersion`      | absent config or unknown → default |
+| View → component | `resolveLayout`                          | unknown → Classic definition       |
+
+Note the asymmetry, which is intentional: the **write** boundary (`updateConfigSchema`) _rejects_ an
+unknown layout, because an admin PATCHing one is a caller bug worth surfacing. Every **read**
+boundary accepts it and falls back, because a stored unknown value is a rollback artefact a live
+respondent has to survive. `tests/unit/lib/app/questionnaire/layout/respondent-layout-default.test.ts`
+walks all of it in one file.
+
+### The placement declaration is load-bearing too
+
+It is not documentation. The container reads `placements.answersPanel.kind` to decide both whether
+to build the panel node at all and whether the review trigger carries `lg:hidden` — so a layout
+that changes its mind about the panel changes both at once, and the declaration cannot drift from
+the behaviour it describes.
+
 ## Placement vocabulary
 
 ```ts
@@ -89,12 +128,17 @@ conversation, not the respondent's completion screen.
 1. Add its name to `RESPONDENT_LAYOUTS` in `lib/app/questionnaire/types.ts`. **The tuple grows only
    as layouts land** — a name with no entry in the registry is a compile error, which is exactly
    what stops a setting offering a blank surface.
-2. Write `components/app/questionnaire/layouts/<name>-layout.tsx`. Read `slots` and `state`; fetch
+2. Add its label + description to `lib/app/questionnaire/layout/catalog.ts`.
+3. Write `components/app/questionnaire/layouts/<name>-layout.tsx`. Read `slots` and `state`; fetch
    nothing.
-3. Add the registry entry, including a placement for **every** slot. The compiler will tell you
+4. Add the registry entry, including a placement for **every** slot. The compiler will tell you
    what you missed.
-4. `npm test tests/unit/components/app/questionnaire/layouts` — the declaration/JSX agreement test
-   runs against your layout automatically.
+5. Add a thumbnail to `components/admin/questionnaires/respondent-layout-picker.tsx`.
+6. `npm test tests/unit/components/app/questionnaire/layouts tests/unit/lib/app/questionnaire/layout`
+   — the declaration/JSX agreement test and the catalog-coverage test both pick your layout up
+   automatically.
+
+No schema change is needed: the column already exists and stores a plain string.
 
 ## Adding a feature
 
@@ -102,6 +146,29 @@ Add its slot key to `RESPONDENT_SLOTS`, build the node in the container, and the
 every layout has placed it. That break is the feature working, not a chore: it is the moment each
 layout's author decides where the new thing goes, instead of discovering months later that one
 layout never showed it.
+
+## The layouts
+
+### ConQuest Classic — the default
+
+The conversation with the live answer panel beside it from `lg` up, the panel's bottom-sheet twin
+below that. What every questionnaire has always looked like, extracted unchanged.
+
+### Focus
+
+One column at every width, with a deliberately tighter reading measure (`--cq-chat-measure: 38rem`,
+a custom property `globals.css` already declares with a fallback and sets nowhere else). Suits a
+phone, an embed, or a conversation the respondent should sit with rather than scan.
+
+It exists as the second layout because of what it demonstrates: a layout may **relocate** a part
+rather than drop it. `answersPanel` is `omitted` here, but the captured answers stay one tap away in
+the review sheet at every width — which is exactly why the review trigger loses Classic's
+`lg:hidden`, and why `answersPanel` is not in `ESSENTIAL_SLOTS` while the answers themselves
+effectively are.
+
+Distinct from `answerSlotPanelScope: 'hidden'`, a different decision at a different level: that
+removes the answers surface altogether. The two compose — a Focus questionnaire with the scope
+hidden simply has no review affordance, exactly as under Classic.
 
 ## Known granularity limit
 

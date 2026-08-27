@@ -22,6 +22,7 @@ export interface SessionSurfaceConfig {
   config: {
     anonymousMode: boolean;
     presentationMode: string;
+    respondentLayout: string;
     answerSlotPanelScope: string;
     inlineCorrectionEnabled: boolean;
     voiceEnabled: boolean;
@@ -50,6 +51,7 @@ export async function loadSessionSurfaceConfig(
             select: {
               anonymousMode: true,
               presentationMode: true,
+              respondentLayout: true,
               answerSlotPanelScope: true,
               inlineCorrectionEnabled: true,
               voiceEnabled: true,

@@ -132,6 +132,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
       presentationMode: 'chat',
+      respondentLayout: 'classic',
       captureMode: 'form',
       inlineCorrectionEnabled: true,
       sessionResumeEnabled: true,

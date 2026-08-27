@@ -24,6 +24,8 @@
 import type { ReactNode } from 'react';
 import { ClipboardList } from 'lucide-react';
 
+import { cn } from '@/lib/utils';
+
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import { AnswerReviewDrawer } from '@/components/app/questionnaire/panel/answer-review-drawer';
@@ -127,7 +129,7 @@ export interface SessionWorkspaceProps {
    * decides *what* the respondent completes, this decides *where the parts sit*. Defaults to —
    * and falls back to — ConQuest Classic, so an absent or unrecognised value is always safe.
    */
-  layout?: RespondentLayout;
+  respondentLayout?: RespondentLayout;
   /**
    * How much of the live answer panel the respondent sees (F7.2): `full_progress`, `answered_only`,
    * or `hidden` — the chat-only surface, where no panel rides beside the conversation, the mobile
@@ -216,7 +218,7 @@ export function SessionWorkspace({
   showProgressPercentText = true,
   autoStart = false,
   presentationMode = 'both',
-  layout,
+  respondentLayout,
   answerPanelScope = 'full_progress',
   initialFormView,
   reasoningPlacement,
@@ -391,6 +393,13 @@ export function SessionWorkspace({
   // one-tap skip past required details (and `ModeToggle` has no per-segment disabled state). The intro
   // Proceed button and the gate's own submit drive the flow until the details are in.
   const showToggle = views.length > 1 && !captureBlocking;
+  // The chosen layout, resolved before the slots because its placement declaration is load-bearing
+  // rather than decorative: two slots below are built differently depending on whether this layout
+  // keeps the answer panel on screen. Reading the declaration (instead of re-deciding here) is what
+  // stops the two drifting — a layout that changes its mind about the panel changes both at once.
+  const { Component: Layout, placements } = resolveLayout(respondentLayout);
+  const panelInline = placements.answersPanel.kind === 'region';
+
   const showReviewTrigger =
     showChat &&
     showPanel && // chat-only mode has no answers surface to review
@@ -429,9 +438,11 @@ export function SessionWorkspace({
       type="button"
       variant="outline"
       size="sm"
-      // Pill shape echoes the ModeToggle so the two read as one control group when they
-      // share a wrapped row on mobile. Hidden once the side panel returns (`lg`).
-      className="rounded-full lg:hidden"
+      // Pill shape echoes the ModeToggle so the two read as one control group when they share a
+      // wrapped row on mobile. Hidden once the side panel returns (`lg`) — but ONLY where a panel
+      // returns at all: in a layout that relocates review into the sheet, this is the sole route to
+      // the captured answers and must stay at every width.
+      className={cn('rounded-full', panelInline && 'lg:hidden')}
       onClick={() => setReviewOpen(true)}
       aria-haspopup="dialog"
       aria-expanded={reviewOpen}
@@ -612,20 +623,22 @@ export function SessionWorkspace({
     ),
 
     // `hidden lg:flex` is a property of the PAIR, not of one layout: the panel is the wide-viewport
-    // affordance and `answersDrawer` is its narrow-viewport twin. A layout that wants only one of
-    // them omits the other rather than re-deciding the breakpoint.
-    answersPanel: showPanel ? (
-      <AnswerSlotPanel
-        view={panel.view}
-        loading={panel.loading}
-        onRevisit={handleRevisit}
-        canRevisit={stream.canSend}
-        onRefine={handleRefine}
-        newlyFilledKeys={newlyFilledKeys}
-        correction={correction}
-        className="hidden lg:flex"
-      />
-    ) : null,
+    // affordance and `answersDrawer` is its narrow-viewport twin. A layout that relocates review
+    // into the sheet declares `answersPanel` omitted, and gets `null` here rather than a node it
+    // would have to hide.
+    answersPanel:
+      showPanel && panelInline ? (
+        <AnswerSlotPanel
+          view={panel.view}
+          loading={panel.loading}
+          onRevisit={handleRevisit}
+          canRevisit={stream.canSend}
+          onRefine={handleRefine}
+          newlyFilledKeys={newlyFilledKeys}
+          correction={correction}
+          className="hidden lg:flex"
+        />
+      ) : null,
 
     // The mobile answers sheet is the below-`lg` twin of the side panel — chat-only mode drops
     // both, so it never mounts there.
@@ -687,8 +700,6 @@ export function SessionWorkspace({
         />
       ) : null,
   };
-
-  const { Component: Layout } = resolveLayout(layout);
 
   return (
     // `--cq-chat-scale` is consumed by the `.cq-chat-scale` utility on the transcript (globals.css).

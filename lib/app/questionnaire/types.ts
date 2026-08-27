@@ -347,7 +347,7 @@ export type PresentationMode = (typeof PRESENTATION_MODES)[number];
  * Whichever layout is chosen, EVERY respondent feature stays reachable — the parts move, they do
  * not disappear. See `lib/app/questionnaire/layout/slots.ts` for how that is enforced.
  */
-export const RESPONDENT_LAYOUTS = ['classic'] as const;
+export const RESPONDENT_LAYOUTS = ['classic', 'focus'] as const;
 export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
 
 /** The layout every questionnaire gets unless it says otherwise. Referenced wherever a layout is narrowed. */
@@ -1480,6 +1480,15 @@ export type QuestionnaireConfigShape = {
    */
   presentationMode: PresentationMode;
   /**
+   * How the respondent surface is ARRANGED. Orthogonal to {@link presentationMode}: that decides
+   * *what* the respondent completes, this decides *where the parts sit*. Every combination is
+   * valid, and whichever layout is chosen every feature stays reachable — see
+   * `lib/app/questionnaire/layout/slots.ts` for how that is enforced rather than promised.
+   * Defaults to `classic`, which is what every questionnaire has always looked like.
+   * See {@link RESPONDENT_LAYOUTS}.
+   */
+  respondentLayout: RespondentLayout;
+  /**
    * Inline answer correction (Variant B): when on, the respondent can "fix" an answer the latest
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
@@ -1662,6 +1671,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   captureMode: 'form',
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
+  respondentLayout: DEFAULT_RESPONDENT_LAYOUT,
   inlineCorrectionEnabled: false,
   sessionResumeEnabled: true,
   showProgressPercentText: true,

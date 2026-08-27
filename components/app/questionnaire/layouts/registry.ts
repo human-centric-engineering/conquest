@@ -19,6 +19,8 @@
  */
 
 import { ClassicLayout } from '@/components/app/questionnaire/layouts/classic-layout';
+import { FocusLayout } from '@/components/app/questionnaire/layouts/focus-layout';
+import { RESPONDENT_LAYOUT_META } from '@/lib/app/questionnaire/layout/catalog';
 import type {
   LayoutDefinition,
   LayoutRegistry,
@@ -27,9 +29,9 @@ import { DEFAULT_RESPONDENT_LAYOUT, type RespondentLayout } from '@/lib/app/ques
 
 export const LAYOUT_REGISTRY = {
   classic: {
-    label: 'ConQuest Classic',
-    description:
-      'The conversation with the live answer panel beside it. The default, and what every questionnaire has always looked like.',
+    // Copy comes from the shared catalog so the picker, the exported settings table and this
+    // registry can never disagree about what a layout is called — see catalog.ts.
+    ...RESPONDENT_LAYOUT_META.classic,
     Component: ClassicLayout,
     placements: {
       /* Identity */
@@ -56,6 +58,53 @@ export const LAYOUT_REGISTRY = {
       conversation: { kind: 'region', region: 'carousel page, left column of the split' },
       formView: { kind: 'region', region: 'carousel page' },
       answersPanel: { kind: 'region', region: 'right column of the split (lg and up)' },
+      answersDrawer: { kind: 'overlay', via: 'sheet' },
+
+      /* Finishing */
+      completionOffer: { kind: 'region', region: 'above the conversation and the form' },
+      finalCheck: { kind: 'overlay', via: 'modal' },
+      complete: { kind: 'region', region: 'takeover' },
+      handoff: { kind: 'region', region: 'takeover' },
+      personaSwitcher: { kind: 'overlay', via: 'modal' },
+    },
+  },
+
+  focus: {
+    ...RESPONDENT_LAYOUT_META.focus,
+    Component: FocusLayout,
+    placements: {
+      /* Identity */
+      brandBand: { kind: 'region', region: 'above the workspace, in the brand provider' },
+
+      /* Session chrome */
+      lifecycleBar: { kind: 'region', region: 'strip along the top' },
+      progress: { kind: 'region', region: 'inside the lifecycle strip' },
+      sessionRef: { kind: 'region', region: "the intro splash's footer, else the lifecycle strip" },
+      transcriptDownload: { kind: 'region', region: 'lifecycle strip, download slot' },
+      modeToggle: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+      textSize: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+      // Not `lg:hidden` as in Classic: with no panel on screen at any width, the trigger is the
+      // ONLY route to the captured answers, so it has to be present at every width. The container
+      // reads this placement to decide that, rather than the layout re-styling a node it was given.
+      reviewTrigger: { kind: 'region', region: 'lifecycle strip, trailing cluster (all widths)' },
+      interviewerChip: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+
+      /* Pre-conversation gates */
+      splash: { kind: 'region', region: 'carousel page' },
+      captureGate: { kind: 'region', region: 'carousel page' },
+      personaPicker: { kind: 'region', region: 'carousel page' },
+
+      /* The work itself */
+      conversation: { kind: 'region', region: 'the single column' },
+      formView: { kind: 'region', region: 'carousel page' },
+      // RELOCATED, not dropped — the whole point of this layout. The captured answers stay one tap
+      // away in the review sheet at every width (see `answersDrawer`), which is why the trigger
+      // above is always on screen. Omitting the panel is legal precisely because `answersPanel` is
+      // not an essential slot; omitting the answers ENTIRELY would not be.
+      answersPanel: {
+        kind: 'omitted',
+        because: 'review lives in the sheet at every width, so no panel rides beside the column',
+      },
       answersDrawer: { kind: 'overlay', via: 'sheet' },
 
       /* Finishing */

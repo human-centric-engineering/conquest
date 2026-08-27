@@ -61,6 +61,7 @@ describe('loadVersionSurface', () => {
       voiceEnabled: true,
       attachmentsEnabled: true,
       presentationMode: true,
+      respondentLayout: true,
       answerSlotPanelScope: true,
       inlineCorrectionEnabled: true,
       sessionResumeEnabled: true,

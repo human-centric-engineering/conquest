@@ -333,6 +333,7 @@ export function MeetingParticipantBoot({
               voiceInputEnabled={activeSurface?.voiceInputEnabled}
               attachmentInputEnabled={activeSurface?.attachmentInputEnabled}
               presentationMode={activeSurface?.presentationMode}
+              respondentLayout={activeSurface?.respondentLayout}
               answerPanelScope={activeSurface?.answerPanelScope}
               reasoningPlacement={activeSurface?.reasoningPlacement}
               reasoningDwellMs={activeSurface?.reasoningDwellMs}

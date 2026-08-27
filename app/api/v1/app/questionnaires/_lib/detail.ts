@@ -26,6 +26,7 @@ import {
   ACCESS_MODES,
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
+  RESPONDENT_LAYOUTS,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   narrowQuestionFidelity,
@@ -39,6 +40,7 @@ import {
   type ContradictionMode,
   type FieldProvenance,
   type PresentationMode,
+  type RespondentLayout,
   type ProfileFieldConfig,
   type ReasoningPlacement,
   type SelectionStrategy,
@@ -128,6 +130,7 @@ export const CONFIG_SELECT = {
   captureMode: true,
   answerSlotPanelScope: true,
   presentationMode: true,
+  respondentLayout: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
   showProgressPercentText: true,
@@ -183,6 +186,7 @@ type ConfigRow = {
   captureMode: string;
   answerSlotPanelScope: string;
   presentationMode: string;
+  respondentLayout: string;
   inlineCorrectionEnabled: boolean;
   sessionResumeEnabled: boolean;
   showProgressPercentText: boolean;
@@ -273,6 +277,19 @@ function asPresentationMode(value: string): PresentationMode {
     : DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode;
 }
 
+/**
+ * Narrow a stored `respondentLayout` to the enum (default when unknown).
+ *
+ * The unknown branch is the one that matters: a version saved by a build that had a layout this
+ * one does not (a rollback, a fork that dropped one) must render Classic rather than a blank
+ * surface. `resolveLayout` repeats the same fallback at the component boundary.
+ */
+function asRespondentLayout(value: string): RespondentLayout {
+  return (RESPONDENT_LAYOUTS as readonly string[]).includes(value)
+    ? (value as RespondentLayout)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout;
+}
+
 /** Narrow a stored `accessMode` to the enum (default when unknown). */
 function asAccessMode(value: string): AccessMode {
   return (ACCESS_MODES as readonly string[]).includes(value)
@@ -328,6 +345,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     captureMode: asCaptureMode(row.captureMode),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
+    respondentLayout: asRespondentLayout(row.respondentLayout),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     sessionResumeEnabled: row.sessionResumeEnabled,
     showProgressPercentText: row.showProgressPercentText,

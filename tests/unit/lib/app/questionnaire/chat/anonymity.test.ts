@@ -32,6 +32,7 @@ import {
   resolveVoiceEnabledForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveRespondentLayoutForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -54,6 +55,50 @@ function findUniqueArg(): {
 } {
   return vi.mocked(prisma.appQuestionnaireVersion.findUnique).mock.calls[0]?.[0] as never;
 }
+
+describe('resolveRespondentLayoutForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored layout', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentLayout: 'focus' },
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('focus');
+  });
+
+  it('falls back to classic when there is no config row', async () => {
+    // A version that has never been saved renders exactly as it always did.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('classic');
+  });
+
+  it('falls back to classic for a layout this build does not know', async () => {
+    // The rollback case, and the reason this boundary is forgiving where the PATCH validator is
+    // strict: a row naming a layout that no longer exists must render Classic, not nothing.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentLayout: 'broadsheet' },
+    } as never);
+
+    await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('classic');
+  });
+
+  it('selects the column it reads', async () => {
+    // Without this the resolver would silently return 'classic' forever, whatever the admin chose.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await resolveRespondentLayoutForVersion('ver-abc');
+
+    expect(findUniqueArg().select.config.select).toHaveProperty('respondentLayout', true);
+  });
+});
 
 describe('resolveAnonymousForVersion', () => {
   beforeEach(() => {

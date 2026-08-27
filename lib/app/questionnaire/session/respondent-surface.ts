@@ -41,6 +41,7 @@ import type {
   AnswerSlotPanelScope,
   PresentationMode,
   ReasoningPlacement,
+  RespondentLayout,
 } from '@/lib/app/questionnaire/types';
 
 /**
@@ -65,6 +66,8 @@ export interface RespondentSurfaceConfig {
   attachmentInputEnabled: boolean;
   /** How the respondent completes: `chat`, raw `form`, or `both`. */
   presentationMode: PresentationMode;
+  /** How the surface is ARRANGED (F-layouts). Defaults to `classic` — see RESPONDENT_LAYOUTS. */
+  respondentLayout: RespondentLayout;
   /** How much of the live answer panel shows; `hidden` is the chat-only surface. */
   answerPanelScope: AnswerSlotPanelScope;
   /** Resolved "watch it think" placement, or null when the version has the feature off. */

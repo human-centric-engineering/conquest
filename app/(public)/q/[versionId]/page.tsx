@@ -18,6 +18,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
+  resolveRespondentLayoutForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveSessionResumeEnabledForVersion,
@@ -87,6 +88,7 @@ export default async function PublicQuestionnairePage({
     bandHeader,
     anonymous,
     presentationMode,
+    respondentLayout,
     answerPanelScope,
     voiceConfigured,
     attachmentsConfigured,
@@ -103,6 +105,7 @@ export default async function PublicQuestionnairePage({
     resolveVersionHeader(versionId),
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
+    resolveRespondentLayoutForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
@@ -165,6 +168,7 @@ export default async function PublicQuestionnairePage({
             attachmentInputEnabled={attachmentInputEnabled}
             anonymous={anonymous}
             presentationMode={presentationMode}
+            respondentLayout={respondentLayout}
             answerPanelScope={answerPanelScope}
             reasoningPlacement={reasoningPlacement}
             reasoningDwellMs={reasoningDwell.dwellMs}

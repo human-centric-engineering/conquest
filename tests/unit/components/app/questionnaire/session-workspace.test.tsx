@@ -1753,3 +1753,90 @@ describe('SessionWorkspace', () => {
     });
   });
 });
+
+/**
+ * F-layouts: the workspace hands the parts to the chosen arrangement.
+ *
+ * These assert the ONE behaviour that distinguishes "relocated" from "dropped", which is the
+ * promise the whole layout feature is sold on. Focus takes the answer panel off screen, so the
+ * captured answers have to remain reachable by the only route left — the review sheet — at every
+ * width, not just below `lg` where Classic hides its trigger.
+ *
+ * The arrangement itself (grids, carousel mechanics) is asserted in the layout suite; what is
+ * under test here is the container reading each layout's placement declaration instead of
+ * re-deciding, which is what stops the two drifting apart.
+ */
+describe('respondent layout', () => {
+  function renderWithLayout(layout: 'classic' | 'focus') {
+    streamHook.mockReturnValue({
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />);
+  }
+
+  it('renders the answer panel under Classic', () => {
+    renderWithLayout('classic');
+    expect(screen.queryByTestId('panel')).not.toBeNull();
+  });
+
+  it('does not render the answer panel under Focus', () => {
+    // Focus declares `answersPanel` omitted, so the container builds no node at all rather than
+    // handing the layout one to hide — a hidden panel would still fetch and still be in the a11y
+    // tree.
+    renderWithLayout('focus');
+    expect(screen.queryByTestId('panel')).toBeNull();
+  });
+
+  it('keeps the review trigger at every width under Focus', () => {
+    // With no panel on screen, this button is the ONLY route to the captured answers. Classic's
+    // `lg:hidden` here would strand them on a desktop.
+    renderWithLayout('focus');
+    const trigger = screen.getByRole('button', { name: /Review answers/ });
+    expect(trigger.className).not.toContain('lg:hidden');
+  });
+
+  it('hides the review trigger at lg under Classic, where the panel returns', () => {
+    renderWithLayout('classic');
+    const trigger = screen.getByRole('button', { name: /Review answers/ });
+    expect(trigger.className).toContain('lg:hidden');
+  });
+
+  it('reaches the captured answers through the sheet under Focus, so nothing is lost', () => {
+    // The actual promise, end to end: no panel on screen, but the answers are one tap away. Driven
+    // through the trigger rather than asserting the drawer is mounted, because a drawer that
+    // renders but cannot be opened would satisfy the weaker check and strand the respondent.
+    renderWithLayout('focus');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Review answers/ }));
+
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+  });
+
+  it('falls back to Classic when the stored layout is unrecognised', () => {
+    // A rollback leaves rows naming layouts this build has never heard of. The surface must render.
+    streamHook.mockReturnValue({
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(
+      <SessionWorkspace
+        sessionId="s1"
+        presentationMode="chat"
+        respondentLayout={'broadsheet' as never}
+      />
+    );
+    expect(screen.queryByTestId('panel')).not.toBeNull();
+  });
+});
