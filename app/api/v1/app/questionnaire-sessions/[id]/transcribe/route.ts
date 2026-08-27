@@ -2,7 +2,8 @@
  * Live respondent voice input — transcription (F6.2).
  *
  * POST /api/v1/app/questionnaire-sessions/:id/transcribe
- *   multipart/form-data: audio (File, required) + language (ISO 639-1, optional)
+ *   multipart/form-data: audio (File, required) + language (ISO 639-1, optional — defaults to
+ *   `en`; see DEFAULT_TRANSCRIBE_LANGUAGE)
  *   → { success: true, data: { text, durationMs, language? } }
  *
  * Turns a respondent's recorded audio into text via Sunrise's configured audio provider (OpenAI
@@ -34,7 +35,10 @@ import { ProviderError } from '@/lib/orchestration/llm/provider';
 import { enforceContentLengthCap } from '@/lib/validations/transcribe';
 
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
-import { validateAudioUpload } from '@/app/api/v1/app/questionnaire-sessions/_lib/audio-upload';
+import {
+  DEFAULT_TRANSCRIBE_LANGUAGE,
+  validateAudioUpload,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/audio-upload';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -89,7 +93,12 @@ async function handleTranscribe(
 
     const validation = validateAudioUpload(formData);
     if (!validation.ok) return validation.response;
-    const { file, language } = validation.value;
+    const { file } = validation.value;
+    // Always send a language hint. Left to auto-detect, Whisper mis-identifies short or noisy
+    // respondent clips and *translates* them (an English answer came back in Welsh); pinning the
+    // hint keeps the transcript in the language the respondent actually spoke. A client that knows
+    // the respondent's language overrides the default via the `language` form field.
+    const language = validation.value.language ?? DEFAULT_TRANSCRIBE_LANGUAGE;
 
     const audio = await getAudioProvider();
     if (!audio) {
@@ -102,7 +111,7 @@ async function handleTranscribe(
     try {
       const result = await audio.provider.transcribe(file, {
         model: audio.modelId,
-        ...(language ? { language } : {}),
+        language,
         mimeType: file.type,
         filename: file.name || 'audio.webm',
       });
