@@ -84,6 +84,33 @@ export interface LaunchReadinessInput {
    * once someone has authored conditions for it.
    */
   conditionalTopicsConditionalCount?: number;
+  /**
+   * How many topics the Routing Analyst's PENDING proposal contains — `AppQuestionnaireTopicDraft`,
+   * which is explicitly not live. Above zero, launch is blocked until the admin accepts or discards
+   * it: the document described routing, a paid model call turned that into a concrete proposal, and
+   * nothing between the draft and the respondent reads it. Before this check the whole chain was
+   * invisible from here, so a version whose Topics tab was never opened launched looking clean.
+   *
+   * The exit is *look at it*, not *agree with it* — discarding the proposal clears the row just as
+   * accepting does. That is what makes it a legitimate blocker rather than a nudge with teeth.
+   */
+  conditionalTopicsDraftTopicCount?: number;
+  /**
+   * True when the ingestion-time candidacy check said this document describes routing and the
+   * analyst has still not produced a proposal from it (the Topics tab's auto-trigger is pending).
+   *
+   * The non-streaming ingest path leaves exactly this state: the verdict is cached on the version
+   * and the analyst runs on the first Topics-tab visit, so an admin who never opens that tab had no
+   * draft AND no signal.
+   *
+   * Self-clearing, but not by itself: the flag goes false as soon as a run succeeds (there is then
+   * a draft to review) or the bounded retries are spent — and retries are only spent by the
+   * dispatcher, so an analyst that never reaches it never spends one. `detectedButUnreviewed`
+   * (`launchability.ts`) carries the other half of the contract by refusing to raise this at all
+   * when the Routing Analyst agent is unseeded. Read the two together before changing either: on
+   * its own, "the bounded retries are spent" is not enough to promise this row fails open.
+   */
+  conditionalTopicsDetectedUnreviewed?: boolean;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -98,7 +125,8 @@ export type LaunchCheckKey =
   | 'dataSlots'
   | 'dataSlotEmbeddings'
   | 'conditionalTopics'
-  | 'conditionalTopicsOff';
+  | 'conditionalTopicsOff'
+  | 'conditionalTopicsReview';
 
 /**
  * Whether a failed check stops a launch.
@@ -214,6 +242,19 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
           },
         ]
       : []),
+    // Before either conditional-topics row, because reviewing the proposal is what decides what the
+    // other two describe: accepting it may add the conditional topics the "off" warning counts, and
+    // the coherence row can only judge a topic set once it is live.
+    ...(conditionalTopicsReviewPending(input)
+      ? [
+          {
+            key: 'conditionalTopicsReview' as const,
+            ok: false,
+            label: conditionalTopicsReviewLabel(input),
+            severity: 'blocker' as const,
+          },
+        ]
+      : []),
     ...(input.conditionalTopicsEnabled
       ? [
           {
@@ -238,6 +279,29 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
         ]
       : []),
   ];
+}
+
+/**
+ * Is there Conditional Topics work this document asked for that nobody has looked at yet?
+ *
+ * Two states, one row: a proposal is waiting (`draftTopicCount`), or the document was flagged and
+ * the proposal has not been produced yet (`detectedUnreviewed`). They are mutually exclusive in
+ * practice — the auto-trigger flag goes false the moment a draft lands — and the draft wins when
+ * both are somehow set, because a proposal on screen is the more actionable of the two.
+ */
+function conditionalTopicsReviewPending(input: LaunchReadinessInput): boolean {
+  return (
+    (input.conditionalTopicsDraftTopicCount ?? 0) > 0 ||
+    input.conditionalTopicsDetectedUnreviewed === true
+  );
+}
+
+/** "4 suggested topics are waiting for review." */
+function conditionalTopicsReviewLabel(input: LaunchReadinessInput): string {
+  const count = input.conditionalTopicsDraftTopicCount ?? 0;
+  if (count === 1) return '1 suggested topic is waiting for review';
+  if (count > 1) return `${count} suggested topics are waiting for review`;
+  return 'This document describes who should be asked what — the suggested topics are not reviewed yet';
 }
 
 /** "Conditional topics is off, so all 4 conditional topics are asked to everyone." */

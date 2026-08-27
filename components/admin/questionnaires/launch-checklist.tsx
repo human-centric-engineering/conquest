@@ -82,6 +82,14 @@ export interface LaunchChecklistProps {
    * asked to every respondent. It never blocks a launch.
    */
   conditionalTopicsConditionalCount?: number;
+  /**
+   * How many topics the Routing Analyst's pending proposal contains. Above zero the checklist
+   * raises a BLOCKING row: the proposal is not live, nothing else on this page said it existed,
+   * and accepting or discarding it both clear the row.
+   */
+  conditionalTopicsDraftTopicCount?: number;
+  /** True when the document was flagged as describing routing and no proposal exists yet. */
+  conditionalTopicsDetectedUnreviewed?: boolean;
 }
 
 interface LaunchCheck {
@@ -89,8 +97,10 @@ interface LaunchCheck {
   ok: boolean;
   label: string;
   severity: LaunchCheckSeverity;
-  /** Page that configures this step (opened by the row's "Configure" link). */
+  /** Page that configures this step (opened by the row's trailing link). */
   href: string;
+  /** Verb for that link — "Configure" everywhere except the two conditional-topics rows. */
+  linkLabel: string;
 }
 
 function ChecklistRow({
@@ -98,11 +108,17 @@ function ChecklistRow({
   label,
   severity,
   href,
+  linkLabel = 'Configure',
+  action,
 }: {
   ok: boolean;
   label: string;
   severity: LaunchCheckSeverity;
   href?: string;
+  /** Verb for the row's trailing link — "Review" reads wrong as "Configure" on a proposal. */
+  linkLabel?: string;
+  /** Optional inline control rendered before the link (the "Turn on" button on the warning row). */
+  action?: React.ReactNode;
 }) {
   // Three states, not two. A failed warning is neither done nor outstanding-work-before-launch: it
   // is something to look at, so it gets its own colour and its own screen-reader word rather than
@@ -132,13 +148,14 @@ function ChecklistRow({
         {label}
       </span>
       <span className="sr-only">{ok ? '(ready)' : warning ? '(warning)' : '(not ready)'}</span>
+      {action && <span className="ml-auto shrink-0">{action}</span>}
       {href && (
         <Link
           href={href}
-          aria-label={`Configure: ${label}`}
-          className="text-muted-foreground hover:text-foreground ml-auto inline-flex shrink-0 items-center gap-0.5 text-xs"
+          aria-label={`${linkLabel}: ${label}`}
+          className={`text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-0.5 text-xs ${action ? '' : 'ml-auto'}`}
         >
-          Configure
+          {linkLabel}
           <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       )}
@@ -168,11 +185,15 @@ export function LaunchChecklist({
   conditionalTopicsEnabled = false,
   conditionalTopicsErrorCount = 0,
   conditionalTopicsConditionalCount = 0,
+  conditionalTopicsDraftTopicCount = 0,
+  conditionalTopicsDetectedUnreviewed = false,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [enabling, setEnabling] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
 
   // Goal, audience, sections, questions and the config row are all set in the Structure editor;
   // data slots have their own tab; embeddings are generated on the Settings tab (under the
@@ -194,6 +215,13 @@ export function LaunchChecklist({
     dataSlotEmbeddings: `${base}/data-slots`,
     conditionalTopics: `${base}/topics`,
     conditionalTopicsOff: `${base}/topics`,
+    conditionalTopicsReview: `${base}/topics`,
+  };
+  // "Configure" is the verb for a setting. Neither conditional-topics row is one: one points at a
+  // proposal to accept or discard, the other at topics to read before deciding.
+  const linkLabelByKey: Partial<Record<LaunchCheckKey, string>> = {
+    conditionalTopicsOff: 'Review',
+    conditionalTopicsReview: 'Review',
   };
   const checks: LaunchCheck[] = launchReadinessChecks({
     goal,
@@ -214,18 +242,45 @@ export function LaunchChecklist({
     conditionalTopicsEnabled,
     conditionalTopicsErrorCount,
     conditionalTopicsConditionalCount,
+    conditionalTopicsDraftTopicCount,
+    conditionalTopicsDetectedUnreviewed,
   }).map((c) => ({
     key: c.key,
     ok: c.ok,
     label: c.label,
     severity: c.severity,
     href: hrefByKey[c.key],
+    linkLabel: linkLabelByKey[c.key] ?? 'Configure',
   }));
   // Both counts read blockers only, so a warning never claims a step is outstanding nor disables
   // the Launch button — the server applies the same rule on the PATCH.
   const ready = !checks.some(blocksLaunch);
   const remaining = checks.filter(blocksLaunch).length;
   const warnings = checks.filter((c) => !c.ok && c.severity === 'warning').length;
+
+  /**
+   * Turn conditional topics on from the warning row itself.
+   *
+   * The row states a misconfiguration and, until now, the only way out of it was to know that the
+   * Topics tab has a switch on it. The topics it refers to are already accepted — this is the same
+   * decision the accept dialog offered and the admin declined or missed, so nothing unreviewed goes
+   * live by pressing it. If the newly-live topic set turns out to be incoherent, the coherence row
+   * appears on the refreshed checklist and blocks the launch, which is exactly what should happen.
+   */
+  const turnConditionalTopicsOn = () => {
+    setEnabling(true);
+    setEnableError(null);
+    authoringMutate('PATCH', API.APP.QUESTIONNAIRES.versionTopics(questionnaireId, versionId), {
+      enabled: true,
+    })
+      .then(() => router.refresh())
+      .catch((err: unknown) => {
+        setEnableError(
+          err instanceof Error ? err.message : 'Could not turn conditional topics on.'
+        );
+      })
+      .finally(() => setEnabling(false));
+  };
 
   const launch = () => {
     setBusy(true);
@@ -304,9 +359,31 @@ export function LaunchChecklist({
           can jump straight to whatever's outstanding without opening the dialog. */}
       <ul className="space-y-1.5">
         {checks.map((c) => (
-          <ChecklistRow key={c.key} ok={c.ok} label={c.label} severity={c.severity} href={c.href} />
+          <ChecklistRow
+            key={c.key}
+            ok={c.ok}
+            label={c.label}
+            severity={c.severity}
+            href={c.href}
+            linkLabel={c.linkLabel}
+            action={
+              c.key === 'conditionalTopicsOff' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  disabled={enabling}
+                  onClick={turnConditionalTopicsOn}
+                >
+                  {enabling && <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" />}
+                  Turn on
+                </Button>
+              ) : undefined
+            }
+          />
         ))}
       </ul>
+      {enableError && <p className="text-destructive text-sm">{enableError}</p>}
     </div>
   );
 }

@@ -58,6 +58,8 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
   dataSlotEmbeddings: 'Generate data-slot embeddings before launching adaptive data-slot selection',
   conditionalTopics:
     'Fix the conditional-topics problems on the Conditional topics tab before launch — most often a question that belongs to no topic, which could never be asked',
+  conditionalTopicsReview:
+    'This document describes who should be asked what. Open the Conditional topics tab and accept or discard the suggested topics before launch',
   // Never reachable: `conditionalTopicsOff` is a warning, and the loop below skips warnings. Present
   // because the map is exhaustive over the key union, which is what stops a future BLOCKING check
   // from shipping without a launch-gate message.
@@ -70,8 +72,14 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
  * saved config row (+ data slots when the feature is on). Delegates to the shared
  * {@link loadLaunchReadiness} — the same criteria the "Preview as respondent" gate uses — and
  * maps any failed check to the launch-gate's `missing` validation detail.
+ *
+ * Returns the keys of the checks that were failing but NOT blocking — the warnings the admin
+ * launched over. They are returned rather than swallowed so the audit entry can record them: a
+ * warning that can be launched past is, by construction, a decision somebody made, and "the
+ * checklist said conditional topics was off and they went anyway" is worth being able to answer
+ * later. It stays a decision, not a gate — nothing here refuses a launch over one.
  */
-async function assertLaunchable(versionId: string): Promise<void> {
+async function assertLaunchable(versionId: string): Promise<LaunchCheckKey[]> {
   const { checks } = await loadLaunchReadiness(versionId);
   const missing: Record<string, string[]> = {};
   for (const check of checks) {
@@ -82,6 +90,7 @@ async function assertLaunchable(versionId: string): Promise<void> {
   if (Object.keys(missing).length > 0) {
     throw new ValidationError('Version is not ready to launch', missing);
   }
+  return checks.filter((c) => !c.ok && c.severity === 'warning').map((c) => c.key);
 }
 
 const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
@@ -117,7 +126,9 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
         'Cannot change status: this version has live sessions or invitations'
       );
     }
-    if (to === 'launched') await assertLaunchable(vid);
+    // Empty for every transition that is not a launch — an un-launch or an archive is not a
+    // decision about warnings, and stamping the previous launch's warnings onto it would be a lie.
+    const launchedOverWarnings = to === 'launched' ? await assertLaunchable(vid) : [];
 
     const updated = await prisma.appQuestionnaireVersion.update({
       where: { id: vid },
@@ -131,6 +142,9 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
       entityType: 'questionnaire_version',
       entityId: vid,
       changes: computeChanges({ status: from }, { status: to }),
+      // Only when there were any: an empty array on every launch would make the field noise, and
+      // the absence of the key already reads as "the checklist was clean".
+      ...(launchedOverWarnings.length > 0 ? { metadata: { launchedOverWarnings } } : {}),
       clientIp,
     });
     log.info('Questionnaire version status changed', {
@@ -138,6 +152,7 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
       versionId: vid,
       from,
       to,
+      ...(launchedOverWarnings.length > 0 ? { launchedOverWarnings } : {}),
     });
 
     return successResponse(updated);

@@ -181,11 +181,61 @@ describe('LaunchChecklist', () => {
       expect(screen.getByRole('button', { name: /^launch$/i })).toBeEnabled();
     });
 
-    it('links to the Conditional topics tab', () => {
+    it('links to the Conditional topics tab, as a review rather than a configure', () => {
+      // "Configure" is the verb for a setting, and this row points at topics to read before
+      // deciding. The label is the assertion because it is the only thing distinguishing this
+      // link from the eight identical ones above it in the screen-reader list.
       render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
       expect(
-        screen.getByRole('link', { name: /configure: conditional topics is off/i })
+        screen.getByRole('link', { name: /review: conditional topics is off/i })
       ).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/v-1/topics');
+    });
+
+    it('offers Turn on inline, and PATCHes only `enabled` when pressed', async () => {
+      // The gap this closes: before it, the only way out of the state the row describes was to
+      // know the Topics tab has a switch on it.
+      render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
+
+      await userEvent.click(screen.getByRole('button', { name: /turn on/i }));
+
+      await waitFor(() => expect(mockAuthoringMutate).toHaveBeenCalledTimes(1));
+      expect(mockAuthoringMutate).toHaveBeenCalledWith(
+        'PATCH',
+        API.APP.QUESTIONNAIRES.versionTopics('qn-1', 'v-1'),
+        { enabled: true }
+      );
+      // `enabled` and nothing else: the payload is the whole of what this row is allowed to say.
+      // Whether the route MERGES that onto the rest of the settings blob is the route's contract,
+      // covered where the route is tested — not something a mocked `authoringMutate` can observe.
+      await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    });
+
+    it('shows the server error instead of a refresh when turning it on fails', async () => {
+      mockAuthoringMutate.mockRejectedValueOnce(new Error('Version is locked'));
+      render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
+
+      await userEvent.click(screen.getByRole('button', { name: /turn on/i }));
+
+      expect(await screen.findByText('Version is locked')).toBeInTheDocument();
+      expect(mockRefresh).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a generic message when the failure is not an Error', async () => {
+      // `authoringMutate` rejects with whatever the fetch layer threw, which is not always an
+      // Error — without the fallback the row would render "undefined" as its failure.
+      mockAuthoringMutate.mockRejectedValueOnce('socket hang up');
+      render(<LaunchChecklist {...OFF_WITH_CONDITIONALS} />);
+
+      await userEvent.click(screen.getByRole('button', { name: /turn on/i }));
+
+      expect(await screen.findByText('Could not turn conditional topics on.')).toBeInTheDocument();
+      expect(mockRefresh).not.toHaveBeenCalled();
+    });
+
+    it('offers Turn on nowhere else', () => {
+      // Every other row is either a setting with its own page or a fact no button can change.
+      render(<LaunchChecklist {...READY} dataSlotsRequired dataSlotsReady={false} />);
+      expect(screen.queryByRole('button', { name: /turn on/i })).not.toBeInTheDocument();
     });
 
     it('is absent when the feature is on, and when there are no conditional topics', () => {
@@ -196,6 +246,53 @@ describe('LaunchChecklist', () => {
 
       rerender(<LaunchChecklist {...READY} conditionalTopicsConditionalCount={0} />);
       expect(screen.queryByText(/asked to everyone/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('the unreviewed-proposal row', () => {
+    it("blocks Launch while the Routing Analyst's proposal is unreviewed", async () => {
+      // The hole this closes: the proposal is not live, the runtime never reads it, and before
+      // this row nothing on the Overview said it existed — so a version whose Topics tab was
+      // never opened launched looking clean, asking everyone everything.
+      render(<LaunchChecklist {...READY} conditionalTopicsDraftTopicCount={4} />);
+
+      expect(
+        screen.getAllByText('4 suggested topics are waiting for review')[0]
+      ).toBeInTheDocument();
+      await openDialog();
+      expect(screen.getByRole('button', { name: /^launch$/i })).toBeDisabled();
+    });
+
+    it('counts as an outstanding step, not a warning', () => {
+      render(<LaunchChecklist {...READY} conditionalTopicsDraftTopicCount={1} />);
+
+      const row = screen.getAllByText('1 suggested topic is waiting for review')[0].closest('li');
+      expect(row).toHaveTextContent('(not ready)');
+      expect(row).not.toHaveTextContent('(warning)');
+      expect(screen.getByText(/Complete the 1 remaining step/i)).toBeInTheDocument();
+    });
+
+    it('blocks on a flagged document whose proposal has not been produced yet', async () => {
+      render(<LaunchChecklist {...READY} conditionalTopicsDetectedUnreviewed />);
+
+      expect(screen.getAllByText(/describes who should be asked what/i)[0]).toBeInTheDocument();
+      await openDialog();
+      expect(screen.getByRole('button', { name: /^launch$/i })).toBeDisabled();
+    });
+
+    it('links to the Conditional topics tab as a review', () => {
+      // The other half of the two-entry `linkLabelByKey` map. `hrefByKey` is exhaustive over the
+      // check-key union so a missing href fails type-check; the LABEL is not, so only a test
+      // catches this row inheriting the default "Configure" verb.
+      render(<LaunchChecklist {...READY} conditionalTopicsDraftTopicCount={2} />);
+      expect(
+        screen.getByRole('link', { name: /review: 2 suggested topics are waiting for review/i })
+      ).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/v-1/topics');
+    });
+
+    it('is absent when there is nothing waiting', () => {
+      render(<LaunchChecklist {...READY} />);
+      expect(screen.queryByText(/waiting for review/i)).not.toBeInTheDocument();
     });
   });
 

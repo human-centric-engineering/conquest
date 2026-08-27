@@ -347,34 +347,33 @@ describe('forkVersionIfLaunched — fork', () => {
     );
   });
 
-  it('carries the cached Conditional Topics candidacy verdict into the fork (F17.19)', async () => {
-    // The verdict describes the source DOCUMENT's own words, which the fork still carries — so it
-    // stays true of the copy, and the Topics tab's auto-trigger (Phase 3) must still be able to see
-    // it on whichever version ends up editable after a launch forks it.
+  it('does NOT carry the cached Conditional Topics candidacy verdict into the fork (F17.32)', async () => {
+    // It used to (F17.19), reasoning that the verdict describes the source DOCUMENT and the fork
+    // still carries that document. True — but incomplete: the two facts recording how the verdict
+    // was already SETTLED do not travel with it. `AppQuestionnaireTopicDraft` is not copied, and
+    // `AppAiRun` is keyed on `versionId` and stays with the parent. So a copied verdict arrives
+    // with no history, and `resolveAutoTriggerPending` reads that as "never looked at".
+    //
+    // The regression that would land green without this: an admin whose proposal was DISCARDED
+    // edits the launched version, and the fresh draft both re-fires a billed analyst run and — since
+    // F17.32 — refuses to launch until they re-run and re-discard the same proposal. Every edit.
     await forkVersionIfLaunched(scoped(), { userId: 'admin-1' });
 
-    expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          conditionalTopicsCandidate: { isCandidate: true, confidence: 0.8, signals: [] },
-        }),
-      })
-    );
+    const data = (tx.appQuestionnaireVersion.create as Mock).mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(data).not.toHaveProperty('conditionalTopicsCandidate');
   });
 
-  it('writes SQL-NULL for a source with no cached candidacy verdict', async () => {
-    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
-      ...sourceGraph(),
-      conditionalTopicsCandidate: null,
-    });
-
+  it('does not read the candidacy verdict off the source at all', async () => {
+    // Selecting it and then dropping it would leave the next reader thinking the omission was an
+    // oversight. `duplicateQuestionnaire` already makes the same choice.
     await forkVersionIfLaunched(scoped());
 
-    expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ conditionalTopicsCandidate: Prisma.JsonNull }),
-      })
-    );
+    const select = (tx.appQuestionnaireVersion.findUniqueOrThrow as Mock).mock.calls[0][0]
+      .select as Record<string, unknown>;
+    expect(select).not.toHaveProperty('conditionalTopicsCandidate');
   });
 
   it('recreates sections preserving ordinal/title/description', async () => {

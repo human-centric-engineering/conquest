@@ -771,6 +771,88 @@ be asked to everyone until you turn it on"), and off with none ("conditional top
 turn it on yourself" — the sentence that used to be shown unconditionally, including, wrongly, to
 versions where the feature was already on).
 
+### Closing the loop to the review (F17.32)
+
+Phase 4 closed the loop from an **accepted** proposal to the switch. It left the loop from an
+**unreviewed** one open, and that is the bigger hole: the launch checklist counted
+`AppQuestionnaireTopic` rows with `phase: 'conditional'` — accepted topics only. A version where
+candidacy fired, the analyst proposed, and the admin never opened this tab has zero of those. The
+checklist was silent, every row passed, and the version launched looking clean while a paid model
+call sat unread beside it. Same failure shape as the state Phase 4 fixed: the AI chain succeeded and
+the product never said so.
+
+**`conditionalTopicsReview` — the first conditional-topics row that blocks.** It appears when either
+half of "nobody has looked at what this document asked for" holds:
+
+| Fact                                                             | Row                                                                     |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `AppQuestionnaireTopicDraft` holds a proposal                    | "4 suggested topics are waiting for review"                             |
+| Candidacy said yes and `resolveAutoTriggerPending` is still true | "This document describes who should be asked what — … not reviewed yet" |
+
+The second half exists because the **non-streaming** ingest path never runs the analyst: it caches
+the verdict on the version and leaves the run to this tab's auto-trigger. An admin who never opens
+the tab therefore had no draft AND no signal — the streaming path's draft is what made the first
+half look sufficient.
+
+**Why this one is allowed to block, when `conditionalTopicsOff` is not.** The exit is _look at it_,
+not _agree with it_: accepting the proposal clears the row and so does discarding it. A blocker
+whose only exit is "turn the feature on" would not be a check, it would be coercion — and an admin
+who wants everyone asked everything would resolve it by deleting the conditional topics, which is
+strictly worse than the state the warning describes. Every other blocking row is likewise
+objectively verifiable ("a goal is set", "every rating scale is labelled"); "you should route" is a
+judgement, and judgements stay warnings.
+
+**It cannot get stuck — but not for the reason the first version of this claimed.**
+`resolveAutoTriggerPending` goes false the moment a `routing_analysis` run succeeds (there is then a
+draft to review) and after the bounded retries are spent. Retries, however, are only spent by
+`dispatchRoutingAnalysis`, which is the sole writer of a `failed` `AppAiRun` — and the analyse route
+returns ahead of it on three paths. Two of them cannot strand anything: a rate limit resets in
+minutes, and a null `buildRoutingAnalysisInput` means the version has no questions, which the
+`questions` blocker already refuses. The third is permanent: **with the Routing Analyst agent
+unseeded, no run is ever recorded**, `failures` stays at 0 forever, and the row could never clear —
+every flagged draft unlaunchable on any deploy that skipped the seed unit, with only "turn
+Conditional Topics on" or "hand-author a topic" as ways out. That is the coercion this row is
+designed not to be, arrived at by accident. `detectedButUnreviewed` therefore refuses to raise the
+row at all when the analyst is unseeded. The pending-draft half is unaffected and stays a blocker
+even then: accepting or discarding a draft that already exists needs no analyst.
+
+**A fork no longer inherits the verdict.** `forkVersionIfLaunched` used to copy
+`conditionalTopicsCandidate` onto the new draft (F17.19), reasoning that the verdict describes the
+source document and the fork still carries it. True, but incomplete: neither of the facts recording
+how the verdict was already SETTLED travels with it — `AppQuestionnaireTopicDraft` is not copied,
+and `AppAiRun` is keyed on `versionId` and stays with the parent. A copied verdict therefore arrived
+with no history and read as "never looked at". The cost used to be one redundant billed analyst run
+per edit-fork; once this row existed it became a fork that could not be launched until the admin
+re-ran the analyst and discarded the same proposal again, every time. The fork now drops the
+verdict, which is what `duplicateQuestionnaire` already did.
+
+**Preview opts out**, alongside the adaptive-embeddings check —
+`loadLaunchReadiness(id, { includeConditionalTopicsReview: false })`. Rehearsing the draft is how an
+admin decides what to do about a proposal, so gating the rehearsal on having already decided inverts
+the order the work happens in. Nothing a preview session does reads the draft: it is not live.
+
+**What it costs.** `conditionalTopicsCandidate` rides along on a version row `loadLaunchReadiness`
+already reads, and the draft is one lookup on a unique key. The two `AppAiRun` reads and the
+authored-topic lookup behind the second half are paid only when there is no draft to review, the
+feature is off, and the document was actually flagged — a small minority of versions.
+
+**Two smaller repairs shipped with it.**
+
+- **The warning row got a button.** `conditionalTopicsOff` states a misconfiguration whose only
+  remedy used to be knowing that this tab has a switch on it. The row now carries **"Turn on"**,
+  which PATCHes `{ enabled: true }` and refreshes. Nothing unreviewed goes live by pressing it — the
+  topics it counts are already accepted, and this is the same decision the accept dialog offered.
+  If the newly-live set turns out to be incoherent, the `conditionalTopics` coherence row appears on
+  the refreshed checklist and blocks the launch, which is what should happen.
+- **Launching past a warning is recorded.** `assertLaunchable` now returns the failing non-blocking
+  checks, and the `questionnaire_version.status` audit entry carries them as
+  `metadata.launchedOverWarnings` (omitted entirely when there are none, so the field stays signal).
+  A warning that can be launched past is by construction a decision somebody made; this is where
+  "nobody told me" stops being true.
+
+None of it touches the invariant. A proposal is still inert until accepted, and `enabled` still
+moves only when an admin moves it — the checklist just stopped pretending neither existed.
+
 ### What the check reads, and how long it stays suppressed (F17.22 Phase 3)
 
 The gate above was also swallowing documents that _do_ say it, in three separate ways.

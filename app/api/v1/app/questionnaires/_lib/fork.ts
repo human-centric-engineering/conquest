@@ -181,7 +181,6 @@ export async function forkVersionIfLaunched(
           audience: true,
           goalProvenance: true,
           audienceProvenance: true,
-          conditionalTopicsCandidate: true,
         },
       });
 
@@ -203,7 +202,18 @@ export async function forkVersionIfLaunched(
           audience: jsonInput(source.audience),
           goalProvenance: source.goalProvenance,
           audienceProvenance: jsonInput(source.audienceProvenance),
-          conditionalTopicsCandidate: jsonInput(source.conditionalTopicsCandidate),
+          // The ingestion-time Conditional Topics verdict is deliberately NOT carried across, the
+          // same choice `duplicateQuestionnaire` already makes. It is a claim about a document
+          // whose review was settled on the PARENT — but the two facts that record how it was
+          // settled do not come with it: `AppQuestionnaireTopicDraft` is not copied, and `AppAiRun`
+          // is keyed on `versionId` and stays with the parent. So a copied verdict arrives on the
+          // fork with no history, and `resolveAutoTriggerPending` reads that as "never looked at".
+          //
+          // The visible cost was a second billed analyst run on every edit-fork of a version whose
+          // proposal had been DISCARDED (an accepted one leaves `source: 'analyst'` topics, which
+          // the same predicate already treats as handled). Since F17.32 that re-fire is also a
+          // launch blocker, so the fork could not be launched until the admin re-ran the analyst
+          // and discarded the same proposal again — every time.
         },
         select: { id: true },
       });

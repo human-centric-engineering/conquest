@@ -375,11 +375,15 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
   // A launched version is always previewable; a draft is previewable once it passes the same
-  // readiness gate as launch (so an admin can rehearse it before going live). Exception: the
-  // adaptive "Questions embedded" check is launch-only — preview rehearsal is allowed before
-  // embedding because the live turn loop embeds slots lazily as a backstop.
+  // readiness gate as launch (so an admin can rehearse it before going live). Two exceptions, both
+  // launch-only: the adaptive "Questions embedded" check (the live turn loop embeds slots lazily as
+  // a backstop), and the "suggested topics are waiting for review" check — rehearsing the draft is
+  // how an admin decides what to do about that proposal, and the proposal is not live either way.
   if (version.status !== 'launched') {
-    const { ready } = await loadLaunchReadiness(versionId, { includeEmbeddings: false });
+    const { ready } = await loadLaunchReadiness(versionId, {
+      includeEmbeddings: false,
+      includeConditionalTopicsReview: false,
+    });
     if (!ready) {
       return {
         ok: false,
