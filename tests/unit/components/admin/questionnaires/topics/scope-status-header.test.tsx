@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The Conditional Topics status header (F17.25).
  *

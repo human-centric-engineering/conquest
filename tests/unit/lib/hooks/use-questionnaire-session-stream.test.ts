@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useQuestionnaireSessionStream — the respondent turn loop.
  *

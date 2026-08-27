@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionEntry — forwards the resolved intro into the workspace.
  *

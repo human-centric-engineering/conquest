@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionRefChip — respondent-facing support reference chip.
  *

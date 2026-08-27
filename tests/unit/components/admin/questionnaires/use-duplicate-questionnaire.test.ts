@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useDuplicateQuestionnaire — shared client hook for the "Duplicate" action.
  *

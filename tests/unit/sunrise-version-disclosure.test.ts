@@ -149,6 +149,20 @@ const ALLOWED_ROUTES: readonly string[] = [
   'app/api/v1/admin/orchestration/workflows/route.ts',
   'app/api/v1/admin/stats/route.ts',
   'app/api/v1/mcp/route.ts',
+
+  // FORK ADDITION (ConQuest). The platform's own maintenance tick
+  // (`admin/orchestration/maintenance/tick`) is already on this list and reaches
+  // the constant the same transitive way, through
+  // `lib/orchestration/mcp/config.ts`. ConQuest exposes the same tick a second
+  // way, for a platform cron that cannot hold a session or an API key, so
+  // `withAdminAuth` is not available to it.
+  //
+  // It qualifies on the same terms as the rows above: it authenticates a
+  // `CRON_SECRET` bearer token before doing any work, refuses outright when
+  // `CRON_SECRET` is unset (rather than running unauthenticated), and never
+  // returns the version — it only reaches it transitively. Nothing here is
+  // disclosed to an unauthenticated caller.
+  'app/api/v1/cron/maintenance/route.ts',
 ];
 
 /** Segments only reachable after signing in. */

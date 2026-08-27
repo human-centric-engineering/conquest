@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: CohortSubgroupsPanel render — the create form, the subgroup rows (name + description +
  * member count), and the empty state. Router + apiClient mocked.

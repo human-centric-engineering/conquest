@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ChatErrorPanel — blocking / error state panels for the respondent chat surface (F7.1).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MeetingParticipantBoot — the participant's surface in a facilitated meeting (P15.5).
  *

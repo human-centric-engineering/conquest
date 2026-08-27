@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useInlineCorrection — single-shot answer correction behind the "fix this answer" gesture
  * (Variant B). Pins the contract the inline editor depends on but can't easily drive itself:

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AnonymousSessionBoot — client-side bootstrap for the no-login respondent surface (F7.1).
  *

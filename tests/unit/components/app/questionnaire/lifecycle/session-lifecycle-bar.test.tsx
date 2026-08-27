@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionLifecycleBar — anon badge, pause/resume gating, cost hint, action error (F7.3).
  *

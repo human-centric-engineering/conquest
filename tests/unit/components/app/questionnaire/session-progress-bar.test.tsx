@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionProgressBar — weighted-coverage bar for the respondent surface (F7.3).
  *

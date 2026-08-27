@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Interviewer switcher (F-persona) — the `indicator` / `both` in-chat presentation.
  *

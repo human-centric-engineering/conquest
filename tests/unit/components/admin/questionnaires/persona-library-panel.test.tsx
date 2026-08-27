@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * PersonaLibraryPanel (F-persona) — unit tests for the built-in-persona half of the "Interviewer
  * voice" either/or shown in `config-editor.tsx` when built-in-persona mode is on.

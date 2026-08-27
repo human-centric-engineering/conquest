@@ -73,9 +73,23 @@ describe('BRAND resolves from the seam', () => {
 });
 
 describe('header brand', () => {
-  it('renders the fork brand', () => {
+  // FORK NOTE (ConQuest). Upstream asserts `BrandMark` renders `FORK.name`,
+  // because Sunrise's scaffold renders `BRAND.name` as a bare string. ConQuest
+  // has replaced that body with its own two-tone wordmark, which is exactly what
+  // the seam is for — CUSTOMIZATION.md §2 calls it a render concern an identity
+  // string cannot express — so the slot no longer tracks the seam's value and
+  // the upstream assertion is unsatisfiable here by design.
+  //
+  // What still has to hold is the half this file exists for: the header must
+  // carry THIS product's identity and must not leak the starter's. Asserted
+  // against a literal rather than `appBrandName`, so a fork that rebrands
+  // `lib/app/brand.ts` and forgets the wordmark fails here instead of passing
+  // vacuously. The wordmark's own rendering is covered in
+  // tests/unit/components/brand/brand-mark.test.tsx.
+  it('renders the fork’s own lockup, and never the starter’s name', () => {
     const { container } = render(React.createElement(BrandMark));
-    expect(container.textContent).toBe(FORK.name);
+    expect(container.textContent).toBe('ConQuest');
+    expect(container.textContent).not.toContain('Sunrise');
   });
 });
 

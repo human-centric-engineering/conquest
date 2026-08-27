@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ScopeSettingsCard — the opening's follow-up allowance (G03 / F17.17).
  *

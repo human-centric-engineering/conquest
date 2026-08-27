@@ -53,6 +53,18 @@ vi.mock('@/components/admin/system-info', () => ({
   ),
 }));
 
+// FORK STUB (ConQuest). This page also renders a `ConfigHealthBanner`, a
+// ConQuest addition with no upstream counterpart. It is stubbed for the same
+// reason the three above are — this file is about the PAGE's job, not a child's
+// rendering — and stubbing it also stops `getConfigHealth()`'s own `serverFetch`
+// call, which shares the mock below, from feeding the banner an undefined
+// report and throwing inside a test that is not about the banner at all.
+vi.mock('@/components/admin/config-health-banner', () => ({
+  ConfigHealthBanner: (props: { report: unknown }) => (
+    <div data-testid="config-health-banner" data-report={JSON.stringify(props.report)} />
+  ),
+}));
+
 vi.mock('@/components/status/status-page', () => ({
   StatusPage: (props: { title?: string }) => (
     <div data-testid="status-page" data-title={props.title} />

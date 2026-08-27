@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useFormAnswers — local answer state + debounced autosave for the form surface
  * (P-presentation). Pins the save contract the chat↔form coherence depends on: a value

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * VersionGraph — read-only structural graph render tests.
  *

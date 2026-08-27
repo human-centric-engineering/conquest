@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Compose Questionnaire page — render tests.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Admin Questionnaires LIST page — summary-tile tally + within-cap stats fetch.
  *

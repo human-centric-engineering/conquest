@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * What surrounds a respondent surface, per chrome mode — and the height that surrounds it.
  *

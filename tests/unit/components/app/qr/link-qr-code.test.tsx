@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * LinkQrCode — the download / copy-image actions and their failure paths.
  *

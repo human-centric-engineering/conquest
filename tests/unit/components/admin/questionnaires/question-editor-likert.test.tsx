@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionEditor — the likert editor must show/author endpoint anchor labels.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ForkConfirmProvider — mounts the single workspace fork-confirmation dialog and bridges it to
  * `authoringMutate`. It registers a handler on the bridge; invoking that handler opens the dialog

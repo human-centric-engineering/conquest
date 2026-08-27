@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `ScopeMapNode` — the routing map's node renderer, and `miniMapNodeColor`.
  *

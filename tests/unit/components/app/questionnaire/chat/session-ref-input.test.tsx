@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
+
 /**
- * @vitest-environment jsdom
- *
  * SessionRefInput — the segmented session-reference field.
  *
  * Pins the behaviour the visual cells are there to support: one labelled field (not eight), input

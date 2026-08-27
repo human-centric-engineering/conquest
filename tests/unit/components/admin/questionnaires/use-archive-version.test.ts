@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useArchiveVersion — shared client hook for the per-version Archive + Restore actions.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ClientKnowledgePanel — component tests (demo-client KB section).
  *

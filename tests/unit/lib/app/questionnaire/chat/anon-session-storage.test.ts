@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
+
 /**
- * @vitest-environment jsdom
- *
  * Unit test: no-login session credential storage (session resume).
  *
  * Pins the durable-vs-ephemeral split (localStorage vs sessionStorage), the expiry check, the

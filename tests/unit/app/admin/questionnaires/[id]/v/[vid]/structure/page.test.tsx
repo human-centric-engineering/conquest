@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Structure tab page (`/admin/questionnaires/[id]/v/[vid]/structure`) tests.
  *

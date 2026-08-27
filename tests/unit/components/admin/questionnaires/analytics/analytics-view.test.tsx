@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AnalyticsView — alpha privacy-disclosure note wiring.
  *

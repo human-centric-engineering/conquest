@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SaveButton — a Save action that flashes a brief "Saved" check on success.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AnswerSlotPanel (+ AnswerSlotItem) — rendering, scope header, expand, Revisit (F7.2).
  *

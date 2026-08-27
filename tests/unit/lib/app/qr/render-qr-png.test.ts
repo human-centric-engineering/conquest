@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QR PNG rasterisation, clipboard write, and download trigger.
  *

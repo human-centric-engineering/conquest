@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionComplete — the post-submission confirmation (F7.3, + F7.4 PDF download).
  *

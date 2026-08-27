@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ImportDefinitionDialog — unit tests for the "Import definition" flow (F14.9).
  *

@@ -44,6 +44,7 @@ import {
 } from '@/lib/orchestration/llm/provider-manager';
 import { ProviderError } from '@/lib/orchestration/llm/provider';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { isWorkflowAgentId } from '@/lib/orchestration/capabilities/dispatcher';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
@@ -524,7 +525,11 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     }
 
     void logCost({
-      ...(opts.context.agentId ? { agentId: opts.context.agentId } : {}),
+      // Same guard as the primary path above — a workflow dispatch puts
+      // `workflow:<id>` here, which is not an AiAgent row (Sunrise #599/#600).
+      ...(opts.context.agentId && !isWorkflowAgentId(opts.context.agentId)
+        ? { agentId: opts.context.agentId }
+        : {}),
       operation: CostOperation.CHAT,
       model: opts.model,
       provider: opts.providerSlug,
@@ -666,7 +671,12 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
 
     // 4. Cost — fire-and-forget. An accounting write must never fail the turn.
     void logCost({
-      ...(context.agentId ? { agentId: context.agentId } : {}),
+      // A workflow step dispatches with `workflow:<id>` in `agentId`, which is not
+      // an AiAgent row — the FK violation is caught inside logCost and the cost row
+      // silently never exists (Sunrise #599/#600). Attribute only a real agent id.
+      ...(context.agentId && !isWorkflowAgentId(context.agentId)
+        ? { agentId: context.agentId }
+        : {}),
       operation: CostOperation.CHAT,
       model,
       provider: providerSlug,

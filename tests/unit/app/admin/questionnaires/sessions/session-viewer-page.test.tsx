@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionViewerPage Tests — the admin "read (and, for a preview, continue) one session" surface.
  *

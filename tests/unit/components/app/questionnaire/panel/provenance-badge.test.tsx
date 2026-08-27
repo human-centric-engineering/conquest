@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ProvenanceBadge — label copy per provenance, nothing when null (F7.2).
  *

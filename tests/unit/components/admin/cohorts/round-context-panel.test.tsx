@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: RoundContextPanel render — grouping, attribution labels, source badges, empty state, and the
  * contextEnabled toggle. The router + apiClient are mocked; this asserts what the panel SHOWS, not

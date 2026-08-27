@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionConfigWarning — the amber "not launch-ready" cue render tests.
  *

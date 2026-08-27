@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * IntroBackgroundField — controlled markdown editor with upload / generate / refine helpers (F12.2).
  *

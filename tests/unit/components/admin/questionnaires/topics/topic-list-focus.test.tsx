@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `TopicListEditor`'s `focusTopic` seam.
  *

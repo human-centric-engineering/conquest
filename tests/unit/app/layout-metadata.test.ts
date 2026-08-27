@@ -224,10 +224,27 @@ describe('metadata is driven by the BRAND seam, not hardcoded', () => {
     // `(public)/about`, one `(public)/page` — but a route group's layout is
     // structural, and a fork that removes a whole group loses the pin with it
     // rather than failing.
+    // FORK EXCLUSION (ConQuest). These four are structural only — they exist to
+    // wrap an admin section in a shared shell, and every page inside them
+    // declares its own title. Listed here rather than given a token
+    // `description`, which is what this row asks for: the point is that the
+    // omission is visible and deliberate, not that every layout must speak.
+    //
+    // Admin-only, which is why serving no root description costs nothing: the
+    // surfaces where the root fallback actually lands are the 404 and error
+    // pages, and those sit above this tree.
+    const FORK_SILENT_LAYOUTS = new Set([
+      'admin/demo-clients/layout.tsx',
+      'admin/experiences/layout.tsx',
+      'admin/experiences/[id]/layout.tsx',
+      'admin/questionnaires/layout.tsx',
+    ]);
+
     const servesMetadata = new Set(withMetadata.map((m) => m.rel));
     const silentLayouts = discovered
       .filter((rel) => /(^|\/)layout\.tsx$/.test(rel))
-      .filter((rel) => !servesMetadata.has(rel));
+      .filter((rel) => !servesMetadata.has(rel))
+      .filter((rel) => !FORK_SILENT_LAYOUTS.has(rel));
 
     expect(
       silentLayouts,

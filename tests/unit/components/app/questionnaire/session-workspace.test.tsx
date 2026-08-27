@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionWorkspace — the chat + answer-panel split-screen wiring (F7.2).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Evaluation run detail page (`/admin/questionnaires/[id]/v/[vid]/evaluations/[runId]`) tests.
  *

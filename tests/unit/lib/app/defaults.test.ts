@@ -18,6 +18,15 @@
  * *behaviour* (replace-vs-fallback) is covered content-agnostically in
  * `public-nav.test.tsx` and `protected-nav.test.tsx`.
  *
+ * FORK NOTE — every seam here is read for real (`importActual` for the brand
+ * one), which is the entire point: the contract only fails in a fork if the
+ * fork's own values are what gets measured. Filling a seam therefore breaks its
+ * row BY DESIGN. Pin the new value, marked `FORK FILL`, rather than deleting
+ * the row — deleting it silently drops the protection for every install, which
+ * is the failure this file exists to prevent. The rows still asserting empty
+ * are the seams ConQuest has not filled, and they must keep failing if anything
+ * ever registers into them by accident.
+ *
  * @see lib/app/ · CUSTOMIZATION.md §4
  */
 

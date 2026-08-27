@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ReasoningTrace — per-turn "watch it think" disclosure for the respondent chat (demo feature).
  *

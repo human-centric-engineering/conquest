@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useSessionLifecycle — the lifecycle status + actions hook (F7.3).
  *

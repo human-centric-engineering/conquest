@@ -21,7 +21,13 @@ export async function fetchLogoDataUri(url: string | null): Promise<string | nul
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LOGO_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    // `redirect: 'error'` because the https check above only ever sees the FIRST
+    // hop. This URL is operator-supplied brand configuration, so a logo host
+    // that 302s to an internal address would otherwise be followed unchecked and
+    // its body embedded in the PDF — the class Sunrise #635 closed upstream.
+    // A logo that redirects renders no logo, which this function already treats
+    // as an ordinary outcome.
+    const res = await fetch(url, { signal: controller.signal, redirect: 'error' });
     if (!res.ok) return null;
     const contentType = res.headers.get('content-type') ?? '';
     if (!contentType.startsWith('image/')) return null;

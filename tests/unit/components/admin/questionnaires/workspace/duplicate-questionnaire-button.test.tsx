@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * DuplicateQuestionnaireButton — workspace-header button wrapping useDuplicateQuestionnaire.
  *

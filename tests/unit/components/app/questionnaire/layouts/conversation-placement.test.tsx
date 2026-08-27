@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Where each layout actually puts the parts of the conversation.
  *

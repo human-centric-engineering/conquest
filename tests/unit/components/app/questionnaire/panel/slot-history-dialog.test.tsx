@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SlotHistoryDialog — the "Edited" pill + evolution modal for a data slot (F7.2).
  *

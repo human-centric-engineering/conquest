@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SectionEditor — the section-level "set fidelity" control (P18).
  *

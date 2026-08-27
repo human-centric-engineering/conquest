@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ConfigEditor (F3.1) — unit tests for the version run-time configuration editor.
  *

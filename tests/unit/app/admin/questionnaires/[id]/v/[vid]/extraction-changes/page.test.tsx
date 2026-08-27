@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Extraction-changes tab page (`/admin/questionnaires/[id]/v/[vid]/extraction-changes`) tests.
  *

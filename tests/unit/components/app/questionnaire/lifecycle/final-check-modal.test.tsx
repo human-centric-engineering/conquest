@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * FinalCheckModal — the early-finish submit-time contradiction "final check" (F7.3).
  *

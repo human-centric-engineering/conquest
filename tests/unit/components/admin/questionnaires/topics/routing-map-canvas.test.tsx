@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `RoutingMapCanvas` — the React Flow surface for the routing map.
  *

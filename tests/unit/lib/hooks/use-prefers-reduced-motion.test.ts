@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * usePrefersReducedMotion — reads `(prefers-reduced-motion: reduce)` and reacts to OS changes.
  *

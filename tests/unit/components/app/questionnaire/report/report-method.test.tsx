@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * "How this report was created" panel — component tests.
  *

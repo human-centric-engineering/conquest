@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Analytics tab page (`/admin/questionnaires/[id]/v/[vid]/analytics`) tests.
  *

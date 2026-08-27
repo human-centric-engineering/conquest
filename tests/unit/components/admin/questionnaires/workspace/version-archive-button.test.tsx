@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * VersionArchiveButton — the per-row Archive/Restore control in the Overview version timeline.
  *

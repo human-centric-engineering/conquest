@@ -33,6 +33,7 @@ import {
 } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { isWorkflowAgentId } from '@/lib/orchestration/capabilities/dispatcher';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
   runStructuredCompletion,
@@ -225,7 +226,12 @@ export class AppReconcileSuggestionsCapability extends BaseCapability<
 
     // 3. Cost — fire-and-forget; an accounting write must never fail the run.
     void logCost({
-      ...(context.agentId ? { agentId: context.agentId } : {}),
+      // A workflow step dispatches with `workflow:<id>` in `agentId`, which is not
+      // an AiAgent row — the FK violation is caught inside logCost and the cost row
+      // silently never exists (Sunrise #599/#600). Attribute only a real agent id.
+      ...(context.agentId && !isWorkflowAgentId(context.agentId)
+        ? { agentId: context.agentId }
+        : {}),
       operation: CostOperation.CHAT,
       model,
       provider: providerSlug,

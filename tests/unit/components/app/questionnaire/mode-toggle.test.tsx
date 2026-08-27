@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ModeToggle — the compact chat ↔ form segmented switch (P-presentation).
  *

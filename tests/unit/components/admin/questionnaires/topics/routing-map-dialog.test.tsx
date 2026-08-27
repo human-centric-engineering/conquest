@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `RoutingMapDialog` — the Conditional topics routing map.
  *

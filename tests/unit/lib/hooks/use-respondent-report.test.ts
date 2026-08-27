@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useRespondentReport — hook tests (fetch + token header + terminal-stop).
  *

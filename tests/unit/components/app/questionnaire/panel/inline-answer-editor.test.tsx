@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * InlineAnswerEditor — the shared "fix this answer" editor (Variant B). Pins the contract the
  * correction gesture depends on: editing a field and saving PUTs the batch to `…/answers`, an

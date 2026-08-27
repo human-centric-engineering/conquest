@@ -284,6 +284,68 @@ const ALLOWED_CALL_SITES: readonly string[] = [
   // Keyword enrichment runs post-upload against a document, with no agent or
   // conversation in scope. Deliberate — see the doc note above.
   'lib/orchestration/knowledge/keyword-enricher.ts | agentId=— | conversationId=— | workflowExecutionId=—',
+
+  // ─── ConQuest app tier ────────────────────────────────────────────────────
+  //
+  // Added on the Sunrise 0.11.1 sync. This guard is in ALWAYS_RUN_TESTS, so the
+  // merge is what surfaced them — they had never been measured against it.
+  //
+  // The capability rows below all carry `!isWorkflowAgentId(...)`, and it is
+  // load-bearing for exactly the reason #599 was: every one of these registers
+  // through `initAppCapabilities()` into the SAME dispatcher registry core uses,
+  // and `engine/executors/tool-call.ts` dispatches with `workflowAgentId(...)`.
+  // Bound to a workflow step, `context.agentId` is `workflow:<id>` — not an
+  // AiAgent row — and the FK violation is swallowed inside logCost. The guard
+  // was absent from all 21 until this sync; the cost rows would simply not have
+  // existed, on spend that did.
+  'lib/app/questionnaire/capabilities/analyse-glossary-terms.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/analyse-routing.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/assign-data-slots.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/author-intro-background.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/compose-completion-offer.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/compose-questionnaire.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/detect-contradictions.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/detect-scope-candidacy.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/evaluate-policy.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/evaluate-scope.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/evaluate-structure.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/extract-answer-slots.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/extract-answer-slots.ts | agentId=spread((opts.context.agentId && !isWorkflowAgentId(opts.context.agentId) ? { agentId: opts.context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/extract-questionnaire-structure.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/generate-data-slots.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/reconcile-suggestions.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/refine-answer.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/refine-data-slot.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/refine-questionnaire-structure.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/repair-questions.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/suggest-round-briefing.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/capabilities/verify-extraction-structure.ts | agentId=spread((context.agentId && !isWorkflowAgentId(context.agentId) ? { agentId: context.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+
+  // App session routes. Each `agent`/`extractor` is a row the caller resolved
+  // before invoking, and the transcription route attributes to no agent at all.
+  'app/api/v1/app/questionnaire-sessions/[id]/transcribe/route.ts | agentId=— | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaire-sessions/_lib/offer-stream.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts | agentId=spread((extractor ? { agentId: extractor.id } : {})) | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaires/_lib/selector-completion.ts | agentId=spread((agent ? { agentId: agent.id } : {})) | conversationId=— | workflowExecutionId=—',
+
+  // Remaining app-tier callers. `advisor` is a resolved row; `meta.agentId` is
+  // threaded from the caller that loaded it, and omitted when absent.
+  'lib/app/questionnaire/advisor/stream-advisor.ts | agentId=spread((meta.agentId ? { agentId: meta.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/agent-advisory/explain.ts | agentId=advisor.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/data-slots/generate-stream.ts | agentId=spread((meta.agentId ? { agentId: meta.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/edit-agent/translate.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/experiences/carryover/build.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/experiences/meeting/synthesise.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/experiences/routing/select.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/ingestion/stream-compose.ts | agentId=spread((meta.agentId ? { agentId: meta.agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/learning/digest.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/llm/log-app-cost.ts | agentId=params.agentId | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/profile/validate-profile-fields.ts | agentId=spread((agentId ? { agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/scope/planner.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/scope/routability.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/turn-evaluation/evaluate-turn.ts | agentId=spread((opts.agentId ? { agentId: opts.agentId } : {})) | conversationId=— | workflowExecutionId=—',
 ];
 
 describe('AiCostLog foreign-key attribution', () => {

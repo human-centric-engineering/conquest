@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: RoundInvitesPanel — generating per-member invite links, and the per-row QR affordance.
  *

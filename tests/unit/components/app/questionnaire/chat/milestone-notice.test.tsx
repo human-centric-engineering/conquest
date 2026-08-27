@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MilestoneNotice — completeness-milestone side-band notice (F-progress).
  *

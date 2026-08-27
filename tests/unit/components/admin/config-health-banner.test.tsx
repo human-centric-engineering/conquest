@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ConfigHealthBanner — presentational tests (card + global variants).
  *

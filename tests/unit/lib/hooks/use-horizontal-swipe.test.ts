@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useHorizontalSwipe — follow-the-gesture horizontal carousel driver (touch + trackpad wheel).
  *

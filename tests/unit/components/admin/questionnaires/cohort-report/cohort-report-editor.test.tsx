@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CohortReportEditor — section list identity under reordering (F14.5).
  *

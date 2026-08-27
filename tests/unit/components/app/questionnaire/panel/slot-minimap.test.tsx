@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SlotMiniMap — floating vertical minimap: proportional bars, viewport window, click/drag to scrub.
  *
