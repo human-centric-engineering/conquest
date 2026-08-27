@@ -179,6 +179,10 @@ export const API = {
       workflowRollback: (id: string): string =>
         `/api/v1/admin/orchestration/workflows/${id}/rollback`,
       CHAT_STREAM: '/api/v1/admin/orchestration/chat/stream',
+      // Registered rather than left as a literal in chat-interface.tsx, so the
+      // transcribe route is discoverable next to the stream route it pairs
+      // with, and so the component can take it as an overridable prop (#526).
+      CHAT_TRANSCRIBE: '/api/v1/admin/orchestration/chat/transcribe',
       CONVERSATIONS: '/api/v1/admin/orchestration/conversations',
       conversationById: (id: string): string => `/api/v1/admin/orchestration/conversations/${id}`,
       conversationMessages: (id: string): string =>

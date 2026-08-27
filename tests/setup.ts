@@ -40,6 +40,172 @@ import '@testing-library/jest-dom';
 import { expect, vi, afterEach } from 'vitest';
 
 /**
+ * Refuse real network requests.
+ *
+ * A component that fetches on mount, in a test that hasn't stubbed `fetch`,
+ * issues a genuine HTTP request. happy-dom's document URL is
+ * `http://localhost:3000`, so a relative path resolves against it and the
+ * suite spends the run connecting to a dev server that isn't there —
+ * ~470 `ECONNREFUSED ::1:3000` lines per full run before this guard.
+ *
+ * Nothing failed because of it, but every one of those is a socket opened
+ * during a test, and one still in flight when Vitest tears the environment
+ * down is the shape of the `EnvironmentTeardownError` reported on #597.
+ *
+ * **It has to hook here, not `globalThis.fetch`.** happy-dom ships its own
+ * fetch implementation (`happy-dom/lib/fetch/`) over `node:http`, and binds
+ * its module references at import time — before this file runs. Patching
+ * `globalThis.fetch`, or `node:http`'s `request`, intercepts none of it. That
+ * is why the traffic was so hard to attribute: it appears in the output with
+ * no test name attached, because it lands after the test that caused it.
+ *
+ * The rejection deliberately matches what happy-dom itself throws for a failed
+ * connection — a `DOMException` named `NetworkError` (`happy-dom/lib/fetch/
+ * Fetch.js:540`), not a `TypeError` — so a test that asserts on the error shape
+ * sees no change. A test that *wants* a response must stub it:
+ * `vi.stubGlobal('fetch', vi.fn())`, or mock the module that calls it.
+ *
+ * Known wart: happy-dom brackets this hook with `startTask()` / `endTask()` and
+ * no `try/finally` (same file, ~line 115), so throwing here leaks one async
+ * task. Nothing in the suite is affected — vitest tears down with `abort()`,
+ * which resets the counters — but a test that awaits
+ * `happyDOM.waitUntilComplete()` after a blocked request will hang to the 30s
+ * timeout. Returning a `Response` is the only non-throwing exit the interceptor
+ * offers, and that would turn a rejection into a success, which is the larger
+ * lie.
+ */
+{
+  interface InterceptedRequest {
+    request: { url: string; signal?: AbortSignal };
+  }
+  interface HappyDomFetchSettings {
+    interceptor: {
+      // happy-dom `await`s the async hook, so a plain `void` return is a valid
+      // "carry on with the real request" answer.
+      beforeAsyncRequest?: (ctx: InterceptedRequest) => Promise<Response | void> | void;
+      beforeSyncRequest?: (ctx: InterceptedRequest) => void;
+    } | null;
+  }
+  const happyDom = (globalThis as { happyDOM?: { settings?: { fetch?: HappyDomFetchSettings } } })
+    .happyDOM;
+
+  const blocked = (url: string): DOMException =>
+    new DOMException(
+      `Blocked a real network request to ${url}. Tests must not reach the ` +
+        `network: stub it with vi.stubGlobal('fetch', …), or mock the module ` +
+        `that issues it. See tests/setup.ts.`,
+      'NetworkError'
+    );
+
+  // happy-dom's interceptor signals refusal by throwing; node's rejects. Same
+  // error either way, built once, so the two halves cannot drift.
+  const refuse = (url: string): never => {
+    throw blocked(url);
+  };
+
+  // Fail loud if the hook point moves. `settings.fetch.interceptor` is not a
+  // stable API across happy-dom majors, and a silently-skipped guard restores
+  // ~470 real connections per run with nothing pointing at the cause — the
+  // original #597 diagnosis took five attempts precisely because this traffic
+  // arrives unattributed.
+  //
+  // Keyed on the user-agent rather than on `globalThis.happyDOM`, so a rename
+  // of that object still trips the check instead of skipping in silence — and
+  // rather than on `typeof window`, which fires for ANY DOM environment. That
+  // second point is not hypothetical: `jsdom` is a runtime dependency of this
+  // repo, so `--environment jsdom` or a per-file `@vitest-environment jsdom`
+  // would otherwise fail every affected file with a message blaming a
+  // happy-dom upgrade that never happened. A non-happy-dom DOM environment
+  // simply gets no guard, which is the status quo for it.
+  const isHappyDom =
+    typeof navigator !== 'undefined' && /happydom/i.test(navigator.userAgent ?? '');
+  if (isHappyDom && !happyDom?.settings?.fetch) {
+    throw new Error(
+      'tests/setup.ts: happy-dom is the environment but `window.happyDOM.settings.fetch` ' +
+        'is missing, so the network guard did not install. The hook point has probably ' +
+        'moved in a happy-dom upgrade — re-point it rather than removing this check. ' +
+        'See #597.'
+    );
+  }
+
+  // happy-dom runs this hook BEFORE its own aborted-signal check
+  // (`Fetch.js:115` vs `:127`), so refusing unconditionally would pre-empt
+  // `AbortError` with `NetworkError` — silently disabling every
+  // `if (err.name === 'AbortError') return` branch under test, of which
+  // `chat-interface.tsx` and `approval-card.tsx` each have one. Mirror
+  // happy-dom's check first so an aborted request still rejects as an abort.
+  const refuseUnlessAborted = ({ request }: InterceptedRequest): void => {
+    // happy-dom's own `data:` branch sits *after* this hook (`Fetch.js:133`),
+    // so an unconditional refusal would block a URI that opens no socket at
+    // all. Returning without throwing lets happy-dom resolve it normally.
+    if (/^(data|blob):/i.test(request.url)) return;
+
+    if (request.signal?.aborted) {
+      throw (
+        request.signal.reason ?? new DOMException('signal is aborted without reason', 'AbortError')
+      );
+    }
+    return refuse(request.url);
+  };
+
+  if (happyDom?.settings?.fetch) {
+    happyDom.settings.fetch.interceptor = {
+      beforeAsyncRequest: refuseUnlessAborted,
+      beforeSyncRequest: refuseUnlessAborted,
+    };
+  }
+
+  /**
+   * The same refusal for the node environment, which has no interceptor.
+   *
+   * The hook above is happy-dom's, so it only covers the 479 files that opt
+   * into a DOM. Since `vitest.config.ts` defaults to `node`, the other 605 ran
+   * against real undici with nothing in the way — the guard did not fail, it
+   * simply was not there, which is the quieter half of the same problem it was
+   * written for.
+   *
+   * Patching `globalThis.fetch` is right *here* and wrong for happy-dom, for
+   * the reason the comment above gives: happy-dom binds its own fetch at import
+   * time and never consults this global. Under node it is the only fetch there
+   * is.
+   *
+   * Rejects rather than throws, because `fetch` never throws synchronously and
+   * a test doing `await expect(...).rejects` should see the same shape it saw
+   * under happy-dom. `vi.stubGlobal('fetch', …)` still overrides it, which is
+   * the documented escape hatch.
+   */
+  if (!isHappyDom) {
+    const realFetch = globalThis.fetch;
+    const urlOf = (input: RequestInfo | URL): string => {
+      if (typeof input === 'string') return input;
+      if (input instanceof URL) return input.href;
+      return input.url;
+    };
+
+    globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = urlOf(input);
+      // `data:` and `blob:` open no socket; happy-dom resolves them normally,
+      // so node must too or the two environments disagree.
+      if (/^(data|blob):/i.test(url)) return realFetch(input, init);
+
+      const signal =
+        init?.signal ?? (typeof input === 'object' && 'signal' in input ? input.signal : null);
+      if (signal?.aborted) {
+        // `reason` is `any` and a test may set it to anything; only pass it on
+        // when it is throwable, so the rejection is always an Error.
+        const reason: unknown = signal.reason;
+        return Promise.reject(
+          reason instanceof Error
+            ? reason
+            : new DOMException('signal is aborted without reason', 'AbortError')
+        );
+      }
+      return Promise.reject(blocked(url));
+    };
+  }
+}
+
+/**
  * Mock Next.js navigation hooks
  *
  * These are used frequently in components but need to be mocked for testing.
@@ -92,6 +258,41 @@ vi.mock('next/headers', () => ({
  * removed on that sync — keeping it would shadow the plugin and re-break on the
  * next font change.
  */
+
+/**
+ * Pin the brand seam to "unconfigured", for every test file (#661).
+ *
+ * `BRAND` resolves from `lib/app/brand.ts`, a committed file a fork edits. That
+ * means a fork's brand changes what `BRAND.name` returns inside the CORE test
+ * suite, and dozens of core tests assert brand-derived copy ("Sign in to your
+ * Sunrise account", "You've been invited to join Sunrise"). Every one of them
+ * would fail in a fork that had done nothing wrong — the "core test a fork
+ * cannot satisfy" class #660 is about.
+ *
+ * Enumerating those call sites was tried twice and was the wrong shape both
+ * times: it fixed the files a review named while nothing stopped the next
+ * brand-asserting test being written. Filling the seam and running the whole
+ * suite gave the real number — seven files, nine cases — so this is global and
+ * by construction instead.
+ *
+ * A test that needs a brand VALUE overrides this with its own HOISTED
+ * `vi.mock` — see tests/unit/brand-fork-surfaces.test.tsx, which is the one file
+ * that fills the seam and renders every brand-bearing surface with it. Do NOT
+ * drive a brand with `vi.doMock` + `vi.resetModules()` + a re-import: the seam is
+ * read at module scope, so that races the module graph and failed CI twice. The
+ * one test that must read the real scaffold
+ * uses `vi.importActual` (tests/unit/lib/app/defaults.test.ts), which is what
+ * keeps the "seams ship empty" contract able to fail in a fork rather than
+ * being mocked into always passing. Never `vi.doUnmock` this — that REMOVES the
+ * pin rather than restoring it; defaults.test.ts fails if any file does.
+ */
+vi.mock('@/lib/app/brand', async (importOriginal) => {
+  // DERIVED from the real module's export list, not a hand-written triple. A
+  // fourth brand field added later would otherwise read `undefined` in every
+  // test file — silently, since nothing links this factory to the seam.
+  const actual = await importOriginal<Record<string, unknown>>();
+  return Object.fromEntries(Object.keys(actual).map((key) => [key, null]));
+});
 
 /**
  * Mock Analytics

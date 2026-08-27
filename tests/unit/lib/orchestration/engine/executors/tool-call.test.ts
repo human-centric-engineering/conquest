@@ -56,6 +56,8 @@ import {
 } from '@/lib/orchestration/engine/dispatch-cache';
 import type { WorkflowStep } from '@/types/orchestration';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
+import { createContext } from '@/lib/orchestration/engine/context';
+import { logger } from '@/lib/logging';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -175,6 +177,46 @@ describe('executeToolCall', () => {
     );
   });
 
+  it('forwards the authority a real ExecutionContext carries, not just the values', async () => {
+    // The end-to-end shape, built by the REAL `createContext` rather than by
+    // hand. Forwarding only `scope` left the scope binding disarmed for every
+    // workflow, schedule, trigger and resume while three docs and a roster test
+    // said it was wired — and a hand-written fixture could not see that,
+    // because a hand-written fixture never had the flag to drop (#586).
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    const real = createContext({
+      workflowId: 'wf_tool',
+      executionId: 'exec_1',
+      userId: 'user_1',
+      inputData: {},
+      scope: { projectId: 'proj-42' },
+      logger,
+    });
+
+    await executeToolCall(makeStep({ capabilitySlug: 'my-tool', args: { x: 1 } }), real);
+
+    const [, , context] = vi.mocked(capabilityDispatcher.dispatch).mock.calls[0];
+    expect(context).toMatchObject({
+      scope: { projectId: 'proj-42' },
+      scopeIsAuthoritative: true,
+    });
+  });
+
+  it('does not invent authority for a scope that arrived without it', async () => {
+    // Same executor, one fact changed. A ctx whose scope is a hint stays a hint.
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    await executeToolCall(
+      makeStep({ capabilitySlug: 'my-tool', args: { x: 1 } }),
+      makeCtx({ scope: { projectId: 'proj-42' } })
+    );
+
+    const [, , context] = vi.mocked(capabilityDispatcher.dispatch).mock.calls[0];
+    expect(context).toHaveProperty('scope');
+    expect(context).not.toHaveProperty('scopeIsAuthoritative');
+  });
+
   it('forwards ctx.scope into the capability dispatch context when present', async () => {
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
       success: true,
@@ -193,6 +235,7 @@ describe('executeToolCall', () => {
         agentId: 'workflow:wf_tool',
         workflowExecutionId: 'exec_1',
         scope: { projectId: 'proj-42' },
+        costLogMetadata: { stepId: 'step1' },
       }
     );
   });
@@ -211,11 +254,49 @@ describe('executeToolCall', () => {
     // `workflowExecutionId` is unconditional, unlike `scope`: it is the only FK
     // the dispatcher's cost log can persist a workflow dispatch against, since
     // the `agentId` beside it is a label rather than an `AiAgent.id`.
+    //
+    // `costLogMetadata` is unconditional too, and always carries `stepId` even
+    // when the run has no metadata of its own — that key alone is what stops
+    // both execution readers dropping the row (#600).
     expect(context).toEqual({
       userId: 'user_1',
       agentId: 'workflow:wf_tool',
       workflowExecutionId: 'exec_1',
+      costLogMetadata: { stepId: 'step1' },
     });
+  });
+
+  it('carries the run-level costLogMetadata through, with stepId added', async () => {
+    // An evaluation run stamps `{ evaluationRunId, role }` on the execution
+    // context. Without this the tags stop at the capability boundary and
+    // evaluation spend that ran through a tool is untagged.
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    const step = makeStep({ capabilitySlug: 'my-tool', args: { x: 1 } });
+    await executeToolCall(
+      step,
+      makeCtx({ costLogMetadata: { evaluationRunId: 'run_7', role: 'subject' } })
+    );
+
+    const [, , context] = vi.mocked(capabilityDispatcher.dispatch).mock.calls[0];
+    expect(context.costLogMetadata).toEqual({
+      evaluationRunId: 'run_7',
+      role: 'subject',
+      stepId: 'step1',
+    });
+  });
+
+  it('lets the run-level metadata not overwrite stepId', async () => {
+    // `stepId` is the engine's attribution key, so it is spread LAST. A run
+    // whose metadata happens to carry a `stepId` must not be able to
+    // misattribute its own cost rows to a different step.
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    const step = makeStep({ capabilitySlug: 'my-tool', args: { x: 1 } });
+    await executeToolCall(step, makeCtx({ costLogMetadata: { stepId: 'somewhere-else' } }));
+
+    const [, , context] = vi.mocked(capabilityDispatcher.dispatch).mock.calls[0];
+    expect(context.costLogMetadata).toEqual({ stepId: 'step1' });
   });
 
   it('uses argsFrom step output (object) when config.args is absent', async () => {

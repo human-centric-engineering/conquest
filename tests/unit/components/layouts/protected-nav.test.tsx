@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ProtectedNav default-vs-override (issue #473)
  *
@@ -20,6 +22,16 @@
  * applies to the kebab too.
  *
  * `usePathname` is globally mocked to '/' (tests/setup.ts).
+ *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — filling `protectedNavItems` is EXPECTED to fail cases here
+ * ---------------------------------------------------------------------------
+ * The `afterEach` only `doUnmock`s the seam, so the default-case tests below
+ * render whatever `lib/app/protected-nav.ts` actually exports. A non-null
+ * override replaces the authenticated nav wholesale and those cases go red.
+ * Pin your own list rather than deleting them — the `adminOnly` and
+ * prefix-matching behaviour they cover is behaviour you still want. See #636
+ * for the sweep that would let this file be rewritten seam-independent.
  *
  * @see components/layouts/protected-nav.tsx · lib/app/protected-nav.ts · lib/protected-nav/types.ts
  */

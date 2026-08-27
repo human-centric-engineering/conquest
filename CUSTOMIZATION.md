@@ -69,14 +69,66 @@ findable in the same place in every fork.)
 
 **Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
 above is the **leaf-fork** tier: fork Sunrise directly and build your product in
-`lib/app/**`, `.context/app/`, and `prisma/schema/app.prisma`. Some forks instead build a reusable
+`lib/app/**`, `components/app/**`, `.context/app/`, and
+`prisma/schema/app.prisma`. Some forks instead build a reusable
 **framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
 Daybreak). For those, Sunrise reserves a second tier one level up —
-`lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
-the `framework_` table prefix. **Sunrise core never creates files or tables
-under either tier**, so both merge cleanly on upgrade. A framework fork owns
+`lib/framework/`, `components/framework/`, `.context/framework/`,
+`prisma/schema/framework-*.prisma`, and the `framework_` table prefix.
+**Sunrise core never creates files or tables under either tier**, so both merge
+cleanly on upgrade.
+
+**`components/app/**` is where your React components go**, and it is reserved
+for the same reason as `lib/app/**`: so an upgrade never lands a platform file
+on top of one of yours. Note the difference in kind between the two. `lib/app/`
+ships _scaffolds_ — files Sunrise creates once, exporting `null` or an empty
+function, that you fill in. `components/app/` ships **nothing at all**: it is an
+empty reservation, and you create whatever structure suits your product.
+
+That matters because `lib/app/**` is required to stay framework-agnostic (no
+runtime framework imports, no `react-dom`), which is why every seam there is
+_data_ — a list of nav items, a boolean, a string. A component cannot live
+there. `components/app/**` is the other half: it has no such restriction, and it
+is where a fork's own frames, pages and widgets belong. A framework fork owns
 `/framework` and re-exposes `/app` to _its_ leaf forks; boot both through the
 `lib/app/bootstrap.ts` seam ([§4](#4-configuration--environment--the-libapp-surface)).
+
+**Once you put files in a reserved tier, say so in `lib/app/reserved-tiers.ts`:**
+
+```ts
+// leaf fork with its own components and docs
+export const occupiedTiers: readonly string[] = ['components/app', '.context/app'];
+
+// framework-layer fork (e.g. Daybreak)
+export const occupiedTiers: readonly string[] = ['lib/framework', '.context/framework'];
+```
+
+`tests/unit/reserved-fork-tiers.test.ts` enforces "Sunrise core creates nothing
+here" by asserting those directories are empty. Upstream that is the promise
+being kept; in your fork it is a property only vanilla Sunrise can satisfy, and
+the failure blames core for files core never created. Declaring subtracts the
+tiers you occupy so the rest keep guarding — which is why you list only what you
+actually fill, and why the test fails if you declare a tier you have left empty.
+
+The declaration is read in one other place: the brand-leak row in
+`tests/unit/app/layout-metadata.test.ts` skips a route module that re-exports
+from a tier you have declared, since metadata reached through your own tier is
+your copy rather than a leak of ours. The starter-template row in the same file
+has no exemption and runs everywhere — no fork means to advertise a starter
+template.
+
+**Then pin it**, exactly as for every other seam: `tests/unit/lib/app/defaults.test.ts`
+asserts each one ships empty, so its `lib/app/reserved-tiers.ts` row fails the
+moment you declare a tier. Change that row to your value rather than deleting it
+— see the FORK NOTE at the top of that file and [§4](#4-configuration--environment--the-libapp-surface).
+Declaring without pinning swaps one red always-run test for another, which is
+not the trade this is offering.
+
+**What you give up:** a declared tier is not checked at all in your checkout, so
+if a future Sunrise release did add a file there you would meet it as a merge
+conflict rather than a test failure. That is the right way round — a conflict is
+visible and recoverable, whereas a permanently-red suite trains people to ignore
+the test.
 
 ---
 
@@ -173,31 +225,58 @@ The rule underneath: a real environment variable always beats a file, and
 
 ## 2. Branding & theming
 
-**App name (the brand seam):**
+**App name, legal entity, meta description — edit `lib/app/brand.ts`:**
 
-- Set **`NEXT_PUBLIC_APP_NAME`** in your `.env` — this renames the app across
-  page-title metadata (all layouts + auth pages), the settings and knowledge-base
-  **tab titles** (written straight to `document.title`, so they would otherwise
-  override the layout template), the legal/contact pages' metadata
-  (`privacy`, `terms`, `contact`), the **header/footer brand**, and the email
-  templates in one place, no file edits. Defaults to `"Sunrise"` when unset.
-  Consumed via `lib/brand.ts` (`BRAND.name`); import that constant if you add new
-  brand-bearing surfaces. Marketing-page **body copy** (`app/(public)/*`,
-  including `about/`'s description of the template itself) is not driven by this
-  seam — re-skin it with the thin-shim pattern in
-  [§6](#6-landing-page--routes) so your content stays sync-safe.
+```ts
+// lib/app/brand.ts — fork-owned scaffold, ships null upstream
+export const appBrandName: string | null = 'ConQuest';
+export const appBrandLegalName: string | null = 'All Too Human Ltd';
+export const appBrandDescription: string | null = 'Everything your team needs, in one place';
+```
 
-**Legal entity / copyright holder (`BRAND.legalName`):**
+That is the whole change — no other file moves.
 
-- Set **`NEXT_PUBLIC_LEGAL_NAME`** when the copyright is held by a company whose
-  name differs from the product — the public footer copyright (`© YEAR …`)
-  attributes to this value, not the product name. Defaults to
-  `NEXT_PUBLIC_APP_NAME` (then `"Sunrise"`), so a fork that only sets the app
-  name keeps today's output. Consumed via `lib/brand.ts` (`BRAND.legalName`);
-  it's deliberately broader than "copyright holder" so it can later drive other
-  legal surfaces (Terms/Privacy boilerplate, email footers). Example: product
-  `"ConQuest"` with `NEXT_PUBLIC_LEGAL_NAME="All Too Human Ltd"` →
+- **`appBrandName`** renames the app across page-title metadata (all layouts +
+  auth pages), the settings and knowledge-base **tab titles** (written straight
+  to `document.title`, so they would otherwise override the layout template), the
+  legal/contact pages' metadata (`privacy`, `terms`, `contact`), the
+  **header/footer brand**, and the email templates. Defaults to `"Sunrise"`.
+- **`appBrandLegalName`** is the copyright holder when it differs from the
+  product — the public footer copyright (`© YEAR …`) attributes to this value.
+  Defaults to the product name, so a fork that only renames the app keeps today's
+  output. It is deliberately broader than "copyright holder" so it can later
+  drive other legal surfaces (Terms/Privacy boilerplate, email footers). Example:
+  product `"ConQuest"` with legal name `"All Too Human Ltd"` →
   `© 2026 All Too Human Ltd. All rights reserved.`
+- **`appBrandDescription`** is the root `<meta name="description">` — what search
+  results and social cards show for any page that does not set its own. Defaults
+  to the product name rather than to a sentence, because a wrong sentence is
+  worse than a short one. **It reaches fewer surfaces than you might expect**:
+  every shipped page and route-group layout declares its own `description`, so
+  the root fallback is what the 404 (`app/not-found.tsx`) and the root error
+  pages serve, plus any page _you_ add that declares none. Set it anyway — those
+  are exactly the pages nobody checks.
+
+All three are consumed via `lib/brand.ts` (`BRAND.name`, `BRAND.legalName`,
+`BRAND.description`); import that constant if you add new brand-bearing surfaces.
+Marketing-page **body copy** (`app/(public)/*`, including `about/`'s description
+of the template itself) is not driven by this seam — re-skin it with the
+thin-shim pattern in [§6](#6-landing-page--routes) so your content stays
+sync-safe.
+
+> **Why code rather than `.env`, and why the env vars are gone.**
+> `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME` and
+> `NEXT_PUBLIC_APP_DESCRIPTION` were **removed** — setting them now does nothing.
+> `NEXT_PUBLIC_*` is inlined by the compiler at **build time**, so the value has
+> to be present in the environment running `next build`; `.dockerignore` excludes
+> `.env*` and the Dockerfile forwarded only the four build args whose absence
+> fails the build. A container build therefore saw none of them, and forks with
+> the legal entity correctly configured still shipped `© <year> Sunrise` (#661).
+> They were not a working mechanism with a gap — on the deployment path most
+> forks use they did nothing at all, silently. Brand identity is also a
+> **constant of the fork**: the same in every environment, not a secret, and
+> better off visible in review. **Upgrading:** move your three `NEXT_PUBLIC_*`
+> values into `lib/app/brand.ts` and delete them from `.env`.
 
 **Header / footer brand — the `<BrandMark>` slot:**
 
@@ -357,30 +436,36 @@ the export name and signature; everything inside is free to change. (Detailed
 examples live here in this guide, not in the files, precisely so the files stay
 small and conflict-free.)
 
-| Edit this file                             | To register                                        | Auto-wired by (runtime)                                               |
-| ------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------- |
-| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                                   |
-| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                            |
-| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                     |
-| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                        |
-| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                       |
-| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                          |
-| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                          |
-| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                        |
-| `lib/app/protected-nav.ts`                 | authenticated nav link list                        | `protected-nav.tsx` (client)                                          |
-| `lib/app/auth-landing.ts`                  | where a signed-in user lands, and its label        | `lib/auth-landing/route.ts` → a dozen sites (proxy + server + client) |
-| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                      |
-| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)                  |
-| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                              |
-| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                         |
-| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                                |
-| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)                 |
-| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler)      |
-| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)          |
-| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)           |
-| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                        |
-| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
-| `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
+| Edit this file                             | To register                                        | Auto-wired by (runtime)                                                     |
+| ------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------- |
+| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                                         |
+| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                                  |
+| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                           |
+| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                              |
+| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                             |
+| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                                |
+| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                                |
+| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                              |
+| `lib/app/protected-nav.ts`                 | authenticated nav link list                        | `protected-nav.tsx` (client)                                                |
+| `lib/app/auth-landing.ts`                  | where a signed-in user lands, and its label        | `lib/auth-landing/route.ts` → a dozen sites (proxy + server + client)       |
+| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                            |
+| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)                        |
+| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                                    |
+| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                               |
+| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                                      |
+| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)                       |
+| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler)            |
+| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)                |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)                 |
+| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                              |
+| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)                |
+| `lib/app/data-export.ts`                   | subject-access export: tables + declarations       | `exportUserData()` + the coverage guard (server + test)                     |
+| `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                            |
+| `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                                  |
+| `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`         | `<AccountSections/>` on both account pages (server)                         |
+| `lib/app/api-key-scopes.ts`                | extra API-key scopes (`APP_API_KEY_SCOPES`)        | `lib/auth/api-key-scopes.ts` + `createApiKeySchema` (server + client)       |
+| `lib/app/brand.ts`                         | product name, legal entity, meta description       | `lib/brand.ts` → metadata, footers, `<BrandMark>`, emails (server + client) |
+| `lib/app/reserved-tiers.ts`                | which reserved tiers THIS checkout occupies        | `tests/unit/reserved-fork-tiers.test.ts` + the metadata guard (test)        |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -390,6 +475,26 @@ small and conflict-free.)
 > deletion). Pinning keeps the protection for the seams you have _not_ filled.
 > One row per seam, so your diff stays a line — see the FORK NOTE at the top of
 > that file.
+>
+> **A `SEAM_DEFAULTS` pin is the only _unavoidable_ cost.** Where a core
+> assertion measured something a seam contributes to and had no business doing
+> so, it was a bug and has been fixed: the subject-access coverage guard now
+> reads your declarations (`registerAppSubjectSources()`), the capability
+> idempotency count stubs the seam, the post-auth landing assertions import
+> `AUTH_LANDING_ROUTE` instead of writing `/dashboard`, and `smoke:export`
+> asserts your sections arrived rather than that you have none (#480, #525,
+> #530, #533). Filling `lib/app/auth-landing.ts` now costs exactly one failing
+> row in the whole suite — measured, not assumed.
+>
+> A few core tests read a seam **deliberately**, and those still move when you
+> fill it: `drift-probes.test.ts` asserts your drift-probe seam is empty,
+> `surface.test.ts` pins the shipped surface classifier, and
+> `reserved-fork-tiers.test.ts` asserts `prisma/schema/app.prisma` declares no
+> models. Every one of them carries a `FORK NOTE` saying what to expect and what
+> to pin — `tests/unit/fork-seam-coupling.test.ts` enforces that a core artifact
+> reading a seam unmocked has one, and its docblock is honest about the shapes a
+> grep cannot catch. If you hit a core test that moves when you fill a seam and
+> it has **no** note, that is a bug worth filing.
 
 **Why one file per concern and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -609,6 +714,144 @@ uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
 
+**API-key scopes — `lib/app/api-key-scopes.ts`.** `AiApiKey.scopes` is a
+`String[]` in the schema, but the two places that decided what may go in it were
+closed lists in platform files. A fork could _check_ a scope of its own; no user
+could ever _create_ one to check — so least privilege was unavailable
+downstream, and the workaround was always a credential wider than the job:
+
+```ts
+// lib/app/api-key-scopes.ts — yours to edit (ships empty)
+export const APP_API_KEY_SCOPES: readonly string[] = ['capture'];
+
+// app/api/v1/app/capture/route.ts — the other half
+export const POST = withAuth(handler, { scope: 'capture' });
+```
+
+**Both halves, or neither.** `withAuth` accepts an API key of **any** scope, so
+a wider scope list on its own is just labels: the key on someone's phone still
+reaches every authenticated route as them. The `scope` option on `withAuth` is
+what makes the name mean something. It applies **only** to API-key callers — a
+browser session is the full user, and gating it on a scope would lock a person
+out of their own page. `admin` satisfies every scope, and still requires an
+ADMIN user to mint.
+
+`scope` is opt-in per route, and no core route sets it yet: adding a requirement
+to a shipped endpoint would revoke access from keys that work today. Set it on
+your own routes.
+
+Names are lower snake_case, must not collide with a core scope (`chat`,
+`analytics`, `knowledge`, `webhook`, `admin`), and a malformed or colliding
+entry is dropped with a logged error rather than widening what can be minted —
+this list is the allowlist `POST /api/v1/user/api-keys` issues against. That
+endpoint's `GET` returns `availableScopes`, so your key UI does not have to
+restate the list. See
+[`.context/orchestration/api-keys.md`](./.context/orchestration/api-keys.md).
+
+**Account sections — `lib/app/account-sections.ts`.** The authenticated account
+surface (`/profile`, `/settings`) is the one place a fork commonly needs to add
+something of its own — an account connection, a billing panel, an integrations
+list — and it had no extension point, so the only way in was editing a
+Sunrise-owned page and taking a conflict on every sync. Fill in the auto-wired
+`initAppAccountSections()` with `registerAccountSection({ … })` calls:
+
+```ts
+// lib/app/account-sections.ts — yours to edit (ships empty)
+import { registerAccountSection } from '@/lib/account-sections/registry';
+import { GitHubConnectSection } from '@/components/app/account/github-connect';
+
+export function initAppAccountSections(): void {
+  registerAccountSection({
+    id: 'github-connect', // dedupe + React key
+    surfaces: ['profile', 'settings'], // the default; narrow it if you need to
+    order: 10, // ascending; equal values keep registration order
+    Component: GitHubConnectSection, // receives { userId }
+  });
+}
+```
+
+Your component lives in `components/app/**`, not in `lib/app/` — the `lib/app/**`
+boundary forbids runtime framework imports, so this file holds the registration
+and the import, never the JSX. The section renders at the **foot of the page**,
+below the profile cards or below the settings tabs; it is deliberately not a
+fifth tab, because the tab list is a fixed four-column grid and a fork's section
+is not always tab-shaped. If you want the account surface in your own shell
+entirely, take a route group instead — see
+[§ When a surface needs a different frame](#when-a-surface-needs-a-different-frame--give-it-a-route-group).
+
+Empty registry renders nothing, so vanilla Sunrise is visually unchanged, and a
+throwing _registration_ degrades to no sections — including any made before the
+throw, which are rolled back, so "no sections" is literally true rather than
+approximately. **Render is a different
+matter**: a section that throws while rendering fails the page, which falls to
+`app/(protected)/error.tsx` — the user is still off the page they came to change
+a password on. There is no per-section boundary, because a React error boundary
+is a client component and cannot catch a throw inside an async server section,
+so it would guard some and not others. Handle failure inside your section.
+
+**Evaluation graders — `lib/app/evaluations.ts`.** Fill in the auto-wired
+`initAppGraders()` with `registerGrader(yourGrader)` calls; the grader registry
+runs it once before its first lookup, which covers the batch worker, the
+run-creation validator and the metric picker alike. Import `registerGrader` from
+`@/lib/orchestration/evaluations/graders/registry` rather than the barrel — the
+barrel's job is to side-effect-import every core grader.
+
+Reach for this when the metric is **deterministic**. `judge_agent` is the right
+answer for a model grader (a new metric is a new agent, no code), but an LLM
+judging set equality adds its own variance to the number you are reading a
+regression out of, and costs money per case for arithmetic.
+
+Re-registering a slug replaces the previous entry, so an app grader _can_
+replace a built-in. That is deliberate — it is how a mock gets swapped in — but
+it is logged at warn, because a silently replaced `exact_match` changes every
+score an admin reads without changing anything they can see. See
+[`.context/orchestration/evaluations.md`](./.context/orchestration/evaluations.md).
+
+**App-owned MCP resources — `lib/app/mcp-resources.ts`.** MCP _tools_ already had
+a seam (`lib/app/capabilities.ts`); _resources_ did not, so a read path a host
+could preload had to ship as a tool call instead. Fill in the auto-wired
+`initAppMcpResources()` with `registerMcpResourceHandler({ resourceType,
+uriScheme, handler })` calls:
+
+```ts
+// lib/app/mcp-resources.ts — yours to edit (ships empty)
+import { registerMcpResourceHandler } from '@/lib/orchestration/mcp/resource-registry';
+import { handleProjectPlan } from '@/lib/app/mcp/project-plan';
+
+export function initAppMcpResources(): void {
+  registerMcpResourceHandler({
+    resourceType: 'project_plan',
+    uriScheme: 'hub', // → hub://projects/{id}/plan
+    handler: handleProjectPlan,
+  });
+}
+```
+
+Then create the `McpExposedResource` row (a seed, or
+`POST /api/v1/admin/orchestration/mcp/resources`). Four rules worth knowing
+before you do:
+
+- **`uriScheme` is required, not defaulted.** A fork resource that silently
+  inherited `sunrise://` would advertise the starter's identity to every MCP
+  client that lists it. Pass `'sunrise'` deliberately if that is what you want.
+- **The `uriScheme` binds to the `resourceType`, and the pair is enforced.**
+  Creating `sunrise://projects/x/plan` under a `project_plan` registered as
+  `hub` is a 400, and so is the inverse. Checking "is this scheme allowed" and
+  "does this type dispatch" independently would let a fork's resource list
+  itself to every MCP client under the platform's own scheme, which is the whole
+  reason `uriScheme` is required.
+- **You cannot shadow a built-in `resourceType`.** Sunrise seeds rows for its own
+  types and `resourceType` is the only thing tying a row to its handler, so an
+  override would change what `sunrise://agents` returns to an external client.
+  The registration is refused and logged.
+- **The row is validated against what can actually dispatch.** Creating a
+  resource whose type has no registered handler is a 400, rather than a row that
+  returns `null` and logs "no handler for type" the first time a client reads it.
+
+The admin create form's type dropdown still lists core types only — an app type
+goes in through a seed or the API. See
+[`.context/orchestration/mcp.md`](./.context/orchestration/mcp.md).
+
 **Third-party iframes — `lib/app/csp.ts`.** `frame-src` is `'self'` in both the
 dev and prod CSP. If your app embeds a third-party iframe (an onboarding or
 marketing video is the usual case), list the hosts in `appFrameSrc` rather than
@@ -630,6 +873,47 @@ using the probe factories from `@/lib/db/drift-probes` (`indexExists`,
 `constraintExists`, `columnExists`). The single most common case is the satellite
 `User`-table FK below in §5. Full reference:
 [`.context/database/prisma-unmodelled-objects.md`](./.context/database/prisma-unmodelled-objects.md#forks-registering-your-own-unmodelled-objects).
+
+**Per-user scheduled runs — ownership lives in `scope`, not `userId`.** A
+schedule-triggered run is **system-owned**: `processDueSchedules` writes
+`userId: null` on the `AiWorkflowExecution` and passes `null` into the engine, so
+`CapabilityContext.userId` is `null` for every scheduled run. That is deliberate
+and should not be worked around — `AiWorkflowExecution.userId` is
+`onDelete: Cascade`, so naming the operator meant erasing one person destroyed
+the organisation's whole scheduled-run history, and a subject-access export
+handed them rows that were never theirs.
+
+But `AiWorkflowSchedule` is also the natural home for **one row per user** — a
+per-person briefing or digest at that person's local time — and for those,
+`createdBy` was not attribution, it was ownership. **`scope` is where that
+ownership now lives.** Set `AiWorkflowSchedule.scope` (a `Json?` carrier,
+e.g. `{ userId }` or `{ projectId }`) and the scheduler stamps it onto the
+execution, from where it reaches `CapabilityContext.scope`:
+
+```ts
+await prisma.aiWorkflowSchedule.create({
+  data: {
+    workflowId,
+    name: `Morning briefing — ${user.email}`,
+    cronExpression: '15 3 * * *',
+    scope: { userId: user.id },
+  },
+});
+
+// …and in your capability, read ownership from scope, never from context.userId:
+const ownerId = capabilityContext.scope?.userId;
+```
+
+**Why this is called out rather than left to be discovered.** The change that
+made runs system-owned is silent in every way that normally catches something:
+`CapabilityContext.userId` is typed `string | null`, so a tier reading it still
+type-checks; unit tests mock the capability boundary, so they stay green on both
+sides; and the failure is nocturnal — a scheduled briefing simply stops
+arriving. One framework-tier fork had all four of its background workflows fail
+at their first `tool_call` step after an upgrade, with a fully green suite. Forks
+with per-user schedules inherit this for rows **already in the database**, so
+audit existing `AiWorkflowSchedule` rows for a missing `scope` as part of the
+upgrade rather than only new ones.
 
 ---
 
@@ -823,6 +1107,54 @@ if you remove `/privacy` or `/contact` outright, repoint (or keep) the banner /
 error link so it doesn't 404 — point it at your own equivalent, or leave the page
 in place.
 
+### When a surface needs a different frame — give it a route group
+
+`(public)` ships one frame: `AppHeader` + `PublicFooter`, sized for a scrolling
+marketing document. That is the right default and the wrong fit for a **no-login
+app surface** — a questionnaire a respondent sits in for twenty minutes, an
+embedded widget, a kiosk view — where the chrome is competing for the same
+vertical space as the thing the page is for.
+
+**The answer is a sibling route group, not an edit to the platform component.**
+Route groups are the Next-native unit of "these pages share a frame", and each
+one gets its own `layout.tsx`:
+
+```
+app/
+├── (public)/          # marketing: header + full footer
+│   ├── layout.tsx
+│   ├── about/
+│   └── pricing/
+└── (programme)/       # your app surface: its own frame entirely
+    ├── layout.tsx     # renders YOUR header/footer from components/app/
+    └── q/[id]/
+```
+
+Your layout imports from `components/app/**` ([the reserved tier](#the-appplatform-model))
+and touches no Sunrise file, so an upgrade merges around it rather than through
+it. You are free to render a minimal footer, a different one per group, or none
+at all.
+
+**Two rules if you take your own frame.** First, **Cookie Preferences has to
+appear somewhere** — consent is a legal requirement in many jurisdictions, and
+it is the one control the platform footer renders unconditionally. A frame that
+opts out of the platform footer has to supply a real one of its own; import
+`useConsent` from `@/lib/consent` and render an `openPreferences` control.
+Second, register any authenticated prefixes in `lib/app/protected-routes.ts` as
+usual — a new route group does not change proxy behaviour.
+
+**Why this section exists.** Two forks hit exactly this and answered it
+differently. One created a `(programme)` group with its own `SiteFooter` in
+`components/app/public/` — three swapped components, no platform file touched.
+The other put its respondent surfaces _inside_ `(public)`, so a single layout had
+to serve both a marketing page and a full-height chat, and the only lever left
+was deleting the copyright row from `components/layouts/public-footer.tsx` — a
+deletion held against a platform file, with a comment reminding them to re-apply
+it after every sync. Same requirement, and the difference was entirely whether
+they knew a route group was the tool. (#561 also gave the attribution line its
+own seam, so that specific deletion is no longer needed either — see
+`lib/app/footer.ts`.)
+
 ### Making it an auth-only app
 
 For an internal tool where **every** route requires a login, you don't need a
@@ -959,26 +1291,46 @@ The two version files are deliberate siblings in `lib/`:
 
 ### Where Sunrise surfaces it
 
-Sunrise's `/api/health` endpoint already includes both versions in its
-response:
+**In the admin UI**, on `/admin/overview` — a System Information card showing
+your app version beside the Sunrise platform release it's built on. This is the
+answer to "which Sunrise is this box on?", and you inherit it for free. It reads
+`GET /api/v1/admin/stats`, whose `system` block carries both:
 
 ```json
 {
-  "status": "ok",
-  "version": "1.2.3", // your app
-  "sunrise": "0.5.0", // the platform release you're on
-  "uptime": 1234,
-  "timestamp": "2026-…"
+  "system": {
+    "appVersion": "1.2.3", // your app
+    "sunriseVersion": "0.5.0", // the platform release you're on
+    "nodeVersion": "v24.1.0",
+    "environment": "production"
+  }
 }
 ```
 
-If you keep the `/api/health` route in your fork (most do), you inherit this
-for free.
+That route is behind `withAdminAuth`. Other admin surfaces show the version too
+— the MCP settings route returns it, and the MCP dashboard renders it in the
+server's description line — and the MCP `initialize` handshake returns it to a
+bearer-key holder.
+
+Do not reason about how many surfaces there are; the count has been wrong every
+time anyone has written it down in this repo. **The property to preserve is that
+no _unauthenticated_ surface carries it**, which is what
+`tests/unit/sunrise-version-disclosure.test.ts` checks.
+
+**`/api/health` carries `version` (your app's) and not `sunrise`.** The platform
+version used to be there too, but that endpoint is unauthenticated — so it told
+any anonymous caller which upstream release, and therefore which published
+issues, a deployment was running, and it did that for every Sunrise-derived
+deployment rather than just one. Your own app version stays: it's your number to
+disclose, it means nothing outside your fork, and health checks read it (#531).
+
+If you re-add `sunrise` to your fork's health payload, understand you're making
+that disclosure decision deliberately.
 
 ### Where you might surface it in your fork
 
-Optional, not required — surface it wherever it's useful for your operators.
-Import the constants from their canonical locations:
+Optional, not required — surface it wherever else it's useful for your
+operators. Import the constants from their canonical locations:
 
 ```ts
 import { APP_VERSION } from '@/lib/app-version';
@@ -987,13 +1339,16 @@ import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 
 Common surfaces:
 
-- **Your own health endpoint**, if you replaced Sunrise's. Add
-  `sunrise: SUNRISE_VERSION` (and optionally `version: APP_VERSION`) to the
-  payload.
-- **An admin "About" panel or sidebar footer** — one line, useful when
-  triaging issues that might be release-specific.
+- **A sidebar footer or "About" dialog**, if the overview card isn't where your
+  operators look. `components/admin/system-info.tsx` is a server component
+  taking the stats payload as a prop — copy it or render it elsewhere.
 - **Your structured-logger base context** — include both in every log
-  line so support tickets carry the version pair implicitly.
+  line so support tickets carry the version pair implicitly. Note this puts the
+  platform version in your logs; that's a different audience from an
+  unauthenticated HTTP response, but worth a moment's thought if you ship logs
+  to a third party.
+- **Your own health endpoint**, if you replaced Sunrise's — with the disclosure
+  trade-off above in mind.
 
 ### What to do when you upgrade
 
@@ -1134,7 +1489,8 @@ extension requirement, and zero-downtime patterns — lives in
 
 - [ ] Delete `tests/` directory
 - [ ] Delete `vitest.config.ts`
-- [ ] Remove test scripts from `package.json` (`test`, `test:watch`, `test:coverage`)
+- [ ] Delete `scripts/ci/scoped-tests.ts` and `scripts/ci/run-scoped-tests.ts`
+- [ ] Remove test scripts from `package.json` (`test`, `test:watch`, `test:coverage`, `test:changed`, `test:changed:coverage`)
 - [ ] Uninstall: `npm uninstall vitest @vitest/ui happy-dom @testing-library/react @testing-library/user-event`
 
 **Docker:**

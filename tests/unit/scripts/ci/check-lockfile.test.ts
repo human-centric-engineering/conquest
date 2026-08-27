@@ -302,21 +302,111 @@ describe('scripts/ci/check-lockfile', () => {
       expect(out()).toContain('lost libc');
     });
 
-    it('gates a change to overrides, read from package.json', async () => {
-      // Not the lockfile: npm never writes the key there, which is why the
-      // rule was previously unfireable — undefined against undefined forever.
+    /** Drives both sides of the overrides comparison from one place. */
+    function overridesMove(baseManifest: object, headManifest: object) {
       mockExecFileSync.mockImplementation((_c: string, a: string[]) => {
         if (a[0] === 'merge-base') return 'abc123\n';
-        if (String(a[1]).endsWith(':package.json')) return '{"overrides":{"hono":"^4"}}';
+        if (String(a[1]).endsWith(':package.json')) return JSON.stringify(baseManifest);
         return LOCK;
       });
       mockReadFileSync.mockImplementation(
-        reads({ manifest: '{"dependencies":{"native":"^1"},"overrides":{"hono":"^5"}}' })
+        reads({ manifest: JSON.stringify({ dependencies: { native: '^1' }, ...headManifest }) })
       );
+    }
+
+    const WHY = 'Dependabot alert on the transitive copy; see #601.';
+
+    it('gates a change to overrides that arrives with no reason', async () => {
+      // Not the lockfile: npm never writes the key there, which is why the
+      // rule was previously unfireable — undefined against undefined forever.
+      overridesMove({ overrides: { hono: '^4' } }, { overrides: { hono: '^5' } });
 
       await run();
       expect(process.exitCode).toBe(1);
       expect(out()).toContain('"overrides" changed');
+      expect(out()).toContain('Add "overrideReasons"."hono"');
+    });
+
+    it('lets an override change through when its reason moves with it', async () => {
+      // #608: before this the answer to "Intentional?" had nowhere to go, so
+      // the only routes past were bypassing branch protection or weakening
+      // the gate.
+      overridesMove(
+        { overrides: { hono: '^4' }, overrideReasons: { hono: WHY } },
+        {
+          overrides: { hono: '^5' },
+          overrideReasons: { hono: 'Re-pointed for the ^5 line; #612.' },
+        }
+      );
+
+      await run();
+
+      expect(process.exitCode).toBe(0);
+      // Still printed. A change that passes silently is a change nobody reviews.
+      expect(out()).toContain('"overrides" changed');
+      expect(out()).toContain('reason: Re-pointed for the ^5 line; #612.');
+      // And the all-clear must not deny the one thing this PR did. "no
+      // override change" was true only while every override change failed.
+      expect(out()).toContain('1 override change, each explained above');
+      expect(out()).not.toContain('and no override change');
+    });
+
+    it('refuses a re-pointed override whose reason stayed put, and quotes it back', async () => {
+      overridesMove(
+        { overrides: { hono: '^4' }, overrideReasons: { hono: WHY } },
+        { overrides: { hono: '^5' }, overrideReasons: { hono: WHY } }
+      );
+
+      await run();
+
+      expect(process.exitCode).toBe(1);
+      expect(out()).toContain('did not move with the override');
+      // Quoted once, in the report block above the failure — not twice.
+      expect(out().match(new RegExp(WHY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(
+        1
+      );
+    });
+
+    it('refuses a removal that left its reason standing', async () => {
+      overridesMove(
+        { overrides: { hono: '^4' }, overrideReasons: { hono: WHY } },
+        { overrideReasons: { hono: WHY } }
+      );
+
+      await run();
+
+      expect(process.exitCode).toBe(1);
+      expect(out()).toContain('still stands');
+      expect(out()).toContain('Delete it too');
+    });
+
+    it('allows a removal whose reason was deleted with it, quoting what went', async () => {
+      overridesMove({ overrides: { hono: '^4' }, overrideReasons: { hono: WHY } }, {});
+
+      await run();
+
+      expect(process.exitCode).toBe(0);
+      expect(out()).toContain('hono "^4" → none');
+      // Read back from the BASE revision: a reviewer approving a removal should
+      // see the protection being dropped, and after this diff the sentence is
+      // gone from the tree.
+      expect(out()).toContain(`reason deleted with it: ${WHY}`);
+      expect(out()).toContain('1 override change, each explained above');
+    });
+
+    it('does not call an unreasoned removal explained', async () => {
+      // The leniency path: nothing on either side ever said what the override
+      // was for, so it passes precisely BECAUSE nothing explained it. Claiming
+      // otherwise is the false-statement shape this file has already fixed
+      // twice — once for lost `libc`, once for "no override change".
+      overridesMove({ overrides: { hono: '^4' } }, {});
+
+      await run();
+
+      expect(process.exitCode).toBe(0);
+      expect(out()).toContain('no reason was ever recorded');
+      expect(out()).toContain('1 override change above, 1 of them a removal with no reason');
+      expect(out()).not.toContain('each explained above');
     });
 
     it('skips the overrides comparison when a manifest is unreadable, rather than blaming it', async () => {

@@ -24,6 +24,12 @@
  *     `atlas schema diff` against the named DB as a second verification.
  *     This script doesn't shell out to atlas itself; it only nudges.
  *
+ * FORK NOTE — this script runs your seam rather than asserting on it. Probes
+ * registered in `lib/app/db-drift.ts` execute alongside Sunrise's A-series and
+ * are reported in the same pass, so a failing probe of yours fails this script.
+ * `mergeDriftProbes` throws if one of your names shadows an A-series name, so
+ * name yours for your own objects. Nothing in this file needs editing.
+ *
  * See `.context/database/prisma-unmodelled-objects.md` for the inventory.
  */
 

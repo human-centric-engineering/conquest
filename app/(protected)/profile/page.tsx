@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Mail, MapPin, Clock, Calendar, Pencil } from 'lucide-react';
+import { AccountSections } from '@/components/account/account-sections';
 
 export const metadata: Metadata = {
   title: 'Profile',
@@ -163,6 +164,9 @@ export default async function ProfilePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Fork-registered sections (#595). Renders nothing in vanilla Sunrise. */}
+      <AccountSections surface="profile" userId={user.id} />
     </div>
   );
 }

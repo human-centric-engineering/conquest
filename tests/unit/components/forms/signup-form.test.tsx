@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SignupForm Component Tests
  *
@@ -16,6 +18,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SignupForm } from '@/components/forms/signup-form';
 import { createMockRouter, type MockRouter } from '@/tests/types/mocks';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock dependencies
 vi.mock('@/lib/auth/client', () => ({
@@ -401,7 +404,7 @@ describe('components/forms/signup-form', () => {
       });
     });
 
-    it('should redirect to dashboard when session exists after signup', async () => {
+    it('should redirect to the auth landing route when session exists after signup', async () => {
       // Arrange
       const user = userEvent.setup();
       const { authClient } = await import('@/lib/auth/client');
@@ -432,7 +435,7 @@ describe('components/forms/signup-form', () => {
 
       // Assert
       await waitFor(() => {
-        expect(mockRouter.push).toHaveBeenCalledWith('/dashboard');
+        expect(mockRouter.push).toHaveBeenCalledWith(AUTH_LANDING_ROUTE);
       });
     });
 

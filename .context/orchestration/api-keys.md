@@ -20,6 +20,34 @@ Per-user API keys for programmatic access as an alternative to session-based aut
 
 The `admin` scope acts as a wildcard — `hasScope(scopes, anyScope)` returns true if `admin` is present.
 
+### Fork-owned scopes (`lib/app/api-key-scopes.ts`)
+
+The table above is the **core** list. A fork adds its own:
+
+```ts
+// lib/app/api-key-scopes.ts — ships empty
+export const APP_API_KEY_SCOPES: readonly string[] = ['capture'];
+```
+
+`lib/auth/api-key-scopes.ts` unions core with these, and `createApiKeySchema` validates against the same union — so the name becomes mintable and checkable with no core edit (#542). Names are lower snake_case (`/^[a-z][a-z0-9_]{0,31}$/`) and must not collide with a core scope; a malformed or colliding entry is dropped with a logged error rather than widening the allowlist `POST /api/v1/user/api-keys` issues against.
+
+The scope vocabulary lives in its own module, separate from `lib/auth/api-keys.ts`, because `api-keys.ts` imports Prisma and `createApiKeySchema` (in `lib/validations/orchestration.ts`) is imported by `'use client'` admin forms.
+
+### Enforcing a scope
+
+`withAuth` accepts an API key of **any** scope by default. A scope only means something when a route requires one:
+
+```ts
+export const POST = withAuth(handler, { scope: 'capture' });
+```
+
+- Applies to **API-key callers only**. A browser session is the full user; gating it on a scope would lock a person out of their own page.
+- `admin` satisfies any scope, per `hasScope`.
+- The 403 names the scope the route wants and never the ones the key holds — a 403 should not be a scope-enumeration oracle.
+- **Opt-in per route, and no core route sets it yet.** Adding a requirement to a shipped endpoint would revoke access from keys that work today. Set it on new routes and on your own.
+
+Without both halves the seam is cosmetic: a wider scope list on its own is just labels, because the key still reaches every authenticated route as its owner.
+
 ## User Endpoints
 
 All endpoints require session auth (`withAuth`). Users can only manage their own keys.
@@ -28,11 +56,17 @@ All endpoints require session auth (`withAuth`). Users can only manage their own
 
 List the current user's API keys (without raw key values).
 
-Returns: `{ keys: [{ id, name, keyPrefix, scopes, lastUsedAt, expiresAt, revokedAt, createdAt }] }`
+Returns: `{ keys: [{ id, name, keyPrefix, scopes, lastUsedAt, expiresAt, revokedAt, createdAt }], availableScopes: string[] }`
+
+`availableScopes` is core plus whatever `lib/app/api-key-scopes.ts` declared — sourced from the same function `POST` validates against, so a key UI cannot drift from what the API will accept. Sunrise ships no self-service key UI; this exists so a fork's does not have to restate the list.
 
 ### `POST /api/v1/user/api-keys`
 
 Create a new API key. The raw key is returned in the response — store it securely, it cannot be retrieved again.
+
+**Requires a browser session** — as does `DELETE /api/v1/user/api-keys/:keyId`. A caller who authenticated with an API key gets a 403 from both: minting a credential over a credential is privilege laundering — a key scoped to one narrow job could mint a `chat` key and reach every authenticated route as its owner, so the narrow scope it was issued with would bound nothing. Revocation is destructive rather than escalating, but `GET` returns every key's id, so a leaked `chat`-scoped key could otherwise enumerate its owner's keys and revoke all of them, `admin` included. Same refusal, and the same reasoning, as `PATCH /api/v1/users/me` (email) and `GET /api/v1/users/me/export`.
+
+No legitimate flow loses anything: a headless rotate-and-revoke script needs `POST` too.
 
 Body:
 
@@ -95,7 +129,9 @@ The `resolveApiKey()` function in `lib/auth/api-keys.ts` handles:
 ## Module Layout
 
 ```
-lib/auth/api-keys.ts           # Key generation, hashing, resolution, scope checks
+lib/auth/api-keys.ts           # Key generation, hashing, resolution (imports Prisma)
+lib/auth/api-key-scopes.ts     # Scope vocabulary + validation (Prisma-free, client-safe)
+lib/app/api-key-scopes.ts      # Fork seam — extra scope names
 app/api/v1/user/api-keys/      # Self-service endpoints (list, create)
 app/api/v1/user/api-keys/[keyId]/ # Revoke endpoint
 ```

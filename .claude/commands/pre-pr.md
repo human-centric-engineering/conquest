@@ -15,9 +15,56 @@ Run `npm run validate` (CHANGELOG structure + type-check + lint + format (Pretti
 
 `validate` runs the CHANGELOG check **first** and short-circuits on failure, so a structural problem in `CHANGELOG.md` will report as a failure with nothing after it — that is the check working, not the type-check being skipped. Fix it and re-run rather than working around it; the rules and their reasoning are in `scripts/ci/changelog-structure.ts`. Note the history rule needs `origin/main`, so run `git fetch origin main` first if the local ref is stale.
 
-Then run `npm run test:coverage`. This runs the full test suite and generates a coverage report at `coverage/coverage-summary.json`. Capture and report any test failures.
+Then run `npm run test:changed:coverage`. Capture and report any test failures.
+
+**This is a scoped run, not the full suite, and that is deliberate.** It runs
+the tests this branch can affect — vitest's own `--changed` selection against
+the merge base — plus the whole-tree invariants no module graph reaches
+(`ALWAYS_RUN_TESTS` in `scripts/ci/scoped-tests.ts`), and it gates coverage on
+**the changed source files, at 80% each**, rather than on the repo average. The
+question a pre-PR gate should answer is "is what I changed tested and passing",
+and a repo-wide average answers a different one: a branch can drop a new file in
+at 0% and still clear an 80% project total.
+
+Measured on this tree, on a 10-core machine, for a 20-file selection: **~5s
+wall when the machine is idle, ~23s with another suite competing.** Roughly half
+of that is the `vitest list` pre-pass that resolves the selection — it builds
+the module graph, and it is the part that suffers most under load (1.8s idle,
+~11s contended). Compare `npm run test:coverage`, whose own measured figure in
+`vitest.config.ts` is 254s of in-vitest time for a solo coverage run.
+
+Quote the wall-clock number, not vitest's `Duration` line — the latter excludes
+the pre-pass and tsx startup, and reporting it as the runtime overstated this by
+about 5x in an earlier draft of this file.
+
+What the scoped run does **not** do is prove the branch broke nothing elsewhere.
+It cannot: a test outside the changed files' import graph is not selected. CI's
+`test-full` job runs the whole suite, 4-way sharded, on every PR and every push
+to `main`, and that remains the backstop — on a fork that sets
+`CI_TEST_SCOPE=changed` it runs only after merge, which
+[`.context/testing/scoped-runs.md`](../../.context/testing/scoped-runs.md)
+explains and gives the one-line workflow fix for. Run `npm run test:coverage` yourself
+when you want the full picture locally — before a release cut, after a merge
+from `main` (scoped runs hide regressions in merged-in tests), or when the
+branch touches something central.
+
+Read the two lines the run prints before the vitest output:
+
+- **`tests selected N by module graph`** — if this is close to the whole suite, the branch
+  touched a hub module (`lib/env.ts` selects 518, `lib/logging/index.ts` 642)
+  and the scoped run is nearly a full one anyway. Nothing is wrong; it just
+  will not be fast.
+- **`Advisory: N test(s) read from the repo root…`** — tests that read the tree
+  but are not declared always-run. Not a failure. Look only if the branch added
+  a test that asserts something about the repository itself, in which case add
+  it to `ALWAYS_RUN_TESTS` with a reason.
 
 If either command fails, report the failures and stop. Do not proceed to the anti-pattern scan until automated checks pass.
+
+A run that reports it **could not** establish a base (`Could not run — no base
+revision available`) exits 1 and is not a pass. Do not work around it by running
+a bare `npx vitest run` — a scoped run against an unknown base selects a short
+file list, and a short file list is a quiet green.
 
 **Migration drift check (DB objects Prisma can't model).** Only if this branch touched `prisma/`:
 
@@ -60,11 +107,20 @@ npm run check:lockfile -- --base "$BASE"
 ```
 
 Exit 1 means something needs a decision: platform metadata (`libc`/`os`/`cpu`)
-lost — including across a hoist — or `overrides` changed (adding, changing OR
-removing an entry). Lost metadata is the one that has actually bitten (#571).
-The cause is almost always **npm below 11.11.0**, which deletes `libc` from
-every entry it writes on every platform; check `npm -v`, then repair with `npm
-run fix:lockfile-libc` and re-run this.
+lost — including across a hoist — or an **unexplained** `overrides` change.
+Lost metadata is the one that has actually bitten (#571). The cause is almost
+always **npm below 11.11.0**, which deletes `libc` from every entry it writes on
+every platform; check `npm -v`, then repair with `npm run fix:lockfile-libc` and
+re-run this.
+
+**Answer an overrides change in `package.json`, not here.** Adding, re-pointing
+or removing an entry passes when that key's `overrideReasons` entry moves in the
+**same diff** — write the sentence, do not look for a flag. The rule is "the
+reason moved", not "a reason exists", which is what stops a reason landed in an
+earlier PR from waving a later change through, and what makes a revert restate
+its case. Deleting an override means deleting its reason too. Every override
+change is printed either way, with its standing reason, so read that block even
+on a pass: a reason you did not approve is the thing worth catching (#608).
 
 **Downgrades do not fail this check** — neither transitive nor direct. They are
 reported, direct ones in their own block. The direct rule used to gate; over 134
@@ -124,22 +180,66 @@ If there are no TypeScript files and no documentation files, report "No changes 
 
 ### Step 3: Coverage analysis for changed files
 
-Parse `coverage/coverage-summary.json` (generated in Step 1) and filter it to only the TypeScript files identified in Step 2 (including test files this time — use the full list of changed `.ts`/`.tsx` files).
+**Step 1 already enforced this.** `npm run test:changed:coverage` scopes
+`--coverage.include` to the changed source files and applies the 80% floor
+**per file** (`thresholds.perFile`), so a file below the line fails the run
+rather than being averaged away. If Step 1 passed, every changed file is at or
+above 80% on all four metrics and there is nothing to re-derive here.
 
-The JSON file contains per-file entries keyed by absolute path, each with `lines`, `statements`, `branches`, and `functions` objects that have a `pct` field (percentage covered). The project thresholds are **80%** for all four metrics (defined in `vitest.config.ts`).
+What is left for this step is reading the report, not recomputing the verdict.
+Parse `coverage/coverage-summary.json` — now scoped to the changed files, not
+the whole repo — and record the per-file numbers in the Step 6 summary so the
+PR description carries them.
 
-For each changed file that appears in the coverage report:
+Two things the run itself surfaces, worth repeating in the summary:
 
-- Extract the `pct` value for lines, branches, functions, and statements
-- Flag any metric below the 80% threshold
+- **A changed file at 0%** is reported as 0%, not as absent. Scoping the include
+  list forces every changed source file into the report whether or not a test
+  touches it, which removes the old "no coverage data" category — that used to
+  be ambiguous between "no test exercises this" and "the reporter excluded it".
+- **Files `vitest.config.ts` excludes from coverage** (layouts, loading states,
+  error boundaries, `lib/env.ts`, `types/**`) never appear, because the config's
+  `exclude` still wins over a CLI `--coverage.include`. They are exempt by
+  design — do not flag them.
 
-Changed files that do **not** appear in the coverage report at all should be flagged separately as "no coverage data" — this typically means no test exercises that file. Files excluded from coverage in `vitest.config.ts` (layouts, loading states, error boundaries, type files, etc.) are exempt — do not flag these.
+If the run reported `no TypeScript sources changed — nothing to gate`, record
+"No coverable files changed" and move on.
 
-If no changed files have coverage data (e.g., all changes are in exempt files), report "No coverable files changed" and move on.
+> Historical note: this step used to parse a **whole-repo** coverage report and
+> filter it down, because Step 1 ran the full suite. That worked but answered
+> the wrong question — a project-wide 80% average clears comfortably while a new
+> file sits at 0%. The gate now lands on each changed file individually.
 
 ### Step 4: Scan for anti-patterns
 
-Read each changed file and check for these project-specific anti-patterns:
+Two of these thirteen checks ship an executable scanner — **4f** and **4m**. The
+other eleven are prose, which means _you_ write the scanner, here, now, in
+whatever shell you happen to have. Three rules before you do. Each one exists
+because it has already cost this project a false CLEAN.
+
+**Prove the scan can report before you trust a clean result.** Append a
+known-bad sentinel — a fake filename, a line containing the very pattern you are
+grepping for — and confirm the scan flags it. Then take it out and run for real.
+A scan that cannot demonstrate it _would_ report a hit is not evidence of
+anything, because "printed nothing" and "passed" are the same output.
+
+**Never write `|| echo CLEAN`.** It is the obvious way to produce step 6's
+output token, and it collapses the two answers that must never be collapsed:
+`grep` exits **1** when it ran and found nothing, and **2** when it could not run
+— unreadable file list, bad pattern, unset variable, wrong shell. Read the exit
+code, and report a failure to run as a failure. A check that errors loudly is
+strictly better than one that passes quietly.
+
+**Assume nothing about the shell.** The agent shell is zsh on macOS and bash on
+CI, and they differ exactly where it hurts: `compgen` is a bash builtin, and a
+`compgen -G` loop under zsh printed nothing and was very nearly banked as a clean
+tree — that instance is what opened #641. `shopt`, arrays and `[[ ]]` vary too.
+This is why **4m is Python** and 4f is a Node script: neither is at the mercy of
+which shell started. If you find yourself debugging shell quoting, stop and
+rewrite it in Python. And if the check is worth keeping, it belongs in
+`scripts/ci/` with tests, not inlined here.
+
+Then, for each changed file, check for these project-specific anti-patterns:
 
 **4a. Unsafe type assertions on structured data**
 Flag `as` casts on Prisma JSON fields, API response bodies, or environment variables that are NOT accompanied by a Zod `.parse()` / `.safeParse()` or a type guard function within 5 lines. Legitimate casts (e.g., `as Record<string, unknown>` followed by a Zod parse) are fine.
@@ -157,7 +257,42 @@ Flag `console.log`, `console.warn`, `console.error`, or `console.info` in change
 For any new `page.tsx` files added under `app/`, check that the same route segment has an `error.tsx` and `loading.tsx`. Flag missing boundaries. Route groups that share a parent `error.tsx`/`loading.tsx` are fine — check parent directories.
 
 **4f. Changed code files missing tests**
-For any TypeScript files added OR modified on this branch (identified via `git diff --name-status $BASE...HEAD` — `A` or `M` status entries), check whether a corresponding test file exists. The project mirrors source paths under `tests/unit/` and `tests/integration/` with a `.test.ts` or `.test.tsx` suffix (e.g., `lib/security/rate-limit.ts` → `tests/unit/lib/security/rate-limit.test.ts`; `app/api/v1/users/route.ts` → `tests/integration/api/v1/users/...`). Flag changed files that have no corresponding test. Also accept co-located parent-directory tests for route files under dynamic segments (e.g., tests for `app/api/v1/foo/[id]/route.ts` may live in `tests/unit/app/api/v1/foo/route.test.ts`). A modified source file with no corresponding test is the same completeness gap as a newly added one — flag both. Exempt from this check: type declaration files (`*.d.ts`), configuration files, `loading.tsx`, `error.tsx`, `layout.tsx`, and barrel/index files that only re-export.
+
+```bash
+npm run check:missing-tests -- --base "$BASE"
+```
+
+Every file the branch added or modified, against the test tree. **Read the exit
+code**: `0` means it ran (findings or not), `1` means it could not run and has no
+opinion about this branch — no base revision, git failed, or it could not see
+`tests/` at all. There is no path that prints a clean result without having
+first proved, on synthetic input, that it can print a dirty one.
+
+It **reports; it never gates on a finding.** A page can legitimately have no
+test and you are the one who can say so. Three verdicts, and the middle one is
+the point:
+
+- **missing** — no test file, and no test mentions the module. The strong
+  finding; treat it as a gap until you have a reason.
+- **referenced only** — no mirrored test, but some test names the module.
+  Weaker on purpose. Open the named test and decide whether it exercises the
+  module or merely mocks it as somebody else's dependency. 240 files in this
+  repo are in this state, so rounding them all up or all down is wrong in
+  opposite directions.
+- **covered** — a test sits where one is expected (mirror path, an aspect-named
+  sibling, or the collapsed parent of a dynamic route).
+
+Add `--verbose` to see why each file landed where it did, including what was
+exempted and why — that is the first thing to reach for if a verdict surprises
+you. The exemptions (`*.d.ts`, root tool configs, App Router boundary files,
+pure barrels, modules that declare no runtime value) and the reasons this list
+deliberately differs from `vitest.config.ts`'s coverage exclusions live in
+[`scripts/ci/missing-tests.ts`](../../scripts/ci/missing-tests.ts). Do not
+re-derive them here; a test fails if the two drift apart.
+
+Note it reads **committed** work (`$BASE...HEAD`), matching step 2, and says so
+when uncommitted `.ts` files were left out. Test files are read from the working
+tree, so a test you have just written does count.
 
 **4g. Direct data imports bypassing the API**
 Flag non-type imports in pages, layouts, and components that pull data or constants from `lib/` modules when that data is seeded into the database and should be fetched via the API. The key indicator is importing runtime values (not just types) from modules whose data is also available through an API endpoint or is seeded into the database — e.g., importing `BUILTIN_WORKFLOW_TEMPLATES` from `@/lib/orchestration/workflows/templates` instead of fetching templates from the API. Type-only imports (`import type { ... }`) are fine — the concern is runtime coupling to data that should come through the API boundary. This enforces the same API-first separation as 4l below: components should fetch data from the API, not import it directly from server-side modules.
@@ -308,6 +443,32 @@ If no public-surface paths are in the diff, the check is silent (correct — mos
 
 This check is a **reminder, not a gate**. The agent reads the flag and decides; mechanical checks can't tell whether a `lib/auth/guards.ts` edit changed behaviour the public depends on or was an internal type tweak.
 
+**5e. CHANGELOG hygiene — an `[Unreleased]` bullet a later commit invalidated**
+
+5d stops at "is there an entry", and says so explicitly: _"If `CHANGELOG.md` IS in the diff, the check passes regardless of what was added."_ In a multi-round PR the likelier failure is the opposite — a bullet that was **accurate when written** and was falsified by a later commit on the same branch. It fired six times on #625 alone, and every one of them passed 5d.
+
+```bash
+npm run check:changelog-drift -- --base "$BASE"
+```
+
+It correlates the identifiers each bullet quotes **in backticks** against the commits that changed those strings later on the branch, per line rather than per bullet, and separately flags any commit SHA in the section that is not reachable from `origin/main` — a branch SHA stops resolving the moment the PR is squash-merged, so cite the PR or issue instead.
+
+**Read the output; it never gates.** Exit 1 means it could not run (an unusable `--base`), never that it disapproves of a bullet. Deliberately so: an unanswerable gate is the defect #608 fixed in `check:lockfile`, and shipping one here would be absurd.
+
+Findings come in two blocks and they do not deserve equal attention:
+
+- **Bullets this branch wrote** — the ones the check exists for. Read every one.
+- **Bullets already in `[Unreleased]`** before this branch, behind their own heading. Every branch commit counts as "later" for these, so they are much noisier. Glance, don't rewrite.
+
+**The dominant false positive is a commit that only _mentions_ the identifier** — in a docblock, a comment, or a test fixture. The pickaxe cannot tell a mention from a change. On the branch that added this check, all 11 inherited flags were of that shape, and so was its one branch-written flag: a bullet naming `check:lockfile`, linked to a commit that merely quoted the name in prose. Open the commit before believing the flag.
+
+**Two things it structurally cannot see**, so check them yourself rather than reading a clean run as an all-clear:
+
+- **A claim that was already wrong when written.** #625's "at 8192, the value the docs tell you to set" quoted a number an _earlier_ commit on the same branch had changed to 6144. Nothing later touched it, so nothing links it.
+- **An omission.** "`typecheck`, `lint`, `build` keep it" was stale because it left out `smoke`, `docker` and `lockfile`. No identifier changed; the missing ones were never named.
+
+**Then re-read `[Unreleased]` yourself, last.** After every other step, with the diff fresh, read the section you wrote and hunt claims your own later commits invalidated. That is what actually caught five of #625's six, and it is the half of this step no script replaces. Note that a manual pass has its own failure mode: the #625 audit introduced the sixth error while fixing the other five, by replacing a vague phrase with a branch SHA. That one the script does catch.
+
 ### Step 6: Output summary
 
 Output a clear summary in this format:
@@ -338,7 +499,7 @@ Output a clear summary in this format:
 - [ ] Duplicated auth checks: {count found or CLEAN}
 - [ ] Console usage: {count found or CLEAN}
 - [ ] Missing error/loading boundaries: {count found or CLEAN}
-- [ ] Changed files missing tests: {count found or CLEAN}
+- [ ] Changed files missing tests: {`npm run check:missing-tests` verdict — "N missing, M referenced-only", CLEAN, or COULD NOT RUN (exit 1, say why)}
 - [ ] Direct data imports bypassing API: {count found or CLEAN}
 - [ ] N+1 client-side fetches: {count found or CLEAN}
 - [ ] Relative imports: {count found or CLEAN}
@@ -352,6 +513,7 @@ Output a clear summary in this format:
 - [ ] Changed docs accuracy: {CLEAN or issues found}
 - [ ] Docs missing/outdated for code changes: {CLEAN or issues found}
 - [ ] CHANGELOG hygiene (public-surface changes): {CLEAN or N/A (no public-surface change) or "{N} file(s) touched the public surface without a CHANGELOG entry"}
+- [ ] CHANGELOG hygiene (stale `[Unreleased]` bullets, step 5e): {CLEAN, or "{N} bullet(s) this branch wrote worth re-reading, {M} inherited, {K} doomed commit reference(s)" — say which you re-read and what you concluded, since the check never gates}
 
 ### Issues to Address
 {List each issue with file path, line number, and brief description}

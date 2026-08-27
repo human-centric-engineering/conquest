@@ -20,6 +20,7 @@ import type {
   McpContentBlock,
 } from '@/types/mcp';
 import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
+import { platformScope } from '@/lib/orchestration/scope';
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes, matching dispatcher
 
@@ -180,7 +181,9 @@ export async function callMcpTool(
   const context: CapabilityContext = {
     userId: caller.userId,
     agentId,
-    ...(caller.scope ? { scope: caller.scope } : {}),
+    // Authoritative: `McpApiKey.scope` is admin-written and re-validated at
+    // auth, so it may bind a capability that declared `scopedBy`.
+    ...platformScope(caller.scope),
   };
 
   let result;

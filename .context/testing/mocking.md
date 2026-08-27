@@ -30,6 +30,59 @@ import { createMockHeaders, createMockSession, delayed } from '@/tests/types/moc
 
 ---
 
+## The network is closed
+
+> **Two implementations, one contract.** What follows describes the happy-dom
+> half. Since the suite defaults to `node` (see
+> [`environments.md`](./environments.md)), most files get the same refusal from a
+> `globalThis.fetch` patch installed in the same block of `tests/setup.ts`. Same
+> `NetworkError`, same message, same `data:`/`blob:` and `AbortError` behaviour,
+> same `vi.stubGlobal` escape hatch — so a test asserting on the error shape does
+> not care which it got. The "why it hooks where it does" note below applies to
+> the happy-dom half only: patching `globalThis.fetch` is useless there and is
+> the whole guard on node.
+
+`tests/setup.ts` installs a happy-dom fetch interceptor that **refuses every
+real HTTP request** with the same error a genuine network failure produces — a
+`DOMException` named `NetworkError`, matching `happy-dom/lib/fetch/Fetch.js`.
+An **aborted** request is exempt and still rejects with `AbortError`: happy-dom
+runs the interceptor before its own signal check, so without that exemption
+every `if (err.name === 'AbortError') return` branch would quietly stop working
+under test. A component that fetches on mount, in a test that has not stubbed
+`fetch`, fails immediately with the URL named:
+
+```
+Blocked a real network request to http://localhost:3000/api/v1/... .
+Tests must not reach the network: stub it with vi.stubGlobal('fetch', …),
+or mock the module that issues it.
+```
+
+**Why it exists.** happy-dom's document URL is `http://localhost:3000`, so a
+relative path resolves against it and the request actually went out — ~470
+`ECONNREFUSED` lines per full run, each a socket opened during a test. Nothing
+failed because of them, but one still in flight when Vitest tears the
+environment down produces `EnvironmentTeardownError` (#597).
+
+**Why it hooks where it does.** happy-dom ships its own fetch over `node:http`
+(`happy-dom/lib/fetch/`) and binds its module references at import time, before
+`tests/setup.ts` runs. Patching `globalThis.fetch` intercepts none of it, and
+neither does patching `node:http`. Only `settings.fetch.interceptor` sees the
+traffic — worth knowing before writing a global fetch stub and wondering why it
+never fires.
+
+To let a test make a request, stub it:
+
+```ts
+const fetchMock = vi
+  .fn()
+  .mockResolvedValue(new Response(JSON.stringify({ success: true, data: [] }), { status: 200 }));
+vi.stubGlobal('fetch', fetchMock);
+```
+
+Note `vi.restoreAllMocks()` in the global `afterEach` does **not** undo
+`vi.stubGlobal` — use `vi.unstubAllGlobals()` if a stub must not leak between
+tests in the same file.
+
 ## Prisma (Database)
 
 **When to use**: Unit tests requiring database operations WITHOUT real database.
@@ -87,19 +140,55 @@ expect(prisma.user.findUnique).toHaveBeenCalledWith({
 
 ### Error Mocking
 
+**Reject with a real `Prisma.PrismaClientKnownRequestError`, not an object literal
+that has a `code` on it.** The shared handler branches on the class, not the
+field:
+
 ```typescript
+// lib/api/errors.ts
+if (error instanceof Prisma.PrismaClientKnownRequestError) {
+  if (error.code === 'P2002') {
+    /* 400 EMAIL_TAKEN */
+  }
+}
+```
+
+A literal fails that `instanceof`, falls through to the catch-all, and the route
+answers **500 `INTERNAL_ERROR`** instead of the 400 you were trying to test.
+Nothing warns you — `mockRejectedValue` takes anything, and a test asserting only
+"it did not succeed" stays green while exercising the wrong branch entirely.
+
+```typescript
+import { Prisma } from '@prisma/client';
+
 // Unique constraint violation (P2002)
-vi.mocked(prisma.user.create).mockRejectedValue({
-  code: 'P2002',
-  meta: { target: ['email'] },
-});
+vi.mocked(prisma.user.create).mockRejectedValue(
+  new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: '7.0.0',
+    meta: { target: ['email'] },
+  })
+);
 
 // Record not found (P2025)
-vi.mocked(prisma.user.delete).mockRejectedValue({
-  code: 'P2025',
-  message: 'Record to delete does not exist.',
-});
+vi.mocked(prisma.user.delete).mockRejectedValue(
+  new Prisma.PrismaClientKnownRequestError('Record to delete does not exist.', {
+    code: 'P2025',
+    clientVersion: '7.0.0',
+  })
+);
 ```
+
+`clientVersion` is required by the constructor and is not asserted on anywhere —
+any string does.
+
+**The narrow exception**, which is not worth taking: a handful of call sites
+duck-type instead (`(err as { code?: unknown }).code === 'P2002'` in
+`app/api/v1/admin/orchestration/triggers/route.ts`, and the idempotency check in
+`lib/orchestration/capabilities/built-in/send-message-to-channel.ts`). A literal
+does reach those branches. Use the real error anyway — it works against both
+styles, and it does not bake in a shape Prisma never actually throws, which is
+what makes the test survive the call site being switched to `handleAPIError`.
 
 **See** `tests/types/mocks.ts` for `delayed()` helper and PrismaPromise compatibility.
 
@@ -644,28 +733,6 @@ import { createMockAuthSession, mockGetSession } from '@/tests/helpers/auth';
 vi.mock('@/lib/auth/server', () => ({
   getSession: mockGetSession(createMockAuthSession()),
 }));
-```
-
-### Database Helpers (`tests/helpers/db.ts`)
-
-Utilities for testing database operations with Prisma.
-
-| Export                                   | Description                                                     |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| `mockPrismaClient`                       | Pre-configured mock Prisma client with all common model methods |
-| `resetDbMocks()`                         | Reset all database mocks (call in `afterEach`)                  |
-| `createMockUser(overrides?)`             | Generate realistic user data with all required fields           |
-| `createMockSession(userId?, overrides?)` | Generate realistic session data                                 |
-
-```typescript
-import { mockPrismaClient, createMockUser } from '@/tests/helpers/db';
-
-vi.mock('@/lib/db', () => ({ db: mockPrismaClient }));
-
-it('should find user', async () => {
-  vi.mocked(mockPrismaClient.user.findUnique).mockResolvedValue(createMockUser());
-  // ... test
-});
 ```
 
 ### Email Helpers (`tests/helpers/email.ts`)

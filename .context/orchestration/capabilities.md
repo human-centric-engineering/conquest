@@ -75,7 +75,13 @@ export function initAppCapabilities(): void {
 }
 ```
 
-`registerBuiltInCapabilities()` (already on the lazy path every dispatch caller hits) runs `initAppCapabilities()` once in the **server route-handler runtime**, then flushes — so your capability is in the dispatcher before any agent resolves its tools. Registration is idempotent by slug. `lib/app/capabilities.ts` is one of the `lib/app/` auto-wired bootstrap files; see [Building on Sunrise → §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) for the full set and the per-runtime rationale.
+`registerBuiltInCapabilities()` (already on the lazy path every dispatch caller hits) runs `initAppCapabilities()` once in the **server route-handler runtime**, then flushes — so your capability is in the dispatcher before any agent resolves its tools. Registration is idempotent by slug.
+
+**One bad capability does not take the others with it.** The flush calls `capabilityDispatcher.register()` per entry inside a `try`. That call throws on an authoring mistake — `processesPii = true` with no `redactProvenance()` override — and it throws mid-loop, so before #633 one misdeclared capability at position 12 of 28 left 11 registered, 16 never reached, and every dispatch path throwing. Now the failing one is named in the log (`an app capability failed to register — skipping it`, with its slug) and skipped, and the rest register normally.
+
+**One case is not a clean skip, and this is the page to read before relying on it.** `register(cap, { slug })` mounts a capability over an _existing_ slug — that is the seam for replacing a built-in, optionally with a `guard` to gate it. If **that** registration is the one that fails, the handler it was replacing stays live, **without your guard**, and the log says so rather than saying "skipping it". It is not undone, because the only lever would be dropping the existing handler, which removes the capability from every agent in the deployment. So: if you override a built-in slug in order to restrict it, do not also misdeclare `processesPii` on that same class — the two together are what produce an un-gated built-in. See [Fork Init Seams](../architecture/fork-init-seams.md).
+
+**A throwing `initAppCapabilities()` itself is different, and deliberately louder.** It is latched before it runs (so it is not re-tried on every dispatch), the pending registrations are rolled back, and then it is **re-raised on every call** rather than degrading the way the other fork seams do. Rollback means an init throw costs you your entire capability set, not one entry — and an agent missing its whole toolset does not go quiet, it answers from its own weights with nothing marking the gap. Core cannot isolate inside your init, because it is a bare sequence of statements and `new YourTool()` throwing aborts the whole function before core sees anything: if your init can fail, guard it. Full contract in [Fork Init Seams](../architecture/fork-init-seams.md). `lib/app/capabilities.ts` is one of the `lib/app/` auto-wired bootstrap files; see [Building on Sunrise → §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) for the full set and the per-runtime rationale.
 
 > **Every path that dispatches must call it first.** The registry is a `globalThis`-backed singleton (#462), so a registration made in one module realm is visible from all of them — but the _trigger_ is lazy, guarded by module-scoped booleans, so the shared map is only populated once something calls the initialiser. All four callers below do — but `executors/tool-call.ts` did not until #537. It dispatched straight in, and on a process that had served no HTTP request — precisely an overnight-quiet server running a 03:15 scheduled workflow — the map was empty and the step failed `unknown_capability` naming a slug that was registered fine. Under load the bug hides, and no unit suite sees it because tests register explicitly in setup. If you add a dispatch path, call `registerBuiltInCapabilities()` at the top of it.
 
@@ -110,23 +116,175 @@ export function initAppCapabilities(): void {
 - **`slug`** overrides the in-memory handler key (defaults to `capability.slug`).
   **⚠️ Second hard contract (#509): a namespaced slug is not advertisable to an LLM.** The slug _is_ the tool name a model sees — `getCapabilityDefinitions` sets `name` from it, because dispatch resolves the emitted name back as a slug. Provider tool names must match `^[a-zA-Z0-9_-]{1,64}$`, so `billing:lookup_order` cannot be one, and a capability whose slug fails that charset is **dropped from the agent's toolset with a warning** rather than sent to the provider — a malformed tool name fails the entire request, not just the call. Such a capability was never reachable from chat regardless (no valid tool name can resolve to a namespaced slug); **MCP is its supported surface**, since `mcp/tool-registry.ts` advertises `customName` and resolves it back to the slug before dispatch. Use an underscore-or-hyphen slug for anything an agent should call directly.
   **⚠️ Hard contract:** the override slug must correspond to an **active `AiCapability` row**. Every downstream gate — registry lookup (step 3), quarantine, per-agent binding, rate limit — looks the DB up by this same slug. An override with no active row dies at `capability_inactive` **before the handler or guard ever runs**. Forks whose module system creates the namespaced rows satisfy this automatically; a bare override with no matching row will silently never dispatch.
+- **`scopedBy`** declares which scope keys bind this capability's parameters; see [The scope binding](#the-scope-binding-scopedby-dispatch-steps-4b--7a).
 - **`guard`** is an async-capable predicate run as dispatch step 4a (after the per-agent binding, before the rate limiter). It reads the generic [`CapabilityContext.scope`](#dispatch-scope-carrier-capabilitycontextscope) carrier — core names no keys. `{ allow: false }` → `capability_guard_denied`; a guard that throws **fails closed** (denied + logged). Keyed by the same registration key as the handler, so a `slug` override guards the override key.
 
-Re-registering the same key **replaces the handler and its guard together** — a guard-less re-registration drops any prior guard on that key.
+Re-registering the same key **replaces the handler, its guard and its `scopedBy` binding together** — a re-registration without one drops any the prior registration left on that key. That matters for the binding in particular: a capability must not stay silently scoped after its author removed the declaration, and `dispatcher.test.ts` pins it.
 
 ### Dispatch scope carrier (`CapabilityContext.scope`)
 
 `CapabilityContext.scope?: Record<string, string>` is a free-form, optional string map the dispatcher's caller can populate. It is **generic by design** — core names no keys and no built-in capability reads it; the dispatcher passes it verbatim into `execute()`. A fork uses it to let a capability refuse to run outside its intended scope (e.g. a `module` slug). In vanilla Sunrise the chat handler threads it from `ChatRequest.scope` into the dispatch context, so it stays `undefined` and inert unless a caller sets it.
 
+**Four callers build a dispatch context that carries it**, and each answers the authority question by spreading one of two helpers from `lib/orchestration/scope.ts`: `platformScope()` for a carrier the platform wrote — `mcp/tool-registry.ts` (an `McpApiKey.scope`) and the two workflow executors, `engine/executors/tool-call.ts` and `agent-call.ts` (a persisted `AiWorkflow*.scope`) — and `hintScope()` for `chat/streaming-handler.ts`, whose `scope` arrives from an untrusted consumer request body.
+
+**The pair must travel together, and once did not.** The flag was set on the workflow engine's own `ExecutionContext` while the `CapabilityContext` was built two files away in the executors, which forwarded the values and nothing else — so the binding armed for MCP and for nothing else, while this page, the CHANGELOG and a roster test all said three carriers were wired. The helpers exist so a caller cannot supply the carrier without answering the question; `tests/unit/lib/orchestration/scope-authority.test.ts` derives the roster from `lib/` and fails on a site it cannot classify.
+
+#### The scope binding (`scopedBy`, dispatch steps 4b + 7a)
+
+Delivering the carrier to `execute()` is only half of what a persisted scope is for. The other half is making it **bind** the arguments, so a scoped caller can omit the scoped parameter and cannot act outside its scope by naming a different one. Before this, every scoped capability consumed the carrier by hand — or a fork patched the dispatch path (#586).
+
+A capability **declares** the binding at registration:
+
+```ts
+registerAppCapability(new GetProjectCapability(), { scopedBy: 'projectId' });
+```
+
+That says: the scope key `projectId` binds to the parameter `projectId`. Then, on every dispatch where **both** conditions hold — the capability declared a binding, **and** the caller's scope is one the platform wrote (`CapabilityContext.scopeIsAuthoritative`) — the dispatcher:
+
+- **fills** the argument at step 4b when the caller omitted it (missing, `null` or `''`);
+- **refuses** with `{ code: 'scope_conflict' }` when the caller named a different value;
+- **re-asserts** at step 7a on the **validated** args, requiring each pinned key to be _present and equal_, and refusing with `{ code: 'scope_unenforceable' }` when it is gone or the args cannot be read.
+
+Both conditions default to off, so a mistake in either direction loses the binding rather than gaining one.
+
+##### Why it is declared and not inferred
+
+The first design read the binding out of the capability's published `functionDefinition.parameters` and armed itself whenever a scope map was present. Three review rounds found four separate ways that was wrong, and they are worth keeping because each is a general trap:
+
+|                                   | what went wrong                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Wrong point in the pipeline**   | The fold ran before `handler.validate()`, and validation is a Zod _pipeline_, not a filter. Three built-ins wrap their schema in `z.preprocess(unwrapApprovalPayload, …)`, which merges an `approvalPayload` object **over** the top level — so a caller hiding `{projectId:'B'}` there took the fill-if-absent path (no conflict; the top-level key was absent) and the preprocess then replaced the pin. |
+| **Verified an unreadable object** | The fail-closed gate was `typeof === 'object'`, which is true of a `Map`, a `URLSearchParams` and every class instance — all of which answer `hasOwnProperty` with `false`. It looked, saw nothing, and reported the invariant held while `execute` read the caller's value out of a getter.                                                                                                               |
+| **A pin could be silently eaten** | `z.object()` strips unknown keys, and `functionDefinition` is admin-editable JSON that need not agree with the Zod schema. A row declaring `projectId` against a schema that does not accept it dispatched with the discriminator **absent**, under a boundary reporting success.                                                                                                                          |
+| **Armed on an untrusted carrier** | `POST /api/v1/chat/stream` accepts `scope` from the request body. Arming on presence alone meant an end user posting `scope: {"priority":"high"}` set the urgency of every `escalate_to_human` call, and `{"reason":"x"}` disabled the capability outright.                                                                                                                                                |
+
+Declaring the binding removes the guess. `parameters` is not consulted at all, so the admin-editable JSON can no longer disagree with the code; and "this tool is scoped" stops being answered by "a scope map exists".
+
+It also makes the gaps visible. Measured against the fork that asked for this: the inferred design covered 19 of its 29 capabilities and **none** of its nine `featureId`-keyed writes, with nothing to say which were which. Under `scopedBy` those nine are a decision someone has to make out loud.
+
+##### What the binding does not cover
+
+Only **top-level own properties** are inspected. A capability that resolves its scope from a child id (`{ featureId }` → the feature's project) is not enforced here and **must not** declare `scopedBy` for it — that check belongs in `execute()`, or in a [`guard`](#app-contributed-capabilities-forks), which sees the context but not the args.
+
+Two more properties, each a bug the tests now pin:
+
+- **Comparison is strict and never coerces.** A `projectId` of `5` is not the scope's `"5"`, and `{ toString: () => 'p1' }` is not `'p1'` — coercing would let any caller satisfy a tenant check.
+- **A conflict on any key refuses the whole call.** Filling some keys while refusing others would dispatch a partially-scoped call.
+
+A declared key the caller's scope does **not** pin is left alone and logged: an unscoped service key is a deliberate configuration (`McpApiKey.scope = NULL` means system-wide), so it is not refused — but the difference between "enforced" and "not" is never silent.
+
+The rules live in [`lib/orchestration/scope.ts`](../../lib/orchestration/scope.ts) (`foldScopeIntoArgs` and `assertScopeHeld`, both pure) — the same module that owns the validate-on-read guard for the persisted columns.
+
 ### Workflow attribution (`CapabilityContext.workflowExecutionId`)
 
-`CapabilityContext.workflowExecutionId?: string` is set by the `tool_call` executor from `ctx.executionId`, and is how a capability dispatched by a workflow gets attributed on its cost row.
+`CapabilityContext.workflowExecutionId?: string` is set by the `tool_call` **and** `agent_call` executors from `ctx.executionId`, and is how a capability dispatched by a workflow gets attributed on its cost row.
 
 It exists because **`agentId` cannot do that job for a workflow.** The label the executor dispatches under is not an `AiAgent.id`, and `AiCostLog.agentId` is a foreign key to one — so writing it there was rejected with P2003 (`ai_cost_log_agentId_fkey`). `logCost` swallows that rejection into an error log and returns `null`, so the symptom was not a crash but an error line per step and a **missing** cost row: the Costs page's per-tool breakdown reported zero for every capability a workflow ran.
 
 Dispatch step 9 therefore writes `agentId` only when it is a real agent, and `workflowExecutionId` otherwise. That FK is satisfied — the `AiWorkflowExecution` row exists before any step runs.
 
-**What this does and does not get you.** The row persists, is queryable by execution, and is counted by the per-capability stats route (which filters on `operation: 'tool_call'` and `metadata.slug`). It does **not** appear in the execution detail or live cost panels: both key on `metadata.stepId` and skip any row without one, and the dispatcher writes `{ slug, success }`. Capabilities dispatched from an `agent_call` step likewise still carry no `workflowExecutionId`. Both are open — see #600.
+**Where the row then shows up.** It persists, is queryable by execution, is counted by the per-capability stats route (which filters on `operation: 'tool_call'` and `metadata.slug`), **and** appears against its step in the execution detail and live cost panels — because `CapabilityContext.costLogMetadata` carries a `stepId`, which is what both readers filter on (`if (!stepId) continue;`). Before #600 the dispatcher wrote `{ slug, success }` only, so every row was dropped by both panels.
+
+`agent_call` dispatches carry `workflowExecutionId` too. Until #600 only `tool_call` did, and the asymmetry sat inside one file: the `agent_call` executor's own LLM `logCost` set it while the capability dispatch beside it did not, so a tool an agent invoked mid-workflow recorded an `agentId` and a null execution link and never appeared against the run.
+
+### The metadata carrier (`CapabilityContext.costLogMetadata`)
+
+`CapabilityContext.costLogMetadata?: Record<string, unknown>` is merged into the dispatcher's cost-row metadata **under** its own keys:
+
+```ts
+metadata: { ...(context.costLogMetadata ?? {}), slug, success: result.success }
+```
+
+Spread order is the guarantee, not a style choice. The per-capability stats route groups on `metadata.slug`, so a caller able to set it could attribute its spend to another capability, and one able to set `success` could hide its failures from the same breakdown. The executors apply the same rule one level up — `{ ...ctx.costLogMetadata, stepId: step.id }` — so a run cannot misattribute its own rows to a different step.
+
+Two things ride on the carrier:
+
+- **`stepId`**, so the row is visible per-step in the execution UI.
+- **Evaluation tags.** An evaluation run stamps `{ evaluationRunId, role }` onto `ExecuteOptions.costLogMetadata`; without a carrier those tags stopped at the capability boundary and evaluation spend that ran through a tool was untagged.
+
+**Every boundary where cost context enters a new cost-logging scope must forward the carrier.** Not just capability dispatch — the first version of this rule said "dispatch sites" and review found two more boundaries it therefore could not see. The roster, derived rather than remembered:
+
+| Boundary                                                           | Forwards                                                                             |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `engine/executors/tool-call.ts` → dispatch                         | `{ ...ctx.costLogMetadata, stepId: step.id }`                                        |
+| `engine/executors/agent-call.ts` → dispatch                        | `{ ...ctx.costLogMetadata, stepId: step.id }`                                        |
+| `engine/executors/judge-call.ts` → `driveJudgeAgent`               | `ctx.costLogMetadata` — the judge logs through the **chat handler**, not an executor |
+| `engine/llm-runner.ts` → `logCost`                                 | `{ ...ctx.costLogMetadata, stepId }`                                                 |
+| `chat/streaming-handler.ts` → dispatch                             | `request.costLogMetadata` — no `stepId`; a chat turn is not a workflow step          |
+| `capabilities/built-in/run-workflow.ts` → child `ExecuteOptions`   | `context.costLogMetadata`, so a nested run inherits the tags                         |
+| `capabilities/built-in/send-message-to-channel.ts` → own `logCost` | `context.costLogMetadata`, plus the workflow-label guard                             |
+| `mcp/tool-registry.ts` → dispatch                                  | nothing, correctly: an MCP call has no execution or evaluation context               |
+| `chat/streaming-handler.ts` → `summarizeMessages`                  | `agent.id` + `conversation.id` — the only caller holding real ids (#654)             |
+| `capabilities/built-in/search-knowledge.ts` → `embedText`          | `context.costLogMetadata`, plus the workflow-label guard (#654)                      |
+| `engine/executors/rag-retrieve.ts` → `searchKnowledge`             | `{ ...ctx.costLogMetadata, stepId: step.id }` + `ctx.executionId` (#654)             |
+
+Every one of these except the MCP row was missing the carrier when #600 started. Do not reason from how many there are — reason from the question, which is _"does anything in scope here carry `costLogMetadata`?"_ If you add a boundary, the answer is usually yes.
+
+**What this roster is NOT.** It covers boundaries where a carrier is _in
+scope_ and must be passed on. It is not a list of everywhere cost is logged, and
+reading it as one is a mistake an earlier draft invited by calling itself
+"derived rather than remembered".
+
+**The two sinks this table used to list as open are closed (#654).** The
+rolling summariser was worse than unattributed: it wrote `agentId: 'system'` and
+`conversationId: 'summary'` — literal strings into columns that are real foreign
+keys — so every insert violated both, `logCost` swallowed the P2003, and the row
+was **never written at all**. It now takes `agent.id` and `conversation.id` from
+the chat handler, the one caller that holds them. The knowledge-search query
+embedding was genuinely unattributed — the row persisted, belonging to nothing —
+and `embedText`/`embedBatch` now take an `EmbeddingAttribution` that the
+capability and the `rag_retrieve` executor fill in.
+
+**What is still deliberately unattributed**, and why:
+
+| Sink                                                   | What it logs                        | Why nothing tags it                                                                             |
+| ------------------------------------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `knowledge/embedder.ts` via document ingestion         | the per-document embedding batch    | no agent or conversation exists behind an upload. Tagged `metadata.kind` + `documentId` instead |
+| `knowledge/keyword-enricher.ts`                        | post-upload BM25 keyword generation | same: runs against a document, from the admin UI, with no turn or execution in scope            |
+| `knowledge/seeder.ts`, `knowledge/semantic-chunker.ts` | backfill and chunking embeddings    | operator-triggered maintenance, not work done on anyone's behalf. Tagged `metadata.kind`        |
+| `chat/message-embedder.ts` backfill path only          | re-embedding older messages         | the live chat path DOES attribute (agent + conversation); the backfill has neither in scope     |
+
+These are a limit of the domain, not a missing line: there is no row to point a
+foreign key at. `metadata.kind` is what makes them separable in reporting.
+
+**The rule these three bugs share, and the guard for it.**
+`AiCostLog.agentId`, `.conversationId` and `.workflowExecutionId` are foreign
+keys, so at every call site the only two safe values are **a real row id** or
+**nothing**. A placeholder is rejected with P2003, and because `logCost` catches
+it and every caller `void`s the promise, the failure is a row that quietly never
+existed. `tests/unit/lib/orchestration/llm/cost-log-fk-attribution.test.ts`
+derives every `logCost` call site in the tree and compares what each writes into
+those columns against a written allowlist — so a fourth instance cannot be added
+without someone stating why its value is a row id.
+
+That guard reads `logCost` call sites, and **a value can also reach a foreign key
+one hop away**, through a function that accepts an attribution and forwards it.
+Measured, not assumed: deleting the workflow-label guard in
+`search-knowledge.ts` — reintroducing #600 exactly — leaves the roster entirely
+green. Each forwarding hop carries its own behavioural test instead; the guard's
+docblock names them.
+
+**Known exception: the judge path.** `judge_call` forwards the carrier, so an
+evaluation run's tags reach the judge's row — but that row is written by the
+streaming chat handler, which sets neither `workflowExecutionId` nor `stepId`.
+The judge's spend therefore does not appear against its step in the execution
+panels, and `loadPastRuns` cannot attribute it. The step total stays correct
+because `StepResult.costUsd` carries it. Fixing this means the chat handler
+accepting an execution link.
+
+**Known exception: `send_message_to_channel` renders as `$0.0000`.** Its row now
+reaches the per-step cost table for the first time, and it will show zero. The
+model string it logs (`twilio-sms`, `postmark-email`) is not in the model
+registry, so `calculateCost` returns 0, and `logCost` has no cost-override
+parameter — the real figure lives only in `metadata.usdPerMessage`. A workflow
+that sends 200 SMS therefore shows 200 rows at `$0.0000` under a heading that
+says cost. Pre-existing in the cost reports; #600 is what puts it in front of an
+operator. Fixing it means `logCost` accepting an explicit cost, which is a change
+to a function 18 call sites share and wants its own review.
+
+**Known exception: orchestrator delegations.** `engine/executors/orchestrator.ts` builds a synthetic step (`${step.id}_delegate_${agentSlug}`) and hands it to `executeAgentCall`, so rows from a delegated turn are stamped with a step id that is **not in the workflow definition**. They pass the readers' `if (!stepId) continue;` and are then keyed under a step no trace row looks up, so the execution panels drop them. This predates #600 for the delegation's LLM rows; #600 extends the same keying to its tool rows rather than fixing it. Attributing them correctly means deciding whether a delegation is its own step or part of the orchestrator's — a question the trace viewer also has a stake in, so it is deliberately not settled here.
+
+**A capability that writes its own cost row must apply both rules itself** — the guard and the merge. `send_message_to_channel` is the worked example: it logs an `OUTBOUND_MESSAGE` row directly, and until #600 it wrote `agentId: context.agentId` unconditionally, so every outbound message sent from a workflow hit the same P2003 and recorded nothing. The dispatcher's guard does not cover a capability's own `logCost` call.
 
 **If you add a dispatch path that is not an agent**, carry the id of whatever real row owns the call and add a column for it, rather than encoding it into `agentId`. `workflowAgentId()` carries the same warning for the same reason.
 
@@ -240,11 +398,13 @@ The registry refuses to register a capability that declares `processesPii = true
    3a. **Quarantine gate** — `resolveQuarantineState(entry)` resolves the effective state (a past `quarantineUntil` is treated as `active`). Soft → `{ code: 'capability_quarantined', skipFollowup: false, metadata: { mode, reason } }` with a "temporarily unavailable" message the agent can route around. Hard → same code with `skipFollowup: true` and a firm message that stops the model's tool loop. See the [Quarantine](#quarantine-incident-disable) section below.
 4. **Per-agent binding** — `prisma.aiAgentCapability.findMany({ agentId })`, cached per agent for 5 minutes. An explicit row with `isEnabled: false` → `{ code: 'capability_disabled_for_agent' }`. Missing row = default-allow with base-capability defaults.
    4a. **Capability guard** — if a `guard` was attached at registration (a fork seam; core attaches none), it's `await`ed here with the full `context`. `{ allow: false }` → `{ code: 'capability_guard_denied' }` (the guard's optional `reason` is folded into the client-surfaced message; no internal ids). A guard that **throws** fails **closed** — same denial, logged via `logger.error`. Placed after enablement and before the rate limiter, so a denied call consumes no rate token. See [App-contributed capabilities](#app-contributed-capabilities-forks).
+   4b. **Scope binding** — when the capability declared `scopedBy` **and** the caller's scope is authoritative, each bound key is filled if the caller omitted it and refused with `{ code: 'scope_conflict' }` if the caller named a different value. Placed beside the guard, and for the guard's reason: a cross-scope call is an authorization failure, not a malformed request, so it must not spend the legitimate tenant's rate token. Inert for a capability that declared nothing. See [The scope binding](#the-scope-binding-scopedby-dispatch-steps-4b--7a).
 5. **Rate limit** — effective limit = `binding.effectiveRateLimit ?? entry.rateLimit`. If non-null, a sliding-window `RateLimiter` keyed by slug (token = `agentId`) checks the request. Exceeded → `{ code: 'rate_limited' }`.
 6. **Approval gate** — `entry.requiresApproval: true` → `{ code: 'requires_approval', skipFollowup: true }`. The handler never runs. (The admin queue that resolves approvals is a later slice.)
-7. **Validate args** — `handler.validate(rawArgs)`. `CapabilityValidationError` → `{ code: 'invalid_args', message }`.
+7. **Validate args** — `handler.validate(dispatchArgs)`. `CapabilityValidationError` → `{ code: 'invalid_args', message }`.
+   7a. **Re-assert the binding** — the invariant is checked again on the **validated** args, the ones `execute` is about to receive. Each pinned key must be present and equal: a different value → `{ code: 'scope_conflict' }`; a stripped key, or args that cannot be read → `{ code: 'scope_unenforceable' }`. See [Why it is declared and not inferred](#why-it-is-declared-and-not-inferred) for why step 4b alone is not sufficient.
 8. **Execute** — `await handler.execute(validated, context)`. Any thrown error → `{ code: 'execution_error' }` and `logger.error`.
-9. **Log cost** — fire-and-forget `logCost({ operation: 'tool_call', model: 'n/a', provider: 'capability', inputTokens: 0, outputTokens: 0, metadata: { slug, success } })`. Not awaited: the LLM call that triggered the tool already logged its own tokens, and `logCost` returns `null` on DB failure. Capabilities that invoke their OWN LLMs internally (the `search_knowledge_base` embedding call, the rolling summariser, `run_workflow`'s child execution) issue their own `logCost` calls for that LLM spend. The chat handler's per-turn cap (improvement #39) only counts the chat-LLM rounds it sees — tool-internal LLM cost is logged to `AiCostLog` for audit but NOT counted against the per-turn cap. Documented in `.context/orchestration/chat.md`.
+9. **Log cost** — fire-and-forget `logCost({ operation: 'tool_call', model: 'n/a', provider: 'capability', inputTokens: 0, outputTokens: 0, metadata: { ...context.costLogMetadata, slug, success } })`. The caller's metadata is spread **first** so the dispatcher's own keys win; see the carrier section above. Not awaited: the LLM call that triggered the tool already logged its own tokens, and `logCost` returns `null` on DB failure. Capabilities that invoke their OWN LLMs internally (the `search_knowledge_base` embedding call, the rolling summariser, `run_workflow`'s child execution) issue their own `logCost` calls for that LLM spend. The chat handler's per-turn cap (improvement #39) only counts the chat-LLM rounds it sees — tool-internal LLM cost is logged to `AiCostLog` for audit but NOT counted against the per-turn cap. Documented in `.context/orchestration/chat.md`.
 10. **Return** the handler's result verbatim. One `logger.info('Capability dispatched', ...)` line with `latencyMs` rounds out each call.
 
 ### Cache semantics

@@ -41,6 +41,24 @@
  *     is unchecked. Callers must either refuse redirects (`redirect: 'error'`)
  *     or re-run this check on each hop — see `fetchRevalidatingRedirects` in
  *     `lib/orchestration/knowledge/url-fetcher.ts` for the loop.
+
+ *     **Do not maintain a list of the call sites here.** An earlier version of
+ *     this comment did, naming five; review found it wrong by three, which is
+ *     the same failure that let #534 miss `orchestration/http/fetch.ts` (that
+ *     sweep was scoped by grepping `checkSafeProviderUrl`, and that site guards
+ *     with an env host allowlist instead). The enumeration is mechanical
+ *     instead: `tests/unit/lib/security/outbound-fetch-redirects.test.ts` finds
+ *     every server-side `fetch(` and fails CI on one with no redirect policy,
+ *     carrying the exemptions as pinned rows. Its `KNOWN GAP` rows are gone —
+ *     #635 closed all three, so nothing in that table is a deferred fix.
+ *
+ *     **It sees literal `fetch(` calls only.** HTTP issued inside a vendor SDK
+ *     is invisible to it, which is how the largest site of the family survived
+ *     three sweeps: `openai-compatible.ts` handed an admin-set `baseUrl` to
+ *     `new OpenAI({ baseURL })` and undici followed every redirect with the
+ *     prompt attached (#635). Configure such a client with a `fetch` wrapper
+ *     that sets the policy — that fixes it AND puts it back in the scanner's
+ *     view. The limits are written up in that test's docblock.
  *   - No IPv4-in-IPv6 mapping parsing beyond what `URL` exposes.
  *
  * This module is platform-agnostic — no Next.js imports.

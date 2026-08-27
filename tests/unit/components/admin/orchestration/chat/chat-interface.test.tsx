@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ChatInterface Component Tests
  *
@@ -54,6 +56,38 @@ vi.mock('@/components/admin/orchestration/chat/mic-button', () => ({
         fire-error
       </button>
     </>
+  ),
+}));
+
+// Stub ApprovalCard the same way MicButton is stubbed above. Its `onResolved`
+// callback is the only caller of `sendFollowupWhenIdle`, and reaching it for
+// real would mean driving the card's own approval polling — which the network
+// guard in tests/setup.ts refuses by design.
+//
+// Kept faithful to the contract the parent depends on — the prompt text and
+// the two accessibly-named actions — so the existing "mounts an ApprovalCard"
+// test still exercises what it was written to check.
+vi.mock('@/components/admin/orchestration/chat/approval-card', () => ({
+  ApprovalCard: ({
+    pendingApproval,
+    onResolved,
+  }: {
+    pendingApproval: { prompt?: string };
+    onResolved: (action: string, followup: string) => void;
+  }) => (
+    <div>
+      <p>{pendingApproval?.prompt}</p>
+      <button
+        type="button"
+        aria-label="Approve action"
+        onClick={() => onResolved('approved', 'ok')}
+      >
+        Approve
+      </button>
+      <button type="button" aria-label="Reject action" onClick={() => onResolved('rejected', 'no')}>
+        Reject
+      </button>
+    </div>
   ),
 }));
 
@@ -127,6 +161,77 @@ describe('ChatInterface', () => {
 
     expect(screen.getByRole('button', { name: 'Hello' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Help me' })).toBeInTheDocument();
+  });
+
+  // ---- endpoint props (#526) --------------------------------------------
+  // The component described itself as reusable while pinning three admin URLs,
+  // so no non-admin surface could use it. Defaults keep every existing caller
+  // unchanged; these assert both halves.
+
+  it('POSTs the turn to the admin stream route by default', async () => {
+    const user = userEvent.setup();
+    const stream = makeSseStream([startFrame('c1', 'm1'), contentFrame('Hi'), doneFrame()]);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ChatInterface agentSlug="test-agent" starterPrompts={['Hello']} />);
+    await user.click(screen.getByRole('button', { name: 'Hello' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/orchestration/chat/stream');
+  });
+
+  it('POSTs the turn to streamEndpoint when supplied', async () => {
+    const user = userEvent.setup();
+    const stream = makeSseStream([startFrame('c1', 'm1'), contentFrame('Hi'), doneFrame()]);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ChatInterface
+        agentSlug="test-agent"
+        streamEndpoint="/api/v1/app/second-brain/chat"
+        starterPrompts={['Hello']}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Hello' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/app/second-brain/chat');
+    // The wire shape is unchanged — that is the whole premise of the prop.
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as Record<string, unknown>;
+    expect(body.agentSlug).toBe('test-agent');
+  });
+
+  it('DELETEs to deleteConversationEndpoint when clearing', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      body: makeSseStream([startFrame('conv-42', 'msg-1'), contentFrame('Hi!'), doneFrame()]),
+    });
+    fetchMock.mockResolvedValueOnce({ ok: true }); // the DELETE
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ChatInterface
+        agentSlug="test-agent"
+        showClearButton
+        deleteConversationEndpoint={(id) => `/api/v1/app/threads/${id}`}
+      />
+    );
+
+    await user.type(screen.getByPlaceholderText(/type a message/i), 'Hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText('Hi!')).toBeInTheDocument());
+
+    // Trigger, then confirm in the AlertDialog.
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await user.click(screen.getByRole('button', { name: /^clear$/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/app/threads/conv-42');
   });
 
   it('does not render starter prompts when none provided', () => {
@@ -2242,6 +2347,88 @@ describe('ChatInterface', () => {
       });
       await user.click(screen.getByRole('button', { name: /suggested prompts/i }));
       expect(screen.getByTestId('suggested-prompts-panel')).toBeInTheDocument();
+    });
+  });
+
+  // ── #597 async lifetimes ────────────────────────────────────────────────
+  //
+  // The two changes the CHANGELOG calls out as *not* cosmetic. Both shipped
+  // without a regression test, so reverting either left the suite green — the
+  // same green-for-the-wrong-reason failure #597 is about.
+  //
+  // `shouldAdvanceTime: true` is load-bearing, and is the pattern the rest of
+  // this file already uses. A bare `vi.useFakeTimers()` DOES hang both of
+  // these to the 30s timeout — the component interleaves timer waits with
+  // promise chains (fetch rejection, stream reads) that need real microtask
+  // turns, and plain fake timers supply none. `shouldAdvanceTime` advances
+  // fake time in lockstep with real time, which is what keeps `waitFor` and
+  // `userEvent` working underneath.
+
+  describe('async lifetimes (#597)', () => {
+    it('stops the reconnect loop when the component unmounts mid-backoff', async () => {
+      // A network failure schedules a 1s backoff and retries. Before
+      // `abortableDelay` that wait was a bare `setTimeout` the unmount could
+      // not cancel, so the loop resumed against a dead component and issued
+      // another fetch. The stubbed fetch here ignores `signal`, which is
+      // exactly why the in-code `signal.aborted` check has to exist.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const fetchMock = vi.fn().mockRejectedValue(new Error('Network error'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { unmount } = render(<ChatInterface agentSlug="a" starterPrompts={['Go']} />);
+      await user.click(screen.getByRole('button', { name: 'Go' }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      unmount();
+
+      await vi.advanceTimersByTimeAsync(10_000); // past all three backoffs
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
+
+    it('stops the follow-up poll when the component unmounts while streaming', async () => {
+      // `sendFollowupWhenIdle` re-queues itself every 500ms until the stream
+      // finishes. `streamingRef.current` freezes at its last value on unmount,
+      // so with a bare setTimeout the chain never terminated — it polled for
+      // the lifetime of the process.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      // A stream that never closes, so `streaming` is still true at unmount.
+      const encoder = new TextEncoder();
+      const openStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(startFrame('c1', 'm1')));
+          controller.enqueue(
+            encoder.encode(
+              approvalRequiredFrame({
+                executionId: 'e1',
+                approveToken: 't1',
+                stepId: 's1',
+                summary: 'Approve?',
+              })
+            )
+          );
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: openStream }));
+
+      const { unmount } = render(<ChatInterface agentSlug="a" starterPrompts={['Go']} />);
+      await user.click(screen.getByRole('button', { name: 'Go' }));
+
+      const resolveButton = await screen.findByRole('button', { name: /approve action/i });
+      const setSpy = vi.spyOn(globalThis, 'setTimeout');
+      const pollCalls = (): number => setSpy.mock.calls.filter((c) => c[1] === 500).length;
+
+      await user.click(resolveButton);
+      await waitFor(() => expect(pollCalls()).toBeGreaterThan(0));
+
+      unmount();
+      const atUnmount = pollCalls();
+      await vi.advanceTimersByTimeAsync(5_000); // 10 more ticks if the chain lives
+
+      expect(pollCalls()).toBe(atUnmount);
+      vi.useRealTimers();
     });
   });
 });

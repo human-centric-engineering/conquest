@@ -1,11 +1,11 @@
 name: CI
 
 # Adaptive pipeline — correct and fast on BOTH public Sunrise (free minutes,
-# large runners) and private forks (capped minutes, 2-core/7GB runners).
+# large runners) and private forks (capped minutes, 2-core/8GB runners).
 #
 # Universal speedups (on for everyone): cancel-superseded runs, warm build
 # caches with a content-based cache strategy, a raised Node heap (a cap, not an
-# allocation — harmless on 16GB, necessary on 7GB), fan-out of the static checks,
+# allocation — harmless on 16GB, necessary on 8GB), fan-out of the static checks,
 # and a 4-way sharded test matrix.
 #
 # Economics knob 1 — repo variable `CI_TEST_SCOPE`:
@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Raise Node's heap cap for every job's own steps. It is a ceiling, not a
-# reservation: on a 16GB public runner it is never approached; on a 7GB
+# reservation: on a 16GB public runner it is never approached; on an 8GB
 # private-fork runner it stops `tsc` / `next build` OOMing (exit 134) when
 # Node's default heap caps near ~2GB.
 #
@@ -407,25 +407,46 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sunrise_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # prisma generate (postinstall) needs DATABASE_URL defined; it does not
+    # connect, so a placeholder is fine — no Postgres service on this job.
+    #
+    # This job carried a pgvector service and ran migrate + seed against it
+    # until #629. No test could reach it: `tests/setup.ts` is a global
+    # `setupFiles` entry and overwrites DATABASE_URL with its own value, so a
+    # query would have authenticated as `test` against a database `test` that
+    # the container never created. The suite mocks the Prisma client and never
+    # constructs a real one. `smoke` is the job that talks to a real database.
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
       BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
       BETTER_AUTH_URL: 'http://localhost:3000'
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+      # Opt out of the workflow-level `CI_NODE_HEAP_MB` ceiling.
+      #
+      # That knob raises a **per-process** cap and is sized for the
+      # single-process jobs it exists for (type-aware ESLint, tsc, next
+      # build). This is the only kind of job that runs several Node processes
+      # at once — vitest forks roughly `cores - 1` workers — so inheriting it
+      # multiplies the ceiling by the worker count. At `CI_NODE_HEAP_MB=8192`
+      # on a 4-vCPU public runner that is ~24.6GB of ceiling on 16GB of RAM.
+      # On a 2-vCPU/8GB private runner vitest forks about one worker, so a
+      # single 8192 cap already sits at the machine's ceiling before the OS and
+      # git. Both turn a clean V8 abort into an OS OOM kill, which is far
+      # harder to diagnose — and the documented remedy for a lint OOM is
+      # exactly what triggers it.
+      #
+      # Empty means "no flag", so each worker takes Node's own default, which
+      # is already derived from the machine's memory and therefore adapts to
+      # public and private runners alike. The suite runs this way locally,
+      # including under coverage.
+      #
+      # `CI_TEST_NODE_HEAP_MB` keeps a fork-facing knob for the case Node's own
+      # default is genuinely not enough, without reusing `CI_NODE_HEAP_MB` —
+      # whose whole problem is that it is sized for a single process. Unset (the
+      # default) means no flag at all. Size it as `workers x value <= runner
+      # memory`, not as whole-runner memory.
+      NODE_OPTIONS: >-
+        ${{ vars.CI_TEST_NODE_HEAP_MB && format('--max-old-space-size={0}', vars.CI_TEST_NODE_HEAP_MB) || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -433,8 +454,6 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
-      - run: npm run db:migrate:deploy
-      - run: npm run db:seed
       - run: npx vitest run --shard=${{ matrix.shard }}/4
 
   # ---- Tests (changed mode): single lean job, PRs only ----
@@ -448,25 +467,17 @@ jobs:
       needs.config.outputs.code == 'true' &&
       needs.config.outputs.test_scope == 'changed' &&
       github.event_name == 'pull_request'
-    services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sunrise_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No Postgres service — see the note on `test-full`. DATABASE_URL is kept
+    # for prisma generate (postinstall), which does not connect.
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
       BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
       BETTER_AUTH_URL: 'http://localhost:3000'
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+      # See the note on `test-full` — vitest is multi-process, so it opts out
+      # of the workflow-level per-process heap ceiling.
+      NODE_OPTIONS: >-
+        ${{ vars.CI_TEST_NODE_HEAP_MB && format('--max-old-space-size={0}', vars.CI_TEST_NODE_HEAP_MB) || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -477,8 +488,6 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
-      - run: npm run db:migrate:deploy
-      - run: npm run db:seed
       # --passWithNoTests: a diff that touches no test-reachable code (e.g. CI
       # config) is a valid pass, not a failure.
       - run: npx vitest run --changed ${{ github.event.pull_request.base.sha }} --passWithNoTests
@@ -545,7 +554,9 @@ jobs:
     timeout-minutes: 30
     # Decoupled from the checks so an image break surfaces in parallel rather
     # than after the long test run. On PRs it runs only when Docker-relevant
-    # files change; on push to main it always runs as the production-image gate.
+    # files change; on push to main it runs as the production-image gate whenever
+    # the push touched code at all (a docs-only push skips it — `code == 'true'`
+    # gates both branches of the condition below).
     if: >-
       needs.config.outputs.code == 'true' &&
       (github.event_name == 'push' || needs.config.outputs.docker == 'true')
@@ -588,11 +599,25 @@ jobs:
           # NODE_OPTIONS above does not cross into a container build, so
           # without this the builder stage stays pinned at its 4096 default
           # while every runner-side job honours the variable.
+          # Client vars are inlined at build time (#662). Passed empty on purpose:
+          # the point is that the CHANNEL exists and the build accepts them, not
+          # that CI configures analytics. NOTE these lines sit OUTSIDE the block
+          # scalar below — inside it, `#` is literal content, and every such line
+          # would be handed to buildx as a --build-arg. Harmless while they carry
+          # no `=`, but the first one that did would become a real build arg.
           build-args: |
             DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sunrise
             BETTER_AUTH_URL=http://localhost:3000
             BETTER_AUTH_SECRET=ci-build-secret-not-for-production-use
             NEXT_PUBLIC_APP_URL=http://localhost:3000
+            NEXT_PUBLIC_ANALYTICS_PROVIDER=
+            NEXT_PUBLIC_GA4_MEASUREMENT_ID=
+            NEXT_PUBLIC_POSTHOG_KEY=
+            NEXT_PUBLIC_POSTHOG_HOST=
+            NEXT_PUBLIC_PLAUSIBLE_DOMAIN=
+            NEXT_PUBLIC_PLAUSIBLE_HOST=
+            NEXT_PUBLIC_SENTRY_DSN=
+            NEXT_PUBLIC_COOKIE_CONSENT_ENABLED=
             NODE_HEAP_MB=${{ vars.CI_NODE_HEAP_MB || 5120 }}
 
       # The migrator and seeder derive from `deps`, which the build above just

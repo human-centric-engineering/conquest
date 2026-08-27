@@ -30,23 +30,30 @@
  * collector yields a bundle that looks complete and is not, and neither the
  * subject nor the operator can tell. A static import cannot be missed.
  *
- * **Keep it complete.** The core guard test (`export-sources.test.ts`) diffs
- * `prisma/schema/*.prisma` against the core manifest so a new core table can't
- * quietly narrow the export. Your tables need the same protection, and core
- * cannot write it for you — the pattern worth copying is a constant listing the
- * tables you export plus a test that greps your own schema file for
- * `@@map("app_…")` and asserts each mapped table appears in it. Then adding a
- * table without extending the export fails your build instead of shipping a
- * short answer to a data subject.
+ * **Keep it complete — and core now checks that you did.** Declare your tables
+ * in `initAppSubjectSources()` below. The core guard test
+ * (`export-sources.test.ts`) diffs `prisma/schema/*.prisma` against the core
+ * manifest so a new core table can't quietly narrow the export, and it holds
+ * your tier's schema file to the same rule against your declarations: **every**
+ * model in a schema file that is not one of Sunrise's own — `app.prisma`,
+ * `framework-*.prisma`, or any other name you choose — must be declared as a
+ * source or excluded with a reason, or the suite fails naming it.
  *
- * A table holding no personal data (lookup tables, org config with no person in
- * it) is fine to leave out — but say so in a comment where you list them, so
- * the omission reads as a decision rather than an oversight.
+ * Full accounting, rather than the user-id heuristic core applies to itself,
+ * because core reads its own column vocabulary and cannot read yours: a table
+ * keyed `authorId` or `respondentId` is invisible to that scan, and the tables
+ * it cannot see are exactly the ones nobody remembers. A lookup or join table
+ * holding no personal data is an `excluded` row with a one-line reason — which
+ * is the note a DPO wants anyway, and it costs you a line once per table.
  *
  * Full guide: .context/privacy/data-export.md · CUSTOMIZATION.md §4
  */
 
-import { APP_SUBJECT_DATA_SOURCES } from '@/lib/app/questionnaire/privacy/export-sources';
+import { registerAppSubjectSources } from '@/lib/privacy/subject-source-registry';
+import {
+  APP_SUBJECT_DATA_SOURCES,
+  APP_EXCLUDED_SOURCES,
+} from '@/lib/app/questionnaire/privacy/export-sources';
 
 /** Identity of the subject being exported. */
 export interface AppSubjectQuery {
@@ -63,11 +70,40 @@ export interface AppSubjectQuery {
 export type AppSubjectData = Record<string, unknown>;
 
 /**
+ * Declare which of ConQuest's models hold data about a person, and which
+ * deliberately do not.
+ *
+ * Sunrise 0.10.0 (#660) turned this into a real seam. Before it, the platform
+ * coverage guard scanned every `prisma/schema/*.prisma` — ours included — but
+ * checked them against a manifest only core could write, so ConQuest patched
+ * the platform test to skip `App*` models and ran a parallel guard of its own.
+ * That fork edit is now gone: the declarations below are what the platform
+ * guard reads, and `tests/unit/lib/app/privacy/export-sources.test.ts` keeps
+ * this list level with `lib/app/questionnaire/privacy/export-sources.ts`.
+ *
+ * Sources are derived from `APP_SUBJECT_DATA_SOURCES` rather than restated, so
+ * a source added there is declared here automatically and cannot drift.
+ * `APP_EXCLUDED_SOURCES` carries the tables we deliberately do not export,
+ * each with a reason the data subject gets to read.
+ */
+export function initAppSubjectSources(): void {
+  registerAppSubjectSources({
+    tier: 'app',
+    sources: APP_SUBJECT_DATA_SOURCES.map(({ model, section, disposition, description }) => ({
+      model,
+      section,
+      disposition,
+      description,
+    })),
+    excluded: APP_EXCLUDED_SOURCES.map(({ model, reason }) => ({ model, reason })),
+  });
+}
+
+/**
  * Collect ConQuest's data about one subject.
  *
  * Drives `APP_SUBJECT_DATA_SOURCES` — the app-tier mirror of the platform's
- * subject-data manifest, held level with `prisma/schema/app*.prisma` by
- * `tests/unit/lib/app/privacy/export-sources.test.ts`.
+ * subject-data manifest.
  *
  * Nothing here is best-effort: a source that throws fails the whole export.
  * That is deliberate, and the opposite of the erasure path (where hook failures

@@ -10,8 +10,13 @@ export const metadata: Metadata = {
     template: `%s - ${BRAND.name}`,
     default: BRAND.name,
   },
-  description:
-    'A production-ready Next.js starter template designed for rapid application development',
+  // Was the starter blurb, hardcoded — which every fork shipped as the meta
+  // description across its whole marketing surface. The root layout's
+  // `BRAND.description` does NOT reach here: Next resolves metadata at the
+  // nearest segment that defines a field, so a group declaring `description`
+  // overrides the root outright. That is why #519's root-only fix was not
+  // enough on its own.
+  description: BRAND.description,
 };
 
 /**

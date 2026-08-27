@@ -55,6 +55,7 @@ import {
 } from '@/lib/orchestration/agents/resolve-effective-prompt';
 import { narrowReasoningEffort } from '@/lib/orchestration/llm/model-heuristics';
 import { registerStepType } from '@/lib/orchestration/engine/executor-registry';
+import { platformScope, hintScope } from '@/lib/orchestration/scope';
 import {
   GEN_AI_OPERATION_NAME,
   GEN_AI_REQUEST_MODEL,
@@ -426,7 +427,16 @@ async function runSingleTurn(
             // scoped too — same as the tool_call executor. Without this an
             // agent_call (and orchestrator, which delegates here) would run its
             // capabilities unscoped, leaving a hole in the workflow scope path.
-            ...(ctx.scope ? { scope: ctx.scope } : {}),
+            ...(ctx.scopeIsAuthoritative ? platformScope(ctx.scope) : hintScope(ctx.scope)),
+            // The execution link, missing until #600. The asymmetry was inside
+            // this same file: this executor's own LLM `logCost` above sets
+            // `workflowExecutionId`, and only the capability dispatch beside it
+            // did not — so a tool an agent invoked mid-workflow recorded an
+            // `agentId` and a null execution link, and never appeared against
+            // the run. No FK hazard: unlike `tool_call`, this dispatches under
+            // the real `agent.id`, and the execution row exists before any step.
+            workflowExecutionId: ctx.executionId,
+            costLogMetadata: { ...(ctx.costLogMetadata ?? {}), stepId: step.id },
           });
         }
 

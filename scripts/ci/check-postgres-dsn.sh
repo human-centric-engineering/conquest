@@ -4,22 +4,27 @@
 #
 # Why this exists
 # ---------------
-# TruffleHog's `Postgres` detector is excluded in .github/workflows/secret-scan.yml
-# because it produced 27 unverified findings on this repo and zero verified ones —
-# every hit a `localhost` / `db` fixture in a test, a doc, .env.example or the CI
-# workflow itself. That noise failed the merge gate, and the alternative fix (a
-# path allowlist over ~29 files) would have blinded *every* detector on tests/ and
-# .context/, which is exactly where someone is most likely to paste a real key.
+# TruffleHog's `Postgres` detector produced 27 unverified findings on this repo
+# and zero verified ones — every hit a `localhost` / `db` fixture in a test, a
+# doc, .env.example or the CI workflow itself. That noise failed the merge gate.
 #
-# So the detector is off and this check replaces it. Unlike the detector it cannot
-# be fooled into firing on a fixture, because it only cares about one thing: is the
-# host routable? A DSN pointing at localhost is a fixture by definition. A DSN
-# pointing anywhere else in committed source is a leak until proven otherwise.
+# The fix was a PATH allowlist: .trufflehog-exclude.txt exempts tests/,
+# .context/, .claude/, docs/, .env.example and docker-compose*.yml. Note what
+# that costs — exclusions are per-path, not per-detector, so EVERY detector goes
+# quiet in those directories, which is exactly where someone is most likely to
+# paste a real key. (An earlier version of this comment described that allowlist
+# as the rejected alternative. It is what shipped.)
 #
-# This is narrower than TruffleHog's detector — it verifies nothing and it only
-# understands Postgres URIs. That is deliberate: it is a tripwire for the one class
-# of finding the detector was drowning out. Every other detector still runs at
-# --results=verified,unknown across every path, tests included.
+# This check is what buys that coverage back for the one credential class
+# provably living in those paths. It ignores paths entirely — `git ls-files`,
+# every tracked file — and it cannot be fooled into firing on a fixture, because
+# it only cares whether the host is routable. A DSN pointing at localhost is a
+# fixture by definition. A DSN pointing anywhere else in committed source is a
+# leak until proven otherwise.
+#
+# It is narrower than the detector it supplements: it verifies nothing and only
+# understands Postgres URIs. That is deliberate — it is a tripwire for the one
+# class of finding the noise was drowning out, not a replacement for TruffleHog.
 #
 # See #453.
 
@@ -42,11 +47,17 @@ readonly PLACEHOLDER_CREDS='(user|username|myuser|postgres|admin|USER|USERNAME):
 # Matches scheme://userinfo@host, capturing userinfo and host separately so each
 # can be tested against the two allowlists above.
 #
-# Deliberately NOT illustrated with a literal example DSN here: this file is
-# real source, so it is not on .trufflehog-exclude.txt (see the scope rule in
-# that file), and a spelled-out `scheme://user:pass@host` in this comment is
-# itself a Postgres-detector hit that fails the secret-scan job. The script
-# that exists to catch committed DSNs is the one place a sample DSN cannot go.
+# Deliberately NOT illustrated with a literal example DSN here. The original
+# reason -- that this file is scanned like any other real source -- no longer
+# holds: the same commit that removed the example also added this file to
+# .trufflehog-exclude.txt, because the PR scan reads the whole commit range and
+# the history still carried the string. So TruffleHog no longer scans this file
+# and an example would not fail the job.
+#
+# It stays out anyway, as house style rather than as a gate: a realistic-looking
+# DSN in the one file whose subject is committed DSNs is confusing to every
+# later reader, and the tripwire below still scans this file like any other, so
+# anything resembling a real credential here would fire it.
 readonly DSN_RE='postgres(ql)?://[^:/@[:space:]]+:[^@[:space:]]+@[^:/[:space:]"'"'"']+'
 
 fail=0

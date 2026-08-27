@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Email Verification Callback Content Tests
  *
@@ -9,7 +11,7 @@
  * - verify-callback-content.tsx - Client component with verification logic (tested here)
  *
  * Test Coverage:
- * - Success state (no error param) - redirects to dashboard
+ * - Success state (no error param) - redirects to the auth landing route
  * - Error state (error=invalid_token) - shows expired message
  * - Resend flow - email input, button click, API call
  * - Loading states during resend
@@ -26,6 +28,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VerifyCallbackClientContent } from '@/app/(auth)/verify-email/callback/verify-callback-content';
 import { createMockRouter, type MockRouter } from '@/tests/types/mocks';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock next/navigation
 vi.mock('next/navigation', async () => {
@@ -102,7 +105,22 @@ describe('VerifyCallbackClientContent', () => {
       // Assert: Success message appears
       await waitFor(() => {
         expect(screen.getByText(/email verified!/i)).toBeInTheDocument();
-        expect(screen.getByText(/redirecting to dashboard/i)).toBeInTheDocument();
+        // Matched without a regex on purpose: `AUTH_LANDING_LABEL` is free-form
+        // fork copy, so interpolating it into a pattern makes 'Projects (beta)'
+        // match text the page never renders and 'Hub (' throw SyntaxError. In a
+        // change whose point is making core tests fork-satisfiable, that is the
+        // wrong way round.
+        expect(
+          screen.getByText((_, element) => {
+            // Only the innermost element: every ancestor's textContent contains
+            // the copy too, and a matcher that accepts them finds "multiple
+            // elements" rather than the one that renders it.
+            if (!element || element.children.length > 0) return false;
+            return (element.textContent ?? '')
+              .toLowerCase()
+              .includes(`redirecting to ${AUTH_LANDING_LABEL}`.toLowerCase());
+          })
+        ).toBeInTheDocument();
       });
     });
 
@@ -120,13 +138,13 @@ describe('VerifyCallbackClientContent', () => {
       });
     });
 
-    it('should redirect to dashboard when no error param', async () => {
+    it('should redirect to the auth landing route when no error param', async () => {
       // Arrange & Act
       render(<VerifyCallbackClientContent />);
 
-      // Assert: Router replace is called with /dashboard
+      // Assert: Router replace is called with the resolved landing route
       await waitFor(() => {
-        expect(mockRouter.replace).toHaveBeenCalledWith('/dashboard');
+        expect(mockRouter.replace).toHaveBeenCalledWith(AUTH_LANDING_ROUTE);
       });
     });
 

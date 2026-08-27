@@ -7,7 +7,7 @@
  * following the same pattern as provider-form.tsx and agent-form.tsx.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -31,6 +31,7 @@ import {
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { narrowParamProfile } from '@/lib/orchestration/llm/db-model-adapter';
+import { useTimeout } from '@/lib/hooks/use-timeout';
 import {
   DEPLOYMENT_PROFILES,
   DEPLOYMENT_PROFILE_META,
@@ -193,6 +194,7 @@ interface ProviderModelFormProps {
 
 export function ProviderModelForm({ model }: ProviderModelFormProps) {
   const router = useRouter();
+  const schedule = useTimeout();
   const isEdit = !!model;
 
   const [submitting, setSubmitting] = useState(false);
@@ -205,7 +207,6 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
    * environment is disposed and throws `ReferenceError: window is not defined` — an intermittent
    * failure that lands in whichever suite happens to be running when the timer expires.
    */
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slugEdited, setSlugEdited] = useState(false);
 
@@ -286,13 +287,6 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
     });
   }
 
-  // Cancel the "Saved" auto-dismiss on unmount (see `savedTimerRef`).
-  useEffect(() => {
-    return () => {
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    };
-  }, []);
-
   // Auto-fill slug from providerSlug + name in create mode
   useEffect(() => {
     if (isEdit || slugEdited) return;
@@ -358,11 +352,7 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
           body: payload,
         });
         setSaved(true);
-        if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-        savedTimerRef.current = setTimeout(() => {
-          savedTimerRef.current = null;
-          setSaved(false);
-        }, 2000);
+        schedule(() => setSaved(false), 2000);
       } else {
         const created = await apiClient.post<{ id: string }>(
           API.ADMIN.ORCHESTRATION.PROVIDER_MODELS,

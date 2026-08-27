@@ -58,6 +58,1386 @@ release process.
   the app-owned retention prune. They run at tick cadence exactly as before, so
   `backgroundTasks` in the tick response now lists the 8 platform jobs rather than 11.
 
+## [0.11.1] — 2026-08-25
+
+> **Alpha release.** Fifteenth tagged Sunrise release. **PATCH bump** — a
+> same-day hotfix. 0.11.0 shipped better-auth 1.7.1 without the column that
+> version requires, and took sign-in down for **every** user on **every**
+> provider: Google and email/password alike. Nothing about it was visible from
+> inside the codebase, and it passed a green test suite, a green CI run and a
+> successful deploy on its way out.
+>
+> ## What a fork has to do
+>
+> **Take this before anyone tries to log in.** If you are on 0.11.0, new
+> sign-ins are failing right now. Existing sessions are not — session validation
+> never reads `account` — so the damage is bounded to people logging in, which
+> is also why it can go unnoticed for a while.
+>
+> **Applying the migration is the whole upgrade** if you run stock Sunrise.
+> Deployments that run migrations for you (Vercel, the #583 Docker migrator)
+> need nothing further.
+>
+> **If you configured a social provider other than Google, read the fork note
+> below before you deploy** — the migration deliberately refuses to guess that
+> provider's issuer, and a refusal leaves a failed migration that blocks every
+> later deploy until it is cleared.
+>
+> **Your sync merge should also stop failing its own coverage gate** ([#671]).
+> That was Sunrise's debt being billed to you, and the floor now measures what
+> you wrote rather than what the merge carried in.
+
+### Fixed
+
+- **Sign-in was broken in 0.11.0 for every user — Google *and* email/password.**
+  0.11.0 bumped better-auth 1.6.29 → 1.7.1 ([#665]), which re-keyed account
+  identity from `(providerId, accountId)` to `(issuer, accountId)`, but the
+  `Account` model was never given the new `issuer` column. Every 1.7 sign-in
+  path selects it, so both flows failed closed against a 0.11.0 database: the
+  Google callback threw `Unknown argument 'issuer'` out of
+  `findAccountOwnerByKey`, and email/password sign-in failed on the same missing
+  column. Existing sessions were unaffected — session validation never reads
+  `account` — so the failure was confined to new sign-ins. Local `.test`
+  development did not catch it because `.test` domains cannot be used with
+  Google, and a stale `node_modules` was still serving 1.6.29.
+- **A fork's sync merge no longer fails `npm run test:changed:coverage` on
+  Sunrise's own coverage debt** ([#671]). The per-file 80% floor asks "is what
+  you changed tested" — but on a sync merge the fork changed nothing, so it was
+  demanding a fork either fail its own pre-PR gate or write tests for platform
+  files `CUSTOMIZATION.md` asks it not to diverge on. Measured against 0.11.0:
+  6 such files syncing from v0.9.0, ~15 from v0.7.0, ~16 from v0.5.0. The floor
+  now lands on what the branch **authored** (its own first-parent, non-merge
+  commits, plus staged and working-tree files); test *selection* still uses the
+  whole diff, so a merge that breaks upstream's tests still fails. An ordinary
+  feature branch has no merges and is gated exactly as before, and the run
+  prints `not authored here N` rather than narrowing in silence.
+- `scripts/ci/check-client-env-delivery.ts` had no test — the one exception to
+  `scripts/ci/`'s 24-of-24 convention, and it shipped in the same release as the
+  check that flags exactly this shape. Now covered at the wiring level.
+- `scripts/db/**` joins `scripts/smoke/**` in the coverage `exclude`. Both are
+  CLI entrypoints that talk to a live database; nothing imports them, so they
+  are absent from a full coverage run entirely and surface at 0% only when a
+  scoped run forces them in. `*-assertions.ts` stays gated in both trees.
+
+### Added
+
+- `Account.issuer` (`String`, required) with `@@unique([issuer, accountId])`,
+  matching better-auth ≥ 1.7. `issuer` is the authority that vouched for the
+  subject — `local:credential` for email/password, the verified OIDC issuer
+  (`https://accounts.google.com`) for Google, `local:oauth:<encoded providerId>`
+  for an OAuth2 provider with none of its own. `providerId` remains a column but
+  is local configuration and is **no longer an identity key**. Migration
+  `20260825120000_add_account_issuer` backfills existing rows.
+- `CREDENTIAL_ACCOUNT_ISSUER` in `lib/auth/constants.ts` — the issuer any code
+  writing a credential `Account` outside better-auth must set.
+
+> **Fork action.** Applying the migration is enough if you run stock Sunrise
+> (Google and/or email/password). **If you configured any other social provider,
+> extend `20260825120000_add_account_issuer` before deploying** — it raises on a
+> `providerId` whose issuer it does not know rather than guessing one, because a
+> wrong issuer does not fail loudly, it just strands those users at the login
+> screen. It also raises if two rows would collide on `(issuer, accountId)`.
+> Either abort leaves the migration recorded as failed, so every later deploy
+> stops with P3009 until you clear it with
+> `prisma migrate resolve --rolled-back 20260825120000_add_account_issuer` (on
+> Neon, prefix `PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=true`) — worth knowing if
+> your platform runs migrations as part of the deploy. Adding a provider *after*
+> the migration has run needs no change at all; never edit an applied migration.
+> See [`.context/auth/oauth.md`](./.context/auth/oauth.md#account-identity-issuer-accountid).
+
+[#665]: https://github.com/human-centric-engineering/sunrise/issues/665
+[#671]: https://github.com/human-centric-engineering/sunrise/issues/671
+
+## [0.11.0] — 2026-08-25
+
+> **Alpha release.** Fourteenth tagged Sunrise release. **MINOR bump** — the
+> fork-friction release. Every defect here was found by merging a real fork or by
+> building a real container image; none of them was visible from inside the
+> codebase, and several passed a green test suite while shipping.
+>
+> ## What a fork has to do
+>
+> **BREAKING: three env vars are removed.** `NEXT_PUBLIC_APP_NAME`,
+> `NEXT_PUBLIC_LEGAL_NAME` and `NEXT_PUBLIC_APP_DESCRIPTION` no longer do
+> anything. Move the values into `lib/app/brand.ts`. If you miss it, a boot
+> warning names each variable still set, so the migration announces itself rather
+> than quietly reverting your brand to "Sunrise".
+>
+> **Then pin what you filled**, as for any seam — `tests/unit/lib/app/defaults.test.ts`
+> asserts each one ships empty, so its `lib/app/brand.ts` row fails the moment you
+> set a value. Change the row rather than deleting it; see the FORK NOTE at the
+> top of that file.
+>
+> **If you have files under `/app` or `/framework`**, declare those tiers in
+> `lib/app/reserved-tiers.ts` and pin that row in `defaults.test.ts` too. That is
+> the fix for the two 0.10.0 tests four of the five known forks failed on merge —
+> including on the `/framework` rows, which the issue had assumed were safe
+> because a leaf fork does not use them, but Daybreak is the framework-layer fork
+> and fails exactly those.
+>
+> So: **two edits if you only rebrand, four if you also occupy a tier.** Measured
+> by doing it, not estimated. Nothing else in the release asks anything of a fork.
+>
+> **No migration.** Zero migrations and no `prisma/schema/` change since 0.10.0,
+> so the code side is a plain `git merge v0.11.0`.
+>
+> ## Read this if you deploy with Docker
+>
+> Two defects were invisible from inside the codebase and showed up only in a real
+> container build. Brand identity reached no build at all, so a fork with its legal
+> entity correctly configured still shipped `© <year> Sunrise` in both footers —
+> proved by building 0.10.0, where the configured name appears zero times and
+> "Sunrise" 74 times in the server bundle. And eight of nine `NEXT_PUBLIC_*`
+> variables had no delivery path, so **analytics and error reporting were off on
+> every self-hosted deploy regardless of configuration**, with no error, nothing
+> above `debug`, and nothing visible in CI. Both are fixed, and both are now
+> guarded so the class cannot return silently.
+
+### Added
+
+- **`lib/app/brand.ts` — brand identity as committed code** (issue [#661]). A
+  fork-owned scaffold exporting `appBrandName`, `appBrandLegalName` and
+  `appBrandDescription`, all `null` upstream, read by `lib/brand.ts`. Vanilla
+  Sunrise is byte-for-byte unchanged; a fork sets three values in one committed
+  file and every brand surface follows — page titles, both footers, the header
+  `<BrandMark>`, the root meta description, and every transactional email.
+
+  Note `appBrandDescription` reaches fewer surfaces than you might expect: every
+  shipped *page* and route-group layout declares its own `description`, so the
+  root fallback is what `app/not-found.tsx` and the root `error.tsx` /
+  `global-error.tsx` serve — the 404 and error pages — plus any page a fork adds
+  that declares none. Worth setting: those are precisely the pages nobody thinks
+  to check.
+
+- **`lib/app/reserved-tiers.ts` — a fork declares which reserved tiers it occupies**
+  (issue [#660]). Ships `[]` upstream, so `tests/unit/reserved-fork-tiers.test.ts`
+  runs all five rows against Sunrise itself exactly as before.
+
+  That test enforces "Sunrise core creates nothing under the `/app` and
+  `/framework` tiers" by asserting the directories are empty. Upstream that is the
+  promise being kept. In a fork the same directories are the space the fork was
+  *told* to fill, so the assertion is unsatisfiable and the failure message blames
+  core for files core never created. **Four of the five known forks fail it on
+  `git merge v0.10.0`** — and not only on the `/app` rows: Daybreak is a
+  framework-layer fork and fails the two `/framework` rows for the same reason, so
+  this was never a leaf-fork-only concern. `reserved-fork-tiers.test.ts` is in
+  `ALWAYS_RUN_TESTS`, so a fork's suite is red from the merge commit onward until
+  it edits a Sunrise-owned test file. (`layout-metadata.test.ts` is added to that
+  list by this release — on v0.10.0 it surfaces only in a full run, not in a
+  scoped pre-flight.)
+
+  Declaring subtracts only the tiers you occupy, so the rest keep guarding. The
+  test rejects a name that is not a reserved tier — a typo would otherwise read as
+  a working declaration while the row it was meant to silence still failed — and
+  fails if you declare a tier you have left empty, so the declaration is
+  self-cleaning rather than accumulating.
+
+- **`npm run check:client-env` — a delivery guard for client variables** (issue
+  [#662]), wired into `npm run validate`. Scans the source for
+  `process.env.NEXT_PUBLIC_*` and fails when one lacks an `ARG`/`ENV` pair in the
+  `Dockerfile` or a build arg in `docker-compose.prod.yml`.
+
+  It keys on **"is it `NEXT_PUBLIC_`"** rather than "is it required", which is what
+  the old hand-maintained list got wrong. The scan is also co-extensive with what
+  Next actually inlines: the compiler needs the static `process.env.NEXT_PUBLIC_X`
+  form, so anything the regex misses the compiler misses too and was never
+  delivered anyway. Bracket-access reads are reported separately, since a build arg
+  cannot help them.
+
+  Fork-tolerant by design: a missing `Dockerfile` or `docker-compose.prod.yml` is
+  skipped rather than failed, so a fork that deploys only to a dashboard platform
+  is not handed one more core check it cannot satisfy.
+
+### Changed
+
+- **`tests/unit/app/layout-metadata.test.ts` derives its module list instead of
+  hand-listing it** (issue [#660]). The list was seven literal module specs behind
+  a `length >= 7` staleness floor, and both halves were wrong. It was **already
+  incomplete upstream** — `(public)/contact`, `(public)/privacy` and
+  `(public)/terms` all export metadata and none were listed, so the floor guarded a
+  list that had never been complete. And it was **unfixable in a fork**: deleting
+  the placeholder About page, which `CUSTOMIZATION.md` §6 explicitly invites and
+  two forks have already done, produced an unresolvable import rather than an
+  assertion failure, after which removing the dead row broke the floor. Reading
+  `app/` off disk takes the modules actually checked from 7 to **76** — 87 route
+  modules are discovered, of which 76 export a static `metadata` object — and
+  retires the floor, since a derived list cannot go stale. The remaining 11
+  include four that use `generateMetadata`, which needs route params and a live
+  database; the hand-listed version did not cover those either, and the test says
+  so rather than counting them.
+
+  Two rows are now fork-aware. The brand-leak row skips a route module that
+  re-exports from a tier declared in `lib/app/reserved-tiers.ts` — metadata reached
+  through a fork's own tier is its copy, not a leak of ours — and it is
+  deliberately the only row exempted: the starter-template row runs everywhere,
+  because no fork means to advertise a starter template. Measuring the forks says
+  that split is right, since two of them are shipping exactly that text today from
+  an About page they never rewrote. The title-doubling row now respects Next's own
+  `title.absolute` semantics, which opt a page out of the parent template — a fork
+  that ships its own home page commonly uses it, and the row was unsatisfiable for
+  them.
+
+### Removed
+
+- **BREAKING: `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME` and
+  `NEXT_PUBLIC_APP_DESCRIPTION`** (issue [#661]). Setting them now does nothing;
+  brand identity comes from `lib/app/brand.ts`.
+
+  **To upgrade:** move the three values from your `.env` into `lib/app/brand.ts`
+  and delete the env vars. That is the whole migration.
+
+  These are removed rather than deprecated because they were never a working
+  mechanism with a gap in it. `NEXT_PUBLIC_*` is inlined by the compiler at build
+  time, `.dockerignore` excludes `.env` and `.env.*`, and the Dockerfile forwards
+  only the four build args whose absence *fails* the build — the brand vars are
+  optional, so their absence was silent. On a container build they delivered
+  nothing at all, and every affected fork was already shipping `© <year> Sunrise`
+  while believing itself configured. Keeping them as a fallback would have meant
+  documenting, in five files, an escape hatch that silently fails on the
+  deployment path most forks use.
+
+  A deploy-time-varying brand — a staging name distinct from production — is no
+  longer supported. That case was already broken everywhere except Vercel.
+
+### Fixed
+
+- **`NEXT_PUBLIC_*` variables now reach a container build** (issue [#662]). Eight
+  of the nine could not, so **analytics and error reporting were off on every
+  self-hosted deploy regardless of configuration** — no error, nothing above
+  `debug`, and nothing visible in CI.
+
+  `NEXT_PUBLIC_*` is inlined by the compiler during `next build`; setting one on a
+  built image does nothing, and `.dockerignore` excludes `.env` and `.env.*`, so a
+  build arg is the only channel. The Dockerfile's own comment stated the rule that
+  produced the gap — *"required for Next.js build and environment validation"*,
+  i.e. **forward what fails the build**. That is right for every variable except
+  the class whose absence fails *silently*: client vars are all optional, so
+  exactly one was forwarded, and only because it happened to also be required.
+  Server-side secrets were never affected — they are runtime reads that `env_file`
+  supplies, and they must not become build args.
+
+  The eight are now wired through `Dockerfile`, `docker-compose.prod.yml` and CI,
+  and `NEXT_PUBLIC_SENTRY_DSN` / `NEXT_PUBLIC_COOKIE_CONSENT_ENABLED` are
+  registered in `lib/env.ts`, having been read straight from `process.env` and
+  declared nowhere.
+
+- **Blank environment values are treated as unset.** Found by building the image
+  rather than by any test: a Dockerfile `ENV VAR=$VAR` whose `ARG` was not passed
+  materialises as the **empty string**, and Zod's `.optional()` accepts `undefined`
+  but rejects `''`. Wiring the client vars therefore broke `next build` outright
+  for anyone who had not set all nine — which is every fork — on `"Invalid URL"`
+  for the two `.url()` hosts. `lib/env.ts` now drops blank values before parsing.
+
+  **Scoped to `NEXT_PUBLIC_*` deliberately.** Blank-is-unset is right where Docker
+  gives no way to distinguish the two, and wrong everywhere else: applying it to
+  the whole environment would have turned `SIGNUP_MODE=""` — what a deploy
+  template produces from an unset source — from a boot refusal into a silent
+  `.default('open')`, so an invite-only deployment would have come up accepting
+  public signups. `TENANCY_MODE`, `MCP_SESSION_MODE` and `CAPABILITY_BINDING_MODE`
+  had the same exposure. Server vars still fail loudly on a blank.
+
+
+[#660]: https://github.com/human-centric-engineering/sunrise/issues/660
+[#662]: https://github.com/human-centric-engineering/sunrise/issues/662
+[#661]: https://github.com/human-centric-engineering/sunrise/issues/661
+
+## [0.10.0] — 2026-08-24
+
+> **Alpha release.** Thirteenth tagged Sunrise release. **MINOR bump** — the
+> fork-seam release. Five new `lib/app/*` seams (API-key scopes, account
+> sections, evaluation graders, MCP resources, the footer attribution line),
+> `components/app/**` and `components/framework/**` reserved and enforced, a
+> fork tier able to declare its own Art. 15 subject-data sources, and one
+> shared init gate behind the lazy seams so a fork's failing `initApp*()` can
+> no longer leave half its registrations live.
+>
+> **No migration.** Zero migrations and no `prisma/schema/` change since 0.9.0,
+> so a fork takes this with a plain `git merge v0.10.0` and no database step.
+>
+> **Security — read this section even if you skip the rest.** The
+> outbound-redirect class that #628 opened is now closed. Five more sites
+> validated their target exactly once and then followed `Location` unchecked —
+> among them the webhook **test** route, which carried its HMAC to the final
+> hop and reported that hop's status as the endpoint's, and the knowledge
+> embedder, which would have posted uploaded document text to an unvalidated
+> host. `executeHttpRequest` no longer follows redirects either, and every
+> server-side `fetch()` must now declare a `redirect` policy, enforced by a
+> guard that enumerates the call sites mechanically — the hand-written roster
+> it replaced was wrong by three, which is the failure mode such a roster
+> exists to prevent. Separately, **minting *or revoking* an API key now
+> requires a browser session**: both verbs accepted a key of any scope, so a
+> narrowly-scoped key could mint a `chat` key and reach every authenticated
+> route as its owner, or enumerate and revoke its owner's keys including
+> `admin`. And `GET /api/health` no longer discloses the Sunrise platform
+> version — unauthenticated, it named the exact upstream release, and therefore
+> the exact set of published issues, for *every* Sunrise-derived deployment
+> rather than one.
+>
+> **Breaking-in-`0.x` changes — read before you merge.** `sunrise` is **gone**
+> from the `GET /api/health` response; read `system.sunriseVersion` from
+> `GET /api/v1/admin/stats`, or import `SUNRISE_VERSION` server-side. **MCP
+> sessions are stateless by default** — the old per-process session `Map` meant
+> `initialize` minted an id on one instance and the next call 404'd on another,
+> unrecoverable by retry; set `MCP_SESSION_MODE=stateful` if you need the SSE
+> stream or the three continuity methods on a single long-running process.
+> **Tests run on `node` by default**, with a DOM opt-in per file, so a fork's
+> own component tests fail with `ReferenceError: document is not defined` on
+> the first run after merging — `npm run fix:dom-tests` migrates them by
+> running them rather than by pattern-matching. **A fork-owned schema file must
+> now account for every model it declares**, each one named as a subject-data
+> source or excluded with a reason. `ApiKeyScope` is an open type and
+> `validateScopes` returns a plain `boolean`;
+> `CreateExposedResource['resourceType']` is now `string`.
+>
+> **If you took any 0.10.0 pre-release commit, check your landing page.** For
+> five days `main` shipped `app/(public)/page.tsx` as a byte-identical copy of
+> `app/(public)/about/page.tsx`, so `/` served the About page. It is fixed
+> here, and the cause is worth knowing because it is not page-specific: a flat
+> backup directory keyed by **basename**, in a tree with 82 files called
+> `page.tsx` and 228 called `route.ts`. The same mechanism made
+> `/api/health` return the admin stats payload two days later. A structural
+> guard now fails when any two route modules under `app/` are byte-identical.
+>
+> **Cost attribution.** Four fixes, all the same shape — spend that was
+> recorded but not attributable. Workflow capability spend sat against no step,
+> `llm_call` rows were untagged, a zero-token row could capture a step's model,
+> and a capability row did not say which capability it was. Separately, the
+> rolling chat summary was being **recomputed on every turn** past the history
+> window — a fresh summarisation of the whole dropped region, on the agent's own
+> provider — and its cost row discarded by a double foreign-key violation, so
+> nothing on the Costs page moved. Repeated and invisible at the same time.
+>
+> **Testing and CI, for anyone who runs the suite.** `npm run test:changed` is
+> the new `/pre-pr` default: it runs what the branch can affect and gates
+> coverage per changed file at 80%, rather than on a repo average that clears
+> while a new file sits at 0%. The full suite is unchanged and remains CI's
+> backstop.
+
+### Added
+
+- **`npm run fix:dom-tests` — the migration aid for a fork merging the
+  node-by-default test environment (#649).** That change carries directives for
+  Sunrise's test files and none for a fork's own, so on the first run after
+  merging, every fork-authored component test fails with
+  `ReferenceError: document is not defined`. Measured across the five forks on
+  this machine: 1233 fork-authored test files, ~350 needing a directive — too
+  many to annotate by hand.
+  It **decides by running, not by pattern**. Sunrise's own migration used a
+  static classifier and it was wrong in both directions: it over-declared 69
+  files (matching the English words "knowledge _document_", "context _window_")
+  and missed one entirely, whose DOM need lived in the source under test behind
+  a `typeof` guard. A directive is written only for a file that **failed**, and
+  kept only if the re-run **shows that file passing** — presence in the passed
+  list, never absence from the failed one, since a path missing from a report
+  may simply not have run. Anything it cannot justify is reverted before it
+  exits, and it refuses a run that collected nothing at all
+  (`numTotalTestSuites: 0`, what a typo'd path produces): that previously
+  printed "no failure was caused by a missing browser global" and exited 0
+  having run nothing. It never edits a file that already
+  declares an environment, and it reports, without touching, the two groups it
+  is not entitled to fix: real failures (Node's `fetch`/`Response` are stricter
+  than happy-dom's, so some are bugs the old environment hid) and files that
+  already ask for a DOM and fail anyway. `--dry-run` previews.
+  `.context/testing/environments.md` gains the fork merge recipe this belongs
+  to, including the one category nothing automated finds — a test whose
+  *subject* touches the DOM behind a `typeof` guard, which passes on node while
+  silently taking the server branch.
+
+- **`/admin/overview` shows which Sunrise a deployment is running.** A
+  `SystemInfo` card (`components/admin/system-info.tsx`) renders the fork's app
+  version beside the Sunrise platform release it is built on, plus Node version
+  and environment — the answer to "did that upgrade actually ship?" and to
+  "which Sunrise are you on?", which until now needed a terminal.
+  `GET /api/v1/admin/stats` gains `system.sunriseVersion` to feed it (see the
+  Security entry). The card is a
+  **server component** taking the stats payload as a prop, so the overview page's
+  existing fetch feeds it — no client bundle, no second request, no hydration —
+  and forks inherit it without editing a Sunrise-owned route.
+  The whole `system` block of the stats payload was previously API-only, so
+  `appVersion` had no UI consumer at all. Two details worth knowing if you adapt
+  the card: the platform row is labelled **"Sunrise platform"**, not "Sunrise",
+  because upstream `BRAND.name` *is* `"Sunrise"` and `APP_VERSION` equals
+  `SUNRISE_VERSION` — a bare label renders the same word over the same number
+  twice, and only a rebranded fork would ever notice; and a `null` stats payload
+  renders an explicit "unavailable" message rather than an empty card, because
+  `getStats()` returns `null` on any fetch failure and a broken stats API must
+  not look like a healthy deployment on the page an operator opens *because*
+  something is wrong. (#531)
+
+- **`npm run test:changed` / `npm run test:changed:coverage` — a scoped local
+  test gate, and the new default for `/pre-pr`.** The full suite is ~1080 files
+  and roughly four minutes with coverage; two of them running at once across
+  checkouts saturates a 10-core machine (measured: one run holds ~3.2 cores).
+  The scoped pair runs the tests the branch can affect — vitest's own
+  `--changed` selection against the merge base, uncommitted and untracked work
+  included — and gates coverage on the **changed source files at 80% each**
+  (`thresholds.perFile`) rather than on the repo average. Measured on a 10-core
+  machine for a 20-file selection: ~5s wall idle, ~23s with another suite
+  competing — about half of it the `vitest list` pre-pass that resolves the
+  selection. `npm run test:coverage`'s own measured figure is 254s of in-vitest
+  time. A project-wide average is the wrong question for a
+  per-PR gate — it clears comfortably while a newly added file sits at 0%; a
+  changed file with no test now reports **as 0%** rather than being absent from
+  the report.
+  The selection is unioned with `ALWAYS_RUN_TESTS` (`scripts/ci/scoped-tests.ts`),
+  the tests whose subject is the repository rather than a module —
+  `export-sources` (the Art. 15 manifest guard), `reserved-fork-tiers`, the
+  fork-init seam roster, the outbound-redirect roster, the ESLint app boundary.
+  Nothing imports `prisma/schema/*.prisma`, so no module graph reaches them and
+  `--changed` would never select them; a scoped run without that union would
+  silently stop enforcing exactly the rules this repo leans on hardest. The list
+  is hand-written with a reason per entry because all three candidate detectors
+  miss things, measured at 8167a36f — by fs-API name (22 found, misses 3), by `node:fs` import (16,
+  misses 9), by repo-rooted read (14, misses `eslint-app-boundary.test.ts`,
+  which reads the tree through ESLint and imports no filesystem module). A
+  detector runs alongside as an **advisory** that prompts you to declare a new
+  one; it is not a completeness guarantee and says so.
+  Fails loudly rather than quietly: an unresolvable base ref, a failed
+  `vitest list`, a signal-killed vitest, and a selected path that cannot be
+  passed to vitest safely all exit 1, because a stale base produces a short file
+  list and a short list is a quiet green. That last one covers two shapes a
+  security review surfaced: a filename containing a newline, which `vitest list`
+  prints across two lines so the second fragment can arrive as its own argv
+  token (vitest reads options wherever they appear, so a fragment like
+  `--config=x.test.ts` would replace the run's whole config, `setupFiles` and
+  coverage `exclude` included); and a git C-quoted path, which stops ending in
+  `.ts` and would otherwise fall out of the coverage list in silence. `origin/main` is
+  fetched by default (`--no-fetch` opts out). The full-suite scripts are
+  unchanged — a scoped run cannot prove the branch broke nothing elsewhere, and
+  CI's `test-full` job (4-way sharded, every PR and every push to `main`)
+  remains the backstop. Note for forks running `CI_TEST_SCOPE=changed`:
+  `test-full` is skipped on PRs there and the `test-changed` job runs a bare
+  `vitest --changed` with no always-run union, so the whole suite lands only
+  after merge; the docs carry the one-line workflow change that closes it.
+  Coverage includes are glob-escaped — `(protected)` and `[...all]` are
+  picomatch syntax, so an unescaped route-group path matched no file, gated
+  nothing and exited 0. See
+  [`.context/testing/scoped-runs.md`](./.context/testing/scoped-runs.md).
+
+- **A capability can declare that a persisted `scope` binds its arguments
+  (#586).** `CapabilityContext.scope` has shipped since 0.5.0 as a carrier —
+  threaded from an MCP key, a workflow execution or a nested `run_workflow`, and
+  handed to `execute()`. It could not *do* anything: every scoped capability
+  consumed it by hand, or a fork patched the dispatch path. Now a capability
+  opts in at registration — `register(cap, { scopedBy: 'projectId' })` — and the
+  dispatcher fills that argument when the caller omits it (step 4b) and refuses
+  with `{ code: 'scope_conflict' }` when the caller names a different value. A
+  key minted with `scope: { projectId: 'x' }` makes `projectId` ambient **and**
+  makes it a boundary.
+
+  **Two conditions, both defaulting to off.** The capability must declare the
+  binding, and the caller's scope must be one the platform wrote
+  (`scopeIsAuthoritative`). The four sites that build a dispatch context each
+  spread `platformScope()` or `hintScope()` — the MCP key carrier and the two
+  workflow executors take the first, `POST /api/v1/chat/stream` takes the
+  second, because its `scope` comes from an untrusted request body. A mistake in
+  either direction loses the binding rather than gaining one, and
+  `run_workflow` drops a hint scope rather than passing it to
+  `engine.execute()`, so the persisted `AiWorkflowExecution.scope` column never
+  holds a consumer's hint. Note for fork adapter authors: the inbound-trigger
+  route merges an adapter's `normalise()` scope under the operator's static
+  one, so a bound value there can originate from a verified request payload
+  rather than from config — more restrictive than no key at all, but worth
+  knowing.
+
+  **The binding is declared rather than inferred**, which is the whole design.
+  An earlier cut read it out of the capability's published
+  `functionDefinition.parameters` and armed whenever a scope map was present;
+  that is admin-editable JSON which need not agree with the Zod schema the
+  author wrote, and "a scope map exists" is a different question from "this tool
+  is scoped". Declaring it also makes the gaps visible: measured against the
+  fork that asked for this, inference covered 19 of its 29 capabilities and none
+  of its nine `featureId`-keyed writes, with nothing to say which were which.
+
+  **The invariant is re-asserted after validation** (step 7a), on the args
+  `execute` actually receives, because `handler.validate()` is a Zod *pipeline*
+  and may transform — three built-ins wrap their schema in
+  `z.preprocess(unwrapApprovalPayload, …)`, which merges an `approvalPayload`
+  object over the top level. Each pinned key must be **present and equal**;
+  a stripped key or unreadable args (a `Map`, a class instance, anything behind
+  an accessor — all of which answer `hasOwnProperty` with `false`) are refused
+  with the second new code, `scope_unenforceable`. **The limit, stated because
+  it cannot be fixed:** only top-level own properties are inspected, so a
+  capability resolving its scope from a child id must not declare `scopedBy` for
+  it — that check belongs in `execute()` or a `guard`.
+
+
+- **`npm run check:missing-tests` — `/pre-pr` step 4f stops being prose.** Twelve
+  of step 4's thirteen anti-pattern checks were prose, so every agent hand-rolled
+  a scanner on every run — and a hand-rolled scanner's failure mode is *silence*,
+  which is indistinguishable from a pass. The instance that prompted this used
+  `compgen` (a bash builtin) in a zsh agent shell: the loop printed nothing and
+  was nearly banked as a clean tree. 4f is now a tested script, and it answers in
+  **three** verdicts rather than two: `covered`, `missing`, and — the one a
+  mirror-path check gets wrong — `referenced only`, for a module no mirrored test
+  covers but some test names. Measured over every tracked `.ts`/`.tsx` — 2301 files, 1146 of
+  them non-exempt — **367 have no mirrored test, and 258 of those are covered
+  some other way**: 240 named by a test file, 14 by the collapsed parent of a
+  dynamic route, 4 by an aspect-named sibling. Only 109 are genuine gaps, so a
+  two-answer check is wrong about 258 files in one direction or the other.
+  Exemptions are decided by the TypeScript compiler where a filename cannot
+  decide them — 14 `index.ts` files here carry their own code, and exempting
+  every barrel by name hides 9 that have no test; 16 more declare no runtime
+  value and are exempt for the opposite reason.
+  It **reports and never gates on a finding**; exit `1` means only that it could
+  not run, and it runs a sentinel through the classifier before every real scan,
+  so a clean result is never printed by a scanner that cannot report a dirty one
+  (#641).
+
+- **`npm run check:changelog-drift` — a CHANGELOG bullet that a later commit
+  made untrue.** `/pre-pr` step 5d asks whether a public-surface change is
+  *missing* an entry and stops there; in a multi-round PR the likelier failure
+  is a bullet that was accurate when written and was falsified by a later commit
+  on the same branch. It fired six times on one PR (#625), and all six passed
+  5d because `CHANGELOG.md` was in the diff. The new check correlates the
+  identifiers a bullet quotes in backticks against the commits that changed
+  those strings afterwards — **per line, not per bullet**, so a partial rewrite
+  cannot make an older claim look fresh — and separately flags any commit SHA in
+  `[Unreleased]` that is not reachable from `origin/main`, because a branch SHA
+  stops resolving the moment the PR is squash-merged. It is wired into `/pre-pr`
+  as step 5e and **never gates**: the correlation is a heuristic, and it cannot
+  see a claim that was already wrong when written, or one that is stale by
+  omission, or tell a commit that *changed* an identifier from one that merely
+  mentioned it in a comment. Bullets an earlier PR left in `[Unreleased]` are
+  reported behind their own heading, because every commit on the branch counts
+  as later for those. All of it is stated where the check is run.
+
+- **`lib/fork-init.ts` — one shared gate behind the lazy `lib/app/*` init seams.**
+  `createAppInitGate({ label, subject, init, snapshot, restore })` owns the
+  latch, the rollback, the log line and the log-safe error description — and
+  `ensure()` never throws, structurally: its body is wrapped, so a `snapshot` or
+  `restore` closure that fails cannot escape a public read on eleven registries,
+  several of which are documented as always-safe-to-call. A seam that returns a
+  **promise** is also called out at boot (`… must be synchronous, and the
+  all-or-nothing rollback does NOT apply`), with its rejection routed to the log;
+  `@typescript-eslint/no-misused-promises` already fails such a seam at lint, so
+  this is the backstop for a fork that does not lint. Eleven of
+  the thirteen `initApp*` seams run through it; the two that do not —
+  `initAppNav`, called at module scope from a client component, and `initApp`,
+  the boot hook that registers nothing itself — are pinned as exemptions with
+  their reasons by `tests/unit/fork-init-seams.test.ts`. That test derives the
+  seam list from `lib/app/`, fails when a new seam hand-rolls the gate, and diffs
+  the roster in
+  [`.context/architecture/fork-init-seams.md`](.context/architecture/fork-init-seams.md)
+  against the code in both directions rather than leaving it maintained by hand —
+  a prose roster is how #633 came to name four of the seven broken seams.
+
+- **`overrideReasons` in `package.json` — an `overrides` change now has somewhere
+  to answer.** `check:lockfile` gated on any change to the `overrides` block and
+  ended with the word "Intentional?", which is a question a build cannot be told
+  the answer to; wired into branch protection, its only routes past were
+  bypassing the protection or weakening the rule. A per-key override transition
+  now passes when that key's `overrideReasons` entry **moved in the same diff**.
+  "Moved", not "exists": a reason landed in an earlier PR cannot wave a later
+  change through, and a revert has to restate its case. Removing an override
+  means removing its reason too. Reasons for keys a diff did not touch are never
+  read, so a fork inheriting the whole upstream block is unaffected — the
+  fork-sync breakage that sank the previous attempt (#584) cannot recur here.
+  Forks with their own overrides should add a reason for each; nothing fails
+  until one of them is next added or re-pointed. Removing an override that never
+  had a reason is deliberately allowed — there is nothing to move, and failing
+  it would fail forks for state they inherited from before the block existed.
+
+- **`lib/privacy/subject-source-registry.ts` + `initAppSubjectSources()` — a
+  fork tier declares its own subject-access sources.** The Art. 15 coverage
+  guard scanned every `prisma/schema/*.prisma`, including the fork-reserved
+  `app.prisma` and `framework-*.prisma`, but checked them against a manifest
+  only core can write to — so a fork that filled `collectAppSubjectData()`
+  exactly as documented still had a red core test and no fork-owned way to green
+  it. `registerAppSubjectSources({ tier, sources, excluded })` is that way. A
+  registry rather than one exported constant because `CLAUDE.md` reserves two
+  fork tiers, and a single slot means a framework tier consumes the seam its
+  leaf forks are entitled to. Skipping the reserved namespaces would have been
+  smaller and was rejected: it trades a noisy false positive for a silent false
+  negative, and an access request cannot survive silence. Vanilla Sunrise
+  declares nothing and is unchanged.
+
+- **`DeclaredAppSourceMissingError` (`lib/privacy/export-user.ts`).** Thrown when
+  a tier declared a source whose `section` `collectAppSubjectData()` did not
+  return — including one set to `undefined`, which `JSON.stringify` drops from
+  the delivered bundle. Return the key with an empty array when the subject owns
+  nothing; a bundle short by a section reads exactly like a complete answer,
+  which is what this module's "a partial export is worse than no export" rule
+  already said. Cannot fire in vanilla Sunrise, where nothing is declared.
+
+- **`meta.app` — a fork tier's declared sources are summarised for the subject.**
+  Each declared source contributes `{ model, section, disposition, description,
+  rows }`, so a section under `app` is named and counted in the bundle's own
+  manifest the way core's are. Its own list rather than folded into
+  `meta.exported`, because an `exported` entry's `section` is a key of
+  `personalData` and these are keys of `app` — folding them would send a reader
+  looking in the wrong object. Empty in vanilla Sunrise.
+
+- **A fork tier's exclusions are disclosed to the data subject.**
+  `bundle.meta.excluded` now carries the registry's `excluded` rows alongside
+  core's, so a fork table withheld from an export is named with its reason on
+  the same terms as `AiMessageEmbedding`. Without it a fork install's bundle
+  stated the boundary for core's tables and stayed silent about the fork's, and
+  a subject could not tell "we hold nothing about you" from "we decided not to
+  give it to you". No bundle shape change — the row type is identical — so no
+  `EXPORT_FORMAT_VERSION` bump.
+
+- **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
+  privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
+  two places deciding what may go in it were closed lists in platform files, so
+  a fork could *check* a scope of its own and no user could ever *create* one to
+  check. `APP_API_KEY_SCOPES` unions into both. The enforcement half ships with
+  it, because a wider scope list on its own is just labels: `withAuth` accepted
+  a key of any scope, so the key on someone's phone reached every authenticated
+  route as them. `{ scope }` applies to API-key callers only — a browser session
+  is the full user — and is opt-in per route, so no shipped endpoint changes.
+  `GET /api/v1/user/api-keys` now also returns `availableScopes`. (#542)
+
+- **`lib/auth/api-key-scopes.ts`** — the scope vocabulary
+  (`CORE_API_KEY_SCOPES`, `validateScopes`, `hasScope`, `listValidApiKeyScopes`,
+  `ApiKeyScope`), split out of `lib/auth/api-keys.ts` so `createApiKeySchema`
+  can read it without dragging Prisma into the client bundle. `api-keys.ts`
+  re-exports all of it, so existing imports are unchanged.
+
+- **`lib/app/account-sections.ts` + `lib/account-sections/registry.ts` — extra
+  sections on `/profile` and `/settings`.** The account surface is where a fork
+  commonly adds an account connection, a billing panel or an integrations list,
+  and it had no extension point — so the only way in was editing a
+  Sunrise-owned page and conflicting on every sync. `registerAccountSection({
+  id, surfaces?, order?, Component })` renders at the foot of either page (or
+  both, the default); `Component` receives `{ userId }`. The account-surface
+  analogue of `lib/admin-nav/registry.ts`. Empty registry renders no node at
+  all, so vanilla Sunrise is unchanged, and a throwing init rolls back anything
+  it had already registered rather than half-rendering the account surface. (#595)
+
+- **`lib/app/evaluations.ts` — fork-owned evaluation graders.** The grader
+  registry advertised pluggability that only held for core: `registerGrader` was
+  exported, but the only caller was the package's own barrel, and the batch
+  worker runs in the **route** realm — so a grader registered from `initApp()`
+  filled a map the worker never read. It either never reached the metric picker
+  or threw `No grader registered for slug` mid-drain, after the subject calls
+  were already paid for. `initAppGraders()` now runs once, lazily, before the
+  registry's first lookup, so every route-realm reader sees it. Replacing a
+  built-in slug still works (that is how a mock is swapped in) but is now logged
+  at warn. A throwing init **rolls back** the registrations it had already
+  made — otherwise a grader that had shadowed `exact_match` would keep rescoring
+  every run while the log said none were registered. (#541)
+
+- **`lib/app/mcp-resources.ts` — fork-owned MCP resource handlers.** MCP *tools*
+  had a fork seam (`lib/app/capabilities.ts`); *resources* did not, so a
+  read path a host could preload had to ship as a tool call. Fill in
+  `initAppMcpResources()` with
+  `registerMcpResourceHandler({ resourceType, uriScheme, handler })` and an app
+  type flows through `resources/list|read|subscribe`, templates, caching,
+  `resources:read` scoping, `McpExposedResource` gating and audit exactly like a
+  core one. `uriScheme` is required — a fork resource silently inheriting
+  `sunrise://` would advertise the starter's identity to every MCP client that
+  lists it — and a built-in `resourceType` cannot be shadowed. The scheme binds
+  to the type: `sunrise://…` filed under a fork type is a 400, and so is the
+  inverse (`isUriSchemeValidForResourceType`, `mcpResourceUriSchemeFor`). A
+  throwing init rolls back its own partial registrations, so a half-configured
+  resource is never left dispatchable. Rows still default to
+  `isEnabled: false`. (#563)
+
+- **`components/app/**` and `components/framework/**` are now reserved fork
+  tiers.** Sunrise creates nothing under either, so a fork's own React
+  components merge cleanly on upgrade. This closes a live collision: the
+  reserved list previously named only `.context/app/`, `lib/app/**` and
+  `prisma/schema/app.prisma`, while forks were already shipping
+  `components/app/` — if Sunrise had ever added a file there it would have
+  landed on top of fork code. Note the difference in kind from `lib/app/`,
+  which ships *scaffolds* you fill in: `components/app/` ships **nothing**, and
+  you invent the structure. It exists because `lib/app/**` must stay
+  framework-agnostic (no runtime framework imports, no `react-dom`), so every
+  seam there is data and a component cannot live there. Enforced by
+  `tests/unit/reserved-fork-tiers.test.ts`. (#561)
+
+- **`lib/app/footer.ts` — `footerCopyright`.** The footer attribution line is now
+  fork-owned: `null` keeps the platform default (`© {year} {BRAND.legalName}`),
+  a string replaces it verbatim, `false` renders nothing. Read by **both**
+  `PublicFooter` and `ProtectedFooter` so they cannot drift. `false` is the
+  white-label case — a public surface that is an end-user artefact rather than a
+  marketing site, where naming the platform operator is a leak rather than a
+  credit. The **Cookie Preferences** control is unaffected and remains
+  non-overridable. (#561)
+
+- **`BRAND.description`, backed by `NEXT_PUBLIC_APP_DESCRIPTION`.** The root
+  `<meta name="description">` for any page that does not set its own. Defaults
+  to the product name rather than a sentence — a wrong sentence is worse than a
+  short one. (#519)
+
+- **`ChatInterface` endpoint props: `streamEndpoint`, `transcribeEndpoint`,
+  `deleteConversationEndpoint`.** All default to today's admin routes, so
+  existing callers are unchanged. A non-admin surface — a consumer page, or an
+  app-owned route pinning `contextType`/`contextId` server-side — can now reuse
+  the component. Its docblock also names which features are admin-only
+  (`showInlineTrace`, the cost/token strip, approval cards) so a fork can decide
+  what to turn off rather than concluding it must rebuild. `CHAT_TRANSCRIBE` is
+  now registered in `lib/api/endpoints.ts` rather than living as a string
+  literal in the component. (#526)
+
+### Fixed
+
+- **The public landing page was serving the About page.**
+  `app/(public)/page.tsx` had been replaced wholesale with a byte-identical copy
+  of `app/(public)/about/page.tsx`, so `/` and `/about` rendered the same hero,
+  the same body copy and the same `title: 'About'`. `Pricing` and `FAQ` were
+  left exported from `components/marketing/index.ts` and rendered by nothing.
+  It shipped to `main` and would have shipped in this release.
+  The page is restored, and its metadata carries the change the clobbering
+  commit intended but did not apply: `title: 'Home'`, with the layout's
+  `%s - ${BRAND.name}` template supplying the brand once.
+
+  **How it happened, because the mechanism recurs.** A flat backup directory
+  keyed by **basename**. In an App Router tree `page.tsx` and `route.ts` are not
+  distinctive names — this repo has 82 of the first and 228 of the second — so
+  `cp <several paths> "$TMP"/` keeps exactly one of each, and the restore writes
+  it back over every path it came from. The commit that did it was editing
+  `page.tsx` and `about/page.tsx` together: the small intended edit to
+  `about/page.tsx` landed (6 lines), and `page.tsx` received about's whole file
+  (331 lines) instead of its own 3-line change.
+  The same mechanism hit `app/api/health/route.ts` two days later, which took
+  the **stats** route's content and became an admin-guarded endpoint returning
+  user counts. Both were verified after restoring — by diffing against the
+  backup, which is corrupted-compared-against-corrupted, an assertion that
+  cannot fail in the one place whose job is to notice. `npm run validate` passes
+  either way: a clobbered route is a real, valid module, just the wrong one.
+
+  **The guard is structural, not content-shaped**
+  (`tests/unit/app/route-module-distinctness.test.ts`, registered in
+  `ALWAYS_RUN_TESTS`): no two route-segment modules under `app/` may be
+  byte-identical — `page`, `layout`, `route`, `error`, `loading`, `not-found`,
+  `template`, `default` and `global-error`, 325 of them today. It catches both
+  incidents above and needs no opinion about what any page *says*, which matters
+  because the marketing pages are fork-owned placeholders: a core test pinning
+  their content would be a core test a fork cannot satisfy, the #480 / #525 /
+  #530 / #533 class this release closes four instances of. That is also why
+  Sunrise still ships **no** content test for the landing page, and says so in
+  the file. A fork with a genuine collision appends to the exported
+  `ALLOWED_IDENTICAL_GROUPS` rather than editing the guard, so the merge stays
+  additive the way `ALWAYS_RUN_TESTS` already is; it ships empty upstream, and a
+  third file joining a declared group still fails. Its reach is byte-identity
+  and no further — a copy that renames the default export passes.
+  **Forks:** if you merged the affected range and had not yet rewritten your
+  landing page, take this file wholesale; if you had, keep yours.
+
+- **The rolling conversation summary was recomputed on every single turn past
+  the history window, and the cost row for each of those calls was silently
+  discarded (#654).** Two defects that concealed each other. The reuse check was
+  `conversation.summaryUpToMessageId === lastDroppedId`, where `lastDroppedId`
+  is `history[droppedCount - 1].id` — the **boundary of a sliding window**.
+  `droppedCount` grows by about two a turn (one user message, one assistant), so
+  turn 1 pinned the message at index 1 and turn 2 asked about index 3. The check
+  could not hit in normal use: past roughly 25 exchanges (`MAX_HISTORY_MESSAGES`
+  is 50 *messages* — `tool` rows count too), **every turn** paid for a fresh
+  summarisation of the whole dropped region, on the agent's own provider.
+  Meanwhile `summarizer.ts` logged that spend with `agentId: 'system'` and
+  `conversationId: 'summary'` — literal strings into two columns that are real
+  foreign keys — so each insert violated both, `logCost` caught the P2003 and
+  returned `null`, and the call was `void`-ed. Nothing on the Costs page moved;
+  the only signal was one error line per summary and the provider invoice.
+  The fix changes the model rather than the comparison. The summary covers a
+  **prefix** of the conversation, `summaryUpToMessageId` names the newest message
+  in it, and reuse asks whether that prefix already contains everything this turn
+  has to drop. Because the boundary moves every turn, staying reusable means
+  summarising **past** the requirement: `SUMMARY_LOOKAHEAD_MESSAGES` (10) buys
+  roughly five turns per call at the default cap. (Not at every cap: at
+  `maxHistoryMessages` of 1–3 the clamp below leaves a lookahead of 0 or 1, so
+  those agents still summarise every turn. Inherent — a two-message window
+  cannot both summarise ahead and keep the last exchange — and each call is now
+  a ~2-message fold rather than a full re-derivation.) The handler now passes `historyDropCount` to
+  `buildMessages` so the summary boundary **is** the drop boundary — two
+  independently-computed boundaries that had to agree is the shape that produced
+  the bug, and nothing appears in the prompt both summarised and verbatim.
+  Verbatim history consequently sits between
+  `cap - min(10, floor(cap / 2))` and `cap` messages: **the lookahead never
+  takes more than half the window.** That clamp is load-bearing, not defensive —
+  `maxHistoryMessages` is validated `min(0).max(500)`, so a cap below the
+  lookahead is supported, and an unclamped 10 summarised an agent with
+  `maxHistoryMessages: 4` down to *zero* verbatim history — losing the assistant
+  turn the user was replying to — on roughly every third turn. At the default
+  cap of 50 it is `min(10, 25)` = 10, so the reuse win is untouched.
+  `summarizeMessages` gained `previousSummary` and **extends** rather than
+  re-derives, so a call costs what was *added* since the last one, not the length
+  of the conversation. That also fixes a quieter loss: `loadHistory` returns at
+  most 200 rows, so anything older used to leave the prompt and the summary
+  together — the folded text now outlives the rows. (With one limit, pre-existing
+  and not changed here: an agent whose `maxHistoryMessages` is at or above that
+  200-row window never summarises at all, because nothing is ever dropped for
+  the cap. Those conversations lose everything past 200 rows silently, as they
+  did before. Filed as #655.)
+  Three failure-path defects found by review and fixed with it: an empty
+  completion (a content filter, or a reasoning model spending its token budget
+  before emitting text) discarded the stored summary instead of falling back to
+  it; rows whose `summary` column holds the placeholder — which the pre-fix code
+  persisted unconditionally, so they exist in the wild — were treated as real
+  and would have been folded forward indefinitely; and a stored summary whose
+  pin has scrolled past the 200-row load window is now rendered without an
+  invented count rather than dropped from the prompt entirely.
+  A `fellBack` result is never
+  persisted, which stops one transient provider error replacing a good summary
+  with `[Summary unavailable]` and recording it as covering messages nothing
+  describes.
+  Embedding cost rows were the third part: recorded, counted in global totals,
+  attributable to nothing. `embedText`/`embedBatch` take an optional
+  `EmbeddingAttribution`, filled in by the `search_knowledge_base` capability
+  (with the `isWorkflowAgentId` guard, since a workflow's `context.agentId` is a
+  synthetic label and not an `AiAgent.id`) and by the `rag_retrieve` executor
+  (`workflowExecutionId` + the carrier's `stepId`, which both execution cost
+  readers filter on). Ingestion paths stay unattributed by design — no agent or
+  conversation exists behind a document upload — and carry `metadata.kind`
+  instead. All parameters are optional; forks calling these directly are
+  unaffected.
+  This was the **third** time a non-row-id reached one of those foreign keys
+  after #599 and #600, so it also ships a guard:
+  `tests/unit/lib/orchestration/llm/cost-log-fk-attribution.test.ts` derives
+  every `logCost` call site in the tree and compares what each writes into
+  `agentId` / `conversationId` / `workflowExecutionId` against a written
+  allowlist, registered in `ALWAYS_RUN_TESTS`. A literal check alone would have
+  caught this one and **neither** of the other two, which passed ordinary
+  expressions that hold a workflow label on some paths — so the guard is a
+  roster compared by set equality, and a new call site fails it until someone
+  states why its value is a row id. Its limit is documented and was measured:
+  it reads `logCost` call sites, so a value reaching a foreign key one hop away
+  through a forwarding function is invisible to it — deleting the workflow guard
+  in `search-knowledge.ts` leaves it green. Each forwarding hop has its own
+  behavioural test instead.
+
+- **Workflow capability spend now shows up against the step that caused it, and
+  `agent_call` tool spend shows up at all.** #599 stopped these `AiCostLog` rows
+  being lost to an FK violation; they existed after it and were still invisible
+  in both places an operator looks. `CapabilityContext` gains a third optional
+  carrier, `costLogMetadata`, merged **under** the dispatcher's own keys
+  (`{ ...context.costLogMetadata, slug, success }`) so a caller cannot overwrite
+  `slug` — which the per-capability stats route groups on — or hide a failure by
+  setting `success`. The executors apply the same rule one level up
+  (`{ ...ctx.costLogMetadata, stepId: step.id }`), so a run cannot misattribute
+  its own rows to a different step.
+  Two things ride on it. **`stepId`**: both execution readers do
+  `const stepId = extractStepId(row.metadata); if (!stepId) continue;`, so every
+  capability row was dropped from the execution detail and live cost panels, and
+  `loadPastRuns` could not attribute it either. **Evaluation tags**: a run stamps
+  `{ evaluationRunId, role }` on `ExecuteOptions.costLogMetadata`, and those
+  stopped at the capability boundary.
+  `agent_call` also gains `workflowExecutionId`, which it never passed. The
+  asymmetry was inside one file — that executor's own LLM `logCost` set it while
+  the capability dispatch beside it did not — so a tool an agent invoked
+  mid-workflow recorded an `agentId` and a null execution link and never
+  appeared against the run. (#600)
+
+- **`llm_call` cost rows were untagged too, and `send_message_to_channel` was
+  still losing rows outright.** Both found by enumerating every `logCost` call
+  site rather than by reading #600, which named neither — it asserted
+  `llm-runner.ts` already forwarded the carrier, and it does not.
+  `runLlmCall` wrote `metadata: { stepId }` and nothing else, so an evaluation
+  run's tags were missing from every LLM step, not just from tool calls.
+  `send_message_to_channel` writes its own `OUTBOUND_MESSAGE` cost row and did
+  so with `agentId: context.agentId` unconditionally — which from a workflow
+  `tool_call` step is the synthetic `workflow:<id>` label, not an `AiAgent.id`.
+  That is the identical P2003 data loss #599 fixed at the dispatcher, still live
+  in a built-in because the dispatcher's guard does not cover a capability's own
+  `logCost` call: **every outbound message sent from a workflow recorded no cost
+  row at all.** Both now apply the guard and the merge.
+  Three more boundaries turned up the same way, each found by checking a site
+  rather than reading the issue. `chat/streaming-handler.ts` threaded
+  `request.costLogMetadata` into its own four `logCost` calls but not into the
+  dispatch context, so an agent evaluation — which runs its subject through that
+  handler — tagged the subject's LLM spend and left every tool it called
+  untagged. `engine/executors/judge-call.ts` **deliberately** withheld it, under
+  a comment asserting the executors already tag those rows; they do not, because
+  `driveJudgeAgent` logs through the chat handler rather than an executor, so
+  evaluating a workflow with a `judge_call` step tagged every step except the
+  judge. And `run-workflow` did not pass it to the child execution, so a nested
+  workflow's rows were untagged.
+  `.context/orchestration/capabilities.md` now carries the full roster of
+  boundaries and what each owes — including the one that correctly forwards
+  nothing, and the orchestrator-delegation case that remains unattributed. The
+  rule is stated as a question to ask at a new boundary, not as a count, because
+  the count has been wrong every time anyone has written one down. (#600)
+
+- **A zero-token cost row can no longer capture a workflow step's model
+  fingerprint.** `loadPastRuns` picks each step's dominant model with
+  `bestTokens = -1` and `>`, so when every candidate ties at zero the winner is
+  whichever row was inserted first. Giving `agent_call` dispatches a `stepId`
+  puts the dispatcher's `model: 'n/a'`, 0-in/0-out row under the same step id as
+  that step's LLM rows — and if those turns also reported zero usage, an `'n/a'`
+  winner made `runMatchesFingerprint` reject the **entire** past run, silently
+  degrading the estimator to heuristic once enough runs fell below
+  `EMPIRICAL_MIN_SAMPLES`. Zero-token rows are now skipped, which is safer
+  rather than merely narrower: a step left with no fingerprint entry is treated
+  as no signal and skipped, not as a mismatch. (#600)
+
+- **A capability cost row now says which capability it was.** The execution
+  detail and live panels project `metadata.slug` into their `CostEntry`, and the
+  per-call cost table renders it in place of the model column. Capability rows
+  are all `capability/n/a` with 0 tokens and $0, so making them visible without
+  this turned an `agent_call` step that invoked five tools into five identical,
+  information-free rows — a cost table saying nothing about cost. LLM rows are
+  unchanged and still identify themselves by `provider/model`.
+  Three cases are documented as **known exceptions** rather than fixed, in
+  `.context/orchestration/capabilities.md`: the judge path's row carries no
+  execution link because the chat handler sets none; orchestrator delegations
+  stamp a synthetic step id no panel can match; and
+  `send_message_to_channel` renders `$0.0000` because its model string is not in
+  the registry and `logCost` takes no cost override. Each needs a wider change
+  than this one. (#600)
+
+
+- **A fork init that threw kept the registrations it had already made, while
+  logging that the feature was disabled.** Six seams — `jobs`,
+  `context-contributors`, `guard-floor-contributors`,
+  `guard-event-contributors`, `knowledge-access-contributors` and
+  `user-created` — caught the throw, said "disabled", and left everything
+  registered before it live. A job kept running on every maintenance tick (and
+  held the idle gate open at its interval) from a config its author believed had
+  not loaded; a knowledge-access contributor kept widening a restricted agent's
+  document set, which is the only direction those can move; a user-created hook
+  kept provisioning, emailing or billing every new account. All six now roll
+  back to the pre-init registry, so the message is literally true. A second
+  latent bug went with it: `String(err)` throws on a null-prototype value, and
+  only one of the eleven seams guarded it. In the nine others that had a catch,
+  the log call itself could throw and escape it — after the rollback, in the
+  three that had one — surfacing as an unexplained failure of the very thing the
+  catch protects (#633).
+
+- **One misdeclared app capability stopped the fork's others from registering.**
+  `capabilityDispatcher.register()` throws on an authoring mistake
+  (`processesPii = true` with no `redactProvenance()` override) and it threw
+  mid-flush, so a fork with 28 registrations and a bad one at position 12 got 11
+  in the dispatcher, 16 never reached, and every dispatch path throwing. The
+  flush now isolates per entry: the failing capability is named in the log and
+  skipped, the rest register. One case is not a clean skip and says so — when the
+  failed registration was replacing an existing slug via `register(cap, { slug })`,
+  the handler it was replacing stays live *without the fork's guard*, so it logs
+  that rather than "skipping it". **A throwing `initAppCapabilities()` itself still
+  re-raises** rather than degrading like the other seams — rollback costs the
+  fork its whole toolset, and an agent missing every tool answers from its own
+  weights with nothing marking the gap — but it is now latched before it runs,
+  so it no longer re-runs on every chat turn and every workflow step for the
+  life of the process (#633).
+
+- **Core tests a fork could not satisfy (#480, #525, #530, #533).** Filling a
+  seam correctly turned the suite red in four places: the subject-access
+  coverage guard (above), the capability registry's idempotency count (which
+  reported "expected 13, got 27" under a test named *is idempotent*, sending the
+  reader after a double-registration bug in wiring that was already correct),
+  twelve test cases across eight files that wrote `/dashboard` and `Dashboard`
+  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL` — measured by
+  filling the seam and running the **whole** suite, which is now down to the one
+  intended `SEAM_DEFAULTS` pin — and
+  `smoke:export`. `tests/unit/fork-seam-coupling.test.ts` now requires any core
+  artifact reading a `lib/app/*` seam unmocked to carry a `FORK NOTE`.
+
+- **Four proxy assertions compared a redirect with `toContain('/dashboard')`,**
+  which matches a query string or a longer path — and for a fork landing on `/`
+  matches every URL there is. They compare the parsed pathname exactly now,
+  which is stronger for vanilla Sunrise too.
+
+- **A parameterised MCP resource URI now matches when its `{param}` is not the
+  last path segment.** `hub://projects/{id}/plan` collapsed to
+  `hub://projects//plan` under the strip-then-`startsWith` test, which no
+  concrete URI starts with, so the read returned `null`. Every core template
+  happens to be trailing, which is why nothing noticed. The prefix test is kept
+  alongside the new exact-fill test, so every URI that resolved before still
+  resolves.
+
+- **Timers are cancelled on unmount across 19 components.** Every unmanaged
+  `setTimeout` in `components/**` — one not stored in a ref that a cleanup
+  clears — outlived the component
+  that scheduled it. The dominant case — "hide the success banner after N
+  seconds" — is a state update React discards, so it looked harmless; two were
+  not. `chat-interface`'s follow-up poll re-queued itself indefinitely after
+  unmount, because `streamingRef.current` freezes at its last value and nothing
+  else terminated the chain, and its reconnect backoff held a timer for up to
+  four seconds past teardown. A new `useTimeout()` in `lib/hooks/` schedules
+  work that is cleared on unmount. It matches `setTimeout` in one deliberate
+  respect and diverges in another: scheduling twice still leaves two independent
+  timers, but **after unmount `schedule()` is a silent no-op**. That is what
+  makes an uncancellable timer impossible, and it is the behaviour to know about
+  before reaching for the hook — an effect that genuinely must outlive its
+  component wants a bare `setTimeout` and its own cleanup. **A fork that has
+  overridden any of these components carries the same defect**; the affected
+  files are listed in [#625](https://github.com/human-centric-engineering/sunrise/pull/625).
+
+- **CI test jobs no longer inherit `CI_NODE_HEAP_MB` once per worker.**
+  `NODE_OPTIONS: --max-old-space-size` is set at workflow level and is a
+  **per-process** cap, but `test-full` and `test-changed` fork roughly
+  `cores - 1` workers apiece — so the real ceiling was `workers × the knob`. At
+  the 5120 default that is ~15.4GB on a 4-vCPU/16GB public runner; at 8192 — the
+  value `ci.md`'s own worked example recommended until this release, four lines
+  above a rule forbidding it — ~24.6GB on the same runner. That example is now
+  6144, so **a fork still carrying 8192 should re-derive its floor by
+  bisection** rather than assume the value was chosen for its codebase. **The documented remedy for one job was the trigger for
+  another**, and the failure it produced was an OS OOM kill rather than a clean
+  V8 abort — surfacing as `Failed to start forks worker`, or as a shard quietly
+  missing from the file count. Both test jobs now opt out of it, taking Node's
+  own memory-derived default. Every other job still inherits it — the
+  single-process ones it was sized for (`typecheck`, `lint`, `build`) and the
+  rest (`smoke`, `docker`, `lockfile`), none of which fork workers. A new `CI_TEST_NODE_HEAP_MB` gives
+  the test jobs their own knob for the case Node's default is not enough; unset
+  (the default) means no flag at all, and it must be sized per worker rather
+  than per runner. **Forks that have
+  raised `CI_NODE_HEAP_MB` should re-read
+  [`.context/architecture/ci.md`](./.context/architecture/ci.md) — and lower it
+  to fit before flipping a repo private**, where `ubuntu-latest` is 2 vCPU / 8GB.
+
+### Removed
+
+- **BREAKING: `sunrise` is gone from the `GET /api/health` response.** Also
+  removed from `HealthCheckResponse` (`lib/monitoring/types.ts`) and
+  `healthCheckResponseSchema` (`lib/validations/monitoring.ts`). Anything reading
+  `body.sunrise` from that endpoint — an uptime monitor asserting on it, a
+  deploy-verification script grepping it — breaks. Read
+  `GET /api/v1/admin/stats` (`system.sunriseVersion`) instead, or import
+  `SUNRISE_VERSION` server-side. `version` is unaffected. **Why** is under
+  Security below; this entry exists so a fork scanning `Removed` for upgrade
+  breakage finds it. (#531)
+
+### Security
+
+- **`GET /api/health` no longer discloses the Sunrise platform version.** The
+  `sunrise` field is **removed** from the response — a breaking change to a
+  documented public surface, and the reason is that the surface was public.
+  The endpoint takes no authentication (verified: it is absent from `proxy.ts`'s
+  `protectedRoutes`, and the handler carries no guard), so the field named the
+  exact upstream release a deployment runs, and therefore the exact set of
+  published issues to try against it, to anyone who asked. Unlike a fork's own
+  app version, that answer is useful against **every** Sunrise-derived
+  deployment rather than one.
+  It is now served from `GET /api/v1/admin/stats` as `system.sunriseVersion`,
+  behind `withAdminAuth`, and rendered on `/admin/overview` — see the Added
+  entry above. `version` (the fork's `package.json` version) **stays** on the
+  health payload: it is the fork's own number to disclose, it means nothing
+  outside that fork, and container health checks and deploy-verification scripts
+  read it.
+  `HealthCheckResponse` (`lib/monitoring/types.ts`) and
+  `healthCheckResponseSchema` (`lib/validations/monitoring.ts`) drop the field
+  with it. The schema **tolerates** a payload that still carries one — Zod's
+  default object behaviour strips unknown keys — so a fork that keeps `sunrise`
+  on its own health route, and a rolling upgrade serving both shapes at once,
+  both keep working against `useHealthCheck`. **What breaks:** anything reading
+  `body.sunrise` from `/api/health` — an uptime monitor asserting on it, a
+  deploy script grepping it. Read `/api/v1/admin/stats` instead, or import
+  `SUNRISE_VERSION` server-side.
+  `tests/integration/api/health.test.ts` now asserts the **exact** top-level key
+  set rather than a list of `toHaveProperty` calls. The old form could only
+  catch a field going missing, never one appearing, which is how this one sat
+  there unquestioned; every future field is now a decision someone has to take
+  deliberately.
+  A whole-tree guard (`tests/unit/sunrise-version-disclosure.test.ts`, added to
+  `ALWAYS_RUN_TESTS`) holds the invariant that actually matters: **no
+  unauthenticated route's import graph reaches `SUNRISE_VERSION`**. Three routes
+  still return it — admin stats, the MCP settings route, and the
+  `POST /api/v1/mcp` `initialize` handshake — and all three are authenticated.
+  The guard computes that roster by walking the tree rather than listing it,
+  because the hand-written version of that roster was wrong while this very
+  change was being written: it named one route and missed two, one of them
+  reached through two hops of imports. (#531)
+
+- **Five more outbound sites refuse redirects, closing the class #628 opened.**
+  Each validated its target exactly once and then followed `Location` headers
+  unchecked. `webhooks/[id]/test` was a one-line divergence from
+  `webhooks/dispatcher.ts` on the *same* `webhook.url`, and because
+  `X-Webhook-Signature` is a custom header name the fetch spec does not strip
+  cross-origin, the HMAC travelled — while the admin UI reported the final hop's
+  status as the endpoint's, so a moved endpoint read as healthy.
+  `knowledge/embedder.ts` would have posted uploaded document text to an
+  unvalidated host. `llm/provider.ts`'s `fetchWithTimeout` is set as
+  defence-in-depth: both its production callers pass hardcoded hosts today, but
+  it is an exported generic wrapper and so the seam a fork reuses with a
+  configured host.
+  **And both vendor SDK clients, which no sweep had found** — `llm/openai-compatible.ts`
+  hands the admin-set `AiProvider.baseUrl` to `new OpenAI({ baseURL })`, and
+  `llm/anthropic.ts` passes no `baseURL` at all yet the SDK defaults it to
+  `ANTHROPIC_BASE_URL`, so pointing it at a gateway is one env var away. Neither
+  SDK sets a redirect policy, so undici followed every hop carrying the prompt —
+  and Anthropic authenticates with `x-api-key`, a custom header name the spec
+  does **not** strip cross-origin, so its key travelled too. Both are fixed with
+  a `fetch` wrapper rather than by trusting SDK defaults, which also returns
+  them to the view of
+  `tests/unit/lib/security/outbound-fetch-redirects.test.ts` — that scan sees
+  literal `fetch(` calls only, which is how they survived three sweeps. The
+  wiring is pinned by a per-client unit test, since deleting the wrapper would
+  remove the literal call from the scan along with it.
+  **A provider or webhook endpoint that answers 3xx now fails instead of being
+  followed; re-point it in config.** The guard's `KNOWN GAP` rows are gone, and
+  its docblock now states what it cannot see (#635).
+
+- **The embedding path re-checks its provider URL at the point of use.**
+  `callEmbeddingApi` read `AiProviderConfig.baseUrl` straight from Prisma and
+  called it. The only other guard is the Zod refine at create/update, which
+  seeds, imports and direct DB writes bypass — which is precisely why
+  `provider-manager.ts` already re-checks at its own point of use. So a
+  seeded or imported row pointing at, say, the cloud metadata endpoint would
+  have had uploaded document text POSTed to it on the **first** hop, which no
+  redirect policy can help with. Now runs `checkSafeProviderUrl` with
+  `allowLoopback` driven by the provider's `isLocal`, and throws before any
+  request leaves (#635).
+
+- **`executeHttpRequest` no longer follows redirects.** The orchestration HTTP
+  executor validated its host allowlist once, against the initial URL, then
+  called `fetch()` with no `redirect` option — so undici's default `'follow'`
+  applied and every subsequent `Location` was unvalidated. #534 fixed four
+  sibling sites and missed this one, because that sweep was scoped by grepping
+  `checkSafeProviderUrl` and this site guards with an env host allowlist
+  (`isHostAllowed`) instead. It is the sole path for
+  the `call_external_api` capability, the workflow `external_call` step, and the
+  Twilio / WhatsApp Cloud adapters — and the capability returns the response
+  body to the model, making it a read primitive rather than a blind write.
+  Auth travelled too: `bearer` and `basic` are stripped cross-origin by the fetch
+  spec, but `api-key` with a custom header name is not, and `query-param` puts
+  the secret in the URL. Now `redirect: 'error'`, matching the three siblings.
+  **Exploitation always needed an operator to have set
+  `ORCHESTRATION_ALLOWED_HOSTS` (unset by default, fail-closed) AND an
+  allowlisted host to emit a redirect**, so this is hardening rather than an
+  open door — but the rule is stated in `lib/security/safe-url.ts` and four of
+  five sites already followed it. A newly-redirecting endpoint now fails
+  non-retriably with `fetch failed: unexpected redirect` rather than being
+  chased; re-point the URL in config.
+
+- **Every server-side `fetch()` now declares a redirect policy, enforced by a
+  test.** `tests/unit/lib/security/outbound-fetch-redirects.test.ts` enumerates
+  the call sites mechanically and fails CI on one with no `redirect` option,
+  carrying legitimate exemptions and known gaps as pinned rows. It replaces a
+  hand-written roster which review found wrong by three — a list maintained by
+  memory has the exact failure mode it was written to prevent. Writing the check
+  turned up three further sites of the same class as this fix, now tracked as
+  **#635**: `llm/provider.ts` and `knowledge/embedder.ts` (admin-set provider
+  `baseUrl`, validated once) and the webhook **test** route, which follows
+  redirects on the same URL its production dispatcher refuses them on, carrying
+  an HMAC in a custom header the fetch spec does not strip.
+
+- **Minting *or revoking* an API key now requires a browser session.** `POST`
+  and `DELETE` on `/api/v1/user/api-keys` used `withAuth`, which accepts a key
+  of any scope. Minting was privilege laundering — a key scoped to one narrow
+  job could mint a `chat` key and reach every authenticated route as its owner,
+  so least privilege that can self-escalate is not least privilege. Revoking is
+  destructive rather than escalating, but `GET` returns every key's id, so a
+  leaked `chat`-scoped key could enumerate its owner's keys and revoke all of
+  them, `admin` included. Both now 403 for a key-authenticated caller,
+  mirroring the existing refusals on `PATCH /api/v1/users/me` (email) and
+  `GET /api/v1/users/me/export`. Browser sessions are unchanged, and no
+  headless flow loses anything it still had — a rotate-and-revoke script needs
+  `POST` too.
+
+### Changed
+
+- **Tests run on `node` by default; a DOM is opt-in per file.** Vitest builds a
+  fresh environment per test file, and constructing a happy-dom Window means
+  building the whole browser API surface — which two thirds of this suite never
+  touches. A file that needs one declares it on its first line
+  (an environment docblock on line 1); 405 files carry one, 682 run on node.
+  Measured back-to-back on `tests/unit/lib` (434 files) under identical load:
+  **49.3s wall / 141s CPU** against **58.1s / 191s** with happy-dom everywhere,
+  and in-worker environment construction of **11.4s against 79.5s**. Read the
+  CPU and environment figures rather than wall clock — wall moves with whatever
+  else is running, aggregate work is what a shared machine is short of.
+  **It is also a correctness fix.** happy-dom defines `window`, so `lib/env.ts`
+  validated only the _client_ schema and every server variable read as
+  `undefined` — anything branching on `TENANCY_MODE`, `CAPABILITY_BINDING_MODE`
+  or `MCP_SESSION_MODE` was silently exercising the undefined path. 44 of the 47
+  test files importing `@/lib/env` now see the real server schema (the three
+  exceptions are two component tests and `env.test.ts`, which asserts on
+  `typeof window` deliberately). The switch
+  surfaced one such masked case: `successResponse(…, { status: 204 })` throws on
+  Node's `Response` (204 forbids a body) and only ever "passed" because
+  happy-dom's is lenient; nothing calls it that way, and the test now pins the
+  real constraint.
+  Getting it wrong is asymmetric: a DOM test on node fails loudly
+  (`ReferenceError: document is not defined`), but a node test that picks up
+  happy-dom **passes** and quietly rejoins the class of test this change exists
+  to escape. `tests/unit/vitest-environment-directives.test.ts` guards the
+  mechanical half (directive on line 1, no conflicting values, known environment
+  name) and is registered in `ALWAYS_RUN_TESTS`; it cannot tell you a file did
+  not need the DOM it asked for, and the docs say so. Vitest matches the
+  directive **anywhere in a file**, so a comment merely discussing it applies
+  it — that bit twice while writing this, once silently.
+  The node default also needed a second network guard: `tests/setup.ts` refused
+  real requests through happy-dom's fetch interceptor, which covered none of the
+  node files. Both halves now exist and both now have tests; neither did before. Chosen as a docblock rather than
+  `test.projects` because a projects config prefixes `vitest list` output with
+  `[name] `, which would break `npm run test:changed`; `environmentMatchGlobs`
+  no longer exists in vitest 4. **Forks:** the directive is per file, so it
+  merges cleanly; a new component test that dies on `document is not defined`
+  just needs the line. See
+  [`.context/testing/environments.md`](./.context/testing/environments.md).
+
+- **`MCP_SESSION_MODE` — MCP sessions are now stateless by default, so the
+  handshake survives a function-per-request platform.** Sessions were held in a
+  per-process `Map`: `initialize` minted an id on one instance, the client's next
+  call was load-balanced to another, and that instance looked the id up in its
+  own empty map and returned `404 Session not found or expired`. Observed on a
+  production Vercel deploy — one session id, one instant, three instances, two
+  404s and a 200. **No client retry recovers it**, because the session is not
+  lost, it is invisible to live siblings, so re-initialising just repeats the
+  race. The default issues no `Mcp-Session-Id`, which per the Streamable HTTP
+  transport means the client never sends one, so there is nothing that can fail
+  to be found.
+  **What this costs you if you are on a single long-running process:** the SSE
+  stream (`GET` answers `405 Allow: POST`), `resources/subscribe`,
+  `resources/unsubscribe` and `logging/setLevel`, which refuse with a new
+  `STATELESS_UNSUPPORTED` (`-32005`) rather than accepting work they would drop —
+  and `initialize` no longer advertises them, so a conforming client does not
+  ask. **Set `MCP_SESSION_MODE=stateful` to keep them.** That mode is a
+  legacy-compatibility mode rather than a richer one: MCP revision `2026-07-28`
+  removes protocol-level sessions and the `initialize` handshake outright and
+  prescribes exactly what `stateless` does. **`stateful` is not needed to serve
+  older clients** — that is backwards: `stateless` dispatches `initialize`
+  normally and **connects** for every client `stateful` does, plus `2026-07-28`
+  clients that `stateful` refuses with `400 Missing Mcp-Session-Id header`. Choose it
+  for the SSE stream or the three continuity methods, on one process — plus one
+  smaller difference: it remembers the negotiated protocol version, so a client
+  that omits `MCP-Protocol-Version` on later requests keeps its `2025-06-18`
+  tool annotations instead of falling back to `2024-11-05`.
+  **Two operator-facing consequences of the default.** `Max sessions per key` in
+  the admin MCP settings has no effect — nothing creates a session, so there is
+  nothing to cap — and the admin Sessions page is always empty even while clients
+  are connected. Both surfaces now say so rather than reading as a broken setting
+  and an idle server. And note the startup guard fails the **whole app** build,
+  not just MCP: it sits at module scope in a file the MCP barrel re-exports, and
+  seven non-MCP admin routes reach that barrel transitively. Choosing `stateful` on a platform that announces itself (`VERCEL`,
+  `AWS_LAMBDA_FUNCTION_NAME`) throws at startup with the fix in the message; that
+  guard is a safety net, not a boundary — a multi-replica container deploy hits
+  the same bug undetected (#609).
+
+- **A fork-owned schema file must now account for every model it declares.**
+  Any file in `prisma/schema/` that is not one of Sunrise's own eleven — not
+  just `app.prisma` and `framework-*.prisma` — is treated as a fork tier's and
+  held to full accounting: each model declared as a source, or excluded with a
+  reason, rather than run through core's `userId`/`createdBy` heuristic. Core
+  reads its own column vocabulary and cannot read yours, so a table keyed
+  `authorId` or `respondentId` was invisible to that scan. No effect on vanilla
+  Sunrise, where `app.prisma` ships empty.
+
+- **`npm run smoke:export` asserts the app seam works rather than that it is
+  untouched.** It checked `Object.keys(bundle.app).length === 0`, which
+  implementing the seam makes false by construction — and the script is not in
+  `validate` or `npm test`, so a fork got a green local run and a red pipeline.
+  It now asserts every declared section arrived and is empty for a subject who
+  owns nothing, which also catches a collector matching a stranger's rows.
+
+- **`ApiKeyScope` is an open type and `validateScopes` returns `boolean`.**
+  `ApiKeyScope` was a closed union and is now `CoreApiKeyScope | (string & {})`,
+  which keeps autocomplete on the five core names while accepting a fork's.
+  `validateScopes` consequently returns a plain `boolean` rather than the type
+  predicate `scopes is ApiKeyScope[]` — against an open type that predicate
+  narrowed nothing while reading as a guarantee it could not make. The runtime
+  check is unchanged.
+
+- **`CreateExposedResource['resourceType']` and
+  `ListExposedResourcesQuery['resourceType']` are now `string`, and
+  `createExposedResourceSchema.uri` no longer requires `sunrise://`.** Both
+  schemas and both inferred types are exported, so a fork consuming them sees a
+  weaker type. That is the type-level shadow of the validation change below —
+  the *runtime* surface is equal-or-stricter, because membership moved to the
+  route rather than being dropped.
+
+- **MCP resource `uri` and `resourceType` are validated against what can
+  dispatch, not against a closed enum.** `POST /api/v1/admin/orchestration/mcp/resources`
+  now rejects a URI whose scheme nothing registered and a `resourceType` with no
+  handler. This is strictly stricter than the Zod enum it replaces — that enum
+  could not see a core type whose handler had gone missing — while letting a
+  fork create `hub://projects/{id}/plan`. The Zod schema keeps a format check
+  only; membership moved to the route because `lib/validations/mcp.ts` is
+  imported by client components and the registry reaches `lib/app/`.
+
+- **Metadata no longer hardcodes the starter identity.** `app/layout.tsx`
+  shipped `"${BRAND.name} - Next.js Starter"` and a description advertising "a
+  production-ready Next.js starter template"; `app/(public)/layout.tsx` shipped
+  the same blurb again, and the landing and About pages hardcoded the literal
+  `Sunrise` in their titles and social cards. All of it now comes from the
+  `BRAND` seam, and the root title uses the object form so un-templated pages
+  inherit `%s - ${BRAND.name}`. Route groups declaring their own
+  `title.template` are unaffected.
+
+  **Fixing the root layout alone is not enough, and that is worth knowing if you
+  carry a patch here.** Next resolves metadata at the nearest segment that
+  defines a field, so any route group declaring `description` overrides the root
+  outright — all four of Sunrise's do. `tests/unit/app/layout-metadata.test.ts`
+  is now on its **third** shape, because the first two both passed while the
+  blurb was still live: v1 asserted on the root `metadata` object, which cannot
+  see a route group's override, and v2 text-scanned
+  `export const metadata[^;]*?;`, which any value hoisted into a module const
+  escapes — exactly what the two remaining offenders did. Both guessed at
+  *where* a leak might be written. v3 does not guess: it stubs
+  `NEXT_PUBLIC_APP_NAME` to a value no fixture would produce, re-imports each
+  metadata module, and reads the strings Next would actually serve. Anything
+  still naming the product after that is hardcoded by definition — however it
+  was spelled, hoisted, interpolated or computed.
+
+  Page **body copy** remains fork-owned and deliberately out of scope — the seam
+  covers the brand name, not marketing prose (see `lib/brand.ts`).
+
+- **The public footer's copyright moved inline, and dropped ". All rights
+  reserved."** It had a dedicated centred row costing ~44px; `ProtectedFooter`
+  has always rendered the same content inline for free. Forks hosting no-login
+  app surfaces in `(public)` — where vertical space is scarce — get that back
+  with no configuration. The shorter wording matches `ProtectedFooter`; the
+  phrase is legally inert under Berne, and because `legalName` falls back to the
+  *product* name, the old default had personal and internal forks asserting all
+  rights on behalf of a product rather than a company. Set `footerCopyright` to
+  a string to restore any wording you want.
+
+- **`npm run lint` runs under an explicit Node heap cap.** Node derives its
+  default heap from machine RAM and stops there — 4288MB on a 16GB host,
+  however much of the rest is free — and cold, whole-repo, type-aware
+  `eslint .` needs ~4.1GB. Base Sunrise clears that by about 2%; **a fork with
+  real code on top does not**, and it fails as `exit 134` (SIGABRT) with no
+  message naming memory. Measured across the fork family: Sunrise 4.05 GiB and
+  passing, two ~2,700-file forks aborting and needing 5120, a ~1.9x fork
+  needing 6144. `lint` and `lint:fix` now go through `scripts/run-capped.mjs`,
+  which appends `--max-old-space-size` to `NODE_OPTIONS` — **only when nothing
+  has set one already**, so CI's `CI_NODE_HEAP_MB` stays authoritative and a
+  fork's measured value is never silently replaced. `NODE_HEAP_MB` overrides
+  the 6144 default locally; it is clamped to 75% of physical memory and floored
+  at Node's own default, so on a machine too small for it the wrapper is a
+  no-op rather than a downgrade. `type-check` and the pre-commit hook are
+  deliberately **not** capped — measured at 1.64-1.75 GiB and 1.85 GiB
+  respectively, both with a wide margin. See
+  [`.context/architecture/lint-toolchain.md`](./.context/architecture/lint-toolchain.md#memory-why-lint-runs-under-an-explicit-heap-cap).
+
+- **The test jobs no longer attach a Postgres service container.** `test-full`
+  (×4 shards) and `test-changed` each started a `pgvector/pgvector:pg15`
+  container and ran `db:migrate:deploy` + `db:seed` against a database **no test
+  could reach**: `tests/setup.ts` is a global `setupFiles` entry and overwrites
+  `DATABASE_URL`, so a query would have authenticated as a user the container
+  never created. Measured at ~37s per shard against a 143s vitest step — ~2.5
+  job-minutes on every push, plus a term in the test-job heap budget on the 8GB
+  private runner where it is tightest. `smoke` keeps its container; it is the
+  job that queries Postgres for real. Both test jobs keep `DATABASE_URL`, which
+  `prisma generate` wants defined and never connects with. **A fork that has
+  repointed `tests/setup.ts` at the CI database and added genuinely DB-backed
+  tests will go red** — re-add the `services:` block and the two steps, both
+  shown in
+  [`.context/architecture/ci.md`](./.context/architecture/ci.md#the-postgres-service-container).
+
+- **Tests in the happy-dom environment no longer touch the network.** happy-dom loads
+  `<script src>` and `<link rel=stylesheet>` for real (both flags default to
+  *off*), and resolves relative URLs against its default document origin,
+  `http://localhost:3000` — so a full run made ~470 failed connections to a dev
+  server that was not running. Both loaders are now disabled, and a
+  `settings.fetch.interceptor` refuses any remaining request with the same
+  error shape happy-dom itself throws for a failed connection — a `DOMException`
+  named `NetworkError`, not a `TypeError`. **A fork whose tests rely on a
+  real HTTP call will now fail fast** with a message naming the URL; stub it
+  with `vi.stubGlobal('fetch', …)` or mock the module that issues it. Note this
+  has to hook happy-dom's own fetch layer — it ships its own implementation
+  over `node:http` and binds it before `tests/setup.ts` runs, so patching
+  `globalThis.fetch` intercepts none of it. Two exemptions: an **aborted**
+  request still rejects with `AbortError` (happy-dom runs the interceptor before
+  its own signal check, so refusing unconditionally would silently break every
+  `if (err.name === 'AbortError')` branch), and `data:`/`blob:` URIs pass
+  through, since they open no socket.
+
+- **Vitest worker count is capped off CI** — at
+  `min(4, floor(cores / 2))`, so 4 on a 10-core machine, 3 on a 6-core, 2 on a
+  4-core, 1 on a 2-core. Sized against vitest's **watch** default
+  (`floor(cores / 2)`) rather than its `run` default (`cores - 1`), because every
+  local script here is watch mode and `resolveMaxWorkers` returns an explicit
+  `maxWorkers` before it reaches the watch branch — a flat 4 would therefore
+  *raise* the count on any machine smaller than this one. The default assumes a
+  machine running one suite; agents run this one in the background behind
+  `validate` and `/pre-pr`, often several at once against different forks. Measured on a 10-core machine, the cap costs ~6% wall-clock
+  (239s → 254s) while halving the aggregate work (summed in-worker test time
+  860s → 326s) — the default was buying contention, not parallelism. CI is
+  untouched: a shard has its runner to itself and runner size varies by fork.
+
+
 ## [0.9.0] — 2026-08-17
 
 > **Alpha release.** Twelfth tagged Sunrise release. **MINOR bump** — the
@@ -3083,7 +4463,10 @@ Sunrise safe to fork and to merge upstream releases into.
 
 ---
 
-[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.7.0...v0.8.0
