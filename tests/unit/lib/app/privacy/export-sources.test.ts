@@ -3,11 +3,29 @@
  *
  * The app-tier mirror of `tests/unit/lib/privacy/export-sources.test.ts`.
  *
- * Sunrise's guard holds the *platform* subject-access manifest level with the
- * platform schema, and stops at the `App*` prefix — it has no way to know what
- * a fork's tables hold. `lib/app/data-export.ts` says as much: "core cannot
- * write it for you … the pattern worth copying is a constant listing the tables
- * you export plus a test that greps your own schema". This is that test.
+ * The division of labour changed in Sunrise 0.10.0 (#660), and this docblock
+ * described the old one until the 0.11.1 sync. It used to be true that the
+ * platform guard "stops at the `App*` prefix", so ConQuest patched that guard to
+ * skip our models and ran this one in its place — the two partitioned the schema
+ * between them. Core now provides the seam that made the patch unnecessary:
+ * `registerAppSubjectSources()`, wired from `initAppSubjectSources()`, feeds the
+ * platform guard our declarations, and that guard holds EVERY model in a
+ * fork-owned schema file to having a disposition or an exclusion. The fork edit
+ * is gone.
+ *
+ * So the two guards now overlap on purpose rather than partition:
+ *
+ *   • The PLATFORM guard asks "is every model accounted for at all?" — it reads
+ *     the declarations and knows nothing about how they are fetched.
+ *   • THIS guard asks the questions core cannot: that a table carrying one of
+ *     OUR user-id column names (`userId` / `createdBy` / `respondentUserId`) is
+ *     a real source rather than merely excluded, that each source's `fetch`
+ *     matches on the right column, and that credential material is omitted.
+ *
+ * Keep both. Losing this one would let every app table be waved through as an
+ * `excluded` row with a plausible sentence, which the platform guard accepts by
+ * design — it cannot read our column vocabulary, which is the reason it asks for
+ * a declaration on every model instead of guessing.
  *
  * Why it is a build failure and not a review checklist is the same reason as
  * upstream: an export that omits a table looks exactly like a complete answer
