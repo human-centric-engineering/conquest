@@ -167,7 +167,7 @@ describe('resolveLayout', () => {
   });
 
   it.each([
-    ['an unknown name', 'horizon'],
+    ['an unknown name', 'kiosk'],
     ['an empty string', ''],
     ['null', null],
     ['undefined', undefined],

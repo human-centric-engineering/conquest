@@ -25,16 +25,18 @@
  *
  * Pure: no React, no Prisma, no DOM. The keys are a vocabulary, not components.
  *
- * GRANULARITY NOTE. The keys below describe the parts as they are *actually composable today*.
- * `conversation` was ONE slot until Broadsheet arrived and wanted the composer in the margin; it is
- * now `transcript` + `composer`, and the split landed with the layout that needed it rather than
- * speculatively ahead of it. Doing it that way was cheap exactly as designed: the `satisfies` gate
- * failed the build until Classic and Focus had each re-classified both halves, so no layout could
- * quietly inherit an arrangement nobody had thought about.
+ * GRANULARITY NOTE. The keys below describe the parts as they are *actually composable today*, and
+ * they have split twice, each time with the layout that needed it rather than speculatively ahead
+ * of it:
  *
- * The next candidate is the same shape. A one-question-at-a-time layout (Horizon) needs the
- * transcript itself divisible — the current turn apart from the history behind it — and that lands
- * with Horizon, not here.
+ *   - `conversation` → `transcript` + `composer`, with Broadsheet, which wanted the answer box held
+ *     in the margin while the document scrolls.
+ *   - `transcript` → `history` + `currentExchange`, with Horizon, which shows one question at a
+ *     time and therefore needs the live exchange apart from everything behind it.
+ *
+ * Both times the cost was exactly what the design predicted: the `satisfies` gate failed the build
+ * until every existing layout had re-classified both halves, so none of them could quietly inherit
+ * an arrangement nobody had thought about. That break is the mechanism working, not a chore.
  */
 
 /**
@@ -82,19 +84,44 @@ export const RESPONDENT_SLOTS = [
 
   /* ── The work itself ──────────────────────────────────────────────────────── */
   /**
-   * The conversation as it reads: turns, reasoning traces, side-band notices, the question card and
-   * the inline correction strip. Scrolls internally; draws no card chrome of its own, so whichever
-   * layout places it supplies the frame.
+   * The pre-release transparency notice — "while ConQuest is in beta your chats are recorded".
+   *
+   * A slot of its own rather than part of the conversation, and that is not tidiness. It used to
+   * ride at the head of the transcript, which was harmless while every layout showed the whole
+   * transcript at once; the moment a layout could put the history behind a gesture (Horizon), the
+   * notice would have gone behind it too, and a recording notice one tap out of sight is not a
+   * notice. Renders nothing once the product is `stable`, and nothing in the read-only admin
+   * replay — the admin is not the recorded party.
+   */
+  'releaseNotice',
+  /**
+   * Everything BEHIND the current exchange: this leg's settled turns, and any earlier Experience
+   * legs replayed above them under `stitched` continuity. Nothing here animates.
+   *
+   * Separate from `currentExchange` since Horizon, which shows one question at a time and holds
+   * this behind a gesture. Every other layout stacks the two in one reading column, where the
+   * boundary between them is invisible — `TranscriptColumn` is that shared arrangement.
+   */
+  'history',
+  /**
+   * The live end of the conversation: the respondent's most recent message, everything the
+   * interviewer has said since, the reply still typing itself in, the question card belonging to
+   * the current question and the inline correction strip.
+   *
+   * A whole exchange rather than the last interviewer turn alone, because a question read without
+   * the answer it followed is a question out of context — and because the opening burst has no
+   * respondent message at all, so anchoring on one keeps the greeting and the first question
+   * together. See `lib/app/questionnaire/chat/exchange.ts`.
    *
    * Note that the question card lives here rather than with `composer`, even though it is an
    * input: it belongs to the turn it answers, and moving it away from that turn would ask the
    * respondent to answer a question they can no longer see.
    */
-  'transcript',
+  'currentExchange',
   /**
    * Where the respondent writes: the input, voice, attachments and send. A separate slot since
-   * Broadsheet, which puts it in a margin beside the transcript rather than beneath it, so that it
-   * stays put while the conversation scrolls.
+   * Broadsheet, which puts it in a margin beside the conversation rather than beneath it, so that
+   * it stays put while the conversation scrolls.
    *
    * Stacking it back under the transcript is the common case and is NOT open-coded per layout —
    * `ConversationFrame` is the shared arrangement, and it owns the hairline seam between the two
@@ -163,21 +190,31 @@ export type SlotPlacement =
  * Slots no layout may omit.
  *
  * The test is not "is it important" — everything here is important — but "can the respondent
- * finish, correctly, without it". Without the transcript there is no question to read and without
- * the composer no way to answer it — and note that BOTH are required even though a layout could
- * technically hide one behind a gesture: `overlay` is legal for either, `omitted` is not, because a
- * conversation with half of itself deleted is not an arrangement, it is a broken session. Without
- * the completion offer they cannot submit; without the gates a blocking capture
- * or an intro the author configured silently never appears; without `complete` a finished session
- * has nowhere to land. `answersPanel` is NOT here: `answerSlotPanelScope: 'hidden'` is a supported
- * configuration today, and a layout may legitimately move review behind a gesture.
+ * finish, correctly, without it". Without the current exchange there is no question to read and
+ * without the composer no way to answer it; without the history they cannot check what they already
+ * said, which is how a long questionnaire is answered consistently. Note that all three are
+ * required even though a layout could technically hide one behind a gesture: `overlay` is legal for
+ * any of them, `omitted` is not, because a conversation with half of itself deleted is not an
+ * arrangement, it is a broken session. Without the completion offer they cannot submit; without the
+ * gates a blocking capture or an intro the author configured silently never appears; without
+ * `complete` a finished session has nowhere to land.
+ *
+ * `releaseNotice` is here on the strength of the word "correctly": a session completed by someone
+ * who was never told it was being recorded is not a correct one, whatever else went right. It is
+ * the only entry that is a *disclosure* rather than a mechanism, and it stays until the product
+ * ships `stable` and the notice renders nothing anywhere.
+ *
+ * `answersPanel` is NOT here: `answerSlotPanelScope: 'hidden'` is a supported configuration today,
+ * and a layout may legitimately move review behind a gesture.
  *
  * A slot that is conditional on config (a splash only exists when the intro is enabled) still
  * belongs here: the rule is about the layout's willingness to place it, not about whether this
  * particular session has one.
  */
 export const ESSENTIAL_SLOTS = [
-  'transcript',
+  'releaseNotice',
+  'history',
+  'currentExchange',
   'composer',
   'formView',
   'completionOffer',

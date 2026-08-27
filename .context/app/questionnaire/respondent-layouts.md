@@ -20,14 +20,15 @@ was fine while there was one. The moment a second exists, two things go wrong on
 
 ## The parts
 
-| Part            | File                                                          | Role                                                           |
-| --------------- | ------------------------------------------------------------- | -------------------------------------------------------------- |
-| Slot vocabulary | `lib/app/questionnaire/layout/slots.ts`                       | The named parts, the placement types, the essential set        |
-| Behaviour       | `lib/hooks/use-session-workspace.ts`                          | Every hook, gate and piece of session state. Headless.         |
-| Container       | `components/app/questionnaire/session-workspace.tsx`          | Runs the hook, handles takeovers, builds slot nodes, delegates |
-| Layouts         | `components/app/questionnaire/layouts/*-layout.tsx`           | Arrangement, and nothing else                                  |
-| Registry        | `components/app/questionnaire/layouts/registry.ts`            | Name → definition, plus the placement declarations             |
-| Shared pieces   | `layouts/surface-carousel.tsx`, `chat/conversation-frame.tsx` | Arrangement a layout reuses rather than re-derives             |
+| Part            | File                                                                                        | Role                                                           |
+| --------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Slot vocabulary | `lib/app/questionnaire/layout/slots.ts`                                                     | The named parts, the placement types, the essential set        |
+| Behaviour       | `lib/hooks/use-session-workspace.ts`                                                        | Every hook, gate and piece of session state. Headless.         |
+| Container       | `components/app/questionnaire/session-workspace.tsx`                                        | Runs the hook, handles takeovers, builds slot nodes, delegates |
+| Layouts         | `components/app/questionnaire/layouts/*-layout.tsx`                                         | Arrangement, and nothing else                                  |
+| Registry        | `components/app/questionnaire/layouts/registry.ts`                                          | Name → definition, plus the placement declarations             |
+| Conversation    | `chat/chat-history.tsx`, `chat/current-exchange.tsx`                                        | The two halves of what was one transcript                      |
+| Shared pieces   | `layouts/surface-carousel.tsx`, `chat/conversation-frame.tsx`, `chat/transcript-column.tsx` | Arrangement a layout reuses rather than re-derives             |
 
 A layout receives `{ slots, state }` and returns JSX. It never constructs a feature, never touches
 a hook, never learns what a session is. So it **cannot break a feature, only misplace one** — and
@@ -47,10 +48,15 @@ shipped silent omissions here.
 **2. The essential set.** `ESSENTIAL_SLOTS` may never be `omitted`, by any layout. The test is not
 "is this important" — everything is — but "can the respondent finish, correctly, without it".
 `answersPanel` is deliberately **not** essential: `answerSlotPanelScope: 'hidden'` is a supported
-configuration today, and a layout may legitimately move review behind a gesture. `transcript` and
-`composer` both **are**, even though a layout could technically hide one behind a gesture: `overlay`
-is legal for either, `omitted` is not, because a conversation with half of itself deleted is not an
-arrangement.
+configuration today, and a layout may legitimately move review behind a gesture. `history`,
+`currentExchange` and `composer` all **are**, even though a layout could technically hide one behind
+a gesture: `overlay` is legal for any of them (Horizon holds the history there), `omitted` is not,
+because a conversation with part of itself deleted is not an arrangement.
+
+`releaseNotice` is the one entry that is a _disclosure_ rather than a mechanism, and it is there on
+the strength of the word "correctly": a session completed by someone who was never told it was being
+recorded is not a correct one, whatever else went right. It became a slot at all because of Horizon
+— see below.
 
 **3. The tests.** A declaration can drift from the JSX beside it, and a declaration that drifts is
 worse than none — it reads like a guarantee. `registry.test.tsx` renders each layout with a
@@ -117,6 +123,12 @@ Two pieces of arrangement are declared once and reused by every layout that want
   Extracted at the third layout, not the second: two copies of a block this subtle are watchable,
   three is where one of them loses the `overflow-clip` and a stray `scrollIntoView` starts dragging
   the whole track sideways. A layout still supplies `surfaceFor`, so it owns everything visible.
+- **`TranscriptColumn`** (`chat/transcript-column.tsx`) — the reading column itself: the scrolling
+  box, its padding, `.cq-chat-scale`, `.cq-chat-measure`, and the rhythm between the blocks in it.
+  Extracted with the second split, when four layouts would otherwise each have declared it — which
+  is how one of them ends up with a different measure, or forgets `.cq-chat-scale` and quietly stops
+  honouring the text-size stepper. It takes children rather than named slots on purpose: naming the
+  parts would fix their ORDER too, and the order is the layout's to state.
 - **`ConversationFrame`** (`chat/conversation-frame.tsx`) — the transcript and the composer stacked
   in one card, which is what `conversation` used to be. Classic, Focus and the read-only replay all
   want exactly that. It also owns the hairline seam between the two, because the seam belongs to the
@@ -128,10 +140,13 @@ Neither builds a feature, fetches anything, or reads session state — they take
 position them. That is arrangement, shared, and it is the opposite of the thing the contract
 forbids (a layout constructing a feature for itself).
 
-## The conversation is two slots
+## The conversation is four slots
 
-`transcript` and `composer`, since Broadsheet. They are the one pair that genuinely needs care,
-because they share a clock:
+`releaseNotice`, `history`, `currentExchange` and `composer` — where there was one `conversation`
+until Broadsheet, and one `transcript` until Horizon. Three things about that need saying out loud,
+because each one is a place a plausible-looking change would break a respondent's session.
+
+### The composer shares a clock with the exchange
 
 > The composer must stay shut until **both** the HTTP stream has closed **and** the transcript's
 > reveal queue has finished typing the reply in. Gating on `canSend` alone re-opens the box
@@ -144,15 +159,51 @@ with no common ancestor between them, so the shared state rides `ConversationPro
 there: so no layout has to remember it.
 
 The provider carries only what genuinely cannot be derived twice — the reveal cursor, `composerReady`,
-`isTerminal` and the wait cue. Everything else stays a prop (`glossary` and the reasoning placement
-belong to the transcript; the voice and attachment flags to the composer), because a context that
-also carries those becomes a second, competing props channel and costs the type-checking that
-catches a missing one. `useConversation` **throws** without a provider rather than defaulting: a
-composer that silently decided it was ready would open mid-reveal, which is the precise failure the
-queue exists to prevent.
+`isTerminal`, the wait cue, and (since Horizon) `historyEnd`. Everything else stays a prop
+(`glossary` and the reasoning placement belong to the history and the exchange; the voice and
+attachment flags to the composer), because a context that also carries those becomes a second,
+competing props channel and costs the type-checking that catches a missing one. `useConversation`
+**throws** without a provider rather than defaulting: a composer that silently decided it was ready
+would open mid-reveal, which is the precise failure the queue exists to prevent.
 
 `tests/unit/components/app/questionnaire/chat/conversation-split.test.tsx` mounts the two as
 unrelated siblings and asserts the gate still crosses between them.
+
+### Where the history ends and the exchange begins
+
+An exchange is **the respondent's most recent message and everything the interviewer has said
+since** — not the last interviewer turn alone. Two reasons, both visible only in Horizon:
+
+- A question read without the answer it followed is a question out of context.
+- The opening burst has no respondent message at all (a greeting and the first question arrive as
+  two assistant turns), so anchoring on the last user turn resolves to `0` and keeps the whole burst
+  current. Nothing is stranded in a history the respondent has not made yet.
+
+`currentExchangeStart` (`lib/app/questionnaire/chat/exchange.ts`) is pure and would happily be
+derived twice — which is why it is a function rather than provider state. But the value the halves
+actually read, `historyEnd`, is that function **clamped to the reveal cursor**, and that clamp is
+load-bearing:
+
+> The answer panel's Revisit and Refine both send a turn on `canSend`, which is true a beat before
+> the reply above has finished revealing. Unclamped, the still-typing turn would be moved into the
+> history under it, unmount mid-reveal, and never fire the `onDone` that advances the queue —
+> leaving `composerReady` false for the rest of the session. A composer shut for good, with nothing
+> on screen to explain it.
+
+Clamped, the turn simply stays in the current exchange until it has finished, and crosses over
+settled. `transcript-split.test.tsx` mounts the halves as unrelated siblings and asserts both the
+cut (every turn rendered exactly once) and the clamp.
+
+### Why the recording notice is its own slot
+
+It used to ride at the head of the transcript, which was harmless while every layout showed the
+whole transcript at once. Horizon folds the history behind a gesture — and the notice would have
+gone behind it, on the first screen, for every respondent. A "your conversation is being recorded"
+notice one tap out of sight is not a notice.
+
+So it became `releaseNotice`, and an essential slot. It renders nothing once the product ships
+`stable`, at which point the slot can go — but a slot that disappears cleanly is a much better
+problem than a disclosure that disappears quietly.
 
 ## Placement vocabulary
 
@@ -189,9 +240,12 @@ conversation, not the respondent's completion screen.
 
 1. Add its name to `RESPONDENT_LAYOUTS` in `lib/app/questionnaire/types.ts`. **The tuple grows only
    as layouts land** — a name with no entry in the registry is a compile error, which is exactly
-   what stops a setting offering a blank surface. (`registry.test.tsx` and
-   `respondent-layout-default.test.ts` each use the name of the _next_ designed layout as their
-   "unknown value" example, so check whether the one you are adding is that name.)
+   what stops a setting offering a blank surface. (`registry.test.tsx`,
+   `respondent-layout-default.test.ts`, `anonymity.test.ts` and `session-workspace.test.tsx` each
+   use a not-yet-real layout name — currently `'kiosk'` — as their "unknown value" example, so check
+   whether the one you are adding is that name. This is not hypothetical bookkeeping: `'broadsheet'`
+   was left in one of them when Broadsheet shipped, and that test spent a phase asserting that a
+   real layout resolves to Classic.)
 2. Add its label + description to `lib/app/questionnaire/layout/catalog.ts`.
 3. Write `components/app/questionnaire/layouts/<name>-layout.tsx`. Read `slots` and `state`; fetch
    nothing.
@@ -260,20 +314,50 @@ This is the layout the slot split was made for, and it could not have been writt
 without reaching inside `QuestionnaireChat` and re-deriving the reveal-queue gate — the second
 derivation the whole contract exists to prevent.
 
+### Horizon
+
+One question at a time. The current exchange — the respondent's last answer and everything the
+interviewer has said since — sits alone on a centred stage, and everything before it folds into an
+**"Earlier in this conversation"** disclosure above. The composer stays welded to the foot of the
+stage, as in Classic: there is never enough on screen here for it to scroll away from anyone.
+
+It exists for the case the other three make worse rather than better — a long questionnaire, or
+demanding questions, or a phone on a train — where the accumulated scroll-back is not context but a
+wall of text between the respondent and what they are being asked now. Focus narrows that wall;
+Horizon puts it away.
+
+Three things about it are worth stating, because each one is a decision rather than a detail:
+
+- **The disclosure is a native `<details>`**, not state this layout keeps. A layout owns arrangement
+  and nothing else, and "is the history open" is the kind of thing that grows into a hook, then a
+  gate, then a second copy of behaviour. The element that already does it costs nothing and brings
+  keyboard, screen-reader and find-in-page support with it.
+- **`history` is `overlay` via `gesture`, not `omitted`.** One tap away is available; that is the
+  same argument Focus makes about the answers panel, and it is why `history` can be an essential
+  slot at all. The container hands over `history: null` when there is nothing behind the exchange,
+  so the disclosure is never offered onto nothing.
+- **The measure is left alone** — no `--cq-chat-measure` of its own, unlike Focus (38rem) and
+  Broadsheet (52rem). Horizon's argument is about how much is on screen, not how wide the line is,
+  and setting a value would imply the two are connected.
+
+`answersPanel` is `omitted` for a third distinct reason: a running list of every answer captured so
+far is precisely the accumulation this layout exists to fold away. Review stays one tap into the
+sheet at every width, which is why the review trigger loses Classic's `lg:hidden` here too.
+
 ## Known granularity limits
 
-**The transcript is still one slot.** It covers the turns, reasoning traces, notices, question card
-and correction strip together. A one-question-at-a-time layout (Horizon) needs the current turn
-apart from the history behind it, so that split lands with Horizon — the same way `transcript` /
-`composer` landed with Broadsheet rather than ahead of it. When it does, the `satisfies` gate forces
-every existing layout to re-classify, which is the mechanism working rather than a migration to
-dread.
+**The current exchange is still one slot.** It covers the live turns, their reasoning traces and
+notices, the question card and the correction strip together. That is fine for every layout so far;
+the first one that wants (say) the question card docked somewhere the turn is not will split it, the
+same way `transcript` split for Horizon and `conversation` split for Broadsheet — with the layout
+that needs it, not ahead of it.
 
 **The lifecycle strip cannot yet be decomposed.** `lifecycleBar` is deliberately not essential so a
 layout can omit it and place the atoms instead — but pause / resume and the lifecycle action errors
 live only inside the composed strip and have no slot of their own. A layout that dropped the bar
-today would drop them silently, so every layout so far renders it, Broadsheet included, and says so
-in its placement map. The atoms land with the first layout that genuinely cannot use the strip.
+today would drop them silently, so every layout so far renders it — Horizon included, which is the
+likeliest candidate to want the atoms one day — and says so in its placement map. The atoms land
+with the first layout that genuinely cannot use the strip.
 
 **`brandBand` is declared but drawn elsewhere** — by the page's `BrandThemeProvider`, above the
 workspace. Extracting it so a layout can substitute its own masthead belongs with the first layout

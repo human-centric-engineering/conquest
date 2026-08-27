@@ -21,6 +21,11 @@
  *     reading, which is the bug this gate exists to prevent.
  *   - **`isTerminal`** and the wait cue, so a terminal session cannot end up with one half
  *     believing the conversation is over and the other still offering input.
+ *   - **`historyEnd`**, the boundary between the settled history and the live exchange, added when
+ *     `transcript` split in two for Horizon. Where the boundary SITS is a pure function of `turns`
+ *     (`currentExchangeStart`) and would happily be derived twice — but it has to be clamped to the
+ *     reveal cursor, which is state, and the two halves disagreeing about it is not a cosmetic
+ *     fault: see the clamp below.
  *
  * Everything else stays a prop. `glossary`, the reasoning placement, `correctionTargets` and the
  * stitched history belong to the transcript alone; the voice and attachment flags belong to the
@@ -30,6 +35,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
+import { currentExchangeStart } from '@/lib/app/questionnaire/chat/exchange';
 import { isTerminalStatus } from '@/lib/app/questionnaire/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 
@@ -60,6 +66,12 @@ export interface ConversationContextValue {
   isTerminal: boolean;
   /** Why the composer is held shut, when it is held shut for a non-terminal reason. */
   composerHint: string;
+  /**
+   * The first turn of the CURRENT exchange — equivalently, how many turns belong to the history
+   * behind it. `ChatHistory` renders `turns` below this index and `CurrentExchange` renders from it
+   * up, so one number keeps them from either double-rendering a turn or dropping one.
+   */
+  historyEnd: number;
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null);
@@ -98,6 +110,16 @@ export function ConversationProvider({
   // to settle before any input affordance opens.
   const revealPending = revealCursor < turns.length;
 
+  // The exchange boundary, clamped so it can never overtake the reveal queue.
+  //
+  // Without the clamp a turn still typing itself in could be moved into the history under it — the
+  // panel's Revisit and Refine both send a turn on `canSend`, which is true a beat before the reply
+  // has finished revealing. The revealing turn would unmount, its `onDone` would never fire,
+  // `revealCursor` would never advance, and `composerReady` would stay false for the rest of the
+  // session: a composer shut for good, with nothing on screen to explain it. Clamped, the turn
+  // simply stays in the current exchange until it has finished, and crosses over settled.
+  const historyEnd = Math.min(currentExchangeStart(turns), revealCursor);
+
   const value: ConversationContextValue = {
     revealCursor,
     advanceReveal: (index) => setRevealCursor((c) => Math.max(c, index + 1)),
@@ -106,6 +128,7 @@ export function ConversationProvider({
     composerReady: canSend && !revealPending,
     isTerminal: isTerminalStatus(status),
     composerHint: streaming ? 'Waiting for a reply…' : 'Revealing the reply…',
+    historyEnd,
   };
 
   return <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>;

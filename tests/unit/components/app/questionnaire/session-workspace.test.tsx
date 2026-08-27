@@ -19,6 +19,7 @@ import { createMockRouter } from '@/tests/types/mocks';
 
 import type { PanelSlotView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
 import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
+import type { RespondentLayout } from '@/lib/app/questionnaire/types';
 
 const sendMessage = vi.fn();
 const applyStatus = vi.fn();
@@ -99,12 +100,15 @@ vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
     <div data-testid="chat" data-read-only={String(Boolean(readOnly))} />
   ),
 }));
-// The active surface builds the conversation as two independently-placeable slots. Stubbed
-// separately so the tests can see which of the two the workspace actually handed to the layout —
-// the composer is `null` on a terminal session, and that is a decision made here rather than
-// inside the composer.
-vi.mock('@/components/app/questionnaire/chat/chat-transcript', () => ({
-  ChatTranscript: () => <div data-testid="chat" />,
+// The active surface builds the conversation as independently-placeable slots. Stubbed separately
+// so the tests can see which of them the workspace actually handed to the layout — the composer is
+// `null` on a terminal session and the history is `null` until there IS one, and both of those are
+// decisions made here rather than inside the components.
+vi.mock('@/components/app/questionnaire/chat/chat-history', () => ({
+  ChatHistory: () => <div data-testid="chat-history" />,
+}));
+vi.mock('@/components/app/questionnaire/chat/current-exchange', () => ({
+  CurrentExchange: () => <div data-testid="chat" />,
 }));
 vi.mock('@/components/app/questionnaire/chat/chat-composer', () => ({
   // `fillHeight` is surfaced because deriving it from the layout's `placements.composer.fills` is
@@ -1841,7 +1845,7 @@ describe('SessionWorkspace', () => {
  * re-deciding, which is what stops the two drifting apart.
  */
 describe('respondent layout', () => {
-  function renderWithLayout(layout: 'classic' | 'focus' | 'broadsheet') {
+  function renderWithLayout(layout: RespondentLayout) {
     streamHook.mockReturnValue({
       turns: [],
       canSend: true,
@@ -1915,7 +1919,9 @@ describe('respondent layout', () => {
   });
 
   it('falls back to Classic when the stored layout is unrecognised', () => {
-    // A rollback leaves rows naming layouts this build has never heard of. The surface must render.
+    // A rollback leaves rows naming layouts this build has never heard of. The surface must render
+    // — and render CLASSIC, which is why the assertion is on the answer panel: it is the one part
+    // only Classic places on screen. The example name must therefore be one no build registers.
     streamHook.mockReturnValue({
       turns: [],
       canSend: true,
@@ -1930,7 +1936,7 @@ describe('respondent layout', () => {
       <SessionWorkspace
         sessionId="s1"
         presentationMode="chat"
-        respondentLayout={'horizon' as never}
+        respondentLayout={'kiosk' as never}
       />
     );
     expect(screen.queryByTestId('panel')).not.toBeNull();
@@ -1963,18 +1969,59 @@ describe('respondent layout', () => {
     expect(screen.getByTestId('composer')).toHaveAttribute('data-fill-height', 'true');
     cleanup();
 
-    for (const layout of ['classic', 'focus'] as const) {
+    for (const layout of ['classic', 'focus', 'horizon'] as const) {
       renderWithLayout(layout);
       expect(screen.getByTestId('composer'), layout).toHaveAttribute('data-fill-height', 'false');
       cleanup();
     }
   });
 
+  it('hands the layout NO history until there is one', () => {
+    // `null` rather than an empty node, because a layout that puts the history behind a gesture
+    // (Horizon) must not offer the gesture when it would open onto nothing. A fresh session's
+    // opening burst is all current exchange: a greeting and the first question, with no respondent
+    // message before them.
+    streamHook.mockReturnValue({
+      turns: [
+        { role: 'assistant', content: 'Welcome.' },
+        { role: 'assistant', content: 'What brought you here?' },
+      ],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+    expect(screen.queryByTestId('chat-history')).toBeNull();
+    cleanup();
+
+    // ...and hands one over the moment the respondent has said something.
+    streamHook.mockReturnValue({
+      turns: [
+        { role: 'assistant', content: 'Welcome.' },
+        { role: 'user', content: 'I run a bakery.' },
+        { role: 'assistant', content: 'What made you start?' },
+      ],
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+    expect(screen.getByTestId('chat-history')).toBeInTheDocument();
+  });
+
   it('hands every layout NO composer once the session is terminal', () => {
     // Decided in the container, not inside the composer, so a layout receives a real `null` and can
     // leave out the frame around it — a bordered rail wrapping an invisible box, or a hairline seam
     // under nothing, is what the alternative looks like.
-    for (const layout of ['classic', 'focus', 'broadsheet'] as const) {
+    for (const layout of ['classic', 'focus', 'broadsheet', 'horizon'] as const) {
       streamHook.mockReturnValue({
         turns: [],
         canSend: false,
@@ -1989,7 +2036,7 @@ describe('respondent layout', () => {
       panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
       lifecycleHook.mockReturnValue(lifecycleReturn());
       render(<SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />);
-      expect(screen.queryByTestId('chat'), `${layout} lost the transcript`).not.toBeNull();
+      expect(screen.queryByTestId('chat'), `${layout} lost the conversation`).not.toBeNull();
       expect(screen.queryByTestId('composer'), `${layout} kept a composer`).toBeNull();
       cleanup();
     }

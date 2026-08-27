@@ -39,6 +39,11 @@ export const RESPONDENT_LAYOUT_META: Record<RespondentLayout, RespondentLayoutMe
     description:
       'The conversation reads as a document, with the answer box held still in the margin beside it instead of moving with the text. Good for long questions people need to read and re-read, on a laptop or larger.',
   },
+  horizon: {
+    label: 'Horizon',
+    description:
+      'One question at a time, with everything already answered folded away above it. Good for long questionnaires, demanding questions, and anyone answering on a phone.',
+  },
 };
 
 /** Just the labels, for the places that show a name without room for the description. */

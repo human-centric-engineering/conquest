@@ -23,6 +23,7 @@
 import type { CSSProperties } from 'react';
 
 import { ConversationFrame } from '@/components/app/questionnaire/chat/conversation-frame';
+import { TranscriptColumn } from '@/components/app/questionnaire/chat/transcript-column';
 import { SurfaceCarousel } from '@/components/app/questionnaire/layouts/surface-carousel';
 import type { RespondentLayoutProps } from '@/components/app/questionnaire/layouts/types';
 import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
@@ -40,15 +41,21 @@ const FOCUS_MEASURE: CSSProperties & Record<'--cq-chat-measure', string> = {
 };
 
 export function FocusLayout({ slots, state }: RespondentLayoutProps) {
-  // No panel track at any width — the conversation simply takes the column. Its two halves stay
-  // stacked in one card, exactly as in Classic: Focus narrows the measure, it does not relocate the
-  // composer (that is Broadsheet's move, with the same two slots).
+  // No panel track at any width — the conversation simply takes the column. Its parts stay stacked
+  // in one card, exactly as in Classic: Focus narrows the measure, it does not relocate the composer
+  // (Broadsheet's move) or fold the history away (Horizon's).
   const chatSurface = (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {slots.completionOffer}
       <ConversationFrame
         className="min-h-0 flex-1"
-        transcript={slots.transcript}
+        transcript={
+          <TranscriptColumn>
+            {slots.releaseNotice}
+            {slots.history}
+            {slots.currentExchange}
+          </TranscriptColumn>
+        }
         composer={slots.composer}
       />
     </div>

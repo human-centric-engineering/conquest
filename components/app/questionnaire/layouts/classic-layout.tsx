@@ -24,6 +24,7 @@
 import { cn } from '@/lib/utils';
 import { RESPONDENT_SPLIT } from '@/lib/app/questionnaire/layout';
 import { ConversationFrame } from '@/components/app/questionnaire/chat/conversation-frame';
+import { TranscriptColumn } from '@/components/app/questionnaire/chat/transcript-column';
 import { SurfaceCarousel } from '@/components/app/questionnaire/layouts/surface-carousel';
 import type { RespondentLayoutProps } from '@/components/app/questionnaire/layouts/types';
 import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
@@ -34,16 +35,24 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
   // The conversation column: the submit/finish affordance above the transcript. Takes the full
   // height only when there is no panel beside it — with a panel, the grid track governs.
   //
-  // `transcript` and `composer` are separate slots so that a layout CAN put them apart; Classic
-  // does not, so it stacks them back into the single card they have always shared. The card, and
-  // the hairline seam between the two, come from `ConversationFrame` rather than being drawn here,
-  // so Classic and Focus cannot drift apart on a detail neither of them means to own.
+  // The conversation's parts are four separate slots so that a layout CAN put them apart; Classic
+  // does not, so it stacks them back into the single card they have always shared: the notice at the
+  // head, the history behind the current exchange, the answer box beneath both. The reading column
+  // comes from `TranscriptColumn` and the card and its hairline seam from `ConversationFrame`,
+  // rather than being drawn here, so the layouts that share this arrangement cannot drift apart on a
+  // detail none of them means to own.
   const chatColumn = (
     <div className={cn('flex min-h-0 flex-col gap-3', !showPanel && 'h-full')}>
       {slots.completionOffer}
       <ConversationFrame
         className="min-h-0 flex-1"
-        transcript={slots.transcript}
+        transcript={
+          <TranscriptColumn>
+            {slots.releaseNotice}
+            {slots.history}
+            {slots.currentExchange}
+          </TranscriptColumn>
+        }
         composer={slots.composer}
       />
     </div>

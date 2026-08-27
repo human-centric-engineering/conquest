@@ -39,7 +39,8 @@ describe('RESPONDENT_SLOTS', () => {
     // Spot-check rather than a frozen snapshot: the list is meant to grow, but losing any of these
     // would mean a feature stopped being placeable at all.
     for (const key of [
-      'transcript',
+      'history',
+      'currentExchange',
       'composer',
       'answersPanel',
       'completionOffer',
@@ -50,13 +51,16 @@ describe('RESPONDENT_SLOTS', () => {
     }
   });
 
-  it('keeps the conversation divisible into a transcript and a composer', () => {
-    // The granularity Broadsheet needs. Collapsing these back into one key would not fail a type
-    // check anywhere — every layout would simply place the pair — so the loss would be silent, and
-    // the next layout that wants the composer elsewhere would have to redo the split.
-    expect(RESPONDENT_SLOTS).toContain('transcript');
+  it('keeps the conversation divisible into its parts', () => {
+    // The granularity Broadsheet and Horizon need. Collapsing any of these back into one key would
+    // not fail a type check anywhere — every layout would simply place the merged part — so the
+    // loss would be silent, and the next layout that wants one of them elsewhere would have to redo
+    // the split.
+    expect(RESPONDENT_SLOTS).toContain('history');
+    expect(RESPONDENT_SLOTS).toContain('currentExchange');
     expect(RESPONDENT_SLOTS).toContain('composer');
     expect(RESPONDENT_SLOTS).not.toContain('conversation');
+    expect(RESPONDENT_SLOTS).not.toContain('transcript');
   });
 });
 
@@ -93,7 +97,9 @@ describe('isAvailable', () => {
   });
 
   it('treats an omission as unavailable', () => {
-    expect(isAvailable({ kind: 'omitted', because: 'no transcript in this layout' })).toBe(false);
+    expect(isAvailable({ kind: 'omitted', because: 'no answers panel in this layout' })).toBe(
+      false
+    );
   });
 });
 
@@ -110,11 +116,31 @@ describe('missingEssentialSlots', () => {
 
   it('names the essential slot a layout dropped', () => {
     const placements = allPlaced();
-    placements.transcript = { kind: 'omitted', because: 'oops' };
-    expect(missingEssentialSlots(placements)).toEqual(['transcript']);
+    placements.currentExchange = { kind: 'omitted', because: 'oops' };
+    expect(missingEssentialSlots(placements)).toEqual(['currentExchange']);
   });
 
-  it('refuses a layout that keeps the transcript but drops the composer', () => {
+  it('refuses a layout that keeps the current exchange but drops the history', () => {
+    // The failure the second split makes newly possible. Showing only the live question is a
+    // legitimate shape — it is Horizon — but only because the history stays one gesture away;
+    // dropping it outright leaves a respondent unable to check what they have already said, which
+    // is how a long questionnaire is answered consistently.
+    const placements = allPlaced();
+    placements.history = { kind: 'omitted', because: 'one question at a time' };
+    expect(missingEssentialSlots(placements)).toEqual(['history']);
+  });
+
+  it('refuses a layout that drops the recording notice', () => {
+    // The only entry in the essential set that is a disclosure rather than a mechanism. A session
+    // completed by someone never told it was being recorded is not a correct one, whatever else
+    // went right — and folding it away with the history is exactly what a one-question layout would
+    // otherwise have done.
+    const placements = allPlaced();
+    placements.releaseNotice = { kind: 'omitted', because: 'no room on the stage' };
+    expect(missingEssentialSlots(placements)).toEqual(['releaseNotice']);
+  });
+
+  it('refuses a layout that keeps the conversation but drops the composer', () => {
     // The failure the split makes newly possible: before it, omitting the composer meant omitting
     // the whole conversation, which no author would do by accident. Now it is one line in a
     // placement map, and a respondent with nothing to type into cannot finish.

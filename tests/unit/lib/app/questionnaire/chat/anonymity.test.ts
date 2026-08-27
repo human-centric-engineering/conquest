@@ -81,8 +81,10 @@ describe('resolveRespondentLayoutForVersion', () => {
   it('falls back to classic for a layout this build does not know', async () => {
     // The rollback case, and the reason this boundary is forgiving where the PATCH validator is
     // strict: a row naming a layout that no longer exists must render Classic, not nothing.
+    // The example name has to be one no build registers — it was 'broadsheet' until Broadsheet
+    // shipped, at which point this quietly started asserting that a real layout resolves to Classic.
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
-      config: { respondentLayout: 'broadsheet' },
+      config: { respondentLayout: 'kiosk' },
     } as never);
 
     await expect(resolveRespondentLayoutForVersion('ver-abc')).resolves.toBe('classic');

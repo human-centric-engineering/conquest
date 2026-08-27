@@ -30,7 +30,9 @@ import { ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
-import { ChatTranscript } from '@/components/app/questionnaire/chat/chat-transcript';
+import { ChatHistory } from '@/components/app/questionnaire/chat/chat-history';
+import { CurrentExchange } from '@/components/app/questionnaire/chat/current-exchange';
+import { ReleaseStageNotice } from '@/components/app/questionnaire/chat/release-stage-notice';
 import { ChatComposer } from '@/components/app/questionnaire/chat/chat-composer';
 import { ConversationProvider } from '@/components/app/questionnaire/chat/conversation-context';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
@@ -58,6 +60,7 @@ import { StitchedContinuation } from '@/components/app/questionnaire/experiences
 import { VIEW_META } from '@/components/app/questionnaire/layouts/view-meta';
 import { resolveLayout } from '@/components/app/questionnaire/layouts/registry';
 import type { RespondentSlots } from '@/components/app/questionnaire/layouts/types';
+import { hasConversationHistory } from '@/lib/app/questionnaire/chat/exchange';
 import { stepScaleIndex } from '@/lib/app/questionnaire/chat/text-scale';
 import { useSessionWorkspace, type WorkspaceView } from '@/lib/hooks/use-session-workspace';
 import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
@@ -594,14 +597,35 @@ export function SessionWorkspace({
         />
       ) : null,
 
-    // The conversation, as two independently-placeable halves. Stacking them back into one card is
-    // the common case and belongs to `ConversationFrame`, which Classic and Focus both use — the
-    // split exists for Broadsheet, which runs the transcript as a document and the composer in the
-    // margin beside it. Their shared timing (the reveal queue, and the `composerReady` gate it
-    // feeds) travels through the `ConversationProvider` mounted above the layout below, since the
-    // two may now have no closer common ancestor.
-    transcript: (
-      <ChatTranscript
+    // The conversation, as independently-placeable parts. Stacking them back into one reading
+    // column inside one card is the common case and belongs to `TranscriptColumn` and
+    // `ConversationFrame` — the splits exist for Broadsheet (composer in the margin) and Horizon
+    // (history folded behind a gesture), not so that every layout must re-arrange them. Their shared
+    // timing — the reveal queue, the `composerReady` gate it feeds, and the boundary between the
+    // history and the live exchange — travels through the `ConversationProvider` mounted above the
+    // layout below, since the parts may have no closer common ancestor.
+
+    // A slot of its own since Horizon, which folds the history away: a recording notice folded away
+    // with it would not be a notice. `null` in the read-only admin replay — the admin is not the
+    // recorded party — and the component itself renders nothing once the product is `stable`.
+    releaseNotice: readOnly ? null : <ReleaseStageNotice />,
+
+    // `null` when there is nothing behind the current exchange — a fresh session's opening burst is
+    // all current exchange, and a stitched run's earlier legs count as history even before this leg
+    // has a turn of its own. A real absence, because a layout that puts this behind a gesture
+    // (Horizon) must not offer the gesture when it would open onto nothing.
+    history: hasConversationHistory(stream.turns, stitchedHistory?.segments.length ?? 0) ? (
+      <ChatHistory
+        stream={stream}
+        glossary={glossary}
+        reasoningPlacement={reasoningPlacement}
+        stitchedHistory={stitchedHistory}
+        stitchedSeamLabel={stitchedSeamLabel}
+      />
+    ) : null,
+
+    currentExchange: (
+      <CurrentExchange
         sessionId={sessionId}
         glossary={glossary}
         accessToken={accessToken}
@@ -611,8 +635,6 @@ export function SessionWorkspace({
         reasoningPerItemMs={reasoningPerItemMs}
         correctionTargets={correctionTargets}
         onCorrected={onTurnSettled}
-        stitchedHistory={stitchedHistory}
-        stitchedSeamLabel={stitchedSeamLabel}
       />
     ),
 

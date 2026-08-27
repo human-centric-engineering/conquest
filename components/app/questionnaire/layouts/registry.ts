@@ -21,6 +21,7 @@
 import { ClassicLayout } from '@/components/app/questionnaire/layouts/classic-layout';
 import { FocusLayout } from '@/components/app/questionnaire/layouts/focus-layout';
 import { BroadsheetLayout } from '@/components/app/questionnaire/layouts/broadsheet-layout';
+import { HorizonLayout } from '@/components/app/questionnaire/layouts/horizon-layout';
 import { RESPONDENT_LAYOUT_META } from '@/lib/app/questionnaire/layout/catalog';
 import type {
   LayoutDefinition,
@@ -56,10 +57,17 @@ export const LAYOUT_REGISTRY = {
       personaPicker: { kind: 'region', region: 'carousel page' },
 
       /* The work itself */
-      transcript: { kind: 'region', region: 'carousel page, left column of the split' },
-      // Stacked directly beneath the transcript inside the shared conversation card, which is where
-      // it has always been. Classic keeps them together on purpose: the split exists so a layout
-      // CAN separate them, not so every layout must.
+      releaseNotice: {
+        kind: 'region',
+        region: 'head of the conversation column, above the history',
+      },
+      // History and current exchange stacked in one reading column, which is what a transcript has
+      // always been. Classic keeps them together on purpose: the split exists so a layout CAN
+      // separate them (Horizon does), not so every layout must.
+      history: { kind: 'region', region: 'the conversation column, above the current exchange' },
+      currentExchange: { kind: 'region', region: 'the conversation column, at its foot' },
+      // Stacked directly beneath the conversation inside the shared card, which is where it has
+      // always been.
       composer: { kind: 'region', region: 'foot of the conversation card, beneath the transcript' },
       formView: { kind: 'region', region: 'carousel page' },
       answersPanel: { kind: 'region', region: 'right column of the split (lg and up)' },
@@ -100,7 +108,9 @@ export const LAYOUT_REGISTRY = {
       personaPicker: { kind: 'region', region: 'carousel page' },
 
       /* The work itself */
-      transcript: { kind: 'region', region: 'the single column' },
+      releaseNotice: { kind: 'region', region: 'head of the single column' },
+      history: { kind: 'region', region: 'the single column, above the current exchange' },
+      currentExchange: { kind: 'region', region: 'the single column, at its foot' },
       composer: { kind: 'region', region: 'foot of the conversation card, beneath the transcript' },
       formView: { kind: 'region', region: 'carousel page' },
       // RELOCATED, not dropped — the whole point of this layout. The captured answers stay one tap
@@ -150,7 +160,12 @@ export const LAYOUT_REGISTRY = {
       personaPicker: { kind: 'region', region: 'carousel page' },
 
       /* The work itself */
-      transcript: { kind: 'region', region: 'the document column' },
+      releaseNotice: { kind: 'region', region: 'head of the document column' },
+      // One continuous page: the history runs into the current exchange with no seam, which is what
+      // makes it a document rather than a chat log. Broadsheet's argument is about the composer, and
+      // it has nothing to say about folding the conversation away.
+      history: { kind: 'region', region: 'the document column, above the current exchange' },
+      currentExchange: { kind: 'region', region: 'the document column, at its foot' },
       // THE point of this layout, and the reason `conversation` became two slots. The composer is
       // held still in the margin while the document scrolls beside it, rather than welded to the
       // foot of the transcript. Below `lg` the margin folds underneath, but the composer stays a
@@ -177,6 +192,72 @@ export const LAYOUT_REGISTRY = {
       // In the margin with the composer, not above the document: answering and finishing are the two
       // things the respondent DOES, and the document is the thing they read.
       completionOffer: { kind: 'region', region: 'the margin, above the composer' },
+      finalCheck: { kind: 'overlay', via: 'modal' },
+      complete: { kind: 'region', region: 'takeover' },
+      handoff: { kind: 'region', region: 'takeover' },
+      personaSwitcher: { kind: 'overlay', via: 'modal' },
+    },
+  },
+
+  horizon: {
+    ...RESPONDENT_LAYOUT_META.horizon,
+    Component: HorizonLayout,
+    placements: {
+      /* Identity */
+      brandBand: { kind: 'region', region: 'above the workspace, in the brand provider' },
+
+      /* Session chrome */
+      // The composed strip, for the same reason as everywhere else: pause / resume and the
+      // lifecycle action errors have no slot of their own yet, so decomposing it would drop them
+      // silently. A one-question layout is the most likely candidate to want the atoms one day.
+      lifecycleBar: { kind: 'region', region: 'strip along the top' },
+      progress: { kind: 'region', region: 'inside the lifecycle strip' },
+      sessionRef: { kind: 'region', region: "the intro splash's footer, else the lifecycle strip" },
+      transcriptDownload: { kind: 'region', region: 'lifecycle strip, download slot' },
+      modeToggle: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+      textSize: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+      // As in Focus and Broadsheet, and for the same mechanical reason: no panel on screen at any
+      // width makes this the only route to the captured answers, so it cannot carry Classic's
+      // `lg:hidden`. The container reads this placement to decide that.
+      reviewTrigger: { kind: 'region', region: 'lifecycle strip, trailing cluster (all widths)' },
+      interviewerChip: { kind: 'region', region: 'lifecycle strip, trailing cluster' },
+
+      /* Pre-conversation gates */
+      splash: { kind: 'region', region: 'carousel page' },
+      captureGate: { kind: 'region', region: 'carousel page' },
+      personaPicker: { kind: 'region', region: 'carousel page' },
+
+      /* The work itself */
+      // On the stage, NOT inside the disclosure with the history — the reason this became a slot of
+      // its own. A "your conversation is being recorded" notice one gesture out of sight is not a
+      // notice, and it is the one part of the old transcript that must not move when the rest does.
+      releaseNotice: { kind: 'region', region: 'head of the stage, above the disclosure' },
+      // THE point of this layout, and the reason `transcript` became two slots. Everything before
+      // the current exchange folds into a native `<details>` above the stage: one gesture away, and
+      // therefore available rather than dropped. The container resolves this slot to `null` when
+      // there is no history at all, so the disclosure is never offered onto nothing.
+      history: { kind: 'overlay', via: 'gesture' },
+      currentExchange: { kind: 'region', region: 'the stage, centred in the column' },
+      // Welded to the foot of the stage in one card, as in Classic. Broadsheet's move — the box held
+      // still in a margin — solves a problem this layout does not have: there is never enough on
+      // screen here for the composer to scroll away from the respondent.
+      composer: { kind: 'region', region: 'foot of the conversation card, beneath the stage' },
+      formView: { kind: 'region', region: 'carousel page' },
+      // Same outcome as Focus and Broadsheet, third distinct reason: a panel listing every answer
+      // captured so far is precisely the wall of accumulated conversation this layout exists to put
+      // away. Review stays one tap into the sheet at every width.
+      answersPanel: {
+        kind: 'omitted',
+        because:
+          'a running list of every answer is the accumulation this layout exists to fold away; review lives in the sheet at every width',
+      },
+      answersDrawer: { kind: 'overlay', via: 'sheet' },
+
+      /* Finishing */
+      // Above the stage rather than in the margin (Broadsheet) — there is no margin here, and a
+      // finish affordance under the answer box would sit between the respondent and the one thing
+      // the layout asks them to do.
+      completionOffer: { kind: 'region', region: 'above the conversation and the form' },
       finalCheck: { kind: 'overlay', via: 'modal' },
       complete: { kind: 'region', region: 'takeover' },
       handoff: { kind: 'region', region: 'takeover' },

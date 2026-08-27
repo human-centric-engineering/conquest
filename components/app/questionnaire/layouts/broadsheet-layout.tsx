@@ -44,6 +44,7 @@
 
 import type { CSSProperties } from 'react';
 
+import { TranscriptColumn } from '@/components/app/questionnaire/chat/transcript-column';
 import { SurfaceCarousel } from '@/components/app/questionnaire/layouts/surface-carousel';
 import type { RespondentLayoutProps } from '@/components/app/questionnaire/layouts/types';
 import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
@@ -73,10 +74,18 @@ export function BroadsheetLayout({ slots, state }: RespondentLayoutProps) {
     // transcripts, two scroll positions and two `scrollIntoView` calls fighting each other on every
     // token — so the shape changes by grid template alone.
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3 lg:grid-cols-[minmax(0,1fr)_26rem] lg:grid-rows-1 lg:gap-6">
-      {/* The document. Its own card, filling the column and scrolling internally — the composer is
-          not inside it, so the shared `ConversationFrame` — which exists to stack the two — is
-          deliberately not used here. */}
-      <div className="bg-card flex min-h-0 flex-col rounded-xl border">{slots.transcript}</div>
+      {/* The document: the notice, the history and the current exchange read as one continuous
+          page, in its own card, filling the column and scrolling internally. The composer is not
+          inside it, so the shared `ConversationFrame` — which exists to stack the two — is
+          deliberately not used; `TranscriptColumn` still is, because the reading column itself
+          (scroll box, text scale, measure) is the same one every layout reads in. */}
+      <div className="bg-card flex min-h-0 flex-col rounded-xl border">
+        <TranscriptColumn>
+          {slots.releaseNotice}
+          {slots.history}
+          {slots.currentExchange}
+        </TranscriptColumn>
+      </div>
 
       {/* The margin — a full-height column, with the answer box taking everything the completion
           offer does not. The rail could size to its content instead (`self-start`), but a

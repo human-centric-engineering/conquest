@@ -347,7 +347,7 @@ export type PresentationMode = (typeof PRESENTATION_MODES)[number];
  * Whichever layout is chosen, EVERY respondent feature stays reachable — the parts move, they do
  * not disappear. See `lib/app/questionnaire/layout/slots.ts` for how that is enforced.
  */
-export const RESPONDENT_LAYOUTS = ['classic', 'focus', 'broadsheet'] as const;
+export const RESPONDENT_LAYOUTS = ['classic', 'focus', 'broadsheet', 'horizon'] as const;
 export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
 
 /** The layout every questionnaire gets unless it says otherwise. Referenced wherever a layout is narrowed. */

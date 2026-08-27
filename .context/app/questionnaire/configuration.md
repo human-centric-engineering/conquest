@@ -91,7 +91,10 @@ Invitations surface captures — `email` is always shown + required; see
 conversation, the captured answers and the controls sit. Orthogonal to `presentationMode`
 below, which decides what the respondent completes rather than where it sits; every
 combination is valid. `classic` (the default) is the conversation with the answer panel
-beside it; `focus` is one column at every width with the answers a tap away in a sheet.
+beside it; `focus` is one column at every width with the answers a tap away in a sheet;
+`broadsheet` reads the conversation as a document with the answer box held still in the
+margin; `horizon` shows one question at a time with the conversation so far folded into a
+disclosure above it.
 Whichever is chosen, every feature stays reachable — the layout registry enforces that at
 compile time. Both the read path and the component resolver fall back to `classic` for an
 absent or unrecognised value, so no existing questionnaire changes appearance and a rollback

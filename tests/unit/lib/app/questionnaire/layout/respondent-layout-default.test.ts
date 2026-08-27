@@ -90,9 +90,11 @@ describe('updateConfigSchema — respondentLayout', () => {
     // The write boundary is strict where the read boundary is forgiving: an admin PATCHing an
     // unknown layout is a bug in the caller and should be told so, whereas a stored unknown value
     // is a rollback artefact the respondent surface has to survive.
-    // 'horizon' is the next designed layout and deliberately does NOT exist yet — using the name
-    // of a layout that is coming keeps this honest about what "unknown" means here.
-    expect(updateConfigSchema.safeParse({ respondentLayout: 'horizon' }).success).toBe(false);
+    // 'kiosk' is a plausible next layout name that deliberately does NOT exist yet — using the name
+    // of a layout that might be coming keeps this honest about what "unknown" means here. (It was
+    // 'horizon' until Horizon shipped; whoever adds the next layout should check whether it is this
+    // one, here and in `registry.test.tsx`.)
+    expect(updateConfigSchema.safeParse({ respondentLayout: 'kiosk' }).success).toBe(false);
   });
 
   it('leaves the field untouched when it is omitted', () => {
