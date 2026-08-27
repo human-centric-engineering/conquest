@@ -213,12 +213,16 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       // the REAL seam — and proves `initAppSubjectSources()` is actually wired,
       // which is what the platform guard reads.
       __resetAppSubjectSourceRegistryForTests();
-      expect(getAppSubjectSources().map((source) => source.model).sort()).toEqual(
-        APP_SUBJECT_DATA_SOURCES.map((source) => source.model).sort()
-      );
-      expect(getAppExcludedSubjectSources().map((entry) => entry.model).sort()).toEqual(
-        APP_EXCLUDED_SOURCES.map((entry) => entry.model).sort()
-      );
+      expect(
+        getAppSubjectSources()
+          .map((source) => source.model)
+          .sort()
+      ).toEqual(APP_SUBJECT_DATA_SOURCES.map((source) => source.model).sort());
+      expect(
+        getAppExcludedSubjectSources()
+          .map((entry) => entry.model)
+          .sort()
+      ).toEqual(APP_EXCLUDED_SOURCES.map((entry) => entry.model).sort());
     },
   },
   {
