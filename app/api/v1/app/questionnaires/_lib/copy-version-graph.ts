@@ -143,6 +143,7 @@ export async function copyVersionGraph(
           members: true,
           ordinal: true,
           source: true,
+          trigger: true,
         },
       },
       // Data Slots feature: the abstraction layer forks with the version (like tags).
@@ -392,6 +393,9 @@ export async function copyVersionGraph(
         ordinal: topic.ordinal,
         source: topic.source,
         ...(topic.description !== null ? { description: topic.description } : {}),
+        // F17.31a. A trigger that did not survive a fork would fail silently on the copy the client
+        // actually fields, which is the worst place for it to go missing.
+        ...(topic.trigger !== null ? { trigger: jsonInput(topic.trigger) } : {}),
       })),
     });
   }

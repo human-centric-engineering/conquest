@@ -30,7 +30,7 @@ import {
   SCOPE_RULE_VALUE_MAX_LENGTH,
   TOPIC_CRITERIA_MAX_LENGTH,
   TOPIC_DEPTHS,
-  TOPIC_KEY_MAX_LENGTH,
+  MEMBER_KEY_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeProposedEdit } from '@/lib/app/questionnaire/scope-evaluation/types';
 
@@ -58,7 +58,7 @@ const budgetSecondsSchema = z
 
 /** The rule-field trio shared by `add_rule` and `edit_rule` — one definition, two ops. */
 const ruleFieldsSchema = {
-  dataSlotKey: z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH),
+  dataSlotKey: z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH),
   operator: z.enum(SCOPE_RULE_OPERATORS),
   value: z.string().trim().max(SCOPE_RULE_VALUE_MAX_LENGTH).nullable(),
   action: z.enum(SCOPE_RULE_ACTIONS),

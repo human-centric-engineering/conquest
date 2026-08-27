@@ -22,23 +22,50 @@ from the Duplicates judge. See [design evaluation](./design-evaluation.md).
 `split_question` and `merge_questions` remain in `CHANGE_TYPES` — historical versions carry rows
 with those types and must keep reading.
 
-### The two count-level checks
+### The three whole-set checks
 
 Per-question verdicts structurally cannot see a wrong question SET: every question can be faithful
-while one was split in two, a heading was promoted, or a page was missed. Two checks run alongside
-them, and **neither blocks the ingest** — by the time either is readable the questions already
-exist, and refusing a document over a fidelity nicety is worse than persisting it with the
-discrepancy on record. Both land on the `extraction_verify` `AppAiRun.detail`.
+while one was split in two, a heading was promoted, or a page was missed. Three checks run alongside
+them, and **none blocks the ingest** — by the time any is readable the questions already exist, and
+refusing a document over a fidelity nicety is worse than persisting it with the discrepancy on
+record. All three land on the `extraction_verify` `AppAiRun.detail`, and the two deterministic ones
+are omitted from it when zero, so a key being present already means something happened.
 
-| Check                 | How                                                                                               | Says                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `disallowedEditCount` | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
-| `coverage`            | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+| Check                     | How                                                                                               | Says                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `disallowedEditCount`     | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
+| `unattributedPromptCount` | Deterministic — counts prompts matching neither the source nor any change record's `after`        | Whether the wording in the editor is the author's, or the model's   |
+| `coverage`                | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
 
 `uncountable` is a first-class answer and should be common: plenty of instruments do not number
 their questions, and the prompt explicitly tells the critic that a guessed count is worse than an
 honest shrug. It is also told not to reason backwards from the number of questions it was given,
 without which the check is circular.
+
+#### Why an unrecorded rewrite is the one worth counting
+
+The extractor is allowed to reword — `rewrite_prompt`, `correct_spelling` and `correct_grammar` are
+all sanctioned change types, and some rewording is necessary, because a question is delivered
+conversationally outside its section heading and one that leans on the heading for its referent
+("Who maintains **the register**?") is genuinely broken without it.
+
+What is not allowed is rewording **silently**. The change records are the editorial log: they are
+what the review surface renders and what F2.3 reverts. A prompt the extractor rewrote without filing
+a record sits in the Structure editor looking like the author's own words, and there is nothing to
+revert it to. Routing-corpus doc 03 produced one to two of these on four of six ingests of the same
+file — the same question each time.
+
+No per-question verdict can catch it. The fidelity critic marks reworded questions `ok`, correctly:
+it is asked whether a question still faithfully asks what the source asks, and a reworded one does.
+Only the source can catch it, which is why this check compares strings rather than asking a model.
+Whitespace is flattened first so a hard-wrapped source line still matches a single-line prompt;
+nothing else is normalised, because `near-misses` → `near misses` and `reads` → `reviews` are edits,
+and a looser matcher would quietly shrink the number.
+
+Two legitimate ways to get a non-zero count, both worth seeing rather than suppressing: a synthesised
+prompt (a merged matrix stem is not a quote of anything), and a repair `correct` — `mergeRepairs`
+replaces the whole question but records only its type/config, so a prompt the scales-and-matrix
+specialist changed on the way past is unattributed for exactly the same reason.
 
 ## The endpoint
 

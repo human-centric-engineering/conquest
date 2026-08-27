@@ -88,6 +88,7 @@ import {
   type Topic,
   type TopicDepth,
   type TopicPhase,
+  type TopicTrigger,
 } from '@/lib/app/questionnaire/scope/types';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
@@ -107,6 +108,12 @@ interface DraftTopic {
   dataSlotKeys: string[];
   /** Where the topic came from, so an untouched auto-seed reads as one. */
   source: Topic['source'] | 'new';
+  /**
+   * What the questionnaire said to watch for mid-conversation (F17.31a). Read-only here — it is a
+   * record of the document, not a setting — but carried on the draft because the save replaces the
+   * whole set, so a field this editor forgot would be deleted by an unrelated edit.
+   */
+  trigger: TopicTrigger | null;
 }
 
 /**
@@ -169,6 +176,7 @@ function toDraft(topic: Topic, index: number): DraftTopic {
     questionKeys: [...topic.members.questionKeys],
     dataSlotKeys: [...topic.members.dataSlotKeys],
     source: topic.source,
+    trigger: topic.trigger,
   };
 }
 
@@ -193,6 +201,7 @@ function blankDraftTopic(
     questionKeys: [],
     dataSlotKeys: [],
     source: 'new',
+    trigger: null,
   };
 }
 
@@ -1008,6 +1017,22 @@ export function TopicListEditor({
                                     judge it on.
                                   </p>
                                 )
+                              )}
+                              {draft.trigger && (
+                                <div className="bg-muted/40 rounded-md border p-3">
+                                  <p className="text-xs font-medium">
+                                    The questionnaire said to add this whenever it comes up
+                                  </p>
+                                  <p className="text-muted-foreground mt-1 text-xs italic">
+                                    “{draft.trigger.condition}”
+                                  </p>
+                                  <p className="text-muted-foreground mt-2 text-xs">
+                                    This interview decides what to cover once, after the opening
+                                    questions. So this topic is included when that is already clear
+                                    by then — not if it first comes up later. Kept here as a record
+                                    of what the questionnaire asked for.
+                                  </p>
+                                </div>
                               )}
                             </div>
 

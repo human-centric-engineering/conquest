@@ -112,6 +112,7 @@ function topic(key: string, phase: Topic['phase']): Topic {
     members: { questionKeys: [], dataSlotKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 

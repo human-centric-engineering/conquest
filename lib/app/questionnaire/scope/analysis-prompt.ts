@@ -198,18 +198,77 @@ do not supply a default, for the same reason you omit "maxConditionalTopics".
 
 ## Gaps — what you recognized but could not formalize
 
-Sometimes the document plainly states a routing or eligibility instruction, but you cannot turn it \
-into a clean topic or hard rule — the condition names something not in DATA SLOTS, it depends on \
-information no question captures, it contradicts another instruction, or it is simply too vague to \
-act on ("use judgement for edge cases"). Do not silently drop this. Do not force it into a topic's \
-criteria or a rule just to have somewhere to put it, and do not paraphrase around the problem.
+Sometimes the document plainly states a routing or eligibility instruction and you cannot express \
+it AT ALL — not as a conditional topic's criteria, and not as a hard rule. It depends on \
+information no question captures, it contradicts another instruction in the same document, it \
+happens mid-interview rather than at the opening, or it is simply too vague to act on ("use \
+judgement for edge cases"). Do not silently drop this. Do not force it into a topic's criteria or a \
+rule just to have somewhere to put it, and do not paraphrase around the problem.
+
+**A condition you DID express as a conditional topic's criteria is not a gap.** That is the \
+mechanism working, and reporting it as a gap as well says the opposite. In particular, having no \
+data slot to test a condition mechanically is NOT on its own a gap: criteria are judged against \
+what the respondent conveyed, which is the normal way a conditional topic is decided, and a hard \
+rule is the rare exception. When DATA SLOTS is empty EVERY condition is untestable by a rule, so a \
+gap for each one says nothing about this document and buries the gaps that do.
+
+**Three exceptions to that, and they matter more than anything else on this page. In each, writing \
+the topic is NOT enough, because what you wrote does not mean what the document said.**
+
+**1. TIMING — a block that is added when something COMES UP.** If the document says a block is \
+added "at any stage", "at any point", "whenever they surface", "even in passing", "as soon as they \
+mention it", or "even while answering something else", then putting that sentence into a \
+conditional topic's criteria has quietly changed what it means. Scope here is settled ONCE, when \
+the opening finishes, and is never revisited: a disclosure in the fortieth minute cannot add a \
+block, however plainly the document says it must. \
+STILL PROPOSE THE TOPIC — it is the closest this instrument can get, and a block belonging to no \
+topic is worse than an imperfect one, because its questions could then never be asked at all. \
+But report ONE GAP PER BLOCK: name that block, quote its own trigger sentence, and say plainly what \
+will actually happen — it is decided at the end of the opening, so it is included only if the \
+condition is already apparent by then. \
+One gap about "the mechanism" is NOT enough. A reader who sees five triggered blocks proposed as \
+ordinary conditional topics, and one general note about timing, will believe the five are handled. \
+They are not, and on safeguarding, disclosure or eligibility text that belief is the whole risk. \
+ALSO fill the topic's "trigger" field. "condition" is what the document says to watch for, in its \
+own terms, and "sourceQuote" is the sentence that says so — the instruction's own words belong in \
+those two fields. \
+"cues" is a different job: **the words the RESPONDENT would say if this were happening to them**, \
+3 to 6 of them, a word or two each. Do NOT lift phrases from the instruction. A document writes \
+ABOUT the respondent, in the third person and in a professional register — "the respondent \
+discloses…", "where the party has…", "the block has already been completed" — and none of that is \
+anything a person says while answering a question. They speak in the first person and use the \
+plain word for the thing rather than its category: where an instruction says "a participant \
+reporting a dietary restriction", the cues are "vegan", "can't eat", "allergic". Write what would \
+come out of their mouth, including the everyday words the document itself never uses, in the \
+language the interview is conducted in. \
+Nothing acts on this yet — the criteria you wrote is still what decides the topic — so it changes \
+no behaviour and does not replace the gap. It records what was actually asked for, on the topic \
+itself, where an admin reviewing the routing will see it.
+
+**2. TERMINATION — an instruction that ENDS the interview rather than scoping it.** If the document \
+says a condition means the respondent does not take this review at all — "stop the review", "end \
+the conversation here", "they take X instead", "refer them and stop" — you cannot express that. The \
+only actions available are to include a topic or exclude one; nothing can halt an interview, and \
+excluding every topic is not the same thing and would leave the respondent in a session that simply \
+asks nothing. \
+Turning the screener's checks into ordinary opening questions does NOT express it either: asking \
+"how long have you been trading?" captures the fact and discards the consequence, which is the part \
+that mattered. Propose the questions if they are worth asking, and report a GAP quoting the stop \
+instruction and saying that the review will continue regardless of the answer.
+
+**3. CONTRADICTION — two places that disagree.** If the material states who gets asked what in two \
+places and they conflict — a front-sheet table and a note later in the SAME file, a heading and an \
+instruction, a summary and a detail — do not resolve it quietly, however reasonable the side you \
+would pick. Propose what you judge best, and report the disagreement as a gap quoting BOTH places, \
+so the admin knows a choice was made on their behalf. This applies WITHIN a single document, not \
+only between two documents.
 
 Report it as a GAP instead:
 - "sourceQuote" is REQUIRED and must be the exact span that states the instruction. A gap you cannot \
 quote is not a gap — if you cannot point to the words, you have nothing to report here.
-- "explanation" says what you recognized and specifically why you could not formalize it (missing \
-data slot, contradicts another rule, too vague to test mechanically, references something \
-undefined).
+- "explanation" says what you recognized and specifically why you could not express it at all \
+(no question or answer could ever evidence it, contradicts another instruction, fires mid-interview, \
+too vague to act on, references something undefined).
 
 Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
 instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
@@ -238,7 +297,12 @@ Output ONLY a single JSON object — no prose, no code fences:
       "questionKeys": ["<exact key from QUESTIONS>", ...],
       "dataSlotKeys": ["<exact key from DATA SLOTS>", ...],
       "rationale": "<one sentence: why this is a topic, and this phase>",
-      "sourceQuote": "<exact span from the document — omit entirely if you inferred this>"
+      "sourceQuote": "<exact span from the document — omit entirely if you inferred this>",
+      "trigger": {  // OMIT ENTIRELY unless TIMING applies — see "1. TIMING" above
+        "condition": "<the instruction's own words for what to watch for>",
+        "cues": ["<what the RESPONDENT would say — a word or two each>", ...],
+        "sourceQuote": "<exact span that states the trigger>"
+      }
     }
   ],
   "rules": [

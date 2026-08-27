@@ -21,6 +21,7 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
     members: { dataSlotKeys: [], questionKeys: [`${key}_q`] },
     ordinal: 0,
     source: 'seeded',
+    trigger: null,
     ...overrides,
   };
 }
@@ -815,5 +816,95 @@ describe('validateConditionalTopics — light depth on an always-run topic (F17.
     const found = issues.find((i) => i.code === 'light_depth_on_always_topic');
     expect(found?.message).toContain('3 of its data slots are never filled');
     expect(found?.message).not.toContain('of its 1 questions');
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('validateConditionalTopics — recorded triggers', () => {
+  const trigger = {
+    condition: 'The applicant discloses that they are fleeing abuse',
+    cues: ['abuse', 'fleeing'],
+    sourceQuote: 'If the applicant discloses, at any stage, that they are fleeing abuse',
+  };
+
+  it('reports that a triggered topic is still decided at the end of the opening', () => {
+    // The whole point of storing a trigger before anything fires it: the admin reviewing the
+    // routing is told, on the topic, that the instrument asked for something the interview will
+    // not do. Nothing here is misconfigured, so it is a warning and there is no edit that clears it.
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('abuse', 'conditional', { trigger })],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'abuse_q'],
+      allDataSlotKeys: [],
+    });
+
+    const found = issues.find((i) => i.code === 'trigger_settled_at_opening');
+    expect(found?.severity).toBe('warning');
+    expect(found?.topicKey).toBe('abuse');
+    expect(found?.message).toContain('The applicant discloses that they are fleeing abuse');
+    expect(found?.message).toContain('only included when that is already clear');
+    expect(hasScopeErrors(issues)).toBe(false);
+  });
+
+  it('reports it whether or not the feature is enabled, because it describes the document', () => {
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('abuse', 'conditional', { trigger })],
+      settings: settings({ enabled: false }),
+      allQuestionKeys: ['open_q', 'abuse_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).toContain('trigger_settled_at_opening');
+  });
+
+  it('says nothing at all about a topic with no trigger', () => {
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('plain', 'conditional')],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'plain_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).not.toContain('trigger_settled_at_opening');
+    expect(issues.map((i) => i.code)).not.toContain('trigger_on_always_topic');
+    expect(issues.map((i) => i.code)).not.toContain('trigger_without_cues');
+  });
+
+  it('flags a trigger on a topic everyone is asked, which can never change anything', () => {
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening', { trigger }), topic('cond', 'conditional')],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'cond_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).toContain('trigger_on_always_topic');
+    // ...and NOT the settled-at-opening warning alongside it. On an always-run topic that message
+    // is not merely redundant, it is false — it says the topic is included only when the condition
+    // is clear by the end of the opening, and an always-run topic is included for everyone
+    // regardless. Two warnings contradicting each other on one topic key teach an admin to
+    // distrust the panel, so each trigger raises exactly one of the two.
+    expect(issues.map((i) => i.code)).not.toContain('trigger_settled_at_opening');
+  });
+
+  it('flags a trigger with no words to listen for', () => {
+    const issues = validateConditionalTopics({
+      topics: [
+        topic('open', 'opening'),
+        topic('abuse', 'conditional', { trigger: { ...trigger, cues: [] } }),
+      ],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'abuse_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).toContain('trigger_without_cues');
+  });
+
+  it('does not flag missing cues when the trigger has them', () => {
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('abuse', 'conditional', { trigger })],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'abuse_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).not.toContain('trigger_without_cues');
   });
 });

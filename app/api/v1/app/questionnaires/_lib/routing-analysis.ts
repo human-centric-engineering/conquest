@@ -88,6 +88,13 @@ export function toProposedSet(
       members: { questionKeys: topic.questionKeys, dataSlotKeys: topic.dataSlotKeys },
       rationale: topic.rationale,
       ...(topic.sourceQuote ? { sourceQuote: topic.sourceQuote } : {}),
+      // F17.31a — what the document asked for where the opening cannot decide it. This projection
+      // is the ONLY path from the validated analyst result to a persisted draft, and `trigger` is
+      // optional on `ProposedTopic`, so leaving it out costs no type error and silently discards
+      // the field one line after the schema accepted it: no card, no accepted topic, no column, and
+      // none of the three `validate.ts` warnings. The narrow below cannot put it back — it reads
+      // whatever this literal produced.
+      ...(topic.trigger ? { trigger: topic.trigger } : {}),
       ...(existingKeys.has(topic.key) ? { replacesExisting: true } : {}),
     })),
     rules: result.rules.map((rule) => ({

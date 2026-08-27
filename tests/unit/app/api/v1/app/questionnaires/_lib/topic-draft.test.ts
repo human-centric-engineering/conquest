@@ -161,6 +161,7 @@ describe('acceptTopicDraft', () => {
         depth: 'full',
         questionKeys: ['q1'],
         dataSlotKeys: [],
+        trigger: null,
       },
     ],
   };
@@ -585,5 +586,70 @@ describe('buildRoutingAnalysisInput', () => {
 
     const call = (prismaMock.appQuestionnaireVersion.findFirst as Mock).mock.calls[0]?.[0];
     expect(call.where).toEqual({ id: 'v-xyz', questionnaireId: 'q-abc' });
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('acceptTopicDraft — a recorded trigger', () => {
+  const trigger = {
+    condition: 'The applicant discloses that they are fleeing abuse',
+    cues: ['abuse', 'fleeing'],
+    sourceQuote: 'If the applicant discloses, at any stage, that they are fleeing abuse',
+  };
+
+  beforeEach(() => {
+    prismaMock.appQuestionnaireTopic.deleteMany.mockResolvedValue({ count: 1 });
+    prismaMock.appQuestionnaireTopic.createMany.mockResolvedValue({ count: 1 });
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([makeTopicRow()]);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
+    prismaMock.appQuestionnaireTopicDraft.deleteMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('writes it with the accepted topic, so it outlives the proposal', async () => {
+    await acceptTopicDraft('v-1', {
+      topics: [
+        {
+          key: 'abuse',
+          label: 'Domestic abuse',
+          description: null,
+          phase: 'conditional',
+          criteria: 'The opening indicates the applicant is fleeing abuse.',
+          depth: 'full',
+          questionKeys: ['q1'],
+          dataSlotKeys: [],
+          trigger,
+        },
+      ],
+    });
+
+    const created = prismaMock.appQuestionnaireTopic.createMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>[];
+    };
+    expect(created.data[0]?.trigger).toEqual(trigger);
+  });
+
+  it('omits the column for an ordinary accepted topic', async () => {
+    await acceptTopicDraft('v-1', {
+      topics: [
+        {
+          key: 'intro',
+          label: 'Intro',
+          description: null,
+          phase: 'opening',
+          criteria: null,
+          depth: 'full',
+          questionKeys: ['q1'],
+          dataSlotKeys: [],
+          trigger: null,
+        },
+      ],
+    });
+
+    const created = prismaMock.appQuestionnaireTopic.createMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>[];
+    };
+    expect(created.data[0]).not.toHaveProperty('trigger');
   });
 });

@@ -423,6 +423,50 @@ describe('planRevert · infer_type', () => {
     if (op.op !== 'update-question') throw new Error('expected update-question');
     expect(op.fields.type).toBe('free_text');
   });
+
+  /**
+   * T12. The ingest repair pass (`changeForCorrect`) wrote `suggestedType` / `suggestedTypeConfig`
+   * where the planner reads `type` / `typeConfig`. The names never met, so every repair-originated
+   * revert took the "no prior type recorded" branch above and restored `free_text` — silently
+   * discarding a real prior type that was recorded in the row all along. The writer now emits the
+   * canonical spelling; this reads the legacy one too, because those rows are already stored and a
+   * revert that quietly loses a `likert` is worse than one that fails.
+   */
+  it('restores a prior type recorded in the legacy repair spelling (suggestedType)', () => {
+    const result = planRevert(
+      change({
+        changeType: 'infer_type',
+        beforeJson: { suggestedType: 'likert', suggestedTypeConfig: { min: 1, max: 5 } },
+        afterJson: { suggestedType: 'matrix' },
+      }),
+      graph
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.ops).toEqual([
+      {
+        op: 'update-question',
+        questionId: 'q1',
+        fields: { type: 'likert', typeConfig: { min: 1, max: 5 } },
+      },
+    ]);
+  });
+
+  it('prefers the canonical spelling when a row carries both', () => {
+    const result = planRevert(
+      change({
+        changeType: 'infer_type',
+        beforeJson: { type: 'date', typeConfig: null, suggestedType: 'likert' },
+        afterJson: { type: 'numeric' },
+      }),
+      graph
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.plan.ops[0];
+    if (op.op !== 'update-question') throw new Error('expected update-question');
+    expect(op.fields.type).toBe('date');
+  });
 });
 
 // ─── augment_question ─────────────────────────────────────────────────────────

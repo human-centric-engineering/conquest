@@ -28,6 +28,7 @@ import { z } from 'zod';
 
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_TRIGGER_CUES,
   MAX_PROPOSED_SETTING_KEYS,
   MIN_CONDITIONAL_TOPICS,
   SCOPE_RATIONALE_MAX_LENGTH,
@@ -36,9 +37,11 @@ import {
   SCOPE_RULE_VALUE_MAX_LENGTH,
   TOPIC_CRITERIA_MAX_LENGTH,
   TOPIC_DEPTHS,
+  MEMBER_KEY_MAX_LENGTH,
   TOPIC_KEY_MAX_LENGTH,
   TOPIC_LABEL_MAX_LENGTH,
   TOPIC_PHASES,
+  TRIGGER_CUE_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 
 /** Hard cap on topics from one analysis run. */
@@ -74,18 +77,55 @@ const proposedTopicSchema = z.object({
    */
   criteria: z.string().trim().max(TOPIC_CRITERIA_MAX_LENGTH).nullable().default(null),
   depth: z.enum(TOPIC_DEPTHS).default('full'),
-  questionKeys: z.array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH)).max(500).default([]),
-  dataSlotKeys: z.array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH)).max(500).default([]),
+  // References to keys minted elsewhere — bounded by MEMBER_KEY_MAX_LENGTH, never the topic bound.
+  // The analyst echoes back the question keys it was given; rejecting one for length fails the whole
+  // analysis on a document whose only sin is a long prose question, and no retry can fix it.
+  questionKeys: z.array(z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH)).max(500).default([]),
+  dataSlotKeys: z.array(z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH)).max(500).default([]),
   /** Why the analyst judged this a topic, and this phase. The admin's main review signal. */
   rationale: z.string().trim().min(1).max(SCOPE_RATIONALE_MAX_LENGTH),
   /** The span of the source document that says so. Absent when nothing in it did. */
   sourceQuote: z.string().trim().max(SOURCE_QUOTE_MAX_LENGTH).optional(),
+  /**
+   * What the document asked for when it asked for something the opening cannot decide — "add this
+   * whenever it surfaces, at any point" (F17.31a).
+   *
+   * **Recorded alongside `criteria`, never instead of it.** Scope is still settled once, when the
+   * opening completes, so a topic whose only routing lived here would be asked of nobody. The
+   * criteria stays the closest-fit approximation the product actually runs; this says what was
+   * really asked for, so the admin sees the difference on the topic itself.
+   *
+   * Every field is lenient by design. `cues` defaults to empty rather than requiring one, because a
+   * refusal here fails the WHOLE analysis with no retry that can help — the lesson of T13 in
+   * `routing-corpus/RESULTS.md`, where one over-strict bound cost an entire document its proposal.
+   * An empty cue list is reported by `validateConditionalTopics`, which is the right place for it.
+   *
+   * The cue bounds are enforced by DROPPING, never by rejecting, for that same reason. A rejecting
+   * `.max()` on the cue string is the T13 mistake wearing a different hat: an over-long cue is the
+   * documented failure mode — `TRIGGER_CUE_MAX_LENGTH` exists precisely because "a long cue is a
+   * sign the analyst quoted the rule instead of naming what to listen for" — and the retry message
+   * never mentions cues, so the one retry is blind and the whole document's proposal is lost to a
+   * field nothing reads yet. Dropping matches the read path exactly:
+   * `narrowTopicTrigger` runs `asKeyList`, which slices to the same two bounds rather than failing.
+   */
+  trigger: z
+    .object({
+      condition: z.string().trim().min(1).max(TOPIC_CRITERIA_MAX_LENGTH),
+      cues: z
+        .array(z.string().trim().min(1))
+        .default([])
+        .transform((cues) =>
+          cues.filter((cue) => cue.length <= TRIGGER_CUE_MAX_LENGTH).slice(0, MAX_TRIGGER_CUES)
+        ),
+      sourceQuote: z.string().trim().max(SOURCE_QUOTE_MAX_LENGTH).optional(),
+    })
+    .optional(),
 });
 
 export type ProposedTopicPayload = z.infer<typeof proposedTopicSchema>;
 
 const proposedRuleSchema = z.object({
-  dataSlotKey: z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH),
+  dataSlotKey: z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH),
   operator: z.enum(SCOPE_RULE_OPERATORS),
   value: z.string().trim().max(SCOPE_RULE_VALUE_MAX_LENGTH).nullable().default(null),
   action: z.enum(SCOPE_RULE_ACTIONS),

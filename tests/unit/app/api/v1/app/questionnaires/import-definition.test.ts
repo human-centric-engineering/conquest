@@ -833,6 +833,7 @@ describe('persistDefinitionImport', () => {
             source: 'analyst',
             questionKeys: ['morale'],
             dataSlotKeys: ['morale_slot'],
+            trigger: null,
           },
         ],
       });
@@ -873,6 +874,7 @@ describe('persistDefinitionImport', () => {
             source: 'manual',
             questionKeys: [],
             dataSlotKeys: [],
+            trigger: null,
           },
         ],
       });
@@ -932,6 +934,7 @@ describe('persistDefinitionImport', () => {
             source: 'manual',
             questionKeys: ['score'],
             dataSlotKeys: [],
+            trigger: null,
           },
         ],
       });
@@ -957,6 +960,7 @@ describe('persistDefinitionImport', () => {
             source: 'manual',
             questionKeys: ['no_such_question'],
             dataSlotKeys: ['no_such_slot'],
+            trigger: null,
           },
         ],
       });
@@ -1034,6 +1038,7 @@ describe('persistDefinitionImport', () => {
             source: 'manual',
             questionKeys: [],
             dataSlotKeys: [],
+            trigger: null,
           },
         ],
         conditionalTopics: {

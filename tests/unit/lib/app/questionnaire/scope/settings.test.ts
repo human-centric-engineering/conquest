@@ -4,6 +4,7 @@ import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   DEFAULT_SECONDS_PER_DATA_SLOT,
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MEMBER_KEY_MAX_LENGTH,
   MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
@@ -11,7 +12,11 @@ import {
   narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   narrowProposedTopicSet,
+  narrowTopicTrigger,
+  MAX_TRIGGER_CUES,
+  TRIGGER_CUE_MAX_LENGTH,
   narrowTopicMembers,
+  TOPIC_KEY_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 
 describe('narrowConditionalTopicsSettings', () => {
@@ -129,6 +134,32 @@ describe('narrowTopicMembers', () => {
       dataSlotKeys: [],
       questionKeys: ['q1', 'q2'],
     });
+  });
+
+  /**
+   * T13, the quietest of its three faces. This list was bounded by the TOPIC key length (64), but
+   * every key in it is a REFERENCE to a question or data slot minted elsewhere, and nothing bounds
+   * those at 64 — corpus doc 08 produced one of 78 characters. Truncating such a key does not
+   * shorten it, it changes it into a key that resolves to nothing, which orphans the question. Per
+   * `validate.ts`, an orphaned question "can never be asked, and nothing else in the system would
+   * ever tell you" — so this silently deleted a question from the interview.
+   */
+  it('preserves a long question key rather than truncating it into one that matches nothing', () => {
+    const longKey =
+      'is_there_anything_about_your_circumstances_that_makes_dealing_with_this_harder';
+    expect(longKey.length).toBeGreaterThan(TOPIC_KEY_MAX_LENGTH);
+
+    const members = narrowTopicMembers({ questionKeys: [longKey], dataSlotKeys: [longKey] });
+
+    expect(members.questionKeys).toEqual([longKey]);
+    expect(members.dataSlotKeys).toEqual([longKey]);
+  });
+
+  it('still bounds a key that no realistic minter would produce', () => {
+    const absurd = 'x'.repeat(MEMBER_KEY_MAX_LENGTH + 50);
+    expect(narrowTopicMembers({ questionKeys: [absurd] }).questionKeys[0]).toHaveLength(
+      MEMBER_KEY_MAX_LENGTH
+    );
   });
 });
 
@@ -575,5 +606,106 @@ describe('narrowProposedTopicSet — the F17.23 additions', () => {
       expect(set?.fallbackTopicKeys).toEqual(['pipeline']);
       expect(set?.checkTopicPreference).toBeUndefined();
     });
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('narrowTopicTrigger', () => {
+  it('reads a well-formed trigger', () => {
+    expect(
+      narrowTopicTrigger({
+        condition: 'The partner mentions a food safety incident',
+        cues: ['food safety', 'environmental health'],
+        sourceQuote: 'A food safety incident, complaint or environmental health visit',
+      })
+    ).toEqual({
+      condition: 'The partner mentions a food safety incident',
+      cues: ['food safety', 'environmental health'],
+      sourceQuote: 'A food safety incident, complaint or environmental health visit',
+    });
+  });
+
+  it('is null for the ordinary case — no column value at all', () => {
+    // Every topic authored before this shipped, and every topic scoped from the opening. This is a
+    // read-path narrow precisely so none of them needed backfilling.
+    expect(narrowTopicTrigger(null)).toBeNull();
+    expect(narrowTopicTrigger(undefined)).toBeNull();
+  });
+
+  it('drops a trigger with no condition, cues or not', () => {
+    // Words to listen for, with nothing to confirm, say only that some words matter — which is not
+    // a record of what the document asked for.
+    expect(narrowTopicTrigger({ cues: ['abuse'] })).toBeNull();
+    expect(narrowTopicTrigger({ condition: '   ', cues: ['abuse'] })).toBeNull();
+  });
+
+  it('survives a malformed blob rather than throwing', () => {
+    expect(narrowTopicTrigger('not an object')).toBeNull();
+    expect(narrowTopicTrigger({ condition: 'They mention arrears', cues: 'not a list' })).toEqual({
+      condition: 'They mention arrears',
+      cues: [],
+    });
+  });
+
+  it('omits sourceQuote entirely when the document did not supply one', () => {
+    const trigger = narrowTopicTrigger({ condition: 'Hand-authored', cues: [] });
+    expect(trigger).not.toBeNull();
+    expect(trigger && 'sourceQuote' in trigger).toBe(false);
+  });
+
+  it('caps the cue list and each cue, and drops duplicates', () => {
+    const trigger = narrowTopicTrigger({
+      condition: 'They mention arrears',
+      cues: [
+        'arrears',
+        'arrears',
+        'x'.repeat(200),
+        ...Array.from({ length: 20 }, (_, i) => `c${i}`),
+      ],
+    });
+    expect(trigger?.cues.length).toBeLessThanOrEqual(MAX_TRIGGER_CUES);
+    expect(trigger?.cues.filter((c) => c === 'arrears')).toHaveLength(1);
+    expect(trigger?.cues.every((c) => c.length <= TRIGGER_CUE_MAX_LENGTH)).toBe(true);
+  });
+});
+
+describe('narrowProposedTopicSet — a recorded trigger', () => {
+  function storedWith(trigger: unknown) {
+    return {
+      v: 1,
+      topics: [
+        {
+          key: 'abuse',
+          label: 'Domestic abuse',
+          phase: 'conditional',
+          criteria: 'The opening indicates the applicant is fleeing abuse.',
+          depth: 'full',
+          members: { questionKeys: ['q1'], dataSlotKeys: [] },
+          rationale: 'Added on disclosure.',
+          trigger,
+        },
+      ],
+      rules: [],
+      gaps: [],
+      summary: 'Read from the document.',
+      fromDocument: true,
+      generatedAt: '2026-08-26T10:00:00.000Z',
+    };
+  }
+
+  it('carries the trigger onto the reviewable proposal', () => {
+    const set = narrowProposedTopicSet(
+      storedWith({ condition: 'They disclose abuse at any stage', cues: ['abuse'] })
+    );
+    expect(set?.topics[0]?.trigger?.condition).toBe('They disclose abuse at any stage');
+  });
+
+  it('drops an unreadable trigger without discarding the topic', () => {
+    // A malformed trigger is the absence of a record, not a reason to throw away a proposal an
+    // admin is waiting on.
+    const set = narrowProposedTopicSet(storedWith({ cues: ['abuse'] }));
+    expect(set?.topics).toHaveLength(1);
+    expect(set?.topics[0]?.trigger).toBeUndefined();
   });
 });

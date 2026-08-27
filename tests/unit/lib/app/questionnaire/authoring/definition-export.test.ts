@@ -92,6 +92,7 @@ const TOPICS: Topic[] = [
     members: { dataSlotKeys: ['morale_overall'], questionKeys: ['describe_morale'] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   },
 ];
 
@@ -152,6 +153,7 @@ describe('buildDefinitionExport', () => {
         source: 'manual',
         questionKeys: ['describe_morale'],
         dataSlotKeys: ['morale_overall'],
+        trigger: null,
       },
     ]);
     expect(env.version.conditionalTopics).toEqual(DEFAULT_CONDITIONAL_TOPICS_SETTINGS);
@@ -368,5 +370,42 @@ describe('parseDefinitionImport', () => {
     expect(parsed.version.dataSlots).toEqual([]);
     expect(parsed.version.topics).toEqual([]);
     expect(parsed.version.conditionalTopics).toBeUndefined();
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('a recorded trigger travels with the definition', () => {
+  const trigger = {
+    condition: 'The applicant discloses that they are fleeing abuse',
+    cues: ['abuse', 'fleeing'],
+    sourceQuote: 'If the applicant discloses, at any stage, that they are fleeing abuse',
+  };
+
+  it('exports it, and imports it back unchanged', () => {
+    // An export is how a questionnaire moves between environments. A trigger dropped here would
+    // leave the imported copy silently missing the record of what the document asked for.
+    const topics = [{ ...TOPICS[0], trigger }];
+    const text = JSON.stringify(
+      buildDefinitionExport('T', GRAPH, DATA_SLOTS, topics, SCORING, 'now')
+    );
+
+    const parsed = parseDefinitionImport(text);
+
+    expect(parsed.version.topics[0]?.trigger).toEqual(trigger);
+  });
+
+  it('imports a file written before the field existed', () => {
+    // Backward compatibility, not a schemaVersion bump: an older export has no `trigger` key at
+    // all, and must still import rather than being rejected as a foreign file.
+    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
+    const asJson: { version: { topics: Record<string, unknown>[] } } = JSON.parse(
+      JSON.stringify(env)
+    );
+    delete asJson.version.topics[0].trigger;
+
+    const parsed = parseDefinitionImport(JSON.stringify(asJson));
+
+    expect(parsed.version.topics[0]?.trigger).toBeNull();
   });
 });

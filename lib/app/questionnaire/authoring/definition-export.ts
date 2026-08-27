@@ -61,6 +61,7 @@ import {
   type ConditionalTopicsSettings,
   type Topic,
   type TopicSource,
+  type TopicTrigger,
 } from '@/lib/app/questionnaire/scope/types';
 
 /** Discriminator stamped on an export so import can reject unrelated JSON (e.g. a settings file). */
@@ -127,6 +128,12 @@ export interface DefinitionTopic {
   source: TopicSource;
   questionKeys: string[];
   dataSlotKeys: string[];
+  /**
+   * F17.31a — what the instrument said to watch for mid-conversation, when it asked for something
+   * the opening cannot decide. Null on nearly every topic. Exported so a fork or a re-import keeps
+   * the record of what the document asked for, which is the whole point of storing it.
+   */
+  trigger: TopicTrigger | null;
 }
 
 /** One curated glossary term in an export. */
@@ -217,6 +224,7 @@ export function buildDefinitionExport(
         source: t.source,
         questionKeys: t.members.questionKeys,
         dataSlotKeys: t.members.dataSlotKeys,
+        trigger: t.trigger,
       })),
       conditionalTopics: graph.config.conditionalTopics,
       sections: graph.sections.map((s) => ({

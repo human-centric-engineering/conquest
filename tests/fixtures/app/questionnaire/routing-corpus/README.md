@@ -173,12 +173,24 @@ falls past the candidacy cap.
 
 Recorded here so a run can be scored without re-deriving intent.
 
+> **"Always-asked" is three phases, and exactly one of them is required.** `TOPIC_PHASES` is
+> `opening | core | conditional | closing`, and a config with no `opening` topic fails validation
+> with an **error**, not a warning — `no_opening_topic` in `scope/validate.ts`: _"nothing gathers the
+> signal the agent needs before it can choose."_ So an always-asked topic proposed as `opening`
+> rather than `core` is not a miss, and a proposal where every always-topic is `core` is the one
+> that would be wrong. Score membership (conditional vs always) strictly and the split within
+> always-asked as a judgement, unless the entry below names a phase specifically.
+>
+> This paragraph is a correction. It resolves **T04**, raised against doc 02 in R002 and seen again
+> on doc 03 in R004: the ground truth below asked for `core` where the product requires `opening`,
+> so the pipeline was being marked down for the only output that validates.
+
 - **01** — 7 conditional topics (Adherence, Inhaler, Anticoagulation, Pain, Falls, Cost, plus none for the always-asked blocks). `fromDocument: true`, every criterion quotable.
-- **02** — Parts A, B core; G closing; C–F conditional. `fromDocument: true`.
-- **03** — Sections 1 and 8 always; 2–7 conditional, six criteria all quotable.
+- **02** — Parts A, B, G always-asked (one of A/B is the `opening`, G `closing`); C–F conditional. `fromDocument: true`.
+- **03** — Sections 1 and 8 always (1 the `opening`, 8 `closing`); 2–7 conditional, six criteria all quotable. No cap, depth dial or fallback is stated anywhere, so **inventing one is the failure to watch for** — `maxConditionalTopics`, `fallbackTopicKeys` and `checkTopicPreference` should all be omitted.
 - **04** — Sections 1, 2, 8 core; 3–7 conditional. **`sourceQuote` should be the heading itself.** Watch for the analyst inferring and correctly omitting quotes it cannot support.
 - **05** — Domains 1, 2, 4, 10 core; 3, 5, 6, 7, 8, 9 conditional; `maxConditionalTopics: 4`. **The scoring note in Appendix B must not become a routing rule.** If candidacy misses this document, the 20k cap is implicated.
-- **06** — All core. Zero conditional. `fromDocument: false`. Any conditional topic is a false positive.
+- **06** — **Two correct outcomes, depending on which path runs, and the ingest one is not what this line used to say.** At ingest, `stream/route.ts:230` only invokes the Routing Analyst when candidacy returns `isCandidate: true`, so the correct result is that **candidacy declines and no proposal is produced at all** — no `routing_analysis` row, no topic draft. That is what R007 saw, twice. The "all core, zero conditional, `fromDocument: false`, and a sentence saying the document specifies no conditionality" output belongs to the **manually triggered** analysis on the Topics tab, where the admin has overridden the gate and the analyst does run. Under either path, any conditional topic is a false positive and a critical failure — and so is a candidacy `null`, which means the check did not run and is not the same result as `false`. See RESULTS.md's "Doc 06 is scored out of 6" for why T and G do not apply here.
 - **07** — Standing blocks A–D conditional and correctly criteria'd. **The five triggered blocks must be reported in `gaps[]`, not converted into opening-time criteria.** See below.
 - **08** — The three contradictions must surface — ideally as `gaps[]` — rather than being silently resolved by picking one side. "Use judgement" is unformalisable and belongs in gaps.
 - **09** — `maxConditionalTopics: 3`; Data management and Dissemination at `depth: light`; Consent and Vulnerable participants at `depth: full`.

@@ -460,12 +460,21 @@ function planInferType(change: RevertableChange, snapshot: GraphSnapshot): Rever
   }
   const { question } = resolved.target;
   const before = asObject(change.beforeJson);
-  const priorType = asQuestionType(before?.type);
+  // `type`/`typeConfig` is the canonical spelling. `suggestedType`/`suggestedTypeConfig` is what the
+  // ingest repair pass wrote until the T13/T12 fix, and those rows are already in the wild — read
+  // both rather than backfilling, or every one of them reverts to `free_text` and silently discards
+  // the prior type that is sitting right there in the row.
+  const priorType = asQuestionType(before?.type) ?? asQuestionType(before?.suggestedType);
+  const priorConfig = isRecord(before?.typeConfig)
+    ? before.typeConfig
+    : isRecord(before?.suggestedTypeConfig)
+      ? before.suggestedTypeConfig
+      : null;
   const fields: QuestionUpdateFields = {
     // No prior type recorded → the type was inferred from nothing; the inverse is
     // the schema default with no config.
     type: priorType ?? 'free_text',
-    typeConfig: isRecord(before?.typeConfig) ? before.typeConfig : null,
+    typeConfig: priorConfig,
   };
   return {
     ok: true,

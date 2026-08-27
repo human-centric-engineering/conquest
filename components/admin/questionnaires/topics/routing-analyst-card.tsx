@@ -341,6 +341,10 @@ export function RoutingAnalystCard({
             depth: t.depth,
             questionKeys: t.members.questionKeys,
             dataSlotKeys: t.members.dataSlotKeys,
+            // F17.31a — what the document asked for where the opening cannot decide it. Accepted
+            // with the topic, so the record survives the review rather than living only on a
+            // proposal that gets thrown away.
+            trigger: t.trigger ?? null,
           })),
           rules: draft.rules.map((r) => ({
             dataSlotKey: r.dataSlotKey,
@@ -610,6 +614,18 @@ export function RoutingAnalystCard({
                     <p className="text-sm">
                       <span className="text-muted-foreground">Include when: </span>
                       {topic.criteria}
+                    </p>
+                  )}
+                  {topic.trigger && (
+                    <p className="text-sm">
+                      <span className="text-muted-foreground">
+                        The questionnaire says to add this whenever it comes up:{' '}
+                      </span>
+                      <span className="italic">“{topic.trigger.condition}”</span>{' '}
+                      <span className="text-muted-foreground">
+                        — this interview decides what to cover once, after the opening questions, so
+                        it will be included only when that is already clear by then.
+                      </span>
                     </p>
                   )}
                   <p className="text-muted-foreground text-xs">{topic.rationale}</p>

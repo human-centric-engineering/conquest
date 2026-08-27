@@ -231,8 +231,8 @@ export async function* orchestrateExtraction(
     throw err;
   }
 
-  // Two count-level checks the per-question verdicts structurally cannot make. Neither blocks the
-  // ingest: by the time either is readable the questions already exist, and refusing a document
+  // Three count-level checks the per-question verdicts structurally cannot make. None blocks the
+  // ingest: by the time any is readable the questions already exist, and refusing a document
   // over a fidelity nicety is worse than persisting it with the discrepancy on record. They are
   // logged and carried onto the `extraction_verify` provenance row so a corpus run — or anyone
   // asking "did that prompt change take?" — can see it without re-reading the Structure editor.
@@ -241,6 +241,15 @@ export async function* orchestrateExtraction(
     ctx.log.warn('ingest extractor made edits it is instructed not to make', {
       disallowedEditCount,
       kinds: [...DISALLOWED_EXTRACTOR_EDITS],
+    });
+  }
+
+  const unattributedPromptCount = countUnattributedPrompts(extraction, documentText);
+  if (unattributedPromptCount > 0) {
+    ctx.log.warn('ingest reworded question prompts without recording the edit', {
+      unattributedPromptCount,
+      totalQuestions: total,
+      repairOutcome,
     });
   }
 
@@ -273,6 +282,7 @@ export async function* orchestrateExtraction(
         costUsd: verification.costUsd,
         coverage,
         disallowedEditCount,
+        unattributedPromptCount,
         durationMs: verification.durationMs,
       },
     },
@@ -317,6 +327,60 @@ const DISALLOWED_EXTRACTOR_EDITS: ReadonlySet<ChangeType> = new Set<ChangeType>(
  */
 function countDisallowedEdits(extraction: ExtractQuestionnaireStructureData): number {
   return extraction.changes.filter((c) => DISALLOWED_EXTRACTOR_EDITS.has(c.changeType)).length;
+}
+
+/**
+ * Collapse runs of whitespace so a hard-wrapped source line can be compared to a single-line
+ * prompt. Documents wrap at whatever width their author used and the parsers preserve those
+ * newlines, so a prompt lifted verbatim from a wrapped bullet is NOT a substring of the raw text —
+ * matching without this reports every long question as an unattributed edit.
+ *
+ * Whitespace only. Case, punctuation and hyphens are all left alone deliberately: "near-misses" →
+ * "near misses" and "reads them" → "reviews them" are edits, and an aggressive normaliser that
+ * folded them away would quietly shrink the count this exists to produce.
+ */
+function flattenWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Read the resulting prompt off a change record, whatever change type filed it.
+ *
+ * Keyed on the shape rather than a list of change types on purpose. The question is only ever "did
+ * the extractor tell us this wording is its own?", and any record that put a prompt in `afterJson`
+ * has answered it — including change types added later, which a hard-coded list would silently miss.
+ */
+function recordedPrompt(change: ChangeRecordIntent): string | null {
+  const after = change.afterJson;
+  if (typeof after !== 'object' || after === null) return null;
+  const prompt = (after as { prompt?: unknown }).prompt;
+  return typeof prompt === 'string' && prompt.trim().length > 0 ? prompt : null;
+}
+
+/**
+ * Count prompts that appear neither in the source nor in the editorial log. Deterministic — no
+ * model involved. See `FidelityRecord.unattributedPromptCount` for why this is worth a column.
+ *
+ * Substring containment rather than per-question alignment, because alignment needs to know which
+ * source line each question came from and nothing in the extraction says. Containment can only err
+ * one way — a prompt that happens to appear somewhere else in the document reads as attributed —
+ * which is the right direction for a signal that must never cry wolf on a clean ingest.
+ */
+function countUnattributedPrompts(
+  extraction: ExtractQuestionnaireStructureData,
+  documentText: string
+): number {
+  const source = flattenWhitespace(documentText);
+  const declared = new Set(
+    extraction.changes
+      .map(recordedPrompt)
+      .filter((p): p is string => p !== null)
+      .map(flattenWhitespace)
+  );
+  return extraction.questions.filter((q) => {
+    const prompt = flattenWhitespace(q.prompt);
+    return !source.includes(prompt) && !declared.has(prompt);
+  }).length;
 }
 
 async function runVerification(
@@ -486,7 +550,34 @@ async function runRepair(
   }
 }
 
-/** Build a revertible change intent for a `correct` repair (type change vs config-only). */
+/**
+ * Build a revertible change intent for a `correct` repair (type change vs config-only).
+ *
+ * Two things here are load-bearing and were both wrong until the corpus caught them:
+ *
+ * **The `key`.** `targetEntityId` is null for every question/section change by design (the planner
+ * reconciles by value), but the key is what ties the row to a question in the admin's change list —
+ * `changeForMerge` below has always written one. Without it the row that actually changed the
+ * question names no question, and the earlier `infer_type` row it overrides stays `applied` and
+ * un-superseded. Corpus doc 08 showed the result: three questions whose visible rationale read
+ * "captured as free text to avoid inventing choices" against stored `single_choice` slots WITH
+ * invented choices.
+ *
+ * **The field names.** `planInferType` (`extraction-review/planner.ts`) restores from
+ * `beforeJson.type` / `beforeJson.typeConfig`, which is the shape every other change type uses.
+ * Writing `suggestedType` here meant the two never met, so the planner took its documented "no prior
+ * type recorded" branch and reverted to `free_text` with no config — silent data loss on the one
+ * operation whose entire promise is that it can be undone. The planner now also accepts the old
+ * spelling, so rows written before this fix revert correctly rather than needing a backfill.
+ *
+ * **Scope of that fix: the `infer_type` branch only.** When the type did NOT change this files an
+ * `augment_question`, which `planRevert` routes to `planFieldRestore(..., ['prompt', 'guidelines',
+ * 'rationale'])` — and none of `key`/`type`/`typeConfig` is in that allowlist, so `touched` is empty
+ * and a config-only repair (the specialist fixing a likert's endpoint labels) still reverts as
+ * `missing_before_json`. Pre-existing, not introduced here — the old spelling missed that allowlist
+ * too — and left alone deliberately: widening it would change revert behaviour for every other
+ * producer of `augment_question`, which is a separate decision from this rename.
+ */
 function changeForCorrect(
   original: ExtractedQuestion,
   candidate: ExtractedQuestion
@@ -496,12 +587,14 @@ function changeForCorrect(
     changeType: typeChanged ? 'infer_type' : 'augment_question',
     targetEntityType: 'question',
     beforeJson: {
-      suggestedType: original.suggestedType,
-      suggestedTypeConfig: original.suggestedTypeConfig ?? null,
+      key: original.key,
+      type: original.suggestedType,
+      typeConfig: original.suggestedTypeConfig ?? null,
     },
     afterJson: {
-      suggestedType: candidate.suggestedType,
-      suggestedTypeConfig: candidate.suggestedTypeConfig ?? null,
+      key: candidate.key,
+      type: candidate.suggestedType,
+      typeConfig: candidate.suggestedTypeConfig ?? null,
     },
     rationale: 'Repaired by the scales/matrix specialist during ingestion.',
     ...(typeof candidate.extractionConfidence === 'number'

@@ -113,4 +113,9 @@ const TOPICS_CODES = new Set([
   'no_opening_topic',
   'no_conditional_topics',
   'light_depth_on_always_topic',
+  // F17.31a — recorded triggers. The topic is where each of these is read, and for
+  // `trigger_settled_at_opening` where its story is: nothing is misconfigured and no edit clears it.
+  'trigger_settled_at_opening',
+  'trigger_on_always_topic',
+  'trigger_without_cues',
 ]);

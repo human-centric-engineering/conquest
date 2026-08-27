@@ -99,6 +99,7 @@ function conditionalTopic(): Topic {
     members: { questionKeys: ['q1'], dataSlotKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 

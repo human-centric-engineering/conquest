@@ -353,6 +353,39 @@ describe('persistRoutingAnalysis', () => {
     expect(draft.checkTopicPreference).toEqual(['pipeline']);
   });
 
+  it('carries the topic trigger the analyst returned (F17.31a)', async () => {
+    // `toProposedSet` is the ONLY projection from the validated analyst result to a persisted
+    // draft, and `trigger` is optional on `ProposedTopic` — so omitting it from that literal costs
+    // no type error and silently discards the field one line after the schema accepted it. The
+    // whole F17.31a analyst path hangs off this: no trigger here means no card, no accepted topic,
+    // no column, and none of the three `validate.ts` warnings. `narrowProposedTopicSet` cannot put
+    // it back, because it narrows whatever the literal produced.
+    const log = makeLog();
+    const trigger = {
+      condition: 'The applicant discloses that they are fleeing abuse.',
+      cues: ['he hits me', 'I fled home'],
+      sourceQuote: 'Add the safeguarding block at any stage.',
+    };
+
+    await persistRoutingAnalysis({
+      ...PERSIST,
+      result: { ...RESULT, topics: [{ ...RESULT.topics[0], trigger }] },
+      log: log as never,
+    });
+
+    expect((saveTopicDraft as Mock).mock.calls[0][1].topics[0].trigger).toEqual(trigger);
+  });
+
+  it('leaves trigger off a topic the analyst returned without one', async () => {
+    // Absent is the overwhelmingly common case — nearly every topic is scoped from the opening —
+    // so the key must not appear at all rather than as an empty object a reader mistakes for one.
+    const log = makeLog();
+
+    await persistRoutingAnalysis({ ...PERSIST, log: log as never });
+
+    expect((saveTopicDraft as Mock).mock.calls[0][1].topics[0]).not.toHaveProperty('trigger');
+  });
+
   it('records the model that actually served the call, not the agent row placeholder', async () => {
     // The analyst agent ships with empty provider/model and binds to the reasoning tier at call
     // time. This used to record the literal 'resolved-at-runtime', so `AppAiRun` could not answer

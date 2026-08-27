@@ -212,6 +212,11 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         depth: d.depth,
         questionKeys: d.questionKeys,
         dataSlotKeys: d.dataSlotKeys,
+        // F17.31a. Sent back unchanged — the editor shows it and never edits it. Enumerated like
+        // every other field here, which is exactly why it has to be listed: the PUT replaces the
+        // whole set, so a trigger left out of this payload would be deleted by an admin renaming
+        // an unrelated topic.
+        trigger: d.trigger,
       })),
     });
 

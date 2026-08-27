@@ -59,6 +59,12 @@ const TAB_BY_ISSUE_CODE: Readonly<Record<string, ConditionalTopicsTab>> = {
   no_opening_topic: 'topics',
   no_conditional_topics: 'topics',
   light_depth_on_always_topic: 'topics',
+  // F17.31a. `trigger_settled_at_opening` is not fixable at all — it reports what the questionnaire
+  // asked for against what the product does — but the topic is where its story is, so that is where
+  // the row points. The other two are mis-reads an admin corrects on the topic itself.
+  trigger_settled_at_opening: 'topics',
+  trigger_on_always_topic: 'topics',
+  trigger_without_cues: 'topics',
 
   // Fixed in the settings: a rule, a limit, a list of keys.
   cap_exceeds_candidates: 'rules',

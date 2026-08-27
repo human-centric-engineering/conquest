@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { TOPIC_KEY_MAX_LENGTH } from '@/lib/app/questionnaire/scope/types';
+
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
   ROUTING_ANALYSIS_MAX_SETTING_KEYS,
@@ -269,5 +271,178 @@ describe('validateRoutingAnalysis — the two settings the analyst may now propo
     // runtime, so refusing the whole response over one would throw away a good proposal and pay
     // for a retry to fix a hint.
     expect(validateRoutingAnalysis(proposal({ fallbackTopicKeys: ['not_a_topic'] })).ok).toBe(true);
+  });
+
+  /**
+   * T13, found by corpus doc 08 — the only routing analysis of forty to fail outright.
+   *
+   * `questionKeys` are REFERENCES to keys the extractor minted, and the extractor bounds them at
+   * nothing. Validating them against the *topic* key bound (64) rejected an analysis that had
+   * faithfully echoed back two real question keys of 70 and 78 characters, and no retry could fix
+   * it: satisfying the bound means shortening a key, and a shortened key matches no question. The
+   * failure is durable — a failed routing_analysis is the "already tried" signal the Topics tab
+   * reads — so the admin got no routing and no reason.
+   */
+  const LONG_QUESTION_KEY =
+    'is_there_anything_about_your_circumstances_that_makes_dealing_with_this_harder';
+
+  it('accepts a questionKey longer than a topic key may be — it is a reference, not a slug', () => {
+    expect(LONG_QUESTION_KEY.length).toBeGreaterThan(TOPIC_KEY_MAX_LENGTH);
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [
+          {
+            key: 'vulnerability',
+            label: 'Vulnerability',
+            phase: 'closing',
+            criteria: null,
+            depth: 'full',
+            questionKeys: [LONG_QUESTION_KEY],
+            dataSlotKeys: [LONG_QUESTION_KEY],
+            rationale: 'Every client, at the end, without exception.',
+          },
+        ],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Preserved whole. A truncated key does not resolve, which orphans the question, and an
+    // orphaned question can never be asked.
+    expect(result.value.topics[0]?.questionKeys).toEqual([LONG_QUESTION_KEY]);
+  });
+
+  it('still holds the TOPIC key to the shorter bound — that one the analyst mints', () => {
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [
+          {
+            key: 'k'.repeat(TOPIC_KEY_MAX_LENGTH + 1),
+            label: 'Too long',
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            questionKeys: [],
+            dataSlotKeys: [],
+            rationale: 'r',
+          },
+        ],
+      })
+    );
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ── Mid-interview triggers (F17.31a) ─────────────────────────────────────────
+
+describe('validateRoutingAnalysis — the trigger a document asks for but the opening cannot decide', () => {
+  const triggeredTopic = {
+    key: 'domestic_abuse',
+    label: 'Domestic abuse',
+    phase: 'conditional',
+    criteria: 'The opening indicates the applicant is fleeing abuse.',
+    depth: 'full',
+    questionKeys: ['q_abuse'],
+    dataSlotKeys: [],
+    rationale: 'The document adds this block on disclosure.',
+    trigger: {
+      condition: 'The applicant discloses that they are fleeing abuse',
+      cues: ['abuse', 'fleeing'],
+      sourceQuote: 'If the applicant discloses, at any stage, that they are fleeing abuse',
+    },
+  };
+
+  it('accepts a trigger alongside the criteria, not instead of it', () => {
+    // Both, deliberately. The criteria is what the product runs; the trigger is what was asked for.
+    // A topic that carried only the trigger would be selected by nothing and asked of nobody.
+    const result = validateRoutingAnalysis(proposal({ topics: [triggeredTopic] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.topics[0]?.trigger?.condition).toBe(
+      'The applicant discloses that they are fleeing abuse'
+    );
+    expect(result.value.topics[0]?.criteria).toBe(
+      'The opening indicates the applicant is fleeing abuse.'
+    );
+  });
+
+  it('still requires criteria on a conditional topic that carries a trigger', () => {
+    // The trigger is inert, so a triggered topic with no criteria has nothing deciding it at all.
+    const result = validateRoutingAnalysis(
+      proposal({ topics: [{ ...triggeredTopic, criteria: null }] })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('defaults an omitted cue list rather than failing the whole analysis', () => {
+    // T13 in the routing corpus: one over-strict bound on an analyst field cost a whole document
+    // its proposal, with no retry that could fix it. An empty cue list is reported by
+    // validateConditionalTopics instead, where it costs nothing.
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [{ ...triggeredTopic, trigger: { condition: 'They mention arrears' } }],
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.topics[0]?.trigger?.cues).toEqual([]);
+  });
+
+  it('refuses a trigger with no condition — cues with nothing to confirm record nothing', () => {
+    const result = validateRoutingAnalysis(
+      proposal({ topics: [{ ...triggeredTopic, trigger: { cues: ['abuse'] } }] })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('leaves the field absent on an ordinary topic', () => {
+    const result = validateRoutingAnalysis(proposal());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.topics[0]?.trigger).toBeUndefined();
+  });
+
+  it('drops an over-long cue instead of failing the whole document', () => {
+    // A rejecting bound here is the T13 mistake wearing a different hat. An over-long cue is the
+    // DOCUMENTED failure mode — TRIGGER_CUE_MAX_LENGTH exists because "a long cue is a sign the
+    // analyst quoted the rule instead of naming what to listen for" — and the retry message never
+    // mentions cues, so the single retry is blind. Rejecting would lose every topic, rule and gap
+    // for the document over a field nothing reads yet.
+    const quotedRule =
+      'the respondent discloses that they are fleeing domestic abuse from someone they live with';
+    expect(quotedRule.length).toBeGreaterThan(80);
+
+    const result = validateRoutingAnalysis(
+      proposal({
+        topics: [
+          {
+            ...triggeredTopic,
+            trigger: { ...triggeredTopic.trigger, cues: [quotedRule, 'he hits me'] },
+          },
+        ],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The usable cue survives; the quoted rule is gone. The topic itself is untouched.
+    expect(result.value.topics[0]?.trigger?.cues).toEqual(['he hits me']);
+    expect(result.value.topics[0]?.key).toBe('domestic_abuse');
+  });
+
+  it('caps an over-long cue list instead of failing the whole document', () => {
+    // Same reasoning as the length bound: `narrowTopicTrigger` slices to MAX_TRIGGER_CUES on the
+    // read path, so refusing here would be the one place in the chain that turns "too many" into
+    // "nothing at all".
+    const cues = Array.from({ length: 20 }, (_, i) => `cue ${i}`);
+
+    const result = validateRoutingAnalysis(
+      proposal({ topics: [{ ...triggeredTopic, trigger: { ...triggeredTopic.trigger, cues } }] })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.topics[0]?.trigger?.cues).toHaveLength(12);
+    expect(result.value.topics[0]?.trigger?.cues[0]).toBe('cue 0');
   });
 });

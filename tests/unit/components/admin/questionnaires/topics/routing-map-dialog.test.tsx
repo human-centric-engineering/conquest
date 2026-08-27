@@ -64,6 +64,7 @@ function topic(key: string, phase: Topic['phase'], label = `Topic ${key}`): Topi
     members: { questionKeys: [`q_${key}`], dataSlotKeys: [] },
     ordinal: 0,
     source: 'manual',
+    trigger: null,
   };
 }
 
