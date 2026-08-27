@@ -90,6 +90,11 @@ ARG NEXT_PUBLIC_PLAUSIBLE_DOMAIN
 ARG NEXT_PUBLIC_PLAUSIBLE_HOST
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG NEXT_PUBLIC_COOKIE_CONSENT_ENABLED
+# ConQuest-owned client var (lib/app/release-stage.ts). Forwarded for the reason
+# #662 documents: NEXT_PUBLIC_* is inlined at build time and .dockerignore
+# excludes .env*, so without a build arg the alpha/beta pill and the
+# "chats are recorded" notice would silently not render on a container deploy.
+ARG NEXT_PUBLIC_RELEASE_STAGE
 
 ENV DATABASE_URL=$DATABASE_URL
 ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
@@ -103,6 +108,7 @@ ENV NEXT_PUBLIC_PLAUSIBLE_DOMAIN=$NEXT_PUBLIC_PLAUSIBLE_DOMAIN
 ENV NEXT_PUBLIC_PLAUSIBLE_HOST=$NEXT_PUBLIC_PLAUSIBLE_HOST
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_COOKIE_CONSENT_ENABLED=$NEXT_PUBLIC_COOKIE_CONSENT_ENABLED
+ENV NEXT_PUBLIC_RELEASE_STAGE=$NEXT_PUBLIC_RELEASE_STAGE
 
 # Set environment variables for build
 # Next.js collects anonymous telemetry data about general usage.

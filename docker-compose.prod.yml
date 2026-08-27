@@ -39,6 +39,7 @@ services:
         - NEXT_PUBLIC_PLAUSIBLE_HOST=${NEXT_PUBLIC_PLAUSIBLE_HOST}
         - NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN}
         - NEXT_PUBLIC_COOKIE_CONSENT_ENABLED=${NEXT_PUBLIC_COOKIE_CONSENT_ENABLED}
+        - NEXT_PUBLIC_RELEASE_STAGE=${NEXT_PUBLIC_RELEASE_STAGE}
         # Raise if `next build` OOMs here (FATAL ERROR: Reached heap limit) —
         # the wall #543 was about. Note this default is NOT what CI builds at:
         # CI passes `vars.CI_NODE_HEAP_MB || 5120`, so it always overrides the
