@@ -37,6 +37,7 @@ export const SURFACE_CONFIG_SELECT = {
   attachmentsEnabled: true,
   presentationMode: true,
   respondentLayout: true,
+  respondentChrome: true,
   answerSlotPanelScope: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
@@ -61,6 +62,7 @@ export interface VersionSurface {
     attachmentsEnabled: boolean;
     presentationMode: string;
     respondentLayout: string;
+    respondentChrome: string;
     answerSlotPanelScope: string;
     inlineCorrectionEnabled: boolean;
     sessionResumeEnabled: boolean;

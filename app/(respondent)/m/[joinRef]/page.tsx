@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { MeetingParticipantBoot } from '@/components/app/questionnaire/experiences/meeting-participant-boot';
+import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';
 import { prisma } from '@/lib/db/client';
 import { narrowExperienceSettings } from '@/lib/app/questionnaire/experiences/settings';
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
@@ -42,12 +43,19 @@ export default async function MeetingJoinPage({
   const settings = narrowExperienceSettings(meeting.experience.settings);
 
   return (
-    <MeetingParticipantBoot
-      meetingId={meeting.id}
-      title={meeting.title ?? meeting.experience.title}
-      insightDisplay={
-        settings.surfaceInsightsToRespondents ? settings.respondentInsightDisplay : 'none'
-      }
-    />
+    // `full` rather than the meeting's own choice, deliberately. A meeting's breakout rooms can each
+    // run a DIFFERENT questionnaire version, and the participant surface swaps sessions in place
+    // without a server render — so reading chrome per session would change the frame around people
+    // mid-meeting, which is the one thing a facilitated room cannot have. `full` is what this page
+    // has always shown; making it configurable waits for a per-MEETING setting to read.
+    <RespondentChrome mode="full">
+      <MeetingParticipantBoot
+        meetingId={meeting.id}
+        title={meeting.title ?? meeting.experience.title}
+        insightDisplay={
+          settings.surfaceInsightsToRespondents ? settings.respondentInsightDisplay : 'none'
+        }
+      />
+    </RespondentChrome>
   );
 }

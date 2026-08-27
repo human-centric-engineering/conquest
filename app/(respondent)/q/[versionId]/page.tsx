@@ -18,6 +18,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
+  resolveRespondentChromeForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -26,7 +27,7 @@ import {
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { ResumeByRefEntry } from '@/components/app/questionnaire/chat/resume-by-ref-entry';
-import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
+import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 
 // Display serif for the ConQuest wordmark, shown only in the admin "Preview as
@@ -42,6 +43,9 @@ const display = Fraunces({
  * Title the tab (and any browser-derived print/save filename) after the actual questionnaire, not a
  * generic "Questionnaire". Gated by the same live-sessions flag as the page so a dark-launched
  * surface never leaks a title; falls back to the generic title otherwise.
+ *
+ * Also the one place chrome reaches metadata: a `white_label` questionnaire drops the layout's
+ * " - ConQuest" title template, because a tab is part of what a respondent sees.
  */
 export async function generateMetadata({
   params,
@@ -50,8 +54,18 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const description = 'Complete a short conversational questionnaire — no account needed.';
   const { versionId } = await params;
-  const header = await resolveVersionHeader(versionId);
-  return { title: header?.title ?? 'Questionnaire', description };
+  const [header, chrome] = await Promise.all([
+    resolveVersionHeader(versionId),
+    resolveRespondentChromeForVersion(versionId),
+  ]);
+  const title = header?.title ?? 'Questionnaire';
+  // A white-labelled questionnaire is one a client is presenting as their own, and the layout's
+  // title template would otherwise append " - ConQuest" to the one string the respondent's browser
+  // shows in the tab, the history and any saved-page filename. `absolute` opts out of the template.
+  // The other two modes keep it: they are already showing our name on the page itself.
+  return chrome === 'white_label'
+    ? { title: { absolute: title }, description }
+    : { title, description };
 }
 
 /**
@@ -89,6 +103,7 @@ export default async function PublicQuestionnairePage({
     anonymous,
     presentationMode,
     respondentLayout,
+    respondentChrome,
     answerPanelScope,
     voiceConfigured,
     attachmentsConfigured,
@@ -106,6 +121,7 @@ export default async function PublicQuestionnairePage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
@@ -128,67 +144,71 @@ export default async function PublicQuestionnairePage({
   const reasoningPlacement = reasoningPlacementConfigured;
 
   return (
-    <div
-      className={`${display.variable} ${RESPONDENT_SHELL} flex h-[calc(100dvh-9rem)] flex-col px-4 py-6`}
-    >
-      {/* Admin "Preview as respondent" chrome — the ConQuest signature (mirroring the admin
+    // The chrome owns the viewport height and the shared reading width; this page contributes only
+    // its display font and the padding that lines the conversation up with the chrome's own
+    // container. Before, it carried `h-[calc(100dvh-9rem)]` — a guess at the height of a header and
+    // footer it could not see, and simply wrong the moment either becomes a setting.
+    <RespondentChrome mode={respondentChrome}>
+      <div className={`${display.variable} flex h-full min-h-0 flex-col px-4 py-6`}>
+        {/* Admin "Preview as respondent" chrome — the ConQuest signature (mirroring the admin
           surface) plus a slim meta strip above the brand surface. It's admin meta, not the
           respondent experience, so it shows only in preview: a real respondent sees just the
           questionnaire's own (white-labelled) brand. The Exit link persists across every session
           state so the admin always has a way back. */}
-      {preview && (
-        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
-          <ConquestWordmark size="page" showSubtitle />
-          {previewMeta && (
-            <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
-              <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--cq-accent)]" />
-              <span className="text-foreground font-medium">
-                Preview · v{previewMeta.versionNumber} ({previewMeta.status})
-              </span>
-              <span className="truncate">· not recorded in analytics</span>
-              <Link
-                href={previewMeta.exitHref}
-                className="hover:text-foreground shrink-0 underline underline-offset-2"
-              >
-                Exit
-              </Link>
-            </div>
-          )}
-        </header>
-      )}
-      <div className="min-h-0 flex-1">
-        <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
-          <AnonymousSessionBoot
-            glossary={glossary}
-            glossaryAppendix={glossaryAppendix}
-            versionId={versionId}
-            preview={preview}
-            inviteToken={inviteToken}
-            voiceInputEnabled={voiceInputEnabled}
-            attachmentInputEnabled={attachmentInputEnabled}
-            anonymous={anonymous}
-            presentationMode={presentationMode}
-            respondentLayout={respondentLayout}
-            answerPanelScope={answerPanelScope}
-            reasoningPlacement={reasoningPlacement}
-            reasoningDwellMs={reasoningDwell.dwellMs}
-            reasoningPerItemMs={reasoningDwell.perItemMs}
-            inlineCorrectionEnabled={inlineCorrectionEnabled}
-            showProgressPercentText={showProgressPercentText}
-            welcomeCopy={theme.welcomeCopy}
-            resumeEnabled={resumeEnabled}
-            // Handed down as a NODE rather than a flag: it needs the resolved theme (the dialog
-            // portals to `document.body`, outside this provider's wrapper, so it would otherwise
-            // open platform-coloured on a white-labelled questionnaire), and the workspace — not
-            // the page — knows which existing row can carry it without costing a line of its own.
-            resumeByRef={
-              showResumeByRef ? (
-                <ResumeByRefEntry versionId={versionId} brandStyle={themeToCssVariables(theme)} />
-              ) : undefined
-            }
-          />
-        </BrandThemeProvider>
+        {preview && (
+          <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
+            <ConquestWordmark size="page" showSubtitle />
+            {previewMeta && (
+              <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--cq-accent)]" />
+                <span className="text-foreground font-medium">
+                  Preview · v{previewMeta.versionNumber} ({previewMeta.status})
+                </span>
+                <span className="truncate">· not recorded in analytics</span>
+                <Link
+                  href={previewMeta.exitHref}
+                  className="hover:text-foreground shrink-0 underline underline-offset-2"
+                >
+                  Exit
+                </Link>
+              </div>
+            )}
+          </header>
+        )}
+        <div className="min-h-0 flex-1">
+          <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
+            <AnonymousSessionBoot
+              glossary={glossary}
+              glossaryAppendix={glossaryAppendix}
+              versionId={versionId}
+              preview={preview}
+              inviteToken={inviteToken}
+              voiceInputEnabled={voiceInputEnabled}
+              attachmentInputEnabled={attachmentInputEnabled}
+              anonymous={anonymous}
+              presentationMode={presentationMode}
+              respondentLayout={respondentLayout}
+              answerPanelScope={answerPanelScope}
+              reasoningPlacement={reasoningPlacement}
+              reasoningDwellMs={reasoningDwell.dwellMs}
+              reasoningPerItemMs={reasoningDwell.perItemMs}
+              inlineCorrectionEnabled={inlineCorrectionEnabled}
+              showProgressPercentText={showProgressPercentText}
+              welcomeCopy={theme.welcomeCopy}
+              resumeEnabled={resumeEnabled}
+              // Handed down as a NODE rather than a flag: it needs the resolved theme (the dialog
+              // portals to `document.body`, outside this provider's wrapper, so it would otherwise
+              // open platform-coloured on a white-labelled questionnaire), and the workspace — not
+              // the page — knows which existing row can carry it without costing a line of its own.
+              resumeByRef={
+                showResumeByRef ? (
+                  <ResumeByRefEntry versionId={versionId} brandStyle={themeToCssVariables(theme)} />
+                ) : undefined
+              }
+            />
+          </BrandThemeProvider>
+        </div>
       </div>
-    </div>
+    </RespondentChrome>
   );
 }

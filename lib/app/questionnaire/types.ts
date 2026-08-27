@@ -341,8 +341,7 @@ export type PresentationMode = (typeof PRESENTATION_MODES)[number];
  *
  * This tuple grows only as layouts are actually implemented, never ahead of them: the layout
  * registry is `satisfies Record<RespondentLayout, LayoutDefinition>`, so adding a value here
- * without a layout to back it is a compile error rather than a runtime blank surface. That is why
- * the remaining designed alternative (Horizon, one question at a time) is absent until it lands.
+ * without a layout to back it is a compile error rather than a runtime blank surface.
  *
  * Whichever layout is chosen, EVERY respondent feature stays reachable — the parts move, they do
  * not disappear. See `lib/app/questionnaire/layout/slots.ts` for how that is enforced.
@@ -352,6 +351,30 @@ export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
 
 /** The layout every questionnaire gets unless it says otherwise. Referenced wherever a layout is narrowed. */
 export const DEFAULT_RESPONDENT_LAYOUT: RespondentLayout = 'classic';
+
+/**
+ * How much of ConQuest shows around the respondent surface — the CHROME axis.
+ *
+ * Orthogonal to {@link RESPONDENT_LAYOUTS}, and the distinction is worth holding: a layout decides
+ * where the questionnaire's own parts sit, chrome decides what surrounds them. A white-labelled
+ * Broadsheet and a fully-branded Broadsheet are the same arrangement in different clothes.
+ *
+ * - `full` — the ConQuest site header and footer, exactly as every respondent page has always had
+ *   them. The default, so no existing questionnaire changes appearance.
+ * - `co_branded` — a slim ConQuest line above the questionnaire's own brand band, and nothing
+ *   below. For a client who is happy to be seen using us but does not want their respondents
+ *   offered a marketing nav mid-questionnaire.
+ * - `white_label` — the questionnaire alone. For a client presenting the instrument as their own,
+ *   and for embeds, where a site header inside an iframe is simply wrong.
+ *
+ * A stored value this build does not know resolves to `full` for the same reason an unknown layout
+ * resolves to Classic: a rollback must not strip a live respondent's page of its chrome.
+ */
+export const RESPONDENT_CHROMES = ['full', 'co_branded', 'white_label'] as const;
+export type RespondentChrome = (typeof RESPONDENT_CHROMES)[number];
+
+/** The chrome every questionnaire gets unless it says otherwise. Referenced wherever chrome is narrowed. */
+export const DEFAULT_RESPONDENT_CHROME: RespondentChrome = 'full';
 
 /**
  * Who may START a session over a launched version (the access axis — ORTHOGONAL to
@@ -1489,6 +1512,17 @@ export type QuestionnaireConfigShape = {
    */
   respondentLayout: RespondentLayout;
   /**
+   * How much of ConQuest shows AROUND the respondent surface — the site header and footer, a slim
+   * co-branded line, or nothing at all. Orthogonal to {@link respondentLayout}, which arranges the
+   * questionnaire's own parts inside whatever chrome this leaves.
+   *
+   * Applies to the three respondent pages that stand on their own (`/q`, `/x`, `/m`). It
+   * deliberately does NOT apply to the signed-in `/questionnaires/[sessionId]` surface: a
+   * respondent with an account is inside the product, and hiding its navigation would strand them.
+   * Defaults to `full`. See {@link RESPONDENT_CHROMES}.
+   */
+  respondentChrome: RespondentChrome;
+  /**
    * Inline answer correction (Variant B): when on, the respondent can "fix" an answer the latest
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
@@ -1672,6 +1706,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
   respondentLayout: DEFAULT_RESPONDENT_LAYOUT,
+  respondentChrome: DEFAULT_RESPONDENT_CHROME,
   inlineCorrectionEnabled: false,
   sessionResumeEnabled: true,
   showProgressPercentText: true,

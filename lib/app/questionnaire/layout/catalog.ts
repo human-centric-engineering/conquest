@@ -1,5 +1,5 @@
 /**
- * Human-facing copy for each respondent layout — the ONE source of it.
+ * Human-facing copy for the respondent layouts and chrome modes — the ONE source of it.
  *
  * Three surfaces need to name a layout: the admin picker in the config editor, the settings
  * registry (which feeds the Questionnaire Pack's shareable "Experience setup" table), and the
@@ -14,7 +14,12 @@
  * the pack exporter. Pure data: no React, no Prisma, no DOM.
  */
 
-import { RESPONDENT_LAYOUTS, type RespondentLayout } from '@/lib/app/questionnaire/types';
+import {
+  RESPONDENT_CHROMES,
+  RESPONDENT_LAYOUTS,
+  type RespondentChrome,
+  type RespondentLayout,
+} from '@/lib/app/questionnaire/types';
 
 export interface RespondentLayoutMeta {
   /** Short name, as shown in the picker and in the exported settings table. */
@@ -50,3 +55,35 @@ export const RESPONDENT_LAYOUT_META: Record<RespondentLayout, RespondentLayoutMe
 export const RESPONDENT_LAYOUT_LABELS: Record<RespondentLayout, string> = Object.fromEntries(
   RESPONDENT_LAYOUTS.map((key) => [key, RESPONDENT_LAYOUT_META[key].label])
 ) as Record<RespondentLayout, string>;
+
+/**
+ * Human-facing copy for each chrome mode, declared here for the same reason the layouts are: the
+ * settings tab, the exported settings table and any surface that has to name the choice all read
+ * one source.
+ *
+ * The copy is written for the admin choosing on a client's behalf, so it says what the RESPONDENT
+ * sees rather than naming the mechanism — "no ConQuest branding" is the decision being made;
+ * "renders no AppHeader" is an implementation detail nobody outside this repo can act on.
+ */
+export const RESPONDENT_CHROME_META: Record<RespondentChrome, RespondentLayoutMeta> = {
+  full: {
+    label: 'Full ConQuest',
+    description:
+      'The usual ConQuest header and footer around the questionnaire. The default, and what every questionnaire link has always looked like.',
+  },
+  co_branded: {
+    label: 'Co-branded',
+    description:
+      'A slim ConQuest line above the client’s own branding, and nothing below it. Says who built it without offering respondents a menu mid-questionnaire.',
+  },
+  white_label: {
+    label: 'White label',
+    description:
+      'The questionnaire on its own, with no ConQuest branding at all. For clients presenting it as their own, and for embedding it in someone else’s page.',
+  },
+};
+
+/** Just the labels — the exported settings table and anywhere else without room for a description. */
+export const RESPONDENT_CHROME_LABELS: Record<RespondentChrome, string> = Object.fromEntries(
+  RESPONDENT_CHROMES.map((key) => [key, RESPONDENT_CHROME_META[key].label])
+) as Record<RespondentChrome, string>;

@@ -33,6 +33,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentLayoutForVersion,
+  resolveRespondentChromeForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -99,6 +100,54 @@ describe('resolveRespondentLayoutForVersion', () => {
     await resolveRespondentLayoutForVersion('ver-abc');
 
     expect(findUniqueArg().select.config.select).toHaveProperty('respondentLayout', true);
+  });
+});
+
+describe('resolveRespondentChromeForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored chrome', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentChrome: 'white_label' },
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('white_label');
+  });
+
+  it('falls back to full when there is no config row', async () => {
+    // A version saved before the column existed keeps the header and footer it has always had.
+    // There is no backfill, so this fallback IS the reason nothing changed appearance.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('full');
+  });
+
+  it('falls back to full for a chrome mode this build does not know', async () => {
+    // The rollback case. A build that shipped a fourth mode and was rolled back leaves rows naming
+    // it; a respondent mid-questionnaire must not find the page around them stripped bare. Same
+    // asymmetry as the layout: forgiving here, strict at the PATCH validator.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { respondentChrome: 'kiosk_mode' },
+    } as never);
+
+    await expect(resolveRespondentChromeForVersion('ver-abc')).resolves.toBe('full');
+  });
+
+  it('selects the column it reads', async () => {
+    // Without this the resolver returns 'full' forever, whatever the admin chose — and a
+    // white-labelled questionnaire would quietly keep showing our header to the client's
+    // respondents, which is the one failure this feature exists to prevent.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+
+    await resolveRespondentChromeForVersion('ver-abc');
+
+    expect(findUniqueArg().select.config.select).toHaveProperty('respondentChrome', true);
   });
 });
 

@@ -13,24 +13,11 @@
  * No session-sensitive data is needed here: session creation happens client-side
  * in AnonymousSessionBoot; this page only resolves the theme server-side.
  *
- * @see app/(public)/q/[versionId]/page.tsx
+ * @see app/(respondent)/q/[versionId]/page.tsx
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-
-/**
- * Mock next/navigation — notFound() throws a sentinel so page execution halts,
- * matching Next.js runtime behaviour.
- */
-vi.mock('next/navigation', () => ({
-  notFound: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
-  }),
-  redirect: vi.fn((url: string) => {
-    throw new Error(`NEXT_REDIRECT:${url}`);
-  }),
-}));
 
 /**
  * Mock theme resolver — returns a minimal resolved theme.
@@ -49,6 +36,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnswerPanelScopeForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveRespondentLayoutForVersion: vi.fn(),
+  resolveRespondentChromeForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
   resolveReasoningPlacementForVersion: vi.fn(),
@@ -56,6 +44,18 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveInlineCorrectionForVersion: vi.fn(),
   resolveSessionResumeEnabledForVersion: vi.fn(),
   resolveShowProgressPercentTextForVersion: vi.fn(),
+}));
+
+// The chrome is rendered by the page now, not inherited from a layout. Stubbed to a pass-through
+// that surfaces the mode it was handed: the marketing nav inside the real one needs a router, and
+// what these tests care about is that the page resolved the questionnaire's chrome and passed it —
+// `respondent-chrome.test.tsx` covers what each mode actually draws.
+vi.mock('@/components/app/questionnaire/chrome/respondent-chrome', () => ({
+  RespondentChrome: ({ mode, children }: { mode: string; children: React.ReactNode }) => (
+    <div data-testid="chrome" data-mode={mode}>
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -105,11 +105,12 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
   BrandThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import PublicQuestionnairePage, { generateMetadata } from '@/app/(public)/q/[versionId]/page';
+import PublicQuestionnairePage, { generateMetadata } from '@/app/(respondent)/q/[versionId]/page';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
+  resolveRespondentChromeForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
@@ -163,6 +164,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
     vi.mocked(resolveRespondentLayoutForVersion).mockResolvedValue('classic');
+    vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue('full');
     vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('full_progress');
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
@@ -198,6 +200,34 @@ describe('PublicQuestionnairePage', () => {
       vi.mocked(resolveVersionHeader).mockResolvedValue(null);
       const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
       expect(meta.title).toBe('Questionnaire');
+    });
+
+    it('drops the ConQuest title template for a white-labelled questionnaire', async () => {
+      // The commercial promise reaching the one string a respondent sees outside the page. The
+      // route group's layout appends " - ConQuest" to a plain title, so a client presenting the
+      // instrument as their own would have had our name in the tab, the history entry and any
+      // saved-page filename. `absolute` is what opts out of the template.
+      vi.mocked(resolveVersionHeader).mockResolvedValue({
+        title: 'Acme Alpha Demo',
+        round: null,
+      });
+      vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue('white_label');
+      const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
+      expect(meta.title).toEqual({ absolute: 'Acme Alpha Demo' });
+    });
+
+    it('keeps the template for the branded modes', async () => {
+      // They are already showing our name on the page itself, so hiding it from the tab would be
+      // an inconsistency rather than a courtesy.
+      for (const chrome of ['full', 'co_branded'] as const) {
+        vi.mocked(resolveVersionHeader).mockResolvedValue({
+          title: 'Acme Alpha Demo',
+          round: null,
+        });
+        vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue(chrome);
+        const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
+        expect(meta.title, chrome).toBe('Acme Alpha Demo');
+      }
     });
   });
 

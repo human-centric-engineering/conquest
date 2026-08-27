@@ -96,6 +96,15 @@ export interface UseSessionWorkspaceOptions {
   autoStart?: boolean;
   presentationMode?: PresentationMode;
   answerPanelScope?: AnswerSlotPanelScope;
+  /**
+   * Does the chosen layout put the answer panel back on screen at `lg`?
+   *
+   * Read from `placements.answersPanel.kind` by the container, which already reads it to decide
+   * whether to build the panel node and whether the review trigger carries `lg:hidden` — the same
+   * one declaration driving every consequence, rather than three places guessing. Only the
+   * review-sheet auto-close below depends on it here. Defaults to `true`, which is Classic.
+   */
+  panelReturnsAtLg?: boolean;
   inlineCorrectionEnabled?: boolean;
   readOnly?: boolean;
   intro?: ResolvedSessionIntro | null;
@@ -193,6 +202,7 @@ export function useSessionWorkspace({
   initialStatusView,
   initialFormView,
   autoStart = false,
+  panelReturnsAtLg = true,
   presentationMode = 'both',
   answerPanelScope = 'full_progress',
   inlineCorrectionEnabled = false,
@@ -416,10 +426,18 @@ export function useSessionWorkspace({
     lifecycleRefetchRef.current = lifecycle.refetch;
   });
 
-  // The mobile review sheet only makes sense below `lg` (where the side panel is hidden). If the
-  // viewport grows past `lg` while it's open, close it so it doesn't linger over the now-visible
-  // side panel. The trigger is already `lg:hidden`; this just covers the live-resize edge.
+  // The review sheet is the NARROW-viewport twin of the side panel, so when the panel comes back at
+  // `lg` the sheet should get out of its way — the trigger is `lg:hidden` there, and a sheet
+  // lingering over a visible panel is two copies of the same thing.
+  //
+  // But that is only true of a layout that HAS a panel at `lg`. Focus, Broadsheet and Horizon all
+  // omit `answersPanel` and keep the review affordance at every width — the sheet becomes a side
+  // drawer rather than retiring. Closing it there would take away the only route to the captured
+  // answers: a respondent on a tablet opens their answers in portrait, rotates to landscape, and
+  // watches them vanish mid-read. Hence the gate, keyed on the same placement reading the trigger
+  // and the drawer already share.
   useEffect(() => {
+    if (!panelReturnsAtLg) return;
     if (typeof window === 'undefined' || !('matchMedia' in window)) return;
     const mq = window.matchMedia('(min-width: 1024px)');
     const close = () => {
@@ -428,7 +446,7 @@ export function useSessionWorkspace({
     close();
     mq.addEventListener('change', close);
     return () => mq.removeEventListener('change', close);
-  }, []);
+  }, [panelReturnsAtLg]);
 
   // Detect the data slots the latest refetch filled (data-slot mode only). On the first view we just
   // seed the ref — never auto-scroll the seeded/SSR snapshot. Each later view diffs against the prior

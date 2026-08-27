@@ -21,7 +21,7 @@
  * - Static metadata: `robots: { index: false, follow: false }` — a journey address must never be
  *   indexed
  *
- * @see app/(public)/x/[publicRef]/page.tsx
+ * @see app/(respondent)/x/[publicRef]/page.tsx
  * @see app/api/v1/app/experiences/_lib/run-surface.ts
  */
 
@@ -70,10 +70,33 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveInlineCorrectionForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveRespondentLayoutForVersion: vi.fn(),
+  resolveRespondentChromeForVersion: vi.fn(),
   resolveReasoningDwellForVersion: vi.fn(),
   resolveReasoningPlacementForVersion: vi.fn(),
   resolveShowProgressPercentTextForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
+}));
+
+// The chrome is rendered by the page now, not inherited from a layout. Stubbed to a pass-through
+// that surfaces the mode it was handed: the marketing nav inside the real one needs a router, and
+// what these tests care about is that the page resolved the questionnaire's chrome and passed it —
+// `respondent-chrome.test.tsx` covers what each mode actually draws.
+vi.mock('@/components/app/questionnaire/chrome/respondent-chrome', () => ({
+  RespondentChrome: ({
+    mode,
+    shell,
+    children,
+  }: {
+    mode: string;
+    shell?: boolean;
+    children: React.ReactNode;
+  }) => (
+    // `shell` is surfaced, not swallowed: this page is the one caller that turns it OFF, and a stub
+    // that quietly dropped the prop would let that removal pass every test in the file.
+    <div data-testid="chrome" data-mode={mode} data-shell={String(shell ?? true)}>
+      {children}
+    </div>
+  ),
 }));
 
 /**
@@ -109,7 +132,7 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
   BrandThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import ExperienceRunPage, { metadata } from '@/app/(public)/x/[publicRef]/page';
+import ExperienceRunPage, { metadata } from '@/app/(respondent)/x/[publicRef]/page';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { resolveRunSurface } from '@/app/api/v1/app/experiences/_lib/run-surface';
@@ -122,6 +145,7 @@ import {
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentLayoutForVersion,
+  resolveRespondentChromeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
   resolveShowProgressPercentTextForVersion,
@@ -194,6 +218,7 @@ describe('ExperienceRunPage', () => {
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
     vi.mocked(resolveRespondentLayoutForVersion).mockResolvedValue('classic');
+    vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue('full');
     vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('full_progress');
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
@@ -212,6 +237,14 @@ describe('ExperienceRunPage', () => {
       // A journey URL is short, human-quotable, and respondent-private — indexing it would leak
       // the existence (and possibly content) of a private conversation to search engines.
       expect(metadata.robots).toEqual({ index: false, follow: false });
+    });
+
+    it('keeps ConQuest out of the tab title, since a run can be white-labelled', () => {
+      // The `(respondent)` layout applies a " - ConQuest" title template to any plain title string.
+      // A run is a whole journey and may be presented as the client's own; the page honours that
+      // for everything drawn on it, and the tab is the one surface the page cannot repaint. So the
+      // title is ABSOLUTE, which is what opts out of the template.
+      expect(metadata.title).toEqual({ absolute: 'Your conversation' });
     });
   });
 
@@ -267,6 +300,18 @@ describe('ExperienceRunPage', () => {
       expect(resolveThemeForVersion).not.toHaveBeenCalled();
       expect(resolveVersionHeader).not.toHaveBeenCalled();
     });
+
+    it('falls back to full chrome and opts out of the reading shell', async () => {
+      // No version resolved means no questionnaire to ask what chrome it wanted, so `full` is the
+      // only honest answer. And `shell={false}` because the shared reading measure belongs to a
+      // conversation — there isn't one here, just a narrow explanatory card that sets its own width.
+      const Component = await ExperienceRunPage({ params: makeParams(PUBLIC_REF) });
+      render(Component);
+
+      const chrome = screen.getByTestId('chrome');
+      expect(chrome).toHaveAttribute('data-mode', 'full');
+      expect(chrome).toHaveAttribute('data-shell', 'false');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -274,6 +319,19 @@ describe('ExperienceRunPage', () => {
   // -------------------------------------------------------------------------
 
   describe('when the surface resolves (ok: true)', () => {
+    it('wraps the live surface in the chrome the CURRENT leg asked for', async () => {
+      // Each leg of a run may be a different questionnaire, so chrome is re-resolved per load like
+      // the theme and the layout. A leg that white-labels must not inherit the previous leg's
+      // header — the respondent would watch our branding appear half-way through their journey.
+      vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue('white_label');
+
+      const Component = await ExperienceRunPage({ params: makeParams(PUBLIC_REF) });
+      render(Component);
+
+      expect(screen.getByTestId('chrome')).toHaveAttribute('data-mode', 'white_label');
+      expect(resolveRespondentChromeForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
+    });
+
     it('passes sessionId, accessToken, and the resolved theme welcomeCopy to RunSessionBoot', async () => {
       const Component = await ExperienceRunPage({ params: makeParams(PUBLIC_REF) });
       render(Component);

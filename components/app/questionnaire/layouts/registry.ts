@@ -275,6 +275,15 @@ export const LAYOUT_REGISTRY = {
  * questionnaire quietly rendering the default.
  */
 export function resolveLayout(layout: string | null | undefined): LayoutDefinition {
-  const key = layout as RespondentLayout;
-  return LAYOUT_REGISTRY[key] ?? LAYOUT_REGISTRY[DEFAULT_RESPONDENT_LAYOUT];
+  // `Object.hasOwn`, not a bare index-and-`??`. Indexing a plain object with an arbitrary string
+  // walks the prototype chain, so a stored value of `constructor`, `toString` or `valueOf` returns
+  // an inherited FUNCTION — truthy, so the `??` never fires — and the caller then destructures
+  // `Component` and `placements` off it as `undefined` and crashes on `placements.answersPanel`.
+  // That is precisely the blank surface this fallback exists to prevent, arrived at by the one
+  // route the fallback did not cover. Unreachable through the admin PATCH (a Zod enum) or the read
+  // narrowing today, which is exactly why it would have sat here unnoticed.
+  if (typeof layout === 'string' && Object.hasOwn(LAYOUT_REGISTRY, layout)) {
+    return LAYOUT_REGISTRY[layout as RespondentLayout];
+  }
+  return LAYOUT_REGISTRY[DEFAULT_RESPONDENT_LAYOUT];
 }

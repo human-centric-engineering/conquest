@@ -241,6 +241,16 @@ export function SessionWorkspace({
   capture = null,
   resumeByRef,
 }: SessionWorkspaceProps) {
+  // Resolved before the hook, not after, because the hook needs one of its declarations — and
+  // hooks run before the whole-surface takeovers below can early-return. `resolveLayout` is pure
+  // and total, so calling it here costs nothing and cannot fail.
+  const { Component: Layout, placements } = resolveLayout(respondentLayout);
+  // Does this layout put the answer panel back on screen at `lg`? One declaration, read once, and
+  // handed to everything that depends on it: whether to build the panel node, whether the review
+  // trigger carries `lg:hidden`, whether the review SHEET retires at `lg` — and now whether the
+  // sheet auto-closes on a resize past `lg`, which was silently wrong for every panel-less layout.
+  const panelInline = placements.answersPanel.kind === 'region';
+
   const state = useSessionWorkspace({
     sessionId,
     accessToken,
@@ -258,6 +268,7 @@ export function SessionWorkspace({
     intro,
     personas,
     capture,
+    panelReturnsAtLg: panelInline,
   });
 
   const {
@@ -407,8 +418,6 @@ export function SessionWorkspace({
   // rather than decorative: two slots below are built differently depending on whether this layout
   // keeps the answer panel on screen. Reading the declaration (instead of re-deciding here) is what
   // stops the two drifting — a layout that changes its mind about the panel changes both at once.
-  const { Component: Layout, placements } = resolveLayout(respondentLayout);
-  const panelInline = placements.answersPanel.kind === 'region';
   // Does this layout's composer region hand it the whole height of its column? Broadsheet's margin
   // does. Read here rather than styled in the layout because a layout places nodes it did not build
   // — it cannot reach inside the composer and tell the textarea to grow.

@@ -43,16 +43,22 @@ vi.mock('@/components/app/questionnaire/panel/answer-slot-panel', () => ({
     loading,
     canRevisit,
     onRevisit,
+    onRefine,
+    correction,
     newlyFilledKeys,
     hideNativeScrollbar,
+    headerInsetEnd,
     className,
   }: {
     view: AnswerPanelView | null;
     loading: boolean;
     canRevisit: boolean;
     onRevisit: (slot: PanelSlotView) => void;
+    onRefine?: (slot: PanelSlotView) => void;
+    correction?: unknown;
     newlyFilledKeys?: readonly string[];
     hideNativeScrollbar?: boolean;
+    headerInsetEnd?: boolean;
     className?: string;
   }) => (
     <div
@@ -62,10 +68,19 @@ vi.mock('@/components/app/questionnaire/panel/answer-slot-panel', () => ({
       data-has-view={String(view !== null)}
       data-newly-filled={(newlyFilledKeys ?? []).join(',')}
       data-hide-native-scrollbar={String(Boolean(hideNativeScrollbar))}
+      data-header-inset-end={String(Boolean(headerInsetEnd))}
       data-class={className}
+      // Both are forwarded by the real drawer. Surfaced rather than swallowed so that dropping
+      // either prop fails a test: refine sends a fresh probe turn, and `correction` is what makes
+      // the inline "fix this answer" editor reachable from a panel row.
+      data-has-refine={String(typeof onRefine === 'function')}
+      data-has-correction={String(correction !== undefined)}
     >
       <button type="button" onClick={() => onRevisit(SLOT)}>
         revisit
+      </button>
+      <button type="button" onClick={() => onRefine?.(SLOT)}>
+        refine
       </button>
     </div>
   ),
@@ -120,10 +135,15 @@ function drawer(
 function renderDrawer(over: Partial<React.ComponentProps<typeof AnswerReviewDrawer>> = {}) {
   const onOpenChange = vi.fn();
   const onRevisit = vi.fn();
+  // Supplied by default (overridable) so every render exercises the same prop set the respondent
+  // surface actually passes — the container always hands the drawer both actions.
+  const onRefine = vi.fn();
   render(
-    <BrandThemeProvider theme={THEME}>{drawer(over, onOpenChange, onRevisit)}</BrandThemeProvider>
+    <BrandThemeProvider theme={THEME}>
+      {drawer({ onRefine, ...over }, onOpenChange, onRevisit)}
+    </BrandThemeProvider>
   );
-  return { onOpenChange, onRevisit };
+  return { onOpenChange, onRevisit, onRefine };
 }
 
 /** No provider above — the admin surfaces render this panel too, and have no brand to inherit. */
@@ -257,6 +277,56 @@ describe('AnswerReviewDrawer', () => {
     expect(panel).toHaveAttribute('data-loading', 'true');
     expect(panel).toHaveAttribute('data-can-revisit', 'false');
     expect(panel).toHaveAttribute('data-newly-filled', 'budget');
+  });
+
+  it('forwards the refine action through to the panel', () => {
+    // Refine sends a fresh probe turn. The drawer's job is only to pass the handler down —
+    // DISMISSING the sheet afterwards belongs to the container (`session-workspace.tsx` wraps both
+    // `onRevisit` and `onRefine` with `setReviewOpen(false)`), which is why nothing here asserts a
+    // close. The prop had no test at all, so dropping it on the way to the panel was free.
+    const { onRefine, onOpenChange } = renderDrawer();
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-has-refine', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'refine' }));
+
+    expect(onRefine).toHaveBeenCalledWith(SLOT);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('tells the panel to inset its header, so the help icon clears the close button', () => {
+    // Both live in the same 32px of top-right corner: the drawer's X is `absolute top-3 right-3`,
+    // and the panel header's "How this works" icon is the last thing in its own title row. Stacked,
+    // the one you want to hit sits behind the one you don't.
+    renderDrawer();
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-header-inset-end', 'true');
+  });
+
+  it('carries the real motion class rather than the inert animation utilities', () => {
+    // `animate-in` / `slide-in-from-right` / `fade-in-0` come from `tailwindcss-animate`, which
+    // this project does not install — they were dead class names, which is why the drawer appeared
+    // instead of sliding. The motion is real CSS in globals.css keyed on Radix's `[data-state]`,
+    // and jsdom computes no animation, so the class IS the assertion.
+    renderDrawer();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('cq-answer-drawer');
+    expect(dialog.className).not.toContain('animate-in');
+    expect(dialog.className).not.toContain('slide-in-from');
+  });
+
+  it('opts the side form into the horizontal slide', () => {
+    // Two directions on one element would send it in diagonally — the reason the old bottom slide
+    // was `max-lg:`-scoped. Now the sheet takes the CSS default (up from the floor) and only the
+    // side form adds the modifier.
+    isWide.value = true;
+    renderDrawer({ panelReturnsAtLg: false });
+    expect(screen.getByRole('dialog').className).toContain('cq-answer-drawer-side');
+  });
+
+  it('leaves the bottom sheet on the default (upward) slide', () => {
+    // Classic: the sheet retires at `lg` rather than becoming a drawer, so it never wants the
+    // horizontal direction.
+    renderDrawer({ panelReturnsAtLg: true });
+    expect(screen.getByRole('dialog').className).not.toContain('cq-answer-drawer-side');
   });
 
   it('strips the panel card chrome so it sits flush in the sheet', () => {

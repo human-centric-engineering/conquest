@@ -284,7 +284,16 @@ model AppQuestionnaireConfig {
   // compile time (lib/app/questionnaire/layout/slots.ts). Defaults to classic, and an unrecognised
   // value resolves to classic too, so a rollback can never blank a live respondent's surface.
   // (RESPONDENT_LAYOUTS — types.ts)
-  respondentLayout String @default("classic") // classic | focus
+  respondentLayout String @default("classic") // classic | focus | broadsheet | horizon
+
+  // How much of ConQuest shows AROUND that arrangement: full (the site header and footer, as every
+  // respondent page has always had), co_branded (a slim ConQuest line above the client's own brand
+  // band, nothing below), or white_label (the questionnaire alone). Orthogonal to respondentLayout
+  // — a layout arranges the questionnaire's own parts, chrome decides what surrounds them. Applies
+  // to the standalone respondent pages (/q, /x, /m); the signed-in surface keeps the app's own
+  // navigation on purpose. Defaults to full, and an unrecognised value resolves to full too.
+  // (RESPONDENT_CHROMES — types.ts)
+  respondentChrome String @default("full") // full | co_branded | white_label
 
   // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
   // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer

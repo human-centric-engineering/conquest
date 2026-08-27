@@ -100,6 +100,19 @@ compile time. Both the read path and the component resolver fall back to `classi
 absent or unrecognised value, so no existing questionnaire changes appearance and a rollback
 cannot blank a live surface. See `.context/app/questionnaire/respondent-layouts.md`.
 
+`respondentChrome` (F-chrome) chooses how much of ConQuest shows AROUND the respondent
+surface: `full` (the default — the site header and footer every respondent page has always
+had), `co_branded` (a slim ConQuest line above the client's own brand band, nothing below),
+or `white_label` (the questionnaire alone, including the browser tab). Orthogonal to
+`respondentLayout`, which arranges the questionnaire's own parts inside whatever chrome this
+leaves. It applies to the three standalone respondent pages (`/q`, `/x`, `/m`), which now
+live in the `app/(respondent)` route group so they inherit no chrome by default; the
+signed-in `/questionnaires/[sessionId]` surface keeps the app's own navigation whatever this
+says, since a respondent with an account is inside the product and hiding it would strand
+them. Both the read path and the component resolve an absent or unrecognised value to
+`full`, so no existing questionnaire changes appearance and a rollback cannot strip a live
+page of its chrome. See `.context/app/questionnaire/respondent-chrome.md`.
+
 `presentationMode` (F9.7) chooses how the respondent completes the session: `chat`
 (the streaming conversation), `form` (a raw, sectioned form rendering each question
 with the right input control), or `both` (a chat ↔ form toggle). It is read by the

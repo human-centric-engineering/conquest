@@ -17,16 +17,26 @@ import {
   resolveInlineCorrectionForVersion,
   resolveAnswerPanelScopeForVersion,
   resolvePresentationModeForVersion,
+  resolveRespondentChromeForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
   resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
-import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
+import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';
 
 export const metadata: Metadata = {
-  title: 'Your conversation',
+  // ABSOLUTE, so the `(respondent)` layout's " - ConQuest" template does not apply. A run can be a
+  // white-labelled journey, and this page honours that for everything the respondent sees on it —
+  // a tab reading "Your conversation - ConQuest" would leak the one place the page cannot repaint.
+  //
+  // Unconditional rather than chrome-aware, unlike `/q`: resolving chrome here means resolving the
+  // RUN first, and `resolveRunSurface` is a cookie-credential check plus a query that is not
+  // memoised — so a chrome-aware title would run the whole credential path twice on every load of
+  // the respondent hot path. "Your conversation" is a truthful title under all three modes, and the
+  // two branded modes still show our name on the page itself, which is where branding belongs.
+  title: { absolute: 'Your conversation' },
   description: 'Continue your conversation.',
   // A journey address must never be indexed: the ref is short and the page is respondent-private.
   robots: { index: false, follow: false },
@@ -68,8 +78,11 @@ export default async function ExperienceRunPage({
     // device or after clearing cookies, so this explains rather than accuses — and it says plainly
     // that their answers are safe, which is the thing they will actually be worried about.
     return (
-      <main className="mx-auto flex min-h-[60vh] max-w-md items-center px-4">
-        <div className="bg-card w-full rounded-xl border p-6 text-center">
+      // No version resolved, so there is no questionnaire to ask what chrome it wanted: `full` is
+      // the honest default. `shell={false}` because this card sets its own narrow width — the
+      // reading measure belongs to a conversation, and there is not one here.
+      <RespondentChrome mode="full" shell={false} className="flex items-center overflow-y-auto">
+        <div className="bg-card mx-auto w-full max-w-md rounded-xl border p-6 text-center">
           <p className="font-medium">We can&apos;t open this conversation here</p>
           <p className="text-muted-foreground mt-2 text-sm">
             For your privacy, a conversation can only be reopened in the browser it was started in —
@@ -80,7 +93,7 @@ export default async function ExperienceRunPage({
             get in touch and quote <span className="font-mono">{publicRef}</span>.
           </p>
         </div>
-      </main>
+      </RespondentChrome>
     );
   }
 
@@ -95,6 +108,7 @@ export default async function ExperienceRunPage({
     anonymous,
     presentationMode,
     respondentLayout,
+    respondentChrome,
     answerPanelScope,
     voiceInputEnabled,
     attachmentInputEnabled,
@@ -110,6 +124,7 @@ export default async function ExperienceRunPage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
@@ -121,30 +136,34 @@ export default async function ExperienceRunPage({
     resolveShowProgressPercentTextForVersion(versionId),
   ]);
 
-  // `px-4` matches the site header's own container padding, so the conversation's left and right
-  // edges line up with the header content rather than sitting inside it.
+  // `px-4` matches the chrome's own container padding, so the conversation's left and right edges
+  // line up with whatever chrome is above it rather than sitting inside it. The height comes from
+  // the chrome too — this page used to guess `100vh-8rem`, one rem off the guess `/q` was making
+  // about the same header and footer.
   return (
-    <div className={`${RESPONDENT_SHELL} h-[calc(100vh-8rem)] px-4`}>
-      <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
-        <RunSessionBoot
-          sessionId={sessionId}
-          glossary={glossary}
-          glossaryAppendix={glossaryAppendix}
-          accessToken={sessionToken ?? undefined}
-          welcomeCopy={theme.welcomeCopy}
-          voiceInputEnabled={voiceInputEnabled}
-          attachmentInputEnabled={attachmentInputEnabled}
-          anonymous={anonymous}
-          presentationMode={presentationMode}
-          respondentLayout={respondentLayout}
-          answerPanelScope={answerPanelScope}
-          reasoningPlacement={reasoningPlacement}
-          reasoningDwellMs={reasoningDwell.dwellMs}
-          reasoningPerItemMs={reasoningDwell.perItemMs}
-          inlineCorrectionEnabled={inlineCorrectionEnabled}
-          showProgressPercentText={showProgressPercentText}
-        />
-      </BrandThemeProvider>
-    </div>
+    <RespondentChrome mode={respondentChrome}>
+      <div className="h-full min-h-0 px-4">
+        <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
+          <RunSessionBoot
+            sessionId={sessionId}
+            glossary={glossary}
+            glossaryAppendix={glossaryAppendix}
+            accessToken={sessionToken ?? undefined}
+            welcomeCopy={theme.welcomeCopy}
+            voiceInputEnabled={voiceInputEnabled}
+            attachmentInputEnabled={attachmentInputEnabled}
+            anonymous={anonymous}
+            presentationMode={presentationMode}
+            respondentLayout={respondentLayout}
+            answerPanelScope={answerPanelScope}
+            reasoningPlacement={reasoningPlacement}
+            reasoningDwellMs={reasoningDwell.dwellMs}
+            reasoningPerItemMs={reasoningDwell.perItemMs}
+            inlineCorrectionEnabled={inlineCorrectionEnabled}
+            showProgressPercentText={showProgressPercentText}
+          />
+        </BrandThemeProvider>
+      </div>
+    </RespondentChrome>
   );
 }

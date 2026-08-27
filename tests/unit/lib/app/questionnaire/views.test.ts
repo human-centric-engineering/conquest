@@ -195,6 +195,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     answerSlotPanelScope: 'full_progress',
     presentationMode: 'chat',
     respondentLayout: 'classic',
+    respondentChrome: 'full',
     captureMode: 'form',
     inlineCorrectionEnabled: true,
     sessionResumeEnabled: true,

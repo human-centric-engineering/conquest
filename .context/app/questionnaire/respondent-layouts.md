@@ -97,11 +97,20 @@ walks all of it in one file.
 
 ### The placement declaration is load-bearing too
 
-It is not documentation. The container reads `placements.answersPanel.kind` to decide **three**
+It is not documentation. The container reads `placements.answersPanel.kind` to decide **four**
 things at once — whether to build the panel node at all, whether the review trigger carries
-`lg:hidden`, and whether the review _sheet_ retires at `lg` (`panelReturnsAtLg`) — so a layout that
-changes its mind about the panel changes all of them together, and the declaration cannot drift
-from the behaviour it describes.
+`lg:hidden`, whether the review _sheet_ retires at `lg` (`panelReturnsAtLg`), and whether the sheet
+auto-closes when the viewport crosses `lg` — so a layout that changes its mind about the panel
+changes all of them together, and the declaration cannot drift from the behaviour it describes.
+
+The fourth reading was the last to arrive, and it was wrong for a whole phase before it did. The
+auto-close effect in `useSessionWorkspace` predates any second layout: it closed the sheet at `lg`
+because the side panel was coming back, which was true of the only layout there was. Under Focus,
+Broadsheet or Horizon there is no panel behind it — so a respondent who opened their answers on a
+tablet in portrait and rotated to landscape watched them vanish, with nothing underneath and no way
+back except the trigger they had just used. The hook now takes `panelReturnsAtLg` from the same
+declaration, which is why this is the third example in this file of the same lesson: a behaviour
+keyed off a breakpoint has to read the placement, not assume Classic.
 
 That third reading was missing when Focus shipped, and the bug it caused is the argument for the
 rule. The trigger's `lg:hidden` became conditional; the sheet's stayed hard-coded in
@@ -365,6 +374,8 @@ that needs a different one.
 
 ## Related
 
+- `.context/app/questionnaire/respondent-chrome.md` — the other axis: how much of ConQuest shows
+  AROUND the arrangement, and the self-measuring shell that replaced each page's height arithmetic
 - `.context/app/questionnaire/respondent-layout.md` — the shared width/geometry constants
   (`RESPONDENT_SHELL`, `RESPONDENT_SPLIT`) and how the host pages use them
 - `.context/app/questionnaire/demo-clients.md` — the brand tokens a layout paints with

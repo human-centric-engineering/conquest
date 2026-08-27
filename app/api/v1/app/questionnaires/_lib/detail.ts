@@ -26,6 +26,7 @@ import {
   ACCESS_MODES,
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
+  RESPONDENT_CHROMES,
   RESPONDENT_LAYOUTS,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
@@ -40,6 +41,7 @@ import {
   type ContradictionMode,
   type FieldProvenance,
   type PresentationMode,
+  type RespondentChrome,
   type RespondentLayout,
   type ProfileFieldConfig,
   type ReasoningPlacement,
@@ -131,6 +133,7 @@ export const CONFIG_SELECT = {
   answerSlotPanelScope: true,
   presentationMode: true,
   respondentLayout: true,
+  respondentChrome: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
   showProgressPercentText: true,
@@ -187,6 +190,7 @@ type ConfigRow = {
   answerSlotPanelScope: string;
   presentationMode: string;
   respondentLayout: string;
+  respondentChrome: string;
   inlineCorrectionEnabled: boolean;
   sessionResumeEnabled: boolean;
   showProgressPercentText: boolean;
@@ -290,6 +294,19 @@ function asRespondentLayout(value: string): RespondentLayout {
     : DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout;
 }
 
+/**
+ * Narrow a stored `respondentChrome` to the enum (default when unknown).
+ *
+ * Same asymmetry as the layout: the PATCH validator rejects an unknown value because an admin
+ * sending one is a caller bug, while every read accepts it and falls back, because a stored unknown
+ * value is a rollback artefact a live respondent has to survive.
+ */
+function asRespondentChrome(value: string): RespondentChrome {
+  return (RESPONDENT_CHROMES as readonly string[]).includes(value)
+    ? (value as RespondentChrome)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.respondentChrome;
+}
+
 /** Narrow a stored `accessMode` to the enum (default when unknown). */
 function asAccessMode(value: string): AccessMode {
   return (ACCESS_MODES as readonly string[]).includes(value)
@@ -346,6 +363,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
     respondentLayout: asRespondentLayout(row.respondentLayout),
+    respondentChrome: asRespondentChrome(row.respondentChrome),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     sessionResumeEnabled: row.sessionResumeEnabled,
     showProgressPercentText: row.showProgressPercentText,

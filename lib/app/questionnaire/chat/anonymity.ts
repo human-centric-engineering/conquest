@@ -28,12 +28,15 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
+  RESPONDENT_CHROMES,
   RESPONDENT_LAYOUTS,
+  DEFAULT_RESPONDENT_CHROME,
   DEFAULT_RESPONDENT_LAYOUT,
   REASONING_PLACEMENTS,
   type AccessMode,
   type AnswerSlotPanelScope,
   type PresentationMode,
+  type RespondentChrome,
   type RespondentLayout,
   type ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
@@ -106,6 +109,23 @@ export async function resolveRespondentLayoutForVersion(
     version?.config?.respondentLayout ?? DEFAULT_RESPONDENT_LAYOUT,
     RESPONDENT_LAYOUTS,
     DEFAULT_RESPONDENT_LAYOUT
+  );
+}
+
+/**
+ * Resolve `respondentChrome` for a launched version — how much of ConQuest shows AROUND the
+ * surface. Absent config, or a value this build does not know, → `full`: the chrome every
+ * respondent page has always had. A rollback must not strip a live page of its header and footer,
+ * for the same reason an unknown layout must not blank the surface inside them.
+ */
+export async function resolveRespondentChromeForVersion(
+  versionId: string
+): Promise<RespondentChrome> {
+  const version = await loadVersionSurface(versionId);
+  return narrowToEnum(
+    version?.config?.respondentChrome ?? DEFAULT_RESPONDENT_CHROME,
+    RESPONDENT_CHROMES,
+    DEFAULT_RESPONDENT_CHROME
   );
 }
 

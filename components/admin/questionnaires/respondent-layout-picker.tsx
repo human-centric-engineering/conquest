@@ -122,9 +122,11 @@ export function RespondentLayoutPicker({
     <div
       role="radiogroup"
       aria-label="Respondent layout"
-      // Two up, then four across — never three, which would leave the fourth card alone on a row
-      // looking like an afterthought rather than a peer.
-      className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      // Two per row, and no wider ladder. Tailwind's breakpoints are VIEWPORT-based, so an
+      // `xl:grid-cols-4` fired on a wide monitor even though this picker sits in a narrow settings
+      // column — four cards crammed into ~120px each, with the descriptions falling into one-word
+      // ladders. Two is what the column can actually hold.
+      className="grid gap-3 sm:grid-cols-2"
     >
       {RESPONDENT_LAYOUTS.map((key) => {
         const meta = RESPONDENT_LAYOUT_META[key];

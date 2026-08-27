@@ -126,13 +126,16 @@ export function AnswerReviewDrawer({
           // bespoke content (not the centred `DialogContent`) purely to swap the anchoring and the
           // slide direction; all a11y behaviour stays Radix's.
           className={cn(
-            'cq-suppress-scrollbars bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed z-50 flex flex-col overflow-hidden shadow-lg duration-200',
-            // The narrow form: a bottom sheet across the width, thumb-reachable. The slide is
-            // `max-lg:`-scoped rather than unprefixed so it cannot combine with the wide form's
-            // horizontal slide below — `slide-in-from-bottom` and `slide-in-from-right` set
-            // different axes, and both applying at `lg` would send the sheet in diagonally.
-            'inset-x-0 bottom-0 h-[85svh] max-h-[85svh] w-full max-w-none rounded-t-xl border-t',
-            'max-lg:data-[state=open]:slide-in-from-bottom max-lg:data-[state=closed]:slide-out-to-bottom',
+            // `cq-answer-drawer` (globals.css) carries the motion and the brand edge. It is real
+            // CSS keyed on Radix's `[data-state]`, not Tailwind animation utilities: `animate-in`,
+            // `slide-in-from-right` and `fade-in-0` come from `tailwindcss-animate`, which this
+            // project does not install — every one of those class names was inert, which is why
+            // this appeared instead of sliding.
+            'cq-answer-drawer cq-suppress-scrollbars bg-background fixed z-50 flex flex-col overflow-hidden shadow-lg',
+            // The narrow form: a bottom sheet across the width, thumb-reachable. Its slide
+            // direction is the CSS default; the side form opts into the horizontal one below, so
+            // the two can never both apply and send the panel in diagonally.
+            'inset-x-0 bottom-0 h-[85svh] max-h-[85svh] w-full max-w-none rounded-t-xl',
             panelReturnsAtLg
               ? // A panel takes over at `lg`, so the sheet retires there. Without this condition it
                 // hid the sheet's CONTENT while the overlay still dimmed the page — a modal that
@@ -146,14 +149,14 @@ export function AnswerReviewDrawer({
                 // rows keep a readable measure; and the conversation stays visible beside it,
                 // because reviewing answers is a glance, not a destination.
                 cn(
+                  'cq-answer-drawer-side',
                   'lg:inset-y-0 lg:right-0 lg:left-auto lg:h-full lg:max-h-none lg:w-[32rem] lg:max-w-[92vw]',
-                  'lg:rounded-none lg:border-t-0 lg:border-l',
+                  'lg:rounded-none',
                   // Square against the viewport edge, not a floating card: it is attached to the
                   // side of the window, and rounding the outer corners would claim otherwise. The
                   // separation comes from a deep shadow cast leftward across the conversation
                   // instead — which is also the only thing separating them now the scrim is gone.
-                  'lg:shadow-[-24px_0_48px_-24px_rgba(0,0,0,0.25)]',
-                  'lg:data-[state=open]:slide-in-from-right lg:data-[state=closed]:slide-out-to-right'
+                  'lg:shadow-[-24px_0_48px_-24px_rgba(0,0,0,0.25)]'
                 )
           )}
         >
@@ -182,6 +185,9 @@ export function AnswerReviewDrawer({
             correction={correction}
             // The minimap is the scroll affordance; suppress the native bar (touch needs none).
             hideNativeScrollbar
+            // This drawer's close button occupies the panel's top-right corner, so the header's own
+            // "How this works" icon has to step aside rather than sit underneath it.
+            headerInsetEnd
             className="min-h-0 flex-1 rounded-none border-0 bg-transparent"
           />
         </DialogPrimitive.Content>

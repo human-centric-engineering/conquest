@@ -177,6 +177,19 @@ describe('resolveLayout', () => {
     expect(resolveLayout(value)).toBe(LAYOUT_REGISTRY[DEFAULT_RESPONDENT_LAYOUT]);
   });
 
+  it.each([['constructor'], ['toString'], ['valueOf'], ['hasOwnProperty']])(
+    'falls back to Classic for the inherited property %s',
+    (key) => {
+      // Indexing a plain object with an arbitrary string walks the prototype chain, so these return
+      // an inherited FUNCTION — truthy, so a `??` fallback never fires. The caller then destructures
+      // `Component` and `placements` off it as undefined and crashes reading
+      // `placements.answersPanel.kind`: the blank surface this fallback exists to prevent, reached
+      // by the one route it did not cover. `resolveLayout` takes a bare `string` on purpose, so the
+      // hostile input is in its declared domain.
+      expect(resolveLayout(key)).toBe(LAYOUT_REGISTRY[DEFAULT_RESPONDENT_LAYOUT]);
+    }
+  );
+
   it('resolves the default name to a real definition', () => {
     expect(resolveLayout(DEFAULT_RESPONDENT_LAYOUT).Component).toBeTypeOf('function');
   });

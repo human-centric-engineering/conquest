@@ -55,7 +55,10 @@ import {
   type SelectionStrategy,
   type ToneDimensionKey,
 } from '@/lib/app/questionnaire/types';
-import { RESPONDENT_LAYOUT_LABELS } from '@/lib/app/questionnaire/layout/catalog';
+import {
+  RESPONDENT_CHROME_LABELS,
+  RESPONDENT_LAYOUT_LABELS,
+} from '@/lib/app/questionnaire/layout/catalog';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
@@ -306,6 +309,11 @@ export const SETTING_DESCRIPTORS = {
     group: 'Respondent experience',
     tier: 'standard',
     rows: (c) => [{ label: 'Layout', value: RESPONDENT_LAYOUT_LABELS[c.respondentLayout] }],
+  },
+  respondentChrome: {
+    group: 'Respondent experience',
+    tier: 'standard',
+    rows: (c) => [{ label: 'Branding', value: RESPONDENT_CHROME_LABELS[c.respondentChrome] }],
   },
   presentationMode: {
     group: 'Respondent experience',

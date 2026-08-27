@@ -1221,6 +1221,80 @@ describe('SessionWorkspace', () => {
     };
     const dataSlotView = { ...questionView, dataSlotGroups: [], progressPercent: 40 };
 
+    /**
+     * Drive the `(min-width: 1024px)` listener the review-sheet auto-close registers.
+     *
+     * happy-dom has no real viewport, so the media query is stubbed and its `change` listeners are
+     * captured — firing them is how a tablet rotating into landscape, or a window dragged past
+     * 1024px, is reproduced here.
+     */
+    /** `setup()` always renders the default layout, and these two tests turn on which one it is. */
+    function renderWithLayoutAndPanel(layout: RespondentLayout, view: Record<string, unknown>) {
+      streamHook.mockReturnValue({
+        turns: [],
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view, loading: false, error: false, refetch });
+      // The lifecycle view is a different shape from the panel's (`completion.answeredCount`), so
+      // it keeps its own default rather than being handed the panel fixture.
+      lifecycleHook.mockReturnValue(lifecycleReturn());
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" respondentLayout={layout} />);
+    }
+
+    function stubViewport(matches: boolean) {
+      const listeners: Array<() => void> = [];
+      const mq = {
+        matches,
+        addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+        removeEventListener: vi.fn(),
+      };
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn(() => mq)
+      );
+      return {
+        widen: () => {
+          mq.matches = true;
+          for (const fn of listeners) fn();
+        },
+      };
+    }
+
+    it('retires the sheet at lg under Classic, where the panel takes over', () => {
+      // The sheet is the narrow twin of the side panel. Once the panel is back on screen, a sheet
+      // still open over it is two copies of the same thing.
+      const viewport = stubViewport(false);
+      renderWithLayoutAndPanel('classic', questionView);
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      act(() => viewport.widen());
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      vi.unstubAllGlobals();
+    });
+
+    it('does NOT retire the sheet at lg in a layout that has no panel', () => {
+      // The bug this guards. Focus, Broadsheet and Horizon all omit `answersPanel` and keep the
+      // review affordance at every width — the sheet becomes a side drawer rather than retiring.
+      // Closing it there takes away the ONLY route to the captured answers: a respondent opens
+      // their answers on a tablet in portrait, rotates to landscape, and watches them vanish
+      // mid-read, with nothing behind them.
+      const viewport = stubViewport(false);
+      renderWithLayoutAndPanel('focus', questionView);
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      act(() => viewport.widen());
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      vi.unstubAllGlobals();
+    });
+
     it('renders a mobile-only trigger (lg:hidden) in chat mode', () => {
       setup({}, { view: questionView });
       const trigger = screen.getByRole('button', { name: /review answers/i });
