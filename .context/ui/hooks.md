@@ -156,6 +156,58 @@ export function useHorizontalSwipe(options: {
   props are read through a ref), so `handleWheel` can bind to a native listener once.
   Keyboard navigation is the consumer's responsibility.
 
+## `useTimeout()`
+
+**File:** `lib/hooks/use-timeout.ts`
+
+Schedules timeouts that are cancelled when the component unmounts. Returns a
+stable `schedule(callback, delayMs)` — safe in dependency arrays.
+
+```ts
+export function useTimeout(): (callback: () => void, delayMs: number) => void;
+```
+
+### Why it exists
+
+A bare `setTimeout` outlives the component that scheduled it. The dominant case
+in this codebase — "hide the success banner after N seconds" — is a state update
+React discards, so it looks harmless in a browser.
+
+It is not harmless in a test run. Vitest tears the environment down when a file
+finishes, and a timer firing afterwards throws `ReferenceError: window is not
+defined` from inside React's scheduler, _outside_ any test. The run exits
+non-zero with zero failing tests and nothing naming the file responsible — see
+[#597](https://github.com/human-centric-engineering/sunrise/issues/597).
+
+### Caveats
+
+- Scheduling twice leaves two timers pending, and neither cancels the other.
+- **After unmount, `schedule()` is a silent no-op** — the deliberate divergence
+  from `setTimeout`, and what makes an uncancellable timer impossible. The
+  deferred redirects in `accept-invite-form.tsx` and `reset-password-form.tsx`
+  rely on it: unmounting inside their 1500ms window means the user navigated
+  away themselves, so firing the `router.push` would yank them off a page they
+  chose. Where an effect genuinely must outlive its component, use a bare
+  `setTimeout` and own the cleanup — this hook is the wrong tool.
+- It cancels on unmount, not on re-render. A timer scheduled in a render that
+  is superseded still fires while the component is mounted.
+- For an `await`ed delay rather than a callback, this is the wrong tool — thread
+  an `AbortSignal` through instead, as `chat-interface.tsx` does with its
+  reconnect backoff.
+
+### Example
+
+```tsx
+const schedule = useTimeout();
+
+setSaved(true);
+schedule(() => setSaved(false), 2500);
+```
+
+## See also
+
+- [Setup Wizard](../admin/setup-wizard.md) — composes `useLocalStorage` and `useWizard` together
+
 ## See also
 
 - [Setup Wizard](../admin/setup-wizard.md) — composes both wizard hooks together

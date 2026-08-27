@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * RunSessionBoot — client bootstrap for the experience run surface, `/x/<publicRef>` (P15.3).
  *

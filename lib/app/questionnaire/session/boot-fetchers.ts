@@ -101,6 +101,9 @@ export async function fetchTranscript(
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.transcript(sessionId), {
       headers: authHeaders(accessToken),
+      // Own API, same origin — a redirect here is never legitimate, and following
+      // one would carry the session access token to whatever it pointed at.
+      redirect: 'error',
     });
     if (!res.ok) return empty;
     const parsed = transcriptResponseSchema.safeParse(await res.json());
@@ -144,6 +147,9 @@ export async function fetchIntro(
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.intro(sessionId), {
       headers: authHeaders(accessToken),
+      // Own API, same origin — a redirect here is never legitimate, and following
+      // one would carry the session access token to whatever it pointed at.
+      redirect: 'error',
     });
     if (!res.ok) return null;
     const parsed = introResponseSchema.safeParse(await res.json());
@@ -179,6 +185,9 @@ export async function fetchPersonas(
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.persona(sessionId), {
       headers: authHeaders(accessToken),
+      // Own API, same origin — a redirect here is never legitimate, and following
+      // one would carry the session access token to whatever it pointed at.
+      redirect: 'error',
     });
     if (!res.ok) return null;
     const parsed = personaResponseSchema.safeParse(await res.json());
@@ -226,6 +235,9 @@ export async function fetchCapture(
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.profile(sessionId), {
       headers: authHeaders(accessToken),
+      // Own API, same origin — a redirect here is never legitimate, and following
+      // one would carry the session access token to whatever it pointed at.
+      redirect: 'error',
     });
     if (!res.ok) return null;
     const parsed = captureResponseSchema.safeParse(await res.json());
@@ -329,6 +341,9 @@ export async function fetchSurfaceConfig(
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.surface(sessionId), {
       headers: authHeaders(accessToken),
+      // Own API, same origin — a redirect here is never legitimate, and following
+      // one would carry the session access token to whatever it pointed at.
+      redirect: 'error',
     });
     if (!res.ok) return null;
     const parsed = surfaceResponseSchema.safeParse(await res.json());

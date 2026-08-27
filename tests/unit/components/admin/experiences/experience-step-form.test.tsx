@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ExperienceStepForm — regression coverage for the duration-clear bug.
  *

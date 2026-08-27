@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Data Slots tab page (`/admin/questionnaires/[id]/v/[vid]/data-slots`) tests.
  *

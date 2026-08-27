@@ -20,6 +20,7 @@ import { KNOWN_STEP_TYPES, TASK_TYPES } from '@/types/orchestration';
 import { validateTaskDefaults } from '@/lib/orchestration/llm/model-registry';
 import { reviewSchemaSchema } from '@/lib/orchestration/review-schema/types';
 import { provenanceItemArraySchema } from '@/lib/orchestration/provenance/types';
+import { validateScopes, listValidApiKeyScopes } from '@/lib/auth/api-key-scopes';
 
 // ============================================================================
 // Shared Schemas
@@ -3909,12 +3910,23 @@ export const createInviteTokenSchema = z.object({
 
 // ---------- API Keys ----------
 
-/** Create a new API key */
+/**
+ * Create a new API key.
+ *
+ * Scopes validate against `listValidApiKeyScopes()` rather than a literal
+ * `z.enum`, so a scope a fork declared in `lib/app/api-key-scopes.ts` is
+ * mintable (#542). The list comes from `lib/auth/api-key-scopes.ts`, which is
+ * deliberately Prisma-free — this module is imported by `'use client'` admin
+ * forms, and `lib/auth/api-keys.ts` is not client-safe.
+ */
 export const createApiKeySchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   scopes: z
-    .array(z.enum(['chat', 'analytics', 'knowledge', 'webhook', 'admin']))
+    .array(z.string())
     .min(1, 'At least one scope is required')
+    .refine(validateScopes, {
+      message: `Unknown scope. Valid scopes: ${listValidApiKeyScopes().join(', ')}`,
+    })
     .default(['chat']),
   expiresAt: z.string().datetime().optional(),
 });

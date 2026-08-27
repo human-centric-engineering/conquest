@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * TranscriptDownload — respondent chat-transcript download menu (F7.6).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `TopicsPanel` — the Conditional topics tab's client shell.
  *

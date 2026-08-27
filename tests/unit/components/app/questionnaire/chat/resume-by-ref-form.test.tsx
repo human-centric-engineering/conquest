@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
+
 /**
- * @vitest-environment jsdom
- *
  * ResumeByRefForm — cross-device "continue with your code" entry (session resume).
  *
  * Pins: the segmented field submits itself on the eighth character (and only once); what it sends

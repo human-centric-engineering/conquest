@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The shared typography of the evaluation surfaces — specifically the treatment that keeps the
  * questionnaire's own words distinguishable from the panel's commentary about them.

@@ -19,9 +19,20 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { type McpSettingsResponse } from '@/lib/validations/mcp';
+import { useTimeout } from '@/lib/hooks/use-timeout';
 
 interface McpSettingsFormProps {
   initialSettings: McpSettingsResponse | null;
+  /**
+   * Whether the deployment tracks MCP sessions. Passed in because
+   * `MCP_SESSION_MODE` is server-only and this is a client component.
+   *
+   * When false, `maxSessionsPerKey` still validates and still saves, but the
+   * runtime never consults it — the stateless path creates no session, so there
+   * is nothing to cap. Saying so beside the field is the difference between a
+   * setting that is inert and a setting that looks broken.
+   */
+  sessionsAreTracked: boolean;
 }
 
 const mcpSettingsFormSchema = z.object({
@@ -35,9 +46,10 @@ const mcpSettingsFormSchema = z.object({
 type McpSettingsFormInput = z.input<typeof mcpSettingsFormSchema>;
 type McpSettingsFormData = z.output<typeof mcpSettingsFormSchema>;
 
-export function McpSettingsForm({ initialSettings }: McpSettingsFormProps) {
+export function McpSettingsForm({ initialSettings, sessionsAreTracked }: McpSettingsFormProps) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const schedule = useTimeout();
 
   const {
     register,
@@ -62,7 +74,7 @@ export function McpSettingsForm({ initialSettings }: McpSettingsFormProps) {
       await apiClient.patch(API.ADMIN.ORCHESTRATION.MCP_SETTINGS, { body: data });
       setSaved(true);
       reset(data);
-      setTimeout(() => setSaved(false), 3000);
+      schedule(() => setSaved(false), 3000);
     } catch (err) {
       if (err instanceof APIClientError) {
         setError(err.message);
@@ -135,6 +147,15 @@ export function McpSettingsForm({ initialSettings }: McpSettingsFormProps) {
                 <FieldHelp title="Max Sessions Per Key">
                   Maximum concurrent MCP sessions allowed per API key. Prevents a single key from
                   exhausting server resources.
+                  {!sessionsAreTracked && (
+                    <>
+                      {' '}
+                      <strong>This setting has no effect on this deployment.</strong> It runs{' '}
+                      <code>MCP_SESSION_MODE=stateless</code> (the default), which creates no
+                      sessions, so there is nothing to cap. It applies only under{' '}
+                      <code>MCP_SESSION_MODE=stateful</code>.
+                    </>
+                  )}
                 </FieldHelp>
               </Label>
               <Input
@@ -146,6 +167,11 @@ export function McpSettingsForm({ initialSettings }: McpSettingsFormProps) {
               />
               {errors.maxSessionsPerKey && (
                 <p className="mt-1 text-xs text-red-600">{errors.maxSessionsPerKey.message}</p>
+              )}
+              {!sessionsAreTracked && (
+                <p className="text-muted-foreground mt-1 text-xs">
+                  No effect — this deployment runs <code>MCP_SESSION_MODE=stateless</code>
+                </p>
               )}
             </div>
             <div>

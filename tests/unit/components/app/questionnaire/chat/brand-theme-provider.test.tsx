@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * BrandThemeProvider — projects a resolved theme onto CSS custom properties + logo.
  *

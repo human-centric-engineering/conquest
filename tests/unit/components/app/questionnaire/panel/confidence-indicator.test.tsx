@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ConfidenceIndicator — band label + colour per confidence (F7.2).
  *

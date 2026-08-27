@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertNoAttachmentPersistence } from '@/tests/helpers/no-attachment-persistence';
 
 // ---------------------------------------------------------------------------
 // Module mocks — hoisted before dynamic imports
@@ -186,7 +187,11 @@ vi.mock('@/lib/orchestration/hooks/registry', () => ({
   emitHookEvent: vi.fn(),
 }));
 
-vi.mock('@/lib/orchestration/chat/summarizer', () => ({
+// `importOriginal` so `isPlaceholderSummary` stays REAL. Hand-stubbing it would
+// let the stub drift from the predicate the handler actually depends on to
+// recognise a pre-#654 `[Summary unavailable …]` row.
+vi.mock('@/lib/orchestration/chat/summarizer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/orchestration/chat/summarizer')>()),
   summarizeMessages: vi.fn(),
 }));
 
@@ -218,6 +223,7 @@ const { registerGuardEventContributor, __resetGuardEventContributorsForTests } =
 const { scanOutput, scanCitations } = await import('@/lib/orchestration/chat/output-guard');
 const { getOrchestrationSettings } = await import('@/lib/orchestration/settings');
 const { summarizeMessages } = await import('@/lib/orchestration/chat/summarizer');
+const { queueMessageEmbedding } = await import('@/lib/orchestration/chat/message-embedder');
 const { withAgentBudgetLock } = await import('@/lib/orchestration/llm/budget-mutex');
 const { dispatchWebhookEvent } = await import('@/lib/orchestration/webhooks/dispatcher');
 // Ensure the model-registry mock is loaded (module itself is used by source via vi.mock above)
@@ -583,6 +589,50 @@ describe('StreamingChatHandler', () => {
     expect(getProviderWithFallbacks).not.toHaveBeenCalled();
   });
 
+  // 8a ----------------------------------------------------------------------
+  it('forwards costLogMetadata into the dispatch context so evaluation chat tools are tagged', async () => {
+    // An agent evaluation runs its subject through THIS handler
+    // (`run-cases/agent-case.ts` sets `{ evaluationRunId, role: 'subject' }`).
+    // The handler already threaded that into its own four `logCost` calls;
+    // only the dispatch context dropped it, so the subject's LLM spend was
+    // tagged and every tool it called was not. Fourth site of the same defect
+    // in this PR — the executors and `llm-runner` were the others (#600).
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: 'search_knowledge_base', arguments: { query: 'react' } },
+        },
+        { type: 'done', usage: { inputTokens: 20, outputTokens: 3 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'answer' },
+        { type: 'done', usage: { inputTokens: 30, outputTokens: 8 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { results: [] },
+    });
+
+    await collect(
+      streamChat({
+        ...baseRequest,
+        costLogMetadata: { evaluationRunId: 'run_7', role: 'subject' },
+      })
+    );
+
+    const [, , context] = (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(context.costLogMetadata).toEqual({ evaluationRunId: 'run_7', role: 'subject' });
+    // No `stepId`: a chat turn is not a workflow step, so there is no step to
+    // attribute to. The dispatcher still merges `slug`/`success` over the top.
+    expect(context.costLogMetadata).not.toHaveProperty('stepId');
+  });
+
   // 8 -----------------------------------------------------------------------
   it('tool call round-trip: dispatches tool, yields capability_result, loops for follow-up', async () => {
     const provider = mockProvider([
@@ -631,6 +681,12 @@ describe('StreamingChatHandler', () => {
       { query: 'react' },
       expect.objectContaining({ userId: 'u1', agentId: 'agent-1', conversationId: 'conv-1' })
     );
+
+    // No evaluation tags on this request, so none on the dispatch context —
+    // the field is omitted entirely rather than passed as undefined.
+    const [, , plainContext] = (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(plainContext).not.toHaveProperty('costLogMetadata');
 
     // Message persistence: user + turn1 assistant + tool row + turn2 assistant = 4
     const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -3744,6 +3800,449 @@ describe('rolling conversation summarization', () => {
     expect(events[events.length - 1]).toMatchObject({ type: 'done' });
   });
 
+  // ── Reuse across turns (#654) ──────────────────────────────────────────
+  //
+  // The summary covers a PREFIX of the conversation. Reuse asks whether that
+  // prefix already contains everything this turn has to drop — not whether the
+  // boundary is identical, which it never is, because the boundary belongs to
+  // a sliding window and moves by two messages a turn.
+  //
+  // Before the fix these three tests read: re-summarises, re-summarises,
+  // re-summarises. The committed characterisation test that said so is the
+  // first one below, inverted.
+
+  type SummaryState = { summary: string | null; summaryUpToMessageId: string | null };
+
+  const NO_SUMMARY: SummaryState = { summary: null, summaryUpToMessageId: null };
+
+  /**
+   * Run one turn of `streamChat` against a conversation whose stored summary is
+   * `stored`, with `history` as the loaded rows.
+   *
+   * Returns the summary state *after* the turn — which is `stored` unchanged
+   * when nothing was persisted — plus what the summariser was asked to do and
+   * the messages that actually reached the provider. Threading the returned
+   * state into the next call is what makes these multi-turn tests real: turn N+1
+   * sees exactly what turn N wrote, rather than what the test thinks it wrote.
+   */
+  async function runTurn(
+    conversationId: string,
+    history: ReturnType<typeof makeHistoryMessages>,
+    stored: SummaryState
+  ) {
+    const summarize = summarizeMessages as ReturnType<typeof vi.fn>;
+    summarize.mockClear();
+    (prisma.aiConversation.update as ReturnType<typeof vi.fn>).mockClear();
+
+    (prisma.aiMessage.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      [...history].reverse()
+    );
+    (prisma.aiConversation.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeConversation({ id: conversationId, ...stored })
+    );
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Answer.' },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat({ ...baseRequest, conversationId }));
+
+    const persisted = (prisma.aiConversation.update as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => (c[0] as { data?: Record<string, unknown> }).data)
+      .find((d) => d && 'summaryUpToMessageId' in d) as SummaryState | undefined;
+
+    const call = summarize.mock.calls[0] as
+      | [{ role: string; content: string }[], string, string[], Record<string, unknown> | undefined]
+      | undefined;
+
+    return {
+      state: persisted ?? stored,
+      persisted,
+      calls: summarize.mock.calls.length,
+      /** The messages handed to the summariser — the delta, once a summary exists. */
+      delta: call?.[0] ?? null,
+      options: call?.[3] ?? null,
+      /** What the model was actually sent this turn. */
+      prompt: ((provider.chatStream.mock.calls[0] as unknown[] | undefined)?.[0] ?? []) as {
+        role: string;
+        content: string;
+      }[],
+    };
+  }
+
+  /** The `Message N` rows that reached the model verbatim, as an exact-match set. */
+  function verbatimHistory(prompt: { role: string; content: string }[]): Set<string> {
+    return new Set(prompt.filter((m) => /^Message \d+$/.test(m.content)).map((m) => m.content));
+  }
+
+  function mockSummariser(summary = 'summary-text') {
+    (summarizeMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary,
+      fellBack: false,
+      model: 'claude-haiku-4-5',
+      provider: 'anthropic',
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 0,
+    });
+  }
+
+  it('reuses the stored summary on the very next turn', async () => {
+    // This is the committed characterisation test from
+    // `investigate/654-summariser-recompute`, inverted. It ran two consecutive
+    // turns, carried turn 1's *persisted* `summaryUpToMessageId` into turn 2 —
+    // read back from the update call, not assumed — and the summariser ran both
+    // times. `lastDroppedId` was `history[droppedCount - 1].id` and
+    // `droppedCount` grows by two a turn, so turn 1 pinned index 1 and turn 2
+    // asked about index 3.
+    mockSummariser();
+
+    const turn1 = await runTurn('conv-two-turn', makeHistoryMessages(52), NO_SUMMARY);
+    expect(turn1.calls).toBe(1);
+    // Turn 1 summarised past what it needed: 52 - 50 = 2 must go, and the
+    // summary reaches SUMMARY_LOOKAHEAD_MESSAGES further so it stays usable.
+    expect(turn1.persisted!.summaryUpToMessageId).toBe(`hist-msg-11`);
+
+    const turn2 = await runTurn('conv-two-turn', makeHistoryMessages(54), turn1.state);
+
+    // THE FIX: the prefix pinned on turn 1 still contains everything turn 2 has
+    // to drop (4 messages, and it covers 12), so there is no second call.
+    expect(turn2.calls).toBe(0);
+    // ...and nothing is rewritten, so the pin does not drift either.
+    expect(turn2.persisted).toBeUndefined();
+  });
+
+  it('CONTROL: the same two-turn harness DOES re-summarise when the stored prefix runs out', async () => {
+    // Without this, "zero calls on turn 2" above could equally mean the harness
+    // never reaches the summarisation branch on a second turn at all — the
+    // mocks, not the code. Identical setup; the only change is that turn 2 has
+    // to drop more than turn 1's summary covers, and then the call comes back.
+    mockSummariser();
+
+    const turn1 = await runTurn('conv-control', makeHistoryMessages(52), NO_SUMMARY);
+    expect(turn1.calls).toBe(1);
+
+    // 66 - 50 = 16 must go; turn 1's summary covers 12.
+    const turn2 = await runTurn('conv-control', makeHistoryMessages(66), turn1.state);
+
+    expect(turn2.calls).toBe(1);
+    expect(turn2.persisted).toBeDefined();
+  });
+
+  it('summarises once per lookahead-worth of messages, not once per turn', async () => {
+    // The cadence, stated as a number. Seven consecutive turns, two messages
+    // added each time, threading each turn's persisted state into the next.
+    //
+    // Before the fix this was 7. It is now 2: one to build the prefix, one when
+    // the prefix is finally exhausted — SUMMARY_LOOKAHEAD_MESSAGES / 2 turns
+    // later. That ratio is the whole point of the issue: a conversation that
+    // runs for hours pays for a handful of summarisations, not one per message
+    // the user sends.
+    mockSummariser();
+
+    let state = NO_SUMMARY;
+    let total = 0;
+    const perTurn: number[] = [];
+    for (let size = 52; size <= 64; size += 2) {
+      const turn = await runTurn('conv-cadence', makeHistoryMessages(size), state);
+      state = turn.state;
+      total += turn.calls;
+      perTurn.push(turn.calls);
+    }
+
+    expect(perTurn).toEqual([1, 0, 0, 0, 0, 0, 1]);
+    expect(total).toBe(2);
+  });
+
+  it('extends the summary with only the messages it does not already cover', async () => {
+    // The second call must not re-derive the prefix. It gets the stored text and
+    // the delta — which is what keeps the cost of a summarisation proportional
+    // to what has been added, rather than to the length of the conversation.
+    mockSummariser('first-summary');
+
+    const turn1 = await runTurn('conv-extend', makeHistoryMessages(52), NO_SUMMARY);
+    expect(turn1.delta!.map((m) => m.content)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `Message ${i}`)
+    );
+    expect(turn1.options?.previousSummary).toBeUndefined();
+
+    const turn2 = await runTurn('conv-extend', makeHistoryMessages(66), turn1.state);
+
+    // Picks up exactly where turn 1 stopped (index 12), and reaches
+    // 16 - 1 + 10 = index 25.
+    expect(turn2.delta!.map((m) => m.content)).toEqual(
+      Array.from({ length: 14 }, (_, i) => `Message ${i + 12}`)
+    );
+    expect(turn2.options?.previousSummary).toBe('first-summary');
+  });
+
+  it('drops exactly what the summary covers — nothing reaches the model twice', async () => {
+    // The summary deliberately reaches past the cap, so the boundary it reaches
+    // has to be the boundary the prompt drops at. Two boundaries that merely
+    // agree most of the time is the shape that produced this bug; here the
+    // handler's number is the only one, and this asserts it against what the
+    // provider was actually sent.
+    mockSummariser();
+
+    const turn = await runTurn('conv-boundary', makeHistoryMessages(52), NO_SUMMARY);
+    const verbatim = verbatimHistory(turn.prompt);
+
+    // Messages 0-11 are inside the summary...
+    expect(verbatim.has('Message 0')).toBe(false);
+    expect(verbatim.has('Message 11')).toBe(false);
+    // ...12 onwards are not, and must still be there verbatim.
+    expect(verbatim.has('Message 12')).toBe(true);
+    expect(verbatim.has('Message 51')).toBe(true);
+    expect(verbatim.size).toBe(40);
+
+    // And the summary itself is in the prompt, so the dropped messages are
+    // represented rather than simply gone.
+    expect(turn.prompt.some((m) => m.content.includes('summary-text'))).toBe(true);
+  });
+
+  it('folds forward when the pin has scrolled out of the loaded window', async () => {
+    // `loadHistory` returns at most 200 rows, so a long-running conversation's
+    // pin eventually names a message that is no longer loaded. That is not a
+    // reason to start again: the stored text still describes everything before
+    // the window, and discarding it would silently erase the start of the
+    // conversation.
+    mockSummariser();
+
+    const turn = await runTurn('conv-scrolled', makeHistoryMessages(52), {
+      summary: 'everything that came before',
+      summaryUpToMessageId: 'hist-msg-from-a-previous-window',
+    });
+
+    expect(turn.calls).toBe(1);
+    expect(turn.options?.previousSummary).toBe('everything that came before');
+    // The delta starts at the first loaded row, because nothing in this window
+    // is known to be covered.
+    expect(turn.delta![0].content).toBe('Message 0');
+  });
+
+  it('does not persist a summary the provider failed to produce', async () => {
+    // `summarizeMessages` never throws; it returns `fellBack: true`. Writing that
+    // result would replace a good summary with a placeholder AND record it as
+    // covering messages nothing describes — permanently, from one transient
+    // provider error.
+    (summarizeMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary: 'a good summary from an earlier turn',
+      fellBack: true,
+    });
+
+    const turn = await runTurn('conv-fallback', makeHistoryMessages(66), {
+      summary: 'a good summary from an earlier turn',
+      summaryUpToMessageId: 'hist-msg-11',
+    });
+
+    expect(turn.calls).toBe(1);
+    expect(turn.persisted).toBeUndefined();
+    // The turn still runs, using what is stored.
+    expect(turn.prompt.some((m) => m.content.includes('a good summary from an earlier turn'))).toBe(
+      true
+    );
+  });
+
+  it('never summarises away more than half a small agent window', async () => {
+    // Found by /code-review. `maxHistoryMessages` is validated `min(0).max(500)`,
+    // so a cap below the lookahead is a supported configuration — and with a
+    // fixed 10-message lookahead it was catastrophic rather than merely lossy:
+    // at a cap of 4, five loaded rows gave `requiredDrop = 1` and
+    // `targetIdx = min(0 + 10, 4) = 4`, so ALL of it was summarised and the
+    // prompt carried zero verbatim history, including the assistant turn the
+    // user was replying to. Simulated across nine turns, that hit every third.
+    //
+    // The clamp is `min(lookahead, floor(cap / 2))`, so the agent always keeps
+    // at least half its window.
+    mockSummariser();
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ maxHistoryMessages: 4 })
+    );
+
+    const turn = await runTurn('conv-small-cap', makeHistoryMessages(5), NO_SUMMARY);
+    const verbatim = verbatimHistory(turn.prompt);
+
+    // Two of the five rows survive verbatim — floor(4 / 2) = 2 of lookahead is
+    // all the summary is allowed to take beyond the one row the cap requires.
+    expect(verbatim.size).toBe(2);
+    // ...and they are the NEWEST two, which is what makes the turn coherent.
+    expect(verbatim.has('Message 3')).toBe(true);
+    expect(verbatim.has('Message 4')).toBe(true);
+    // The summary still stands in for what went.
+    expect(turn.prompt.some((m) => m.content.includes('summary-text'))).toBe(true);
+  });
+
+  it('leaves the default window untouched — the clamp only binds where it must', async () => {
+    // The control for the clamp. At the platform default of 50,
+    // `floor(50 / 2) = 25` is far above the 10-message lookahead, so nothing
+    // changes and the reuse cadence is exactly as the cadence test above
+    // asserts. Without this, the clamp could quietly have cost the whole fix.
+    mockSummariser();
+
+    const turn = await runTurn('conv-default-cap', makeHistoryMessages(52), NO_SUMMARY);
+
+    expect(turn.persisted!.summaryUpToMessageId).toBe('hist-msg-11');
+    expect(verbatimHistory(turn.prompt).size).toBe(40);
+  });
+
+  it('tells the prompt the truth when it keeps a stale summary after a failure', async () => {
+    // /code-review round 2. On the fallback path the handler drops what the cap
+    // demands but the stored summary covers less than that, so the prompt used
+    // to label the whole span as summarised. Now the uncovered remainder is
+    // announced as omitted instead.
+    (summarizeMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary: 'a good summary from an earlier turn',
+      fellBack: true,
+    });
+
+    // 66 rows, cap 50 -> 16 must go; the stored summary covers 12.
+    const turn = await runTurn('conv-fallback-label', makeHistoryMessages(66), {
+      summary: 'a good summary from an earlier turn',
+      summaryUpToMessageId: 'hist-msg-11',
+    });
+
+    const summaryBlock = turn.prompt.find((m) => m.content.includes('Conversation summary of'));
+    const marker = turn.prompt.find((m) => m.content.includes('older messages omitted'));
+
+    expect(summaryBlock?.content).toContain('Conversation summary of 12 earlier messages');
+    expect(marker?.content).toContain('4 older messages omitted');
+  });
+
+  it('refuses to fold a pre-#654 placeholder row forward as if it were a summary', async () => {
+    // /code-review round 3. The code this replaces persisted `fellBack` results
+    // unconditionally, so live conversations exist whose `summary` column IS
+    // `[Summary unavailable …]` with a valid pin beside it. Treated as real, the
+    // extend prompt — which says the earlier content "must be carried forward,
+    // not replaced" — would fold the apology into every future summary, forever.
+    mockSummariser();
+
+    const turn = await runTurn('conv-legacy-placeholder', makeHistoryMessages(52), {
+      summary: '[Summary unavailable — earlier messages omitted]',
+      summaryUpToMessageId: 'hist-msg-11',
+    });
+
+    // Not reused as a summary...
+    expect(turn.calls).toBe(1);
+    // ...and not handed to the summariser as something to carry forward.
+    expect(turn.options?.previousSummary).toBeUndefined();
+    // Re-derived from the start of the window instead.
+    expect(turn.delta![0].content).toBe('Message 0');
+  });
+
+  it('keeps a scrolled-out summary in the prompt when the summariser then fails', async () => {
+    // /code-review round 3. Two different situations both produce a coverage
+    // count of zero, and conflating them threw real context away: no stored
+    // summary at all, versus a stored summary whose pin has scrolled out of the
+    // 200-row window — the case the extend path deliberately folds forward.
+    // On the second, one transient provider error used to leave the turn with
+    // neither the summary nor the messages it covered.
+    (summarizeMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary: 'everything that came before this window',
+      fellBack: true,
+    });
+
+    const turn = await runTurn('conv-scrolled-fail', makeHistoryMessages(66), {
+      summary: 'everything that came before this window',
+      summaryUpToMessageId: 'hist-msg-from-a-previous-window',
+    });
+
+    const summaryBlock = turn.prompt.find((m) => m.content.includes('Conversation summary'));
+    expect(summaryBlock?.content).toContain('everything that came before this window');
+    // Unnumbered: it covers none of THIS dropped span, so a count would be a
+    // claim about messages it does not describe.
+    expect(summaryBlock?.content).toContain('[Conversation summary of earlier messages]');
+    expect(summaryBlock?.content).not.toMatch(/summary of \d+ earlier/);
+    // And the dropped messages are still announced.
+    expect(turn.prompt.some((m) => m.content.includes('older messages omitted'))).toBe(true);
+  });
+
+  it('carries the request cost carrier into the summariser', async () => {
+    // The roster table in capabilities.md names this boundary; it has to
+    // actually carry, or the doc asserts something false about this line.
+    mockSummariser();
+
+    const summarize = summarizeMessages as ReturnType<typeof vi.fn>;
+    summarize.mockClear();
+    (prisma.aiMessage.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      [...makeHistoryMessages(52)].reverse()
+    );
+    (prisma.aiConversation.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeConversation({ id: 'conv-carrier', summary: null, summaryUpToMessageId: null })
+    );
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: mockProvider([
+        [
+          { type: 'text', content: 'Answer.' },
+          { type: 'done', usage: { inputTokens: 10, outputTokens: 5 } },
+        ],
+      ]),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(
+      streamChat({
+        ...baseRequest,
+        conversationId: 'conv-carrier',
+        costLogMetadata: { evaluationRunId: 'run-9' },
+      })
+    );
+
+    expect(summarize.mock.calls[0][3]).toMatchObject({
+      costLogMetadata: { evaluationRunId: 'run-9' },
+    });
+  });
+
+  it('attributes the assistant-message embedding to its conversation and agent', async () => {
+    // The hop, not just the function. `message-embedder`'s own tests prove it
+    // uses an attribution when given one; only this proves the handler hands it
+    // over — and a sabotage that removed the argument left every other test
+    // green, exactly as the `documentSlug` one did.
+    mockSummariser();
+    (prisma.aiMessage.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (prisma.aiConversation.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeConversation({ id: 'conv-embed' })
+    );
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: mockProvider([
+        [
+          { type: 'text', content: 'An answer long enough to be worth embedding at all.' },
+          { type: 'done', usage: { inputTokens: 10, outputTokens: 5 } },
+        ],
+      ]),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat({ ...baseRequest, conversationId: 'conv-embed' }));
+
+    expect(vi.mocked(queueMessageEmbedding)).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      { agentId: 'agent-1', conversationId: 'conv-embed' }
+    );
+  });
+
+  it('attributes the summariser call to the real agent and conversation', async () => {
+    // The other half of #654: `summarizeMessages` wrote `agentId: 'system'` and
+    // `conversationId: 'summary'` onto its own cost row. Both columns are
+    // foreign keys, so both inserts were rejected and swallowed. The handler is
+    // the only place that holds the real ids, so it is the only place that can
+    // supply them.
+    mockSummariser();
+
+    const turn = await runTurn('conv-attribution', makeHistoryMessages(52), NO_SUMMARY);
+
+    expect(turn.options).toMatchObject({
+      agentId: 'agent-1',
+      conversationId: 'conv-attribution',
+    });
+  });
+
   it('reuses existing conversation.summary when summaryUpToMessageId matches the last dropped message id', async () => {
     // Arrange: seed 52 messages; conversation already has a summary covering the
     // first 2 dropped messages (droppedCount = 52 - 50 = 2 → lastDropped = history[1]).
@@ -5015,6 +5514,79 @@ describe('attachment gate', () => {
     expect(events.find((e) => (e as { type: string }).type === 'error')).toMatchObject({
       code: 'IMAGE_NOT_SUPPORTED',
     });
+  });
+
+  it('never persists attachment bytes on a successful attachment turn', async () => {
+    // The invariant `tests/helpers/no-attachment-persistence.ts` was written
+    // for — and, until now, was not wired to anything, so nothing enforced it.
+    //
+    // It holds today only by construction: `persistMessage` builds its `data`
+    // from a fixed allowlist (conversationId, role, content, metadata,
+    // provenance, …) with no attachment field, so bytes cannot reach
+    // `aiMessage.create`. That is exactly the kind of implicit guarantee a
+    // later contributor breaks silently — by adding `attachments` to
+    // `PersistMessageParams`, or by folding base64 into `metadata`.
+    //
+    // The guard detects both a suspect KEY name and a base64 payload SHAPE.
+    // The shape check is load-bearing, not belt-and-braces: the first version
+    // of this test checked keys only, and a mutation persisting the real
+    // field (`metadata.files[].data` — attachments are `{name, mediaType,
+    // data}`) passed it while writing the whole PNG to the database. Verified
+    // by mutation both ways: keys-only passed, shape-aware fails naming the
+    // PNG and PDF magic bytes.
+    //
+    // Every other test in this block exercises a REJECTION path, which errors
+    // before any persistence happens. The turn has to succeed for the
+    // assertion to mean anything.
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ enableImageInput: true, enableDocumentInput: true })
+    );
+    (prisma.aiOrchestrationSettings.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      imageInputGloballyEnabled: true,
+      documentInputGloballyEnabled: true,
+    });
+    (assertModelSupportsAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'I can see it.' },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 5 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    const events = await collect(
+      streamChat({
+        ...baseRequest,
+        attachments: [imageAttachment(), pdfAttachment()],
+      })
+    );
+
+    // Guard the guard: if the turn errored, the assertion below passes
+    // vacuously because nothing was ever persisted.
+    expect(events.find((e) => (e as { type: string }).type === 'error')).toBeUndefined();
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(createCalls.some((c: any) => c[0].data.role === 'user')).toBe(true);
+
+    // Every sink this turn writes to, not just the message row. The invariant
+    // in the helper's docblock is "only the user's text becomes an AiMessage,
+    // and only an aggregate cost row goes to AiCostLog" — asserting on
+    // aiMessage.create alone would leave base64 folded into a conversation
+    // title, an eval log or a logCost metadata field completely uncovered.
+    // Both existing audio-guard consumers assert over logCost for this reason.
+    const sinks: Array<[string, unknown]> = [
+      ['prisma.aiMessage.create', prisma.aiMessage.create],
+      ['prisma.aiConversation.create', prisma.aiConversation.create],
+      ['prisma.aiConversation.update', prisma.aiConversation.update],
+      ['prisma.aiEvaluationLog.create', prisma.aiEvaluationLog.create],
+      ['logCost', logCost],
+    ];
+    for (const [label, sink] of sinks) {
+      assertNoAttachmentPersistence(sink as { mock: { calls: unknown[][] } }, label);
+    }
   });
 
   it('does not run the gate when there are no attachments', async () => {

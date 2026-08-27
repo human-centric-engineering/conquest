@@ -8,8 +8,14 @@
  * pulling in real grader modules that would self-register on import.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+
+// The fork seam ships empty; the tests below fill it explicitly.
+vi.mock('@/lib/app/evaluations', () => ({ initAppGraders: vi.fn() }));
+vi.mock('@/lib/logging', () => ({
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 import {
   __resetGraderRegistryForTests,
@@ -21,6 +27,8 @@ import {
   registerGrader,
 } from '@/lib/orchestration/evaluations/graders/registry';
 import type { Grader, PairwiseGrader } from '@/lib/orchestration/evaluations/graders/types';
+import { initAppGraders } from '@/lib/app/evaluations';
+import { logger } from '@/lib/logging';
 
 function makeHeuristicGrader(slug: string, description = `desc-${slug}`): Grader<{ x: number }> {
   return {
@@ -135,5 +143,132 @@ describe('grader registry', () => {
     expect(listGraders()).toEqual([]);
     expect(getRegisteredSlugs()).toEqual([]);
     expect(hasGrader('alpha')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The #541 fork seam — a grader the batch worker can actually see
+// ---------------------------------------------------------------------------
+
+describe('app grader registrations', () => {
+  beforeEach(() => {
+    __resetGraderRegistryForTests();
+    vi.clearAllMocks();
+  });
+
+  it('ships with no app graders', () => {
+    expect(listGraders()).toEqual([]);
+  });
+
+  it.each([
+    ['getGrader', () => getGrader('app_triage_accuracy')],
+    ['hasGrader', () => hasGrader('app_triage_accuracy')],
+    ['listGraders', () => listGraders()],
+    ['getRegisteredSlugs', () => getRegisteredSlugs()],
+  ])('%s sees an app grader registered from the seam', (_name, read) => {
+    // Every one of these backs a different route-realm caller: the batch
+    // worker's dispatch, the run-creation validator, the metric picker, the
+    // parity check. #541's failure was that only SOME of them could ever have
+    // seen a fork registration, so all four are asserted.
+    const grader = makeHeuristicGrader('app_triage_accuracy');
+    vi.mocked(initAppGraders).mockImplementation(() => registerGrader(grader));
+
+    read();
+
+    expect(hasGrader('app_triage_accuracy')).toBe(true);
+    expect(getGrader('app_triage_accuracy')).toBe(grader);
+  });
+
+  it('runs the fork init exactly once across many lookups', () => {
+    vi.mocked(initAppGraders).mockImplementation(() =>
+      registerGrader(makeHeuristicGrader('app_triage_accuracy'))
+    );
+
+    hasGrader('app_triage_accuracy');
+    listGraders();
+    getRegisteredSlugs();
+    getGrader('app_triage_accuracy');
+
+    expect(initAppGraders).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades to no app graders when the fork init throws', () => {
+    vi.mocked(initAppGraders).mockImplementation(() => {
+      throw new Error('fork boom');
+    });
+
+    // A thrown init must not become a 500 on the metric picker...
+    expect(listGraders()).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('initAppGraders threw'),
+      expect.objectContaining({ error: 'fork boom' })
+    );
+
+    // ...and the latch means it is not retried on every case of a drain.
+    listGraders();
+    expect(initAppGraders).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back a PARTIAL init, so the log and the registry agree', () => {
+    // The dangerous shape: an init that registers something and then throws.
+    // Without rollback those registrations stay live while the log says "app
+    // graders disabled" — and if one of them replaced a built-in slug, the
+    // override warn is skipped too, so every score changes with nothing saying
+    // so anywhere.
+    const builtIn = makeHeuristicGrader('exact_match', 'core');
+    registerGrader(builtIn);
+
+    vi.mocked(initAppGraders).mockImplementation(() => {
+      registerGrader(makeHeuristicGrader('exact_match', 'fork')); // shadows a built-in
+      registerGrader(makeHeuristicGrader('app_triage_accuracy')); // and adds one
+      throw new Error('fork boom on the third');
+    });
+
+    expect(listGraders()).toEqual([builtIn]);
+    expect(getGrader('exact_match')).toBe(builtIn);
+    expect(hasGrader('app_triage_accuracy')).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rolled back and disabled'),
+      expect.objectContaining({ error: 'fork boom on the third' })
+    );
+  });
+
+  it('lets an app grader replace a built-in slug, but says so', () => {
+    // Overwrite-by-slug is the documented behaviour and swapping in a mock is
+    // why. Silence is the part that was wrong: a replaced `exact_match` changes
+    // every score an admin reads while changing nothing they can see.
+    const builtIn = makeHeuristicGrader('exact_match', 'core');
+    registerGrader(builtIn);
+
+    const replacement = makeHeuristicGrader('exact_match', 'fork');
+    vi.mocked(initAppGraders).mockImplementation(() => registerGrader(replacement));
+
+    expect(getGrader('exact_match')).toBe(replacement);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('replaced a built-in slug'), {
+      slug: 'exact_match',
+    });
+  });
+
+  it('does not warn when an app grader adds a slug nothing used', () => {
+    registerGrader(makeHeuristicGrader('exact_match'));
+    vi.mocked(initAppGraders).mockImplementation(() =>
+      registerGrader(makeHeuristicGrader('app_triage_accuracy'))
+    );
+
+    listGraders();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('re-arms the one-shot init on reset so a test cannot inherit a stale latch', () => {
+    vi.mocked(initAppGraders).mockImplementation(() =>
+      registerGrader(makeHeuristicGrader('app_triage_accuracy'))
+    );
+
+    listGraders();
+    __resetGraderRegistryForTests();
+    listGraders();
+
+    expect(initAppGraders).toHaveBeenCalledTimes(2);
   });
 });

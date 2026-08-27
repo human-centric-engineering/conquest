@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: RoundPhasesPanel render — the add form (gated on the cohort having subgroups), the phase rows
  * (window + end mode + completion), and the empty state. Router + apiClient mocked.

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * `useScopeTabs` (F17.26) — `?tab=` state without an RSC round-trip.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionResumeGate — the no-login "welcome back" chooser (session resume).
  *

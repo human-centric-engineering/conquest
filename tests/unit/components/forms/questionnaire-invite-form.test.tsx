@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionnaireInviteForm — respondent invitation landing form.
  *

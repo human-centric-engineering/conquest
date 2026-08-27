@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SectionNavigator — the completeness map for the form surface (P-presentation). Pins: per-section
  * answered/total counts, the active-section highlight, jump-to-section, and the inferred-answer dot

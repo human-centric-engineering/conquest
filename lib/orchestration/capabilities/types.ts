@@ -49,11 +49,50 @@ export interface CapabilityContext {
    */
   workflowExecutionId?: string;
   /**
+   * Extra keys the caller wants on this dispatch's `AiCostLog.metadata` row.
+   *
+   * Two things ride on this, and both are about where an operator can SEE the
+   * spend rather than whether it was recorded:
+   *
+   * - **`stepId`.** Both execution readers filter cost rows with
+   *   `const stepId = extractStepId(row.metadata); if (!stepId) continue;`
+   *   (`executions/[id]/route.ts` and its `live/` sibling), so a row without
+   *   one is dropped from the execution detail and live cost panels entirely.
+   *   `loadPastRuns` in `cost-estimation/workflow-cost.ts` cannot attribute it
+   *   either.
+   * - **Evaluation tags.** An evaluation run stamps
+   *   `{ evaluationRunId, role }` onto `ExecuteOptions.costLogMetadata`, and
+   *   the executors thread it into their own `logCost` calls. Without a carrier
+   *   it stops at the capability boundary, so evaluation spend that runs
+   *   through a tool is untagged.
+   *
+   * The dispatcher **merges this under its own keys** — see step 9 — so a
+   * caller cannot overwrite `slug` or `success` by supplying them here.
+   * Populated by the executors; absent on a direct dispatch. (#600)
+   */
+  costLogMetadata?: Record<string, unknown>;
+  /**
    * Free-form context from the chat handler (e.g. the current entity
    * being discussed). Capabilities can inspect but shouldn't require
    * it.
    */
   entityContext?: Record<string, unknown>;
+  /**
+   * Whether {@link CapabilityContext.scope} came from a carrier the platform
+   * wrote, and may therefore drive the scope binding at dispatch.
+   *
+   * `true` for the persisted, admin-written carriers — an `McpApiKey.scope`, an
+   * `AiWorkflowExecution.scope`, a nested `run_workflow` inheriting its
+   * parent's. **Absent for a consumer-supplied scope**, which
+   * `POST /api/v1/chat/stream` accepts straight from an untrusted request body
+   * and whose own schema says it is "a routing/context hint, never proof of
+   * authorization".
+   *
+   * Default (absent) means **not** authoritative, so a caller added later that
+   * forgets this flag loses the binding rather than gaining one — the safe
+   * direction for both mistakes.
+   */
+  scopeIsAuthoritative?: boolean;
   /**
    * Optional free-form scope map populated by the dispatcher's caller.
    * Generic by design — core names no keys and no core capability reads
@@ -184,7 +223,7 @@ export type CapabilityGuard = (
 ) => CapabilityGuardDecision | Promise<CapabilityGuardDecision>;
 
 /**
- * Options for `CapabilityDispatcher.register`. Both fields are opt-in; the
+ * Options for `CapabilityDispatcher.register`. Every field is opt-in; the
  * no-options call behaves exactly as before.
  */
 export interface CapabilityRegisterOptions {
@@ -201,4 +240,25 @@ export interface CapabilityRegisterOptions {
   slug?: string;
   /** Pre-execute guard for this registration; see {@link CapabilityGuard}. */
   guard?: CapabilityGuard;
+  /**
+   * Scope keys this capability is **bound** by — each names a parameter of the
+   * same name that carries the caller's scope value.
+   *
+   * `{ scopedBy: 'projectId' }` says: when an authoritative caller's scope pins
+   * `projectId`, supply it as the `projectId` argument if the caller omitted
+   * one, and refuse the dispatch if the caller named anything else. See
+   * `.context/orchestration/capabilities.md` for the exact guarantee.
+   *
+   * **Opt-in, and deliberately not inferred.** An earlier design derived the
+   * binding from the capability's published `functionDefinition.parameters` and
+   * switched itself on whenever a scope map was present. That is admin-editable
+   * JSON which need not agree with the Zod schema the author wrote, and "a
+   * scope map exists" is not the same question as "this tool is scoped" — three
+   * review rounds found four separate ways for that inference to be wrong
+   * (#586). Naming the binding here makes it a fact the capability author
+   * states rather than one the dispatcher guesses.
+   *
+   * A capability that declares nothing is never folded and never refused.
+   */
+  scopedBy?: string | readonly string[];
 }

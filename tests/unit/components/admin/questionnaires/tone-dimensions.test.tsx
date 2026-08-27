@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ToneDimensionRow (F-tone / F-persona) — unit tests for the shared tone-dimension control used by
  * both the version tone panel and each persona card.

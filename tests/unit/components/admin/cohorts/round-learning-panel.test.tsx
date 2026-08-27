@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: RoundLearningPanel render — the bias warning, toggle state, threshold control, digest preview
  * (insight + respondent count + divergence band), and empty state. Router + apiClient mocked.

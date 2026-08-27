@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * VersionSettingsPanel — the Settings-tab surface wrapping the run-time config editor under one
  * mutation runner. The child editor and the mutation helper are mocked; the assertions pin the

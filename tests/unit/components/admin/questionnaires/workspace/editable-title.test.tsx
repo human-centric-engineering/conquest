@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * EditableTitle — inline-editable questionnaire title for the workspace header.
  *

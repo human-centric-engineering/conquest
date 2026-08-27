@@ -1,11 +1,13 @@
+// @vitest-environment jsdom
+
 /**
  * QuestionnaireSplash — the respondent intro screen.
  *
- * Runs under jsdom (not the project-default happy-dom): the splash renders a live <iframe> for the
+ * Runs under jsdom (see the environment docblock on line 1), not the
+ * project-default happy-dom: the splash renders a live <iframe> for the
  * intro video embed, and jsdom silently ignores the iframe `src` whereas happy-dom tries to navigate
  * it (real network + noisy aborts). The assertions below are DOM-library agnostic.
  *
- * @vitest-environment jsdom
  * @see components/app/questionnaire/intro/questionnaire-splash.tsx
  */
 

@@ -494,7 +494,7 @@ Reasoning plus acting is a reflex loop.
 
 **Supported types:** only `pattern` is a built-in (delegates to `getPatternDetail`). Types with neither a built-in case nor a registered contributor (below) log a warn and return a benign "no loader" placeholder so the model doesn't hallucinate. Adding a built-in type is a ~10-line change — add a `case` in the switch.
 
-**App-contributed context types (forks):** `registerContextContributor(type, loader)` teaches `buildContext` about additional types without editing the core switch. On a cache miss with no matching built-in case, the loader registered for that `type` is invoked; its returned body is framed and cached identically to a built-in. A built-in case always takes precedence over a same-type contributor. Put registrations in the auto-wired fork-owned scaffold **`lib/app/context-contributors.ts`** → `initAppContextContributors()`, which `buildContext` runs once before its first lookup (mirrors `lib/app/capabilities.ts` → `initAppCapabilities`):
+**App-contributed context types (forks):** `registerContextContributor(type, loader)` teaches `buildContext` about additional types without editing the core switch. On a cache miss with no matching built-in case, the loader registered for that `type` is invoked; its returned body is framed and cached identically to a built-in. A built-in case always takes precedence over a same-type contributor. Put registrations in the auto-wired fork-owned scaffold **`lib/app/context-contributors.ts`** → `initAppContextContributors()`, which `buildContext` runs once before its first lookup (mirrors `lib/app/capabilities.ts` → `initAppCapabilities`). A throwing init never fails the turn — it is logged and rolled back to the pre-init registry, because a contributor left live by a partial init has its body framed into the system prompt of every turn using that type, where the model reads it as fact. See [Fork Init Seams](../architecture/fork-init-seams.md):
 
 ```typescript
 // lib/app/context-contributors.ts — called once by buildContext() before the first lookup
@@ -537,7 +537,7 @@ The three inline guards — input (prompt-injection scan), [output](./output-gua
 
 **A floor only ever RAISES a guard, never lowers it.** Strictness is ordered `none` < `log_only` < `warn_and_continue` < `block`, and the effective mode is `max(resolved agent/global mode, strictest registered floor)`. An empty registry leaves guard-mode resolution byte-for-byte unchanged (inert in vanilla Sunrise).
 
-A contributor is keyed on the turn's `(contextType, contextId, agentId)` and returns a `GuardFloors` = `Partial<Record<'input'|'output'|'citation', GuardMode>>` (it may be async). The handler collects floors **once** per turn (`collectGuardFloors`) and applies each via `applyGuardFloor(guard, resolvedMode, floors)` at the three guard sites. Multiple contributors merge to the strictest per guard; a contributor that throws is logged and ignored (never fails the turn); a returned value that isn't a known `GuardMode` is dropped.
+A contributor is keyed on the turn's `(contextType, contextId, agentId)` and returns a `GuardFloors` = `Partial<Record<'input'|'output'|'citation', GuardMode>>` (it may be async). The handler collects floors **once** per turn (`collectGuardFloors`) and applies each via `applyGuardFloor(guard, resolvedMode, floors)` at the three guard sites. Multiple contributors merge to the strictest per guard; a contributor that throws is logged and ignored (never fails the turn); a returned value that isn't a known `GuardMode` is dropped. A throwing **init** is logged and rolled back to the pre-init registry — a floor can only raise, so a partial apply cannot weaken a guard, but it would make _which_ guards are raised depend on where the bug sits in your init rather than on your policy. See [Fork Init Seams](../architecture/fork-init-seams.md).
 
 ```typescript
 // lib/app/guard-floor-contributors.ts — called once by the chat handler
@@ -558,7 +558,7 @@ The post-detection sibling of the guard-floor seam. When an inline guard **flags
 
 **Fire-and-forget.** Emission never delays or breaks the turn: each contributor runs on a microtask (so it can't block the handler), and a synchronous throw or an async rejection is swallowed and logged. It fires **before** the `block` short-circuit, so a `block` outcome is still observed. An empty registry is a no-op — inert in vanilla Sunrise.
 
-A contributor receives a `GuardEventContext` keyed on the turn's `(contextType, contextId, agentId, userId, conversationId)` and a `GuardEvent` = `{ guard: 'input'|'output'|'citation', outcome: GuardMode }` — where `outcome` is the effective mode the guard acted in (`block` = turn stopped, `warn_and_continue` = warned, `log_only` = logged only, `none` = flagged but no action). It is **observation only**: it cannot change detection or the action taken (use a guard-floor contributor to raise strictness).
+A contributor receives a `GuardEventContext` keyed on the turn's `(contextType, contextId, agentId, userId, conversationId)` and a `GuardEvent` = `{ guard: 'input'|'output'|'citation', outcome: GuardMode }` — where `outcome` is the effective mode the guard acted in (`block` = turn stopped, `warn_and_continue` = warned, `log_only` = logged only, `none` = flagged but no action). It is **observation only**: it cannot change detection or the action taken (use a guard-floor contributor to raise strictness). A throwing init is logged and rolled back: contributors registered before the throw would otherwise observe every guard firing for the life of the process — and these are the observers that notify and escalate — from a config the log reports as disabled. See [Fork Init Seams](../architecture/fork-init-seams.md).
 
 ```typescript
 // lib/app/guard-event-contributors.ts — called once by the chat handler
@@ -573,21 +573,40 @@ export function initAppGuardEventContributors(): void {
 
 ## Rolling Conversation Summary
 
-When conversation history exceeds the effective message-count cap (`AiAgent.maxHistoryMessages ?? MAX_HISTORY_MESSAGES`, default 50), the streaming handler generates a concise LLM summary of the dropped messages instead of silently truncating them. This preserves the original problem, key decisions, and important context across long conversations.
+When conversation history exceeds the effective message-count cap (`AiAgent.maxHistoryMessages ?? MAX_HISTORY_MESSAGES`, default 50), the streaming handler represents the messages that fall out with a concise LLM summary instead of silently truncating them. This preserves the original problem, key decisions, and important context across long conversations.
 
-The same effective cap drives both the summary trigger here and the verbatim-history truncation inside `buildMessages`, so the summary always covers exactly the messages that got dropped from the live history. Agents that set `maxHistoryMessages` to a smaller value see summarisation kick in earlier; agents that set it to `0` get a pure-summary view of all prior turns (no verbatim history on any turn).
+Agents that set `maxHistoryMessages` to a smaller value see summarisation kick in earlier; agents that set it to `0` get a pure-summary view of all prior turns (no verbatim history on any turn).
 
-**How it works:**
+### The model: a prefix, not a window
 
-1. After loading history, if `history.length > effectiveCap`, the handler checks whether a persisted summary exists on `AiConversation.summary` and whether it's stale (via `summaryUpToMessageId`).
-2. If stale or missing: yields a `{ type: 'status', message: 'Summarizing conversation history...' }` event, calls `summarizeMessages()` on the dropped portion, and persists the result.
-3. The summary is passed to `buildMessages()` which emits it as a `[Conversation summary of N earlier messages]` system message instead of the old `[... N older messages omitted ...]` marker.
+**The summary covers a _prefix_ of the conversation.** `AiConversation.summaryUpToMessageId` names the newest message inside it, and `AiConversation.summary` holds the text. Reuse asks one question:
 
-**Budget:** Uses the `routing` task-type model (budget-tier, e.g. Haiku) via `getDefaultModelForTask('routing')`. Cost is logged as a `CHAT` operation with `agentId: 'system'`.
+> Does the stored prefix already contain everything this turn has to drop?
 
-**Failure:** If summarization fails (provider down, LLM error), the handler falls back to the old truncation marker. Summarization never blocks the main chat flow.
+Note what it does **not** ask: whether the boundary matches. The drop boundary is the edge of a sliding window and advances by about two messages a turn (one user, one assistant), so an equality check can essentially never hold — which is exactly what #654 was. Every turn past the window paid for a fresh summarisation of the whole dropped region, on the agent's own provider, and [the cost row was discarded](#cost-attribution) so nothing on the Costs page moved.
 
-**Staleness:** A summary is considered stale when `summaryUpToMessageId` is null or messages exist beyond that point in the dropped window. Once generated, the summary is reused until new messages push past the window again.
+Because the boundary moves every turn, staying reusable means summarising **past** the requirement. `SUMMARY_LOOKAHEAD_MESSAGES` (10, in `chat/types.ts`) is how far. One summarisation then serves roughly five turns **at the default cap** — see the clamp below for what happens to a very small window.
+
+**The summary boundary is also the drop boundary.** The handler passes `historyDropCount` to `buildMessages`, which takes the larger of that and its own cap-derived figure. Two independently-computed boundaries that have to agree is the shape that produced the bug; there is now one number, and the lookahead messages are inside the summary rather than appearing in the prompt both ways. The practical effect is that verbatim history sits between `cap - min(SUMMARY_LOOKAHEAD_MESSAGES, floor(cap / 2))` and `cap` messages rather than exactly at `cap`. **The lookahead never takes more than half the window**, and that clamp is load-bearing rather than defensive: `maxHistoryMessages` is validated `min(0).max(500)`, so a cap below the lookahead is a supported configuration, and a fixed 10 would summarise an agent with `maxHistoryMessages: 4` down to zero verbatim history — losing the assistant turn the user is replying to — on roughly every third turn. At the default cap of 50 the clamp is `min(10, 25)` = 10 and nothing changes. At `0`, the documented stateless setting, it is `0`, which is the pure-summary view that setting asks for.
+
+**At caps of 1–3 the reuse win does not apply.** A clamped lookahead of 0 or 1 is exhausted by the next turn's two new messages, so those agents summarise on every turn — for them the #654 cadence is unchanged. That is inherent rather than an oversight: a two-message window has no room to both summarise ahead and keep anything verbatim, and keeping the last exchange is worth more than saving the call. What did change for them is the price of each call — it folds the ~2 new messages into the stored summary instead of re-deriving the whole prefix. Read "one call serves ~5 turns" as a statement about the default cap, not about every configuration.
+
+### How it works
+
+1. After loading history, the handler computes `requiredDrop = history.length - effectiveCap`. If it is zero, nothing here runs.
+2. It locates `summaryUpToMessageId` in the loaded rows. **Reuse** when that index is at or beyond `requiredDrop - 1` — no LLM call, and `historyDropCount` follows the summary's own boundary.
+3. Otherwise it **extends**: yields `{ type: 'status', message: 'Summarizing conversation history...' }` and calls `summarizeMessages()` with the stored text as `previousSummary` and only the messages it does not yet cover. The model folds them in.
+4. The result is persisted with the new pin, and passed to `buildMessages()`, which emits it as a `[Conversation summary of N earlier messages]` system message instead of the `[... N older messages omitted ...]` marker.
+
+**Extension keeps the cost proportional to what was added**, not to the length of the conversation — and it is what lets the summary outlive the rows. `loadHistory` returns at most the 200 most recent messages, so a pin eventually names a message that is no longer loaded; that is treated as "covers everything before this window", and the stored text is folded forward rather than discarded. Without that, anything older than 200 messages left the prompt and the summary at the same time.
+
+**Budget:** the `routing` task-type model (budget tier, e.g. Haiku) via `getDefaultModelForTask('routing')`, capped at `maxTokens: 500`.
+
+<a id="cost-attribution"></a>**Cost attribution:** logged as a `CHAT` operation against the **real** `agent.id` and `conversation.id`, with `metadata.kind = 'conversation_summary'` so analytics can separate summarisation from turns a user asked for. `operation` stays `CHAT` because it is a chat completion billed to that agent. Until #654 this row carried the literals `'system'` and `'summary'` — both columns are foreign keys, so every insert was rejected with P2003, swallowed by `logCost`, and the spend appeared only on the provider invoice.
+
+**Failure:** `summarizeMessages` never throws; it returns `fellBack: true` — and it does so for an **empty completion** as well as an error, because a content filter or a reasoning model exhausting its 500-token budget is a failure too. `fellBack` is derived from the raw completion rather than by comparing the result to the placeholder: with the previous summary returned on failure, that comparison would report success and the caller would advance the pin over messages nothing describes. The handler **does not persist a `fellBack` result** — writing it would replace a good summary with a placeholder and record it as covering messages nothing describes, permanently, from one transient provider error. It drops only what the cap demands, uses what is stored, and tries again next turn.
+
+**Two things about stored summaries that are not obvious.** A row whose `summary` is the placeholder text is treated as _no summary at all_ (`isPlaceholderSummary`): the pre-#654 code persisted `fellBack` results unconditionally, so live conversations exist in that state, and folding one forward under the extend prompt — which requires earlier content to be carried forward — would propagate the apology indefinitely. And a stored summary whose pin has scrolled out of the 200-row window covers _none of the current dropped span_ while still being real context; it is rendered as `[Conversation summary of earlier messages]`, without a count, rather than being dropped or given an invented one.
 
 ## User Memory
 
@@ -650,11 +669,12 @@ Three internal modules under `lib/orchestration/chat/` are not exported from the
 
 ### `summarizer.ts` — rolling history summary
 
-- Primary export: `summarizeMessages(messages, providerSlug, fallbackSlugs)` returning a string.
+- Primary export: `summarizeMessages(messages, providerSlug, fallbackSlugs, options?)` returning a `SummarizeResult`.
+- `options.previousSummary` switches it from _summarise_ to **extend**: the prior text and the delta go to the model together, under a prompt that requires the earlier content to be carried forward rather than replaced. `options.agentId` / `options.conversationId` attribute the cost row.
 - Called by the handler from the [Rolling Conversation Summary](#rolling-conversation-summary) flow once `history.length > effectiveCap` (where `effectiveCap = agent.maxHistoryMessages ?? MAX_HISTORY_MESSAGES`).
 - Runs on the **`routing` task-type model** (budget tier, e.g. Haiku) resolved via `getDefaultModelForTask('routing')` in the LLM settings resolver. Capped at `maxTokens: 500`.
-- Logs cost as a `CostOperation.CHAT` row with `agentId: 'system'` and `conversationId: 'summary'`.
-- **Never throws.** Any failure (provider down, LLM error, empty response) returns `FALLBACK_MESSAGE = '[Summary unavailable — earlier messages omitted]'` so the chat turn keeps moving.
+- Logs cost as a `CostOperation.CHAT` row against the caller's real agent and conversation, tagged `metadata.kind = 'conversation_summary'`. Both columns are foreign keys — pass a real row id or pass nothing; a placeholder is rejected and swallowed (#654).
+- **Never throws.** Any failure (provider down, LLM error, empty response) returns `fellBack: true` with `previousSummary` if there is one, and `FALLBACK_MESSAGE = '[Summary unavailable — earlier messages omitted]'` otherwise, so the chat turn keeps moving and a good summary is never destroyed by a bad call.
 - Prompt is a fixed system message telling the model to produce a third-person summary covering the original problem, key decisions, facts/constraints, and current state.
 
 ### `token-estimator.ts` — context window sizing

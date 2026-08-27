@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * RefinementHistory — disclosure of an answer's revision trail (F7.2).
  *

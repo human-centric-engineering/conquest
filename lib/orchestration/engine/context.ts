@@ -13,6 +13,7 @@
 
 import type { Logger } from '@/lib/logging';
 import type { LlmTelemetryEntry, StepResult, TurnEntry } from '@/types/orchestration';
+import { platformScope } from '@/lib/orchestration/scope';
 
 /**
  * Context passed to each step executor.
@@ -40,6 +41,13 @@ export interface ExecutionContext {
    * unchanged.
    */
   scope?: Record<string, string>;
+  /**
+   * Whether {@link ExecutionContext.scope} may bind a capability's arguments.
+   * Declared so the compiler can see it at every forwarding site — it was set
+   * on this object without being declared here, and the executors that build
+   * the real `CapabilityContext` dropped it in silence (#586).
+   */
+  scopeIsAuthoritative?: boolean;
   /** Map of `step.id` → that step's structured output so far. */
   stepOutputs: Record<string, unknown>;
   /** Free-form scratchpad for executors (planner state, loop counters, ...). */
@@ -151,7 +159,25 @@ export function createContext(params: {
     signal: params.signal,
     logger: params.logger,
     stepTelemetry: [],
-    ...(params.scope ? { scope: params.scope } : {}),
+    // Authoritative: persisted on the execution/schedule/trigger row by an
+    // admin route and re-validated on read by `resolvePersistedScope`.
+    // Authoritative by construction: this scope came off
+    // `AiWorkflow{Execution,Schedule,Trigger}.scope`, whose writers are the
+    // admin execute/rerun routes, the scheduler, and the inbound trigger route.
+    // `run_workflow` — the one path that could carry a consumer-supplied scope
+    // into `engine.execute()` — drops a non-authoritative one rather than
+    // passing it, so the column never holds a consumer's hint. If a new writer
+    // of that column appears, it must uphold this.
+    //
+    // **One writer is not purely operator config**, and a fork adapter author
+    // should know it: the inbound route merges an adapter's `normalise()`
+    // scope UNDER the operator's static `AiWorkflowTrigger.scope`, so an
+    // adapter may contribute a key the operator did not pin — derived from the
+    // verified request payload. That is not an escalation (absent the key the
+    // binding would be `unpinned` on it, leaving the caller's own argument
+    // unchecked, so the adapter key is strictly more restrictive), but it does
+    // mean a bound value can originate from a payload rather than from config.
+    ...platformScope(params.scope),
     ...(params.costLogMetadata ? { costLogMetadata: params.costLogMetadata } : {}),
   };
 }

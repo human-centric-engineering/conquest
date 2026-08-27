@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Component test: VersionEditor — the structure authoring surface (F2.1) + the F5.3 seed-composer
  * mount point.

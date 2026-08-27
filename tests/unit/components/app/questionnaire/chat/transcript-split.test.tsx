@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The history and the current exchange, placed APART.
  *

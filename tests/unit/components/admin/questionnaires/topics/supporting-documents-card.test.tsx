@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `SupportingDocumentsCard` — the companions the Routing Analyst reads (F17.29).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ProfileCaptureGate — the blocking respondent profile capture form (F-capture).
  *

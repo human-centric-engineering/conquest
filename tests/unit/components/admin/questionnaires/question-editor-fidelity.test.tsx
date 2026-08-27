@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionEditor — the per-question fidelity slider (P18).
  *

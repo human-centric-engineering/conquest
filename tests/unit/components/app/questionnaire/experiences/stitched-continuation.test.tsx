@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * StitchedContinuation (P15.3) — the seam under `stitched` continuity.
  *

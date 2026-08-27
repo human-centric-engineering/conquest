@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * GoalAudienceEditor — version goal/audience metadata, edited inline on the Structure tab.
  *

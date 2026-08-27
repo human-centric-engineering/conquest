@@ -55,6 +55,7 @@ import { DELETE } from '@/app/api/v1/user/api-keys/[keyId]/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
+import { listValidApiKeyScopes } from '@/lib/auth/api-keys';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -137,6 +138,20 @@ describe('API Key Endpoints', () => {
       const res = await GET(makeGetRequest());
 
       expect(res.status).toBe(401);
+    });
+
+    it('reports the scopes this install can mint', async () => {
+      // A fork that adds a scope in `lib/app/api-key-scopes.ts` needs its key
+      // UI to know about it; otherwise the only way to discover a scope is a
+      // 400 from POST. Sourced from the same function POST validates against,
+      // so the two cannot drift.
+      vi.mocked(prisma.aiApiKey.findMany).mockResolvedValue([]);
+
+      const res = await GET(makeGetRequest());
+      const json = JSON.parse(await res.text());
+
+      expect(json.data.availableScopes).toEqual(listValidApiKeyScopes());
+      expect(json.data.availableScopes).toContain('chat');
     });
   });
 
@@ -245,6 +260,64 @@ describe('API Key Endpoints', () => {
         })
       );
     });
+    // ── Minting a key over a key (#542) ──────────────────────────────────
+
+    it('refuses to mint a key for a caller who authenticated with a key', async () => {
+      // Privilege laundering: a narrow key that can mint a `chat` key reaches
+      // every authenticated route as its owner, so the narrow scope it was
+      // issued with bounds nothing. Exercised through the REAL `resolveApiKey`
+      // rather than by stubbing the session shape, because the thing under
+      // test is that `withAuth`'s API-key path reaches this refusal.
+      vi.mocked(prisma.aiApiKey.findFirst).mockResolvedValue({
+        id: KEY_ID,
+        userId: USER_ID,
+        scopes: ['chat'],
+        rateLimitRpm: null,
+        expiresAt: null,
+        createdAt: new Date(),
+        user: {
+          id: USER_ID,
+          name: 'Key Owner',
+          email: 'owner@example.com',
+          emailVerified: true,
+          image: null,
+          role: 'USER',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      } as never);
+
+      const request = new Request('http://localhost/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: 'Bearer sk_deadbeefdeadbeefdeadbeefdeadbeef',
+        },
+        body: JSON.stringify({ name: 'Second key', scopes: ['chat'] }),
+      }) as unknown as NextRequest;
+
+      const res = await POST(request);
+
+      expect(res.status).toBe(403);
+      expect(prisma.aiApiKey.create).not.toHaveBeenCalled();
+    });
+
+    it('still mints for a browser session', async () => {
+      // The other half of the refusal above: the cookie path is unchanged.
+      vi.mocked(prisma.aiApiKey.create).mockResolvedValue({
+        id: KEY_ID,
+        name: 'Browser key',
+        keyPrefix: 'sk_test1',
+        scopes: ['chat'],
+        expiresAt: null,
+        createdAt: new Date(),
+      } as never);
+
+      const res = await POST(makePostRequest({ name: 'Browser key', scopes: ['chat'] }));
+
+      expect(res.status).toBe(201);
+      expect(prisma.aiApiKey.create).toHaveBeenCalled();
+    });
   });
 
   // ── DELETE — Revoke key ────────────────────────────────────────────────
@@ -278,6 +351,46 @@ describe('API Key Endpoints', () => {
       expect(res.status).toBe(200);
       expect(json.data.message).toBe('API key already revoked');
       expect(prisma.aiApiKey.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a revoke from a caller who authenticated with a key', async () => {
+      // Same rule as POST: a narrow credential does not manage credentials.
+      // GET returns every key's id, so without this a leaked `chat` key could
+      // enumerate its owner's keys and revoke all of them, `admin` included.
+      vi.mocked(prisma.aiApiKey.findFirst).mockResolvedValue({
+        id: KEY_ID,
+        userId: USER_ID,
+        scopes: ['chat'],
+        rateLimitRpm: null,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: new Date(),
+        user: {
+          id: USER_ID,
+          name: 'Key Owner',
+          email: 'owner@example.com',
+          emailVerified: true,
+          image: null,
+          role: 'USER',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      } as never);
+
+      const request = new Request('http://localhost/test', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer sk_deadbeefdeadbeefdeadbeefdeadbeef' },
+      }) as unknown as NextRequest;
+
+      const res = await DELETE(request, { params: Promise.resolve({ keyId: KEY_ID }) });
+
+      expect(res.status).toBe(403);
+      // `update` IS called once — `resolveApiKey` stamps `lastUsedAt`
+      // fire-and-forget on every key auth. What must not happen is the revoke.
+      const revokes = vi
+        .mocked(prisma.aiApiKey.update)
+        .mock.calls.filter(([arg]) => 'revokedAt' in (arg as { data: object }).data);
+      expect(revokes).toEqual([]);
     });
 
     it('returns 404 for unknown key', async () => {

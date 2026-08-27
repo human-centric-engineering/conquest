@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Invitations tab page (`/admin/questionnaires/[id]/v/[vid]/invitations`) tests.
  *

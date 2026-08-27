@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AuthedResumeChooser — the authenticated "Continue / Start new" screen (session resume).
  *

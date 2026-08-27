@@ -1,11 +1,17 @@
+// @vitest-environment happy-dom
+
 /**
  * BrandMark slot (issue #347) — ConQuest override.
  *
  * Sunrise ships the scaffold rendering `BRAND.name` as a bare string. ConQuest
  * replaces the body with its styled two-tone wordmark ({@link ConquestWordmark}),
- * so these assertions track the fork's override, not the platform default. The
- * brand seam (`NEXT_PUBLIC_APP_NAME` → `BRAND.name`) still drives page titles,
- * footer copyright, and emails — the wordmark is the header/footer lockup only.
+ * so these assertions track the fork's override, not the platform default.
+ *
+ * The brand seam moved from `NEXT_PUBLIC_APP_NAME` to `lib/app/brand.ts` in
+ * Sunrise 0.11.0 (#661) and still drives page titles, both footers' attribution
+ * line and every transactional email — the wordmark is the header/footer lockup
+ * only, and renders its own text rather than reading `BRAND.name`. That is why
+ * the suite-wide brand pin in tests/setup.ts does not affect these cases.
  *
  * @see components/brand/brand-mark.tsx · components/app/questionnaire/conquest-wordmark.tsx
  */

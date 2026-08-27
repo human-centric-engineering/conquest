@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ExperienceSynthesisPanel — the experience-wide synthesis read/generate panel (P15.8).
  *

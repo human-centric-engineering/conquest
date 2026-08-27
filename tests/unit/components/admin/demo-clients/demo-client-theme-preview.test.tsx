@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * DemoClientThemePreview — admin-facing visual preview of a demo client's brand.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The transcript and the composer, placed APART.
  *

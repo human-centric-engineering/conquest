@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CohortReportPanel tests (F14.3 read view).
  *

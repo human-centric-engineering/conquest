@@ -7,6 +7,14 @@
  * re-imports to observe the resolved value. The key guarantee is fail-safe:
  * anything other than alpha/beta (incl. typos, empty, unset) ⇒ `stable`.
  *
+ * FORK NOTE — `lib/app/release-stage.ts` is a ConQuest-only seam with no
+ * upstream counterpart, so this whole file is fork-owned and reads the real
+ * module deliberately. Nothing in Sunrise will ever fill or empty it. What a
+ * fork inheriting this should know: the assertions pin the fail-safe (anything
+ * that is not alpha/beta resolves to `stable`), and that guarantee is what the
+ * alpha-only admin tooling relies on to re-protect itself at GA — so keep the
+ * fail-safe cases even if you change which stages you use.
+ *
  * @see lib/app/release-stage.ts
  */
 

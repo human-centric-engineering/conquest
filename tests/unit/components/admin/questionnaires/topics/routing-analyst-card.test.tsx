@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `RoutingAnalystCard` — run the Routing Analyst, then review what it proposed
  * (P17.4 / F17.19 Phase 2).

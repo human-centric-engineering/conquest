@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: the routing map's detail panel.
  *

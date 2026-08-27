@@ -3,18 +3,18 @@
 How Sunrise's GitHub Actions pipeline works, how it adapts to public vs private
 repos, and the two knobs a fork may want to flip. The pipeline is designed to be
 **correct and fast on both** the public Sunrise repo (free Actions minutes,
-4-core/16GB runners) and private forks (capped minutes, 2-core/7GB runners).
+4-core/16GB runners) and private forks (capped minutes, 2-core/8GB runners).
 
 ## Workflows
 
-| File                                        | Trigger                      | Purpose                                                                                             |
-| ------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`                  | push to `main`, PR to `main` | Type-check, lint/format, build, tests, erasure smoke, Docker build + stack smoke, lockfile metadata |
-| `.github/workflows/codeql.yml`              | push, PR, weekly cron        | SAST → Security → Code scanning (skips on private; see below)                                       |
-| `.github/workflows/dependency-review.yml`   | PR to `main`                 | Blocks PRs adding vulnerable deps (skips on private; see below)                                     |
-| `.github/workflows/secret-scan.yml`         | push, PR, weekly cron        | TruffleHog; diff on PR, full history on cron                                                        |
-| `.github/workflows/dependency-audit.yml`    | weekly cron, manual          | Audits the tree **as it stands**: advisories + `libc` completeness                                  |
-| `.github/workflows/fork-sync-integrity.yml` | push to `main`, manual       | Detects a squash-merged sync PR that silently reset the merge base (no-op upstream; see below)      |
+| File                                        | Trigger                      | Purpose                                                                                                                                                 |
+| ------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`                  | push to `main`, PR to `main` | Type-check, lint/format, build, tests, real-DB smoke (migration drift + erasure + subject-access export), Docker build + stack smoke, lockfile metadata |
+| `.github/workflows/codeql.yml`              | push, PR, weekly cron        | SAST → Security → Code scanning (skips on private; see below)                                                                                           |
+| `.github/workflows/dependency-review.yml`   | PR to `main`                 | Blocks PRs adding vulnerable deps (skips on private; see below)                                                                                         |
+| `.github/workflows/secret-scan.yml`         | push, PR, weekly cron        | **Two** gates: TruffleHog (diff on PR, full history on cron) **and** a Postgres DSN tripwire (see below)                                                |
+| `.github/workflows/dependency-audit.yml`    | weekly cron, manual          | Audits the tree **as it stands**: advisories + `libc` completeness                                                                                      |
+| `.github/workflows/fork-sync-integrity.yml` | push to `main`, manual       | Detects a squash-merged sync PR that silently reset the merge base (no-op upstream; see below)                                                          |
 
 ## `ci.yml` shape
 
@@ -27,7 +27,7 @@ config ──┬─ typecheck
          ├─ build
          ├─ test-full   (4-way shard matrix)   ┐ exactly one test
          ├─ test-changed (single, PR only)     ┘ job runs (see below)
-         ├─ smoke — account erasure (real DB)
+         ├─ smoke — real-DB invariants (drift + erasure + export)
          ├─ docker — build + prod-stack smoke  (parallel; gated on PRs)
          └─ lockfile — platform metadata       (PRs touching the manifest)
                                    └─ ci-status (branch-protection gate)
@@ -104,9 +104,18 @@ killed by its own `timeout-minutes` (the docker job carries 30), or a run
 cancelled while `ci-status`'s `if: always()` still fires, reported "CI passed"
 for gates that never finished.
 
+**`ci-status`'s job list is maintained by hand, in two places.** Both the
+`needs:` array and the shell loop below it enumerate every gating job
+explicitly — there is no dynamic "all jobs" expression in GitHub Actions to use
+instead. **A job you add to `ci.yml` does not gate anything until you add it to
+both.** It will run, it can fail, and `ci-status` — the single required check on
+the branch-protection rule — will still report success. Forks extending the
+pipeline are the likely victims here, since adding a fork-specific job is an
+expected thing to do. Check both lists whenever you add a job.
+
 **`ci-status` lists `config` in its `needs`.** Every other job is gated on
 `config`'s outputs, so if `config` itself fails they all resolve to `skipped` —
-and the loop fails only on the literal string `failure`. Without `config` in the
+and a loop that passed on `skipped` reported success for all of them. Without `config` in the
 list, one API hiccup in change detection produced "CI passed" with zero gates
 run: the same hole as a truncated file list, one job further up.
 
@@ -150,6 +159,21 @@ Locally, `npm run check:changelog` takes no arguments: it falls back to the
 merge base with `origin/main`, and **skips the history rule quietly** when that
 is unavailable — a fresh clone with no remote, a detached HEAD, or a fork whose
 upstream is named something else. CI is where that rule is enforced.
+
+`npm run check:changelog-drift` is a **separate, local-only** check and is
+deliberately not a CI job. It asks whether an `[Unreleased]` bullet is still
+true after everything else the branch did — the failure `check:changelog`'s
+structural rules cannot see, because a falsified claim leaves a perfectly
+well-formed file. Its identifier correlation is a heuristic, so it never gates
+and has no place in a pipeline that blocks merges; `/pre-pr` step 5e runs it and
+the agent judges the output (#627).
+
+`npm run check:missing-tests` is local-only for the same reason. It answers
+step 4f — did anything this branch changed arrive without a test — and a page
+can legitimately have no test, so findings are a judgement rather than a gate.
+Its exit code says only whether it could _run_: `1` means no base revision, git
+failing, or an unreadable test tree, which is a wiring problem, not a verdict on
+the branch (#641).
 
 > **Fork note.** The check assumes `CHANGELOG.md` carries Sunrise's release
 > history. A fork that empties the file, or renumbers it to its own app
@@ -260,7 +284,7 @@ These help both repo types and cost nothing, so they're always on:
   (workflow-level) and a `NODE_HEAP_MB` build arg defaulting to 4096 in the
   Dockerfile `builder` stage. It's a **cap, not an allocation**: never
   approached on a 16GB runner, but it stops `tsc`/`next build` OOMing (exit 134)
-  on a 7GB runner where Node's default heap caps near ~2GB. The Dockerfile cap
+  on an 8GB runner where Node's default heap caps near ~2GB. The Dockerfile cap
   lives in the `builder` stage only — the `runner` stage is a fresh `FROM base`
   and doesn't inherit it, so production runtime memory is unchanged.
 - **Sharded tests** — the full suite runs as a 4-way `vitest --shard` matrix
@@ -268,22 +292,37 @@ These help both repo types and cost nothing, so they're always on:
   per-shard overhead (each shard re-pays checkout + `npm ci` + DB setup).
 - **Decoupled, gated Docker** — the `docker` job no longer waits on the checks
   (an image break surfaces in parallel). On PRs it runs only when Docker-relevant
-  files change; on push to `main` it always runs as the production-image gate.
+  files change; on push to `main` it runs as the production-image gate for any
+  change that touches code (a docs-only push still skips it).
   The path filter covers `Dockerfile`, `Dockerfile.dev`, `.dockerignore`,
-  `docker-compose*.yml`, `package.json`, `package-lock.json`, `next.config.*`,
-  `prisma.config.ts` and **`prisma/**`**. The last one means every schema or
+  `docker-compose*.yml`, `.npmrc`, `package.json`, `package-lock.json`,
+  `next.config.*`, `prisma.config.ts` and **`prisma/*`** (a single star — bash
+  `case` lets `*` cross `/`, so it matches the whole subtree). The last one means every schema or
   migration PR runs the heaviest job — deliberate, because the job now applies
   those migrations for real.
 
 - **The docker job runs the stack, it does not just build it.** It builds the
   `runner`, `migrator` and `seeder` targets with `load: true`, asserts image
   invariants (musl-only `sharp` per #571; no Prisma CLI in the runtime image per
-  #583), brings up `db` + `migrator` + `web` from `docker-compose.prod.yml`, and
+  #583; **`prisma/seeds/data/chunks/chunks.json` present in the runtime image**),
+  brings up `db` + `migrator` + `web` from `docker-compose.prod.yml`, and
   asserts the migrator exited 0, `web` reached healthy, `/api/health` reports a
   connected database, a Prisma **model** query succeeds, and the seeder
   completes. `nginx` is never started (it binds :80/:443).
 
-  Two details of those assertions are deliberate and easy to "tidy" into
+  The `chunks.json` assertion is the least obvious of the three and the most
+  fragile. The admin knowledge-seed route reads it at
+  `path.join(process.cwd(), 'prisma/seeds/data/chunks/chunks.json')`, and after
+  the wholesale `COPY /app/prisma` was dropped, the file survives into the image
+  **only** because Next's file tracer statically evaluated that `join`. Nothing
+  else holds it there — there is no `outputFileTracingIncludes` entry as a
+  backstop, and the stack smoke never exercises that admin-authed route. An nft
+  upgrade, or a refactor that moves the path into a variable, would ship an image
+  that 500s with `ENOENT` while every job stayed green. If you add another
+  runtime file read this way, assert it here too, or give it an explicit
+  `outputFileTracingIncludes` entry.
+
+  Two further details of those assertions are deliberate and easy to "tidy" into
   uselessness. The health check asserts `connected == true` and accepts
   `operational` **or** `degraded`, because `determineServiceStatus` downgrades
   above 500 ms latency while still returning 200 — asserting `operational`
@@ -297,7 +336,7 @@ These help both repo types and cost nothing, so they're always on:
   all — survived four months of green Docker builds. A build-only check cannot
   catch a runtime-only fault.
 
-  Cost on a private fork (2-core/7GB): roughly +3–5 minutes, no extra `npm ci`
+  Cost on a private fork (2-core/8GB): roughly +3–5 minutes, no extra `npm ci`
   and no extra `next build`, inside a `timeout-minutes: 30` cap. There is no
   opt-out variable — unlike `CI_TEST_SCOPE` and `CI_NODE_HEAP_MB`, whose failure
   modes are opaque, this job's cost is visible and already path-gated. A fork
@@ -315,13 +354,25 @@ These help both repo types and cost nothing, so they're always on:
   **A direct downgrade reports, it does not gate.** The rule was a proxy for "a
   patched dependency returned to a vulnerable one", which `dependency-review`
   measures exactly on every PR (`fail-on-severity: high`) and `check:audit`
-  covers weekly for the standing tree. Measured across all 134 commits that
+  covers weekly for the standing tree. Measured across all 151 commits that
   touched this lockfile it would have fired twice — both deliberate pins, zero
   accidents — and the cost of that was real: a correct one-line `@types/node`
   pin needed a 250-line acknowledgement mechanism to become mergeable.
   `dependency-review` is **skipped on private repos**, so a private fork loses
   the per-PR enforcement; the downgrade is still printed in its own block with
-  that caveat. Lost `libc`/`os`/`cpu` and `overrides` changes still gate.
+  that caveat.
+
+  **Lost `libc`/`os`/`cpu` still gates unconditionally. An `overrides` change
+  gates only when it is unexplained** — the key's `overrideReasons` entry in
+  `package.json` has to move in the same diff (#608). Before that the rule
+  failed on every override change and ended with the word "Intentional?", which
+  is a question a build cannot be told the answer to: wired into branch
+  protection, the only routes past were bypassing the protection or weakening
+  the rule. Measured against every commit that had touched `package.json` up to
+  that point — 149 of them, at `07a14800` — the overrides block moved **once**,
+  six months before this check existed, so it had never fired in its own
+  lifetime when the fix landed. Reasons for keys a diff did not touch are never
+  read, so a fork inheriting the upstream block is unaffected.
 
   It exists because `/pre-pr` runs this check locally and **Dependabot PRs never
   run `/pre-pr`**. npm below 11.11.0 deletes `libc` from every entry it writes,
@@ -364,7 +415,7 @@ gh variable set CI_TEST_SCOPE --body full   # (or just delete the variable)
 ### Knob 2: `CI_NODE_HEAP_MB`
 
 The workflow raises Node's heap **cap** globally (a ceiling, not a reservation —
-harmless on a 16GB public runner, necessary on a 7GB private-fork runner where
+harmless on a 16GB public runner, necessary on an 8GB private-fork runner where
 Node's default caps near ~2GB):
 
 ```yaml
@@ -379,15 +430,65 @@ memory; it reads like a crashed toolchain. If a job fails with exit 134 and no
 diagnostic, raise this variable before investigating anything else.
 
 ```bash
-# Fork whose lint job OOMs at the default:
-gh variable set CI_NODE_HEAP_MB --body 8192
+# Fork whose lint job OOMs at the default. Bisect upward from 5120 rather than
+# jumping — the value you land on has to fit the SMALLEST runner the repo will
+# ever build on, and that is 8GB the day it goes private.
+gh variable set CI_NODE_HEAP_MB --body 6144
 ```
+
+**6144, not 8192, and the difference matters.** An earlier revision of this
+section used 8192 as its example, four lines above a rule forbidding it — see
+below. A fork that took the example at face value carried a cap above its own
+runner's memory, which is the one configuration this knob must never produce.
+Find the real floor by bisection: raise until lint and `next build` both pass,
+then stop. Measured on one ~2x-Sunrise fork, lint aborts at 5120 and passes at
+6144 with a 5.6 GiB peak — so the gap between "fails" and "works" is one step,
+and 8192 was never needed.
+
+**The same wall exists locally, and this variable does not reach it.** `npm run
+lint` therefore runs through `scripts/run-capped.mjs`, which appends a
+`--max-old-space-size` to `NODE_OPTIONS` — but **only when nothing has set one
+already**, so in CI this variable still wins. A developer hitting exit 134 on a
+laptop is the usual first sighting of a fork outgrowing the default; see
+[`lint-toolchain.md`](./lint-toolchain.md#memory-why-lint-runs-under-an-explicit-heap-cap)
+for the measured per-fork numbers and the local `NODE_HEAP_MB` override.
 
 Setting it as a repo variable rather than editing `ci.yml` matters: an edit to
 the workflow file is reverted by every upstream sync, so the fork rediscovers the
 same opaque failure each time. Keep the value at or below the runner's physical
 memory — a cap above available RAM just moves the failure from a clean abort to
-the OOM killer.
+the OOM killer. On a private fork that ceiling is **8GB minus the OS, git and
+npm**, so treat ~6GB as the practical maximum, not 8. (None of the jobs this
+knob applies to attaches a service container; since #629 the test jobs don't
+either.)
+
+**It is a _per-process_ cap, and the test jobs are the only multi-process ones.**
+`--max-old-space-size` applies to each Node process, not to the runner. Every job
+this knob is aimed at — type-aware ESLint, `tsc`, `next build` — is a single
+process, so "cap ≤ physical memory" is the whole rule for them. `test-full` and
+`test-changed` are different: vitest forks roughly `cores - 1` workers, each its
+own Node process inheriting the same ceiling. The rule there is
+
+```
+workers × CI_NODE_HEAP_MB  ≤  runner memory − OS
+```
+
+At the 5120 default that is already ~15.4GB of ceiling on a 4-vCPU/16GB public
+runner. At `CI_NODE_HEAP_MB=8192` — the value this section tells you to set when
+lint dies with exit 134 — it is ~24.6GB on the same 16GB runner, and on a
+2-vCPU/8GB private runner vitest forks about one worker, so a single 8192 cap
+already sits at the machine's ceiling before the OS is counted.
+**So the documented fix for one job was the trigger for the other**, and the
+resulting failure is the worse kind: an OS OOM kill of a worker rather than a
+clean V8 abort, surfacing as `Failed to start forks worker` or a shard that
+vanishes from the summary count.
+
+Both test jobs therefore opt out of the workflow-level ceiling at job level.
+Node's own default heap is derived from the machine's memory, so it adapts to
+public and private runners without a knob, and it is what the suite already runs
+under locally. **If you add a job that runs vitest (or anything else
+process-parallel), give it the same override** — a job that merely inherits the
+workflow `env:` is silently opting into `N × CI_NODE_HEAP_MB`.
 
 **A workflow-level `env:` does not cross into a container build.** This is the
 non-obvious part, and it produced a distinctive symptom: raising the variable
@@ -399,8 +500,25 @@ exposes it too (`NODE_HEAP_MB=${NODE_HEAP_MB:-4096}`) so a self-hosted build
 hits the same wall with the same lever (#543).
 
 The Dockerfile default stays **4096**, not the workflow's 5120: that stage is
-sized for ~7GB hosts, where a bigger cap trades a clean V8 heap error for an
+sized for ~8GB hosts, where a bigger cap trades a clean V8 heap error for an
 OS-level kill. Only a caller that knows its runner is larger asks for more.
+
+### Knob 3: `CI_TEST_NODE_HEAP_MB`
+
+Unset by default, which means no `--max-old-space-size` flag on the test jobs at
+all. It exists so a fork whose workers genuinely need more than Node's default
+still has a repo-variable path — the same "don't edit the workflow, it won't
+survive a sync" rule as the other two knobs — without reaching for
+`CI_NODE_HEAP_MB`, whose entire problem is that it is sized for one process.
+
+```bash
+gh variable set CI_TEST_NODE_HEAP_MB --body 3072
+```
+
+**Size it per worker, not per runner:** `workers × value ≤ runner memory`. On a
+2-vCPU runner vitest forks roughly one worker, on 4-vCPU roughly three — so the
+same value means very different totals, and the whole-runner figure that is
+right for `CI_NODE_HEAP_MB` is wrong here.
 
 ## Private-fork correctness (GHAS-dependent jobs)
 
@@ -539,6 +657,170 @@ are **separate repositories** sharing history via an `upstream` remote, not
 GitHub forks, so the "Actions is disabled by default in a fork" rule does not
 apply to them. It would apply to a true GitHub fork, which must enable Actions
 before any of this runs.
+
+### Conventions that hold across every workflow
+
+Small things, uniform on purpose — a fork adding a workflow should match them.
+
+**`permissions: contents: read` at file level, widened only per job.** All six
+workflows declare it, and exactly two jobs need more — both widening at _job_
+level rather than relaxing the file-level default:
+
+| Job                              | Adds                                               |
+| -------------------------------- | -------------------------------------------------- |
+| `codeql.yml` → `analyze`         | `security-events: write`, `actions: read`          |
+| `dependency-review.yml` → review | `pull-requests: write` (posts the failure comment) |
+
+Copy that shape: the file-level block is the floor every job gets, and anything
+only one job needs belongs on that job.
+
+`ci.yml` is itself a partial exception worth knowing about — it declares
+`pull-requests: read` at file level because the `config` job calls
+`gh api .../pulls/{n}/files` to build the changed-file list, so every other job
+in that workflow carries a read scope it never uses. Narrowing it to `config`
+would be strictly tighter; it is called out here rather than presented as the
+pattern to copy. Without an explicit block the token defaults to
+whatever the repository setting says, which on an older fork can still be
+read/write across the board.
+
+**`timeout-minutes` on jobs that start containers.** GitHub's default is six
+hours, which a hung health-wait will happily burn. Two jobs carry a cap:
+`ci.yml`'s `docker` job (30) and `fork-sync-integrity` (5). The other jobs run
+processes that terminate on their own, so they are deliberately uncapped — the
+rule is "cap anything that waits on something else's readiness", not "cap
+everything". Note the interaction with `ci-status`: a job killed by its own
+timeout reports `cancelled`, which the gate treats as a failure precisely so a
+timeout cannot pass as a skip.
+
+**Buildx GHA cache, written by exactly one build.** The runtime image build uses
+`cache-from: type=gha` **and** `cache-to: type=gha,mode=max`; the `migrator` and
+`seeder` builds use `cache-from` only. That asymmetry is load-bearing — buildx
+keeps one builder for the whole job, so the later targets hit its local cache and
+cost seconds anyway, while a second `cache-to` on the same scope would overwrite
+the runtime image's entry, which is the one worth keeping warm. If you add a
+build target, give it `cache-from` and leave `cache-to` alone.
+
+**`check:audit` has a severity floor.** `dependency-audit.yml` calls
+`npm run check:audit` with no arguments, which means the default floor of
+**`high`**. The script accepts `--floor=<severity>` (`low`/`moderate`/`high`/
+`critical`), so a fork with a stricter posture can tighten it in one place. It
+also distinguishes fixable from unfixable: only advisories with a reachable
+patched version gate the job — ones needing a major bump, or with no published
+fix, are reported and pass, because failing on them makes the job permanently red
+with no action available.
+
+### The Postgres service container
+
+One job attaches one — `smoke`:
+
+```yaml
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: sunrise_ci }
+    ports: ['5432:5432']
+    options: >-
+      --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+```
+
+**`pgvector/pgvector:pg15`, not stock `postgres`** — the schema declares a
+`vector` column and HNSW indexes for knowledge-base search, so `db:migrate:deploy`
+fails against an image without the extension. That is the constraint a fork will
+trip if it swaps the image for a plain `postgres:15`.
+
+The `pg_isready` health check is what makes the container's readiness a
+precondition of the first step rather than a race: GitHub holds the job until it
+passes, up to 5 × 10s.
+
+`smoke` is the only consumer: migration drift, the erasure invariants, and the
+~28 subject-access export queries all need Postgres, because the vitest suite
+mocks Prisma and so never executes them.
+
+**`test-full` and `test-changed` used to attach one too, and it was dead weight
+(removed in #629).** `tests/setup.ts` is a global `setupFiles` entry and
+overwrites `DATABASE_URL` with `postgresql://test:test@localhost:5432/test` — a
+user and database the container never creates — so anything inside vitest that
+tried to connect would fail authentication rather than reach `sunrise_ci`.
+Nothing tries: no test constructs a `PrismaClient`, and `lib/db/client.ts` does
+not connect at import (a pg `Pool` and a `PrismaClient` both connect lazily, on
+first query). Of the 332 test files importing `@/lib/db/client`, 330 `vi.mock`
+it; the two that do not are safe for their own reasons — `lib/db/client.test.ts`
+mocks one layer lower at `@prisma/client` via `vi.doMock`, and
+`structured-completion-no-persistence.test.ts` only reads the module path as a
+_string_ out of source text. The container's only consumers were the
+`db:migrate:deploy` and `db:seed` steps that ran ahead of vitest and fed nothing.
+
+Both jobs keep `DATABASE_URL`, for the same reason `typecheck`, `lint` and
+`build` do: `prisma generate` runs on `postinstall` and wants the variable
+defined, without connecting.
+
+What it cost, measured on a 4-shard public run (#626): `Initialize containers`
+22s + `db:migrate:deploy` 2s + `db:seed` 13s = **~37s per shard against a 143s
+vitest step**, paid four times over on four separate containers — ~2.5
+job-minutes on every push, and a term in the heap budget above on the runner
+where it is tightest.
+
+**Fork impact.** An unmodified fork loses nothing. A fork that has edited
+`tests/setup.ts` to point at the CI database _and_ added genuinely DB-backed
+tests will go red — re-adding the `services:` block above plus the two steps is
+the fix.
+
+### `Secret Scan` runs two gates, not one
+
+The workflow is named for TruffleHog, but it has a second merge-blocking step
+that fails independently: **`Postgres DSN tripwire`**, running
+`scripts/ci/check-postgres-dsn.sh`. A PR can pass TruffleHog and still be
+blocked by it, and the failure names neither TruffleHog nor the workflow's own
+title — so it is worth knowing it exists before you meet it.
+
+**Why there are two.** TruffleHog's Postgres detector produced 27 unverified
+findings on this repo and zero verified ones — every hit a `localhost` or `db`
+fixture in a test, a doc, `.env.example`, or the CI workflow itself (#453). The
+noise failed the gate. The available fix was a path allowlist, and
+`.trufflehog-exclude.txt` duly exempts `tests/`, `.context/` and `.claude/`
+wholesale — but an exclusion is per-path, not per-detector, so it silences
+**every** detector in exactly the directories where someone is most likely to
+paste a real key. The tripwire is what buys that exclusion back for the one
+credential class provably living in those paths.
+
+**What trips it.** It ignores paths entirely and scans every tracked file, so a
+fixture cannot hide in an allowlisted directory. It fires only when a DSN pairs
+a non-placeholder credential with a non-local host — both halves are checked, so
+`postgres://user:pass@` at any host is fine, and so is any credential at
+`localhost`. Local hosts include the Compose service names this repo uses (`db`,
+`postgres`, `pgvector`), the usual placeholder words, and the RFC 2606
+`example.com/.net/.org` domains.
+
+**The fix path**, which currently exists only in the script's own failure
+output:
+
+- If it is documentation, use placeholder credentials (`user:pass`) or a local
+  host. This is almost always the right answer.
+- If the host is legitimately non-local and genuinely not a secret — a Neon
+  pooler endpoint in a deployment guide, say — add it to `LOCAL_HOSTS` in
+  `scripts/ci/check-postgres-dsn.sh`, **with a comment saying why**.
+
+**Forks inherit both gates.** Neither needs Advanced Security, so unlike
+`codeql.yml` and `dependency-review.yml` they keep working on a private fork. A
+fork that adds its own deployment docs is the most likely thing to trip the
+tripwire, and `LOCAL_HOSTS` is the seam for it.
+
+One wrinkle, because the script's own comment got this wrong until recently and
+the reasoning is worth keeping. That comment used to say the file "is not on
+`.trufflehog-exclude.txt`". It is — the last entry in that file names it. Both were written in the same commit (`3712a013`): a literal
+example DSN in the comment had failed the scan, so the fix removed the example
+_and_ explained the removal by saying real source is never allowlisted — then
+allowlisted it anyway, because the PR scan reads the whole commit range and the
+history still carried the string. The justification was obsolete before it was
+pushed.
+
+What is actually true: TruffleHog does not scan this one file, and the tripwire
+step does, over every tracked file regardless of path — so a real DSN pasted here
+is still caught, and what is given up is TruffleHog's _other_ detectors over that
+one CI script. Adding a placeholder example back would no longer fail
+anything. Leaving it out is still the better call — a realistic-looking DSN in
+the one file whose subject is committed DSNs invites exactly the confusion this
+paragraph is untangling — but treat that as house style, not as a gate.
 
 ## Two gotchas worth knowing
 

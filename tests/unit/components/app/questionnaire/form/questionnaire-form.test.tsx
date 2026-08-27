@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionnaireForm — sectioned form rendering, completeness map, navigation, and the
  * inferred-answer affordance (P-presentation). Pins that the active section's questions

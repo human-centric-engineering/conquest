@@ -13,11 +13,14 @@ import { randomBytes, createHash } from 'crypto';
 import { prisma } from '@/lib/db/client';
 import type { NextRequest } from 'next/server';
 import type { AuthSession } from '@/lib/auth/guards';
-
-/** Valid API key scopes. */
-export type ApiKeyScope = 'chat' | 'analytics' | 'knowledge' | 'webhook' | 'admin';
-
-const VALID_SCOPES = new Set<ApiKeyScope>(['chat', 'analytics', 'knowledge', 'webhook', 'admin']);
+export {
+  CORE_API_KEY_SCOPES,
+  listValidApiKeyScopes,
+  validateScopes,
+  hasScope,
+  type CoreApiKeyScope,
+  type ApiKeyScope,
+} from '@/lib/auth/api-key-scopes';
 
 /**
  * Prefix on the synthetic `session.id` that `resolveApiKey` mints, so an
@@ -56,11 +59,6 @@ export function hashApiKey(key: string): string {
 /** Extract the display prefix from a key (first 8 chars + ...). */
 export function keyPrefix(key: string): string {
   return key.slice(0, 8);
-}
-
-/** Validate that scopes are all valid. */
-export function validateScopes(scopes: string[]): scopes is ApiKeyScope[] {
-  return scopes.every((s) => VALID_SCOPES.has(s as ApiKeyScope));
 }
 
 /**
@@ -127,11 +125,4 @@ export async function resolveApiKey(
   };
 
   return { session, scopes: apiKey.scopes, rateLimitRpm: apiKey.rateLimitRpm };
-}
-
-/**
- * Check if the provided scopes include the required scope.
- */
-export function hasScope(scopes: string[], required: ApiKeyScope): boolean {
-  return scopes.includes(required) || scopes.includes('admin');
 }

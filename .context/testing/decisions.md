@@ -116,11 +116,44 @@ tests/
     └── mocks.ts             # Mock type factories
 ```
 
-### Future: Component Tests
+### The mirror is a convention, and three other shapes are legitimate
 
-**Decision**: Component tests will be added to `tests/components/` when UI testing is implemented.
+**Decision**: `npm run check:missing-tests` (run by `/pre-pr` step 4f) treats a
+test as covering a source file if it sits at the mirrored path, at the mirrored
+path with `app/` stripped (`tests/integration/api/v1/users/route.test.ts`), at
+the dynamic-segment parent (`app/api/v1/foo/[id]/route.ts` →
+`tests/unit/app/api/v1/foo/route.test.ts`), or as an **aspect-named sibling** —
+`config-signup-mode.test.ts` for `lib/auth/config.ts`.
 
-**Rationale**: Separate directory for React Testing Library component tests keeps them distinct from unit and integration tests. Component tests have different execution patterns (JSDOM, rendering, user events) and benefit from isolation.
+**Rationale**: mirroring is the rule you should follow when writing a new
+test, and it is how 779 of this repo's source files are matched to one. But splitting a large module's suite by
+aspect is a real and useful pattern — `lib/auth/config.ts` has seven — and a
+check that only understood the mirror would call every one of those modules
+untested. The scanner reports a module that no test file covers _and_ no test
+file even names as `missing`, and one that a test names but does not mirror as
+`referenced only`, which is a prompt to look rather than a verdict. Its rules,
+including the two exemptions that need the TypeScript compiler rather than a
+filename, are documented in
+[`scripts/ci/missing-tests.ts`](../../scripts/ci/missing-tests.ts).
+
+### Component Tests
+
+**Decision**: Component tests live in `tests/unit/components/`, mirroring
+`components/`, alongside every other unit test.
+
+**Rationale**: An earlier revision of this document reserved a top-level
+`tests/components/` for them, on the grounds that happy-dom rendering and user
+events are execution patterns worth isolating. That directory was never created
+and the argument did not survive contact: 264 component test files now sit under
+`tests/unit/components/`. Mirroring the source tree is the single rule; it has
+no exception for components.
+
+The environment argument has since been settled a different way. `vitest.config.ts`
+defaults to `node` and a file opts into a DOM with a first-line
+`// @vitest-environment happy-dom` docblock — per file, not per directory, because
+`environmentMatchGlobs` was removed in vitest 3 and the directory a test lives in
+was never a reliable proxy for whether it needs a DOM (51 files under
+`tests/unit/lib/` do). See [`environments.md`](./environments.md).
 
 ---
 

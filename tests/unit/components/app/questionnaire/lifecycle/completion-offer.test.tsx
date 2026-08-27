@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CompletionOffer — Submit CTA, busy state, and dismiss (F7.3).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionDownloads — admin per-session download toolbar (P8 admin session views).
  *

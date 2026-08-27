@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Glossary markdown annotator — component tests (P16).
  *

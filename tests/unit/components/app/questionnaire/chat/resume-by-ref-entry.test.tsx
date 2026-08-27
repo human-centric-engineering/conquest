@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
+
 /**
- * @vitest-environment jsdom
- *
  * ResumeByRefEntry — the public-footer "continue on this device" affordance (session resume).
  *
  * Pins: the trigger stays a quiet two-line footnote (never a rival button to the splash CTA it sits

@@ -23,6 +23,7 @@
 import { prisma } from '@/lib/db/client';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logging';
+import { assertScopeHeld, foldScopeIntoArgs, scopeKeysOf } from '@/lib/orchestration/scope';
 import { createRateLimiter, type RateLimiter } from '@/lib/security/rate-limit';
 import { CostOperation } from '@/types/orchestration';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
@@ -136,6 +137,8 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 class CapabilityDispatcher {
   private handlers = new Map<string, BaseCapability>();
   private guards = new Map<string, CapabilityGuard>();
+  /** Declared scope bindings per registration key; see `CapabilityRegisterOptions.scopedBy`. */
+  private scopeBindings = new Map<string, readonly string[]>();
   private registry = new Map<string, CapabilityRegistryEntry>();
   private rateLimiters = new Map<string, RateLimiter>();
   private agentBindings = new Map<string, Map<string, AgentCapabilityBinding>>();
@@ -155,7 +158,7 @@ class CapabilityDispatcher {
    * rows — silent passthrough for PII-handling capabilities is a
    * footgun, not a feature.
    *
-   * `options` is a fork seam (both fields opt-in; the no-options call is
+   * `options` is a fork seam (every field opt-in; the no-options call is
    * unchanged):
    * - `slug` overrides the handler key (defaults to `capability.slug`). See
    *   the ⚠️ contract on {@link CapabilityRegisterOptions.slug}: the override
@@ -184,6 +187,15 @@ class CapabilityDispatcher {
       this.guards.set(key, options.guard);
     } else {
       this.guards.delete(key);
+    }
+    // Same atomic-replacement rule as the guard: a re-registration without a
+    // binding must drop the one a prior registration left, or a capability
+    // could stay silently scoped after its author removed the declaration.
+    const scopedBy = scopeKeysOf(options?.scopedBy);
+    if (scopedBy.length > 0) {
+      this.scopeBindings.set(key, scopedBy);
+    } else {
+      this.scopeBindings.delete(key);
     }
   }
 
@@ -416,6 +428,67 @@ class CapabilityDispatcher {
       }
     }
 
+    // 4b. Scope binding. When this capability DECLARED a binding
+    //     (`register(cap, { scopedBy })`) and the caller's scope is one the
+    //     platform wrote, each bound key is made ambient in the arguments:
+    //     filled if the caller omitted it, refused if the caller named
+    //     something else.
+    //
+    //     Two independent conditions, both fail-safe by default. The
+    //     capability must opt in — "a scope map exists" is not the same
+    //     question as "this tool is scoped", and armed on presence alone this
+    //     folded the untrusted consumer-chat scope into core tools' arguments.
+    //     And the carrier must be authoritative — `POST /api/v1/chat/stream`
+    //     takes `scope` from the request body, and its own schema calls it "a
+    //     routing/context hint, never proof of authorization".
+    //
+    //     Placed beside the guard rather than next to argument validation, and
+    //     for the guard's reason: a cross-scope call is an authorization
+    //     failure, not a malformed request, so it must not spend the
+    //     legitimate tenant's rate token.
+    const scopedBy = this.scopeBindings.get(slug) ?? [];
+    let dispatchArgs = rawArgs;
+    if (scopedBy.length > 0 && context.scope && context.scopeIsAuthoritative) {
+      const folded = foldScopeIntoArgs(rawArgs, context.scope, scopedBy);
+      if (!folded.ok) {
+        const keys = folded.conflicts.map((conflict) => conflict.key);
+        // The scope VALUES are withheld. This message reaches the client, and
+        // telling a caller which tenant its key is pinned to — or that some
+        // other id exists — is not something a refusal needs to do.
+        logger.warn('Capability dispatch: argument outside caller scope', {
+          slug,
+          agentId: context.agentId,
+          keys,
+        });
+        return {
+          success: false,
+          error: {
+            code: 'scope_conflict',
+            message: `Capability ${slug} was called outside its scope: ${keys.join(', ')}`,
+          },
+        };
+      }
+      dispatchArgs = folded.args;
+      if (folded.filled.length > 0) {
+        logger.debug('Capability dispatch: bound scope into args', {
+          slug,
+          agentId: context.agentId,
+          filled: folded.filled,
+        });
+      }
+      if (folded.unpinned.length > 0) {
+        // The capability says it is scoped on these; this caller's scope does
+        // not pin them, so the call runs unscoped on them. Legitimate for a
+        // deliberately unscoped service key, and worth saying out loud either
+        // way — it is the difference between "enforced" and "not".
+        logger.warn('Capability dispatch: declared scope key not pinned by the caller', {
+          slug,
+          agentId: context.agentId,
+          keys: folded.unpinned,
+        });
+      }
+    }
+
     // 5. Rate limit. Effective limit is the binding override, else the
     //    base capability's `rateLimit`. `null` = unlimited.
     const effectiveLimit = binding?.effectiveRateLimit ?? entry.rateLimit;
@@ -489,7 +562,7 @@ class CapabilityDispatcher {
         // 7. Validate args.
         let validated: unknown;
         try {
-          validated = handler.validate(rawArgs);
+          validated = handler.validate(dispatchArgs);
         } catch (err) {
           if (err instanceof CapabilityValidationError) {
             logger.warn('Capability dispatch: invalid args', {
@@ -507,6 +580,39 @@ class CapabilityDispatcher {
             };
           }
           throw err;
+        }
+
+        // 7a. Re-assert the binding on the args `execute` will actually
+        //     receive. Step 4b folds BEFORE validation, and validation is a
+        //     Zod pipeline that may transform — three built-ins wrap their
+        //     schema in `z.preprocess(unwrapApprovalPayload, …)`, which merges
+        //     an `approvalPayload` object over the top level and silently
+        //     replaced a value the fold had just written. Because the
+        //     capability DECLARED the binding, this demands presence as well as
+        //     equality: a pin that validation stripped is unenforceable, not
+        //     absent-and-fine.
+        if (scopedBy.length > 0 && context.scope && context.scopeIsAuthoritative) {
+          const assertion = assertScopeHeld(validated, context.scope, scopedBy);
+          if (!assertion.held) {
+            const detail =
+              assertion.reason === 'conflict'
+                ? `outside its scope: ${assertion.keys.join(', ')}`
+                : 'with arguments its scope cannot be enforced on';
+            logger.warn('Capability dispatch: scope not held after validation', {
+              slug,
+              agentId: context.agentId,
+              reason: assertion.reason,
+              ...(assertion.reason === 'conflict' ? { keys: assertion.keys } : {}),
+            });
+            setSpanAttributes(span, { [SUNRISE_CAPABILITY_SUCCESS]: false });
+            return {
+              success: false,
+              error: {
+                code: assertion.reason === 'conflict' ? 'scope_conflict' : 'scope_unenforceable',
+                message: `Capability ${slug} was called ${detail}`,
+              },
+            };
+          }
         }
 
         // 8. Execute. Any unexpected throw is normalised to execution_error.
@@ -545,6 +651,13 @@ class CapabilityDispatcher {
         //    breakdown under-reported workflow tool usage to zero.
         //    `workflowExecutionId` is the column that models this properly, and
         //    its FK is satisfied — the execution row exists before any step runs.
+        //
+        //    `context.costLogMetadata` rides along so the row can be ATTRIBUTED
+        //    once it exists: without a `stepId` in it, both execution readers
+        //    drop the row (`if (!stepId) continue;`) and the step shows no cost
+        //    at all, and an evaluation run's `{ evaluationRunId, role }` tags
+        //    stop at this boundary. #599 stopped the rows being lost; this is
+        //    where they become findable (#600).
         void logCost({
           ...(context.agentId && !isWorkflowAgentId(context.agentId)
             ? { agentId: context.agentId }
@@ -560,7 +673,12 @@ class CapabilityDispatcher {
           outputTokens: 0,
           traceId: span.traceId(),
           spanId: span.spanId(),
-          metadata: { slug, success: result.success },
+          // Caller keys first, the dispatcher's own last: `slug` and `success`
+          // are what the per-capability stats route groups on, so a caller must
+          // not be able to overwrite them by passing either in
+          // `costLogMetadata`. Spread order IS the guarantee here — reversing
+          // these two lines silently hands a caller control of the analytics.
+          metadata: { ...(context.costLogMetadata ?? {}), slug, success: result.success },
         }).catch((err) => {
           logger.error('Capability dispatch: logCost rejected', {
             slug,

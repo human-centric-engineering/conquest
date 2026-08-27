@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * LikertScale — discrete integer rating control (P-presentation). Pins: a button per point
  * across the (possibly negative) range, endpoint labels, selection emit, the selected state, the

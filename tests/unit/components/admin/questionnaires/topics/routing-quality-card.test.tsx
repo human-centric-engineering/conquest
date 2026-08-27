@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `RoutingQualityCard` — what routing actually did (F17.16).
  *

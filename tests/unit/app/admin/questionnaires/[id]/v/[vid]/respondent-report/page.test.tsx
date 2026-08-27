@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Respondent report tab page — unit tests.
  *

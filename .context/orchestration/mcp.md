@@ -34,6 +34,118 @@ SSE push (notifications/{tools,resources,prompts}/list_changed,
           notifications/resources/updated, /message, /progress)
 ```
 
+## Session model — `MCP_SESSION_MODE`
+
+**`stateless` is the default, and is the only mode that is correct where more
+than one process serves traffic.**
+
+|                                                                    | `stateless` (default)                          | `stateful`                      |
+| ------------------------------------------------------------------ | ---------------------------------------------- | ------------------------------- |
+| Holds                                                              | nothing                                        | an in-memory `Map`, per process |
+| Correct on                                                         | any topology                                   | one long-running process only   |
+| Issues `Mcp-Session-Id`                                            | no                                             | yes                             |
+| `GET` (SSE stream)                                                 | `405` + `Allow: POST`                          | SSE stream                      |
+| `DELETE`                                                           | `405` (still audited)                          | `204` / `404`                   |
+| `resources/subscribe`, `resources/unsubscribe`, `logging/setLevel` | refuse with `STATELESS_UNSUPPORTED` (`-32005`) | work                            |
+
+### The bug this exists for
+
+`initialize` mints a session on instance A and returns its id. The client's next
+call is load-balanced to instance B, which looks that id up in its **own** empty
+map and returns `404 Session not found or expired`. Observed in production on
+Vercel: one session id, one instant, three instances, two 404s and a 200. It is
+worst immediately after a deploy, when several fresh instances exist, and "works
+on retry" purely by routing luck.
+
+**No client retry recovers this.** The session is not lost — it is invisible to
+live siblings — so re-initialising repeats the race.
+
+In stateless mode the server issues no session id, and per the Streamable HTTP
+transport a client sends `Mcp-Session-Id` only if the server gave it one. There
+is nothing to look up and nothing to fail to find. A stale id from a previous
+stateful deploy is ignored rather than rejected.
+
+### `stateful` is a legacy-compatibility mode
+
+Not "the full-featured one". MCP revision
+[`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+removes protocol-level sessions and the `initialize` handshake outright, and
+tells a modern-only server to answer GET and DELETE with `405` and to ignore
+`Mcp-Session-Id` — which is what `stateless` already does, down to the status
+code. The features `stateful` restores are ones the protocol has removed or
+deprecated: `logging/setLevel` is gone, Logging is deprecated, and
+`resources/subscribe` is replaced by `subscriptions/listen`.
+
+**Choose `stateful` if you need the SSE stream or one of the three continuity
+methods, and you run exactly one process.** There is one further difference,
+below the fold: `stateful` remembers what `initialize` negotiated, so a client
+that omits `MCP-Protocol-Version` on later requests keeps its `2025-06-18` tool
+annotations where `stateless` falls back to `2024-11-05` — see
+[Protocol version without a session](#protocol-version-without-a-session).
+
+What is _not_ a reason is serving older clients. That gets it exactly
+backwards:
+
+| Client                                              | `stateless`                                                                                                               | `stateful`                                                                                |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `2024-11-05` / `2025-06-18` (sends `initialize`)    | connects — `initialize` is dispatched normally, it just gets no session id back, and per the transport it then sends none | connects                                                                                  |
+| `2026-07-28` (sends no `initialize`, no session id) | connects                                                                                                                  | **refused** — a request with no `Mcp-Session-Id` gets `400 Missing Mcp-Session-Id header` |
+
+So `stateless` **connects** for every client `stateful` does, plus the ones it
+cannot. (Serving is a hair different — see the annotations note above.)
+
+### Choosing, and the guard
+
+Selecting `stateful` on a platform that announces itself (`VERCEL`,
+`AWS_LAMBDA_FUNCTION_NAME`) **throws at startup** with the fix in the message,
+mirroring the `TENANCY_MODE` guard in `lib/db/client.ts`. That is a safety net,
+not a boundary: a container deploy with `replicas: 2`, or a clustered Node
+process, hits the identical bug and the guard will not fire. Which is the other
+half of why the default is `stateless` rather than a documented opt-in.
+
+### Protocol version without a session
+
+With no session remembering what `initialize` negotiated, the version comes from
+the client's `MCP-Protocol-Version` header (sent from spec revision 2025-06-18
+onward). The route delegates to `negotiateMcpProtocolVersion`, which is the same
+function the `initialize` path uses:
+
+| Header                             | Result                                              |
+| ---------------------------------- | --------------------------------------------------- |
+| missing / malformed                | oldest supported (`2024-11-05`) — most conservative |
+| a version we support               | itself                                              |
+| date-shaped, newer than our latest | **downgraded to our latest**, not floored           |
+| date-shaped, older and unknown     | oldest supported                                    |
+
+**A client that negotiated `2025-06-18` but omits the header on later requests
+gets `2024-11-05` semantics, and loses tool annotations it would have kept in
+stateful mode.** That is the correct reading — spec revision 2025-06-18 makes the
+header a MUST on every subsequent request, so a client that omits it is
+non-conforming, and there is no session here to remember what it agreed to. It
+also fails safe: MCP's defaults for an absent annotation are
+`destructiveHint: true` / `readOnlyHint: false`, the cautious assumption.
+
+The forward-dated row is the one that matters. A `2026-07-28` client understands
+strictly more than the server does; flooring it to `2024-11-05` would mean the
+newer the client, the worse it is treated — and `protocol-handler` gates tool
+annotations on `>= 2025-06-18`, so the newest clients would silently lose them on
+the default path. Do not re-derive this rule at a call site; delegate to the
+function that already draws the distinction.
+
+### What `initialize` advertises
+
+Refusing the three continuity methods is the backstop; **not advertising them is
+the fix**, because a conforming client then never asks. In stateless mode
+`tools`, `resources` and `prompts` are advertised as `{}` (no `listChanged`, no
+`subscribe`) and `logging` is dropped entirely — `logging: {}` _is_ the signal
+that `logging/setLevel` works, so emptying it would still advertise it.
+`completions` is advertised in both modes; `completion/complete` is a plain
+request/response lookup that needs no continuity.
+
+Progress tokens are the deliberate exception: accepted and never delivered.
+Refusing an entire `tools/call` over an optional `_meta.progressToken` hint would
+break work that otherwise succeeds, and the spec makes progress a MAY.
+
 ## Key Files
 
 | Area          | Files                                                                                                             |
@@ -72,7 +184,7 @@ SSE push (notifications/{tools,resources,prompts}/list_changed,
 3. Client uses `Authorization: Bearer smcp_...` header
 4. Scopes control access: `tools:list`, `tools:execute`, `resources:read`, `prompts:read`
 5. Keys can be revoked immediately; `expiresAt` for automatic expiry
-6. **Application scope carrier** — a key may carry an optional `scope` (`McpApiKey.scope`, a flat string→string map, distinct from the protocol `scopes` above). It is validated on read (`mcpKeyScopeSchema`) and folded into `CapabilityContext.scope` for every `tools/call`, so a scoped capability can refuse to run outside the key's scope. Core names no keys; a fork maps it to its own domain (e.g. `{ projectId }`). NULL = unscoped (unchanged behaviour). Set it as opaque JSON on create/PATCH; clearing it via PATCH uses the `Prisma.DbNull` sentinel. A malformed stored value is dropped at auth (key treated as unscoped) rather than failing authentication.
+6. **Application scope carrier** — a key may carry an optional `scope` (`McpApiKey.scope`, a flat string→string map, distinct from the protocol `scopes` above). It is validated on read (`mcpKeyScopeSchema`) and folded into `CapabilityContext.scope` for every `tools/call`. That carrier is marked **authoritative**, so it may drive a capability's declared scope binding: a capability registered with `{ scopedBy: 'projectId' }` has that argument filled when the caller omits it, and a call naming a different value is refused with `scope_conflict` (step 7a re-asserts on the args `execute` actually receives, so a schema transform cannot undo it). A capability that declares no binding is untouched. See [the scope binding](./capabilities.md#the-scope-binding-scopedby-dispatch-steps-4b--7a). Core names no keys; a fork maps it to its own domain (e.g. `{ projectId }`). NULL = unscoped (unchanged behaviour). Set it as opaque JSON on create/PATCH; clearing it via PATCH uses the `Prisma.DbNull` sentinel. A malformed stored value is dropped at auth (key treated as unscoped) rather than failing authentication.
 7. **Key rotation:** `POST /api/v1/admin/orchestration/mcp/keys/:id/rotate` — generates new key material, returns new plaintext once, immediately invalidates the old key. Optionally set `{ expiresAt }` in the body.
 
 ## Authentication & OAuth 2.1 Roadmap
@@ -130,7 +242,7 @@ Rough estimate: 2–3 weeks of one engineer for a production-ready implementatio
 1. Admin enables a capability as an MCP tool via the Tools page
 2. `McpExposedTool` row links to `AiCapability` with `isEnabled: true`
 3. `tools/list` joins both tables and serves the doubly-enabled tools. When the calling key is **bound to an agent** (`scopedAgentId`), the list is filtered so discovery matches dispatch: a capability **explicitly disabled** for that agent (an `AiAgentCapability` row with `isEnabled = false`) is hidden, because `tools/call` would refuse it (step 4). Scoping is **default-allow** — a capability with no binding row stays callable and stays listed; only explicit disables are honoured (same opt-out semantics as the dispatcher). Unscoped keys see the full global list. The global list stays cached (5-min TTL); the per-agent disable filter is a small live query.
-4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` under the key's `scopedAgentId` when the key is bound to an agent, else the shared `mcp-system` agent — the same resolution the `resources/read` path uses, so cost/budget attribution and knowledge-base grant resolution (`resolveAgentDocumentAccess`) follow the scoped agent. It also threads the optional per-dispatch `scope` carrier (`CapabilityContext.scope`) through to `execute()`. A direct call to a tool disabled for the scoped agent still resolves (name lookup uses the unscoped list) and returns `capability_disabled_for_agent` — whose message deliberately names no agent id (the internal cuid stays in server logs only).
+4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` under the key's `scopedAgentId` when the key is bound to an agent, else the shared `mcp-system` agent — the same resolution the `resources/read` path uses, so cost/budget attribution and knowledge-base grant resolution (`resolveAgentDocumentAccess`) follow the scoped agent. It also threads the optional per-dispatch `scope` carrier (`CapabilityContext.scope`) through to `execute()`, marked authoritative so it can bind the arguments of a capability that declared `scopedBy`. A direct call to a tool disabled for the scoped agent still resolves (name lookup uses the unscoped list) and returns `capability_disabled_for_agent` — whose message deliberately names no agent id (the internal cuid stays in server logs only).
 5. Full 9-step pipeline applies: validation, rate limiting, execution, cost tracking
 
 > **A capability rename pins the advertised tool name rather than moving it (#509).** `tools/list` advertises `customName ?? functionDefinition.name`, and `tools/call` resolves an incoming call by that advertised name. Since #509 every write forces `functionDefinition.name` to equal the `slug`, which would have renamed the published tool of any capability created through the admin UI before that release (they diverged by default). The capability PATCH route therefore copies the displaced name into `customName` in the same transaction, so the external contract is pinned exactly where it was. Rows that already carry a `customName` are left alone — an operator's own choice wins. A displaced name that cannot satisfy `^[a-z][a-z0-9_]*$` is **not** pinned: it would fail validation the next time the MCP row was edited, so that rename proceeds and is logged instead.
@@ -184,13 +296,52 @@ For older protocol negotiations (`2024-11-05`) the annotations field is omitted 
 
 Each `McpExposedResource` has an optional `handlerConfig` JSON field passed to the resource handler as its second argument, allowing per-resource configuration (e.g., custom search parameters, filters). Stored as Prisma JSON and validated as `Record<string, unknown> | null`.
 
-When a URI does not match any registered resource exactly, `readMcpResource` falls back to pattern matching against all enabled resources. Pattern matching uses first-match-wins order (database insertion order). If multiple resource patterns could match the same URI, the first match is used. Both exact and pattern-match handler calls are wrapped in try-catch — handler failures return an error content block instead of propagating.
+When a URI does not match any registered resource exactly, `readMcpResource` falls back to pattern matching against all enabled resources. A row matches if the requested URI either **starts with** the template's fixed prefix (the template stripped of its `{param}`s) **or** fills the template exactly, one path segment per `{param}`. The prefix test alone only ever worked for a template whose `{param}` was the last segment — `hub://projects/{id}/plan` collapses to `hub://projects//plan`, which no concrete URI starts with — so the exact-fill test was added alongside it rather than replacing it. Pattern matching uses first-match-wins order (database insertion order). If multiple resource patterns could match the same URI, the first match is used. Both exact and pattern-match handler calls are wrapped in try-catch — handler failures return an error content block instead of propagating.
+
+### Fork-owned resource types (`lib/app/mcp-resources.ts`)
+
+Sunrise's four types above are built in. A fork adds its own without editing core, mirroring the capability seam:
+
+```ts
+// lib/app/mcp-resources.ts — ships empty
+import { registerMcpResourceHandler } from '@/lib/orchestration/mcp/resource-registry';
+
+export function initAppMcpResources(): void {
+  registerMcpResourceHandler({
+    resourceType: 'project_plan',
+    uriScheme: 'hub', // → hub://projects/{id}/plan
+    handler: handleProjectPlan, // (uri, config, callContext) => Promise<McpResourceContent>
+  });
+}
+```
+
+`resourceType` must be lower snake_case, max 64 characters — the same shape `createExposedResourceSchema` enforces, validated at registration too so a `projectPlan` fails loudly here rather than reporting dispatchable and then 400ing every create with a message that never mentions the registration.
+
+A throwing init rolls back every registration it had already made, so a half-configured resource is never left dispatchable — this registry has the most to lose from a partial apply, because a registered handler serves reads and its scheme is accepted at create.
+
+The registry calls `initAppMcpResources()` once, lazily, before the first dispatch **and** before the admin create route validates a row — both are route-realm reads, so a registration made from `initApp()` would fill a map the MCP route never sees.
+
+An app type then flows through `resources/list|read|subscribe`, templates, the 5-minute cache, `resources:read` scoping, `McpExposedResource` gating and audit exactly like a core one. Rows still default to `isEnabled: false`, so this widens what an admin can turn on, not who can turn it on.
+
+Five constraints:
+
+| Constraint                                            | Why                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uriScheme` is required                               | A fork resource inheriting `sunrise://` advertises the starter's identity to every client that lists it. Pass `'sunrise'` explicitly if that is intended.                                                                                                                                      |
+| The `uriScheme` is bound to the `resourceType`        | Checked as a PAIR at create. `sunrise://projects/x/plan` under a `project_plan` registered as `hub` passes both independent checks and then lists fork data under the platform's scheme — the inheritance `uriScheme` is required in order to prevent. Built-in types are pinned to `sunrise`. |
+| A built-in `resourceType` cannot be overridden        | `resourceType` is the only link between a seeded row and its handler, so a shadowing registration would change what `sunrise://agents` returns.                                                                                                                                                |
+| `http(s)`, `file`, `data`, `javascript`, … banned     | A resource URI is echoed to clients in `resources/list`; none of them should look like a fetchable web address.                                                                                                                                                                                |
+| A stored URI's scheme is matched **case-sensitively** | `readMcpResource` looks a row up by exact URI, so `SUNRISE://agents` would store fine and then never dispatch. `registerMcpResourceHandler` still lowercases the scheme a fork _registers_ — forgiving about config, exact about stored data.                                                  |
+
+Validation on create is **dispatchability**, not a constant: `POST /api/v1/admin/orchestration/mcp/resources` calls `isDispatchableMcpResourceType()` and `isAllowedMcpResourceUri()`. That is strictly stronger than the closed Zod enum it replaced — it also rejects a core type whose handler has gone missing. It lives in the route rather than in `lib/validations/mcp.ts` because that module is imported by `'use client'` components and the registry reaches whatever the fork imports in `lib/app/`.
+
+The admin create form's type dropdown lists core types only; create an app-typed row from a seed or the API.
 
 After creation, **`uri` and `resourceType` are immutable** — the registry routes reads by URI prefix and dispatches by `resourceType`, so changing either mid-life would orphan in-flight client subscriptions. To rename or re-type a resource, delete it and create a new one (per the dialog warning in the admin UI).
 
 ### Subscriptions
 
-MCP clients can call `resources/subscribe { uri }` to receive `notifications/resources/updated { uri }` whenever the underlying data changes. `resources/unsubscribe { uri }` removes the subscription. The server advertises `resources: { subscribe: true }` in `initialize` so clients know the methods are supported.
+MCP clients can call `resources/subscribe { uri }` to receive `notifications/resources/updated { uri }` whenever the underlying data changes. `resources/unsubscribe { uri }` removes the subscription. In `stateful` mode the server advertises `resources: { subscribe: true }` in `initialize` so clients know the methods are supported; under the default `stateless` mode it does not, and the methods refuse — see below.
 
 Limits and rules (enforced in the protocol handler / session manager):
 
@@ -212,7 +363,9 @@ What fires an updated notification:
 
 The wiring lives in `lib/orchestration/mcp/resource-update-hooks.ts` as named helpers (`notifyMcpAgentsChanged`, `notifyMcpWorkflowsChanged`, `notifyMcpKnowledgeChanged`). Mutation routes import the named helper rather than hard-coding the URI string — one place to change if a resource URI ever moves.
 
-**Known limit — multi-process deploys:** the subscription map is per-Node.js-process, so a mutation on instance A doesn't notify subs on instance B. Acceptable for the common single-instance deploy; horizontally-scaled production would need a Redis pub/sub layer (captured as a future improvement).
+**Subscriptions need `MCP_SESSION_MODE=stateful`** — under the default they are refused with `STATELESS_UNSUPPORTED` (`-32005`) and `initialize` does not advertise `subscribe`, so a conforming client never asks. That is deliberate: a subscription that returns success and never notifies is indistinguishable, from the client's side, from a resource that never changes.
+
+**And even in `stateful`, the subscription map is per-Node.js-process**, so a mutation on instance A doesn't notify subs on instance B — which is the same defect as the session map, and why `stateful` is confined to a single long-running process.
 
 ## Progress notifications
 
@@ -365,6 +518,12 @@ Heuristic: if the server is expected to execute logic, call APIs, mutate state, 
 
 ## Session Management
 
+**Everything below applies to `MCP_SESSION_MODE=stateful` only.** Under the
+default (`stateless`) none of it happens: no session is created, no
+`Mcp-Session-Id` is issued, `maxSessionsPerKey` is never consulted, and there is
+nothing to evict or terminate. See
+[Session model](#session-model--mcp_session_mode).
+
 - In-memory `Map<string, McpSession>`, 1hr TTL
 - Created on `initialize`, identified by `Mcp-Session-Id` header
 - `maxSessionsPerKey` enforced per API key
@@ -387,13 +546,13 @@ Heuristic: if the server is expected to execute logic, call APIs, mutate state, 
 ## MCP Protocol Compliance
 
 - Transport: Streamable HTTP
-- Protocol versions: `2025-06-18` (latest) and `2024-11-05` (back-compat). Negotiated per session during `initialize`.
+- Protocol versions: `2025-06-18` (latest) and `2024-11-05` (back-compat). Negotiated during `initialize` in `stateful` mode; taken from the `MCP-Protocol-Version` header per request under the default `stateless` mode, since no session remembers a negotiation ([details](#protocol-version-without-a-session)).
 - Messages: JSON-RPC 2.0 (single and batch requests)
-- Capabilities advertised: `tools.listChanged`, `resources.listChanged`. `prompts.listChanged`, `resources.subscribe`, `logging`, and `completions` land in subsequent phases — the server never advertises a capability it cannot serve.
+- Capabilities advertised: in `stateful` mode, `tools.listChanged`, `resources.listChanged`, `prompts.listChanged`, `resources.subscribe`, `logging` and `completions` — all six ship today. Under the default `stateless` mode only `completions` is advertised, plus bare `tools` / `resources` / `prompts` objects with no `listChanged` or `subscribe`, because the rest need a session that outlives the request. **The server never advertises a capability it cannot serve**, which is the whole reason that list changes with the mode.
 - Resource templates: `resources/templates/list` advertises parameterized URI patterns
 - Pagination: `tools/list` and `resources/list` support cursor-based pagination (50 items/page)
 - Batch requests: JSON-RPC 2.0 array batches (max 20 requests per batch)
-- SSE notifications: `notifications/tools/list_changed` and `notifications/resources/list_changed` pushed to connected clients when admin toggles tools/resources
+- SSE notifications (`stateful` only): `notifications/tools/list_changed` and `notifications/resources/list_changed` pushed to connected clients when admin toggles tools/resources. Under the default `stateless` mode there is no SSE stream — `GET` answers `405` — so nothing is pushed and no listener is ever registered.
 - Client notifications accepted: `notifications/initialized`, `notifications/roots/list_changed`, `notifications/cancelled`
 
 ### Version negotiation
@@ -407,7 +566,7 @@ Heuristic: if the server is expected to execute logic, call APIs, mutate state, 
 | A forward-dated unknown version (e.g. `2099-01-01`) | Latest supported (`2025-06-18`) | Graceful downgrade for newer clients                   |
 | Any other unknown / malformed value                 | `INVALID_PARAMS` error          | Surface mismatch rather than silently misbehave        |
 
-The negotiated version is stored on the session (`McpSession.protocolVersion`) and is available to per-call handlers for branching on features that exist only in newer revisions. The legacy `MCP_PROTOCOL_VERSION` export still resolves to the oldest supported version so downstream imports keep working.
+In `stateful` mode the negotiated version is stored on the session (`McpSession.protocolVersion`) and reused for every later request. Under the default `stateless` mode nothing is stored — the table above governs `initialize`'s response, and each subsequent request derives its own version from the `MCP-Protocol-Version` header ([details](#protocol-version-without-a-session)). Either way the value reaches per-call handlers the same way, for branching on features that exist only in newer revisions. The legacy `MCP_PROTOCOL_VERSION` export still resolves to the oldest supported version so downstream imports keep working.
 
 ### Authentication challenge (WWW-Authenticate)
 
@@ -415,17 +574,18 @@ The negotiated version is stored on the session (`McpSession.protocolVersion`) a
 
 ### Error codes
 
-| Code   | Name              | Meaning                                                                                                  |
-| ------ | ----------------- | -------------------------------------------------------------------------------------------------------- |
-| -32700 | PARSE_ERROR       | Body is not valid JSON, or body exceeds the 1 MB size cap                                                |
-| -32600 | INVALID_REQUEST   | JSON-RPC envelope is malformed, batch is empty / too large, or `initialize` is mixed with other requests |
-| -32601 | METHOD_NOT_FOUND  | Unknown method                                                                                           |
-| -32602 | INVALID_PARAMS    | Method-specific param validation failed                                                                  |
-| -32603 | INTERNAL_ERROR    | Unhandled server error (no internals leaked)                                                             |
-| -32001 | UNAUTHORIZED      | Missing / invalid bearer token (paired with HTTP 401 + `WWW-Authenticate`)                               |
-| -32002 | SESSION_NOT_FOUND | Unknown / expired `Mcp-Session-Id`, or session belongs to a different key                                |
-| -32003 | SERVER_DISABLED   | Master `isEnabled` toggle is off                                                                         |
-| -32004 | RATE_LIMITED      | Per-key or global rate limit exceeded — client should back off and retry                                 |
+| Code   | Name                  | Meaning                                                                                                                                                                                                                |
+| ------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -32700 | PARSE_ERROR           | Body is not valid JSON, or body exceeds the 1 MB size cap                                                                                                                                                              |
+| -32600 | INVALID_REQUEST       | JSON-RPC envelope is malformed, batch is empty / too large, or `initialize` is mixed with other requests                                                                                                               |
+| -32601 | METHOD_NOT_FOUND      | Unknown method                                                                                                                                                                                                         |
+| -32602 | INVALID_PARAMS        | Method-specific param validation failed                                                                                                                                                                                |
+| -32603 | INTERNAL_ERROR        | Unhandled server error (no internals leaked)                                                                                                                                                                           |
+| -32001 | UNAUTHORIZED          | Missing / invalid bearer token (paired with HTTP 401 + `WWW-Authenticate`)                                                                                                                                             |
+| -32002 | SESSION_NOT_FOUND     | Unknown / expired `Mcp-Session-Id`, or session belongs to a different key                                                                                                                                              |
+| -32003 | SERVER_DISABLED       | Master `isEnabled` toggle is off                                                                                                                                                                                       |
+| -32004 | RATE_LIMITED          | Per-key or global rate limit exceeded — client should back off and retry                                                                                                                                               |
+| -32005 | STATELESS_UNSUPPORTED | The method needs a session that outlives the request, and this server runs `MCP_SESSION_MODE=stateless`. Distinct from METHOD_NOT_FOUND: the method exists and is implemented, the deployment topology cannot carry it |
 
 ## Client Configuration
 

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit tests: `ScopeExplainer` — the "How conditional topics works" panel at the top of the tab.
  *

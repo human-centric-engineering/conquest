@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Component test: EvaluationSeedComposer (F5.3 "Open in editor" refine path).
  *

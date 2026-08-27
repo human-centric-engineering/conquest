@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * PersonaPicker — the respondent "Choose your interviewer" surface (F-persona).
  *

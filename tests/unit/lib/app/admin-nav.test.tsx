@@ -5,6 +5,14 @@
  * release stage (`IS_ALPHA`). The stage is resolved at module load, so each case re-imports the nav
  * module with a fresh `release-stage` mock and inspects the real registry.
  *
+ * FORK NOTE — this reads the REAL `lib/app/admin-nav.ts`, not a mock, so it
+ * measures whatever ConQuest has registered there. If you add or rename a nav
+ * entry, or change the alpha gate on "Session refs", these cases move with it
+ * and are meant to: they are a pin on this fork's nav, not on Sunrise's empty
+ * seam. Update the expectations rather than deleting the cases. A downstream
+ * fork of ConQuest should expect to rewrite this file wholesale, or mock
+ * `@/lib/app/admin-nav` and assert the registration mechanics instead.
+ *
  * @see lib/app/admin-nav.ts
  */
 

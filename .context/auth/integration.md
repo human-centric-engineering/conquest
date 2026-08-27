@@ -204,16 +204,25 @@ import { headers } from 'next/headers';
 import { auth } from './config';
 import { UnauthorizedError, ForbiddenError, handleAPIError } from '@/lib/api/errors';
 
+/** Options for `withAuth`. */
+export interface WithAuthOptions {
+  /** Scope an API-KEY caller must hold. Cookie sessions are unaffected. */
+  scope?: ApiKeyScope;
+}
+
 /**
  * Wrap an API route handler with authentication.
  *
  * - Retrieves the session from better-auth
  * - Throws UnauthorizedError (401) if no session
+ * - Throws ForbiddenError (403) if `options.scope` is set and an API-key
+ *   caller lacks it
  * - Passes the session to the handler
  * - Catches all errors via handleAPIError
  */
 export function withAuth(
-  handler: (request: NextRequest, session: AuthSession) => Response | Promise<Response>
+  handler: (request: NextRequest, session: AuthSession) => Response | Promise<Response>,
+  options?: WithAuthOptions
 ): (request: NextRequest) => Promise<Response>;
 
 /**
@@ -243,6 +252,22 @@ export const GET = withAuth(async (request, session) => {
   return successResponse(user);
 });
 ```
+
+**Usage - requiring an API-key scope:**
+
+```typescript
+// A browser session reaches this as normal; an API key needs `capture` scope.
+export const POST = withAuth(handler, { scope: 'capture' });
+```
+
+`withAuth` otherwise accepts an API key of **any** scope, so a route that means
+to be narrower has to say so. The option applies to API-key callers only — a
+cookie session is the full user, and scopes exist to make a _credential_
+narrower than the person it belongs to. `admin` satisfies any scope. It is
+opt-in and no core route sets it yet: adding a requirement to a shipped endpoint
+would revoke access from keys that work today. Scope names come from
+`lib/auth/api-key-scopes.ts` plus the fork seam `lib/app/api-key-scopes.ts` —
+see [`.context/orchestration/api-keys.md`](../orchestration/api-keys.md).
 
 **Usage - Admin-only route:**
 

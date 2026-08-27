@@ -13,12 +13,43 @@
 
 ## Server Requirements
 
-| Resource | Minimum       | Recommended   |
-| -------- | ------------- | ------------- |
-| RAM      | 1GB           | 2GB+          |
-| CPU      | 1 core        | 2+ cores      |
-| Storage  | 10GB          | 20GB+         |
-| OS       | Ubuntu 20.04+ | Ubuntu 22.04+ |
+**Building the image needs several times what running it does**, and the guide
+below builds on the server (step 4). Size for whichever you actually do.
+
+| Resource | Running a pre-built image | Building on the server |
+| -------- | ------------------------- | ---------------------- |
+| RAM      | 1GB min, 2GB+ recommended | **6GB+**               |
+| CPU      | 1 core, 2+ recommended    | 2+ cores               |
+| Storage  | 10GB, 20GB+ recommended   | 20GB+                  |
+| OS       | Ubuntu 20.04+             | Ubuntu 22.04+          |
+
+The builder stage runs `next build` under
+`NODE_OPTIONS=--max-old-space-size=${NODE_HEAP_MB}`, and `Dockerfile:96` defaults
+`NODE_HEAP_MB` to **4096**. A 4GB heap cap alone exceeds a 2GB box before the OS
+and the Docker daemon are counted, so `--build` on a server sized from the
+left-hand column is killed by the OOM killer rather than failing cleanly — the
+same opaque `exit 137` / SIGKILL that
+[`.context/architecture/ci.md`](../../architecture/ci.md) describes for CI.
+
+Three ways out, cheapest first:
+
+1. **Build elsewhere, run here.** Build in CI or on a workstation, push to a
+   registry, and have the server pull. The right answer for a small VPS, and it
+   keeps the runtime box in the left-hand column.
+2. **Lower the cap to fit the box.** `NODE_HEAP_MB` is a build arg wired through
+   `docker-compose.prod.yml`, so no file edit is needed:
+
+   ```bash
+   NODE_HEAP_MB=1536 docker compose -f docker-compose.prod.yml up -d --build
+   ```
+
+   Keep it below physical RAM. A cap above available memory converts a clean V8
+   heap error into an OS kill, which is strictly harder to diagnose. This only
+   works while the build genuinely fits — a fork with a lot of added code will
+   need more, not less.
+
+3. **Give the build machine more RAM temporarily.** Most VPS providers let you
+   resize for an hour; build, then scale back down.
 
 ## Deployment Steps
 
@@ -80,6 +111,31 @@ DB_PASSWORD="your-secure-password"
 DB_NAME="sunrise"
 ```
 
+**Client-side variables must be set BEFORE the build.** `NEXT_PUBLIC_*` is inlined
+by the compiler during `next build`, so setting one on an already-built image or
+service does nothing — there is no runtime lookup to intercept. That covers
+analytics, error reporting and the consent toggle:
+
+```bash
+NEXT_PUBLIC_ANALYTICS_PROVIDER      # ga4 | posthog | plausible | console
+NEXT_PUBLIC_GA4_MEASUREMENT_ID
+NEXT_PUBLIC_POSTHOG_KEY
+NEXT_PUBLIC_POSTHOG_HOST
+NEXT_PUBLIC_PLAUSIBLE_DOMAIN
+NEXT_PUBLIC_PLAUSIBLE_HOST
+NEXT_PUBLIC_SENTRY_DSN
+NEXT_PUBLIC_COOKIE_CONSENT_ENABLED  # "false" disables the banner
+```
+
+Absence is silent: `detectProvider()` simply returns `null` in production and no
+analytics is sent, with nothing logged above `debug`. If you set a key and see no
+data, check it reached the build before checking the provider (#662).
+
+For `docker compose -f docker-compose.prod.yml`, these are already forwarded as
+build args and read from the same `.env` as everything else — set them there and
+rebuild. For a bare `docker build`, pass each with `--build-arg`; the Dockerfile
+declares an `ARG` for every one.
+
 **Optional (for email):**
 
 ```bash
@@ -96,6 +152,11 @@ docker compose -f docker-compose.prod.yml up -d --build
 # View logs
 docker compose -f docker-compose.prod.yml logs -f web
 ```
+
+> **If this step dies without an error message** — the container vanishes, or you
+> see `exit 137` / `Killed` — it is the OOM killer during `next build`, not a
+> code fault. See [Server Requirements](#server-requirements): building needs
+> ~6GB, and the `NODE_HEAP_MB` build arg is the lever if you cannot give it that.
 
 Migrations apply automatically via the `migrator` service: it runs `prisma migrate deploy` once against the healthy `db`, exits, and the `web` service waits on `service_completed_successfully` before starting. No manual migration step is needed.
 

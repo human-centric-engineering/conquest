@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ExportButtons component tests (F8.2).
  *

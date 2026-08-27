@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit: CohortMembersPanel — the subgroup column added for round phasing. The column appears only
  * when subgroups are passed (the phasing feature is on and subgroups exist), and hides otherwise.

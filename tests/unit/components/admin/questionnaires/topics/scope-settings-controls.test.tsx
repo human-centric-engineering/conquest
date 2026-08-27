@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ScopeSettingsCard — the controls themselves, and the draft they edit.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionCard — the in-chat answer control (P18 phase 3).
  *

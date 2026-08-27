@@ -12,6 +12,8 @@ import { logger } from '@/lib/logging';
 import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
 import { calculateEmbeddingCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { CostOperation } from '@/types/orchestration';
+import { checkSafeProviderUrl } from '@/lib/security/safe-url';
+import { describeFetchFailure } from '@/lib/errors/fetch-error';
 
 /**
  * Static fallback embedding model. Only used when neither
@@ -337,6 +339,24 @@ async function callEmbeddingApi(
   input: string | string[],
   inputType?: 'document' | 'query'
 ): Promise<{ embeddings: number[][]; inputTokens: number }> {
+  // Point-of-use SSRF re-check, mirroring `provider-manager.ts` (#635).
+  // Nothing on THIS path ran one: `resolveProvider` reads `AiProviderConfig`
+  // straight from Prisma, and the only other guard is the Zod refine at
+  // create/update — which seeds, imports and direct DB writes bypass, exactly
+  // as provider-manager's own comment says. So hop 1 was unvalidated here, and
+  // the redirect refusal below only ever covered hops 2+.
+  //
+  // An earlier version of the comment below asserted this check already
+  // happened. It did not; that claim is what surfaced the gap.
+  const urlCheck = checkSafeProviderUrl(provider.baseUrl, { allowLoopback: provider.isLocal });
+  if (!urlCheck.ok) {
+    logger.error('Embedding provider baseUrl rejected by SSRF guard at point of use', {
+      providerType: provider.providerType,
+      reason: urlCheck.reason,
+    });
+    throw new Error(`Embedding provider baseUrl is unsafe (${urlCheck.reason ?? 'blocked'})`);
+  }
+
   const url = `${provider.baseUrl.replace(/\/+$/, '')}/embeddings`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -362,11 +382,28 @@ async function callEmbeddingApi(
     body['dimensions'] = provider.dimensions;
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      // Refuse redirects (#635). `url` is built from the embedding provider's
+      // admin-set `baseUrl`, and the check above validates only that first hop.
+      // This is the ingestion path, so the body is whatever document the operator
+      // uploaded; a followed redirect would post that text to a host nothing
+      // validated.
+      redirect: 'error',
+    });
+  } catch (err) {
+    // undici renders a refused redirect, a DNS miss and a connection reset
+    // alike as a bare `TypeError: fetch failed`, with the reason on `cause`.
+    // Ingestion failures surface to the operator through this message, so
+    // without unwrapping, a provider that started redirecting is
+    // indistinguishable from one that is down — and the fix (re-point the
+    // baseUrl) is invisible. Same reasoning as the webhook test route.
+    throw new Error(`Embedding API request failed: ${describeFetchFailure(err)}`);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -428,6 +465,37 @@ function estimateEmbeddingTokens(input: string | string[]): number {
 }
 
 /**
+ * Who to bill an embedding call to.
+ *
+ * Every field is optional and every one is omitted from the cost row when
+ * absent — `AiCostLog.agentId`, `.conversationId` and `.workflowExecutionId` are
+ * nullable foreign keys, so the choice at each call site is *a real row id* or
+ * *nothing*. A placeholder is the one thing that cannot be written: it is
+ * rejected with P2003 and `logCost` swallows the rejection, which is how three
+ * separate cost sinks came to record nothing at all (#599, #600, #654).
+ *
+ * Before this existed, every embedding row landed with all three null and no
+ * metadata: real spend, counted in the global total, attributable to nothing.
+ * Ingestion paths still pass metadata only — there is no agent or conversation
+ * behind a document upload — which is a deliberate limit, not an oversight.
+ * See `.context/orchestration/capabilities.md`.
+ */
+export interface EmbeddingAttribution {
+  /** Must be a real `AiAgent.id`. A workflow's synthetic label is not one. */
+  agentId?: string;
+  /** Must be a real `AiConversation.id`. */
+  conversationId?: string;
+  /** Must be a real `AiWorkflowExecution.id`. */
+  workflowExecutionId?: string;
+  /**
+   * Free-form tags. Carries `stepId` in from a workflow executor — without it
+   * both execution cost readers drop the row (`if (!stepId) continue;`) — and a
+   * `kind` on paths that have nothing else.
+   */
+  metadata?: Record<string, unknown>;
+}
+
+/**
  * Result of a single-text embedding call. Carries the vector plus the
  * provenance and billing data so callers (chat handler, MCP server, …)
  * can attribute the call to a turn / request without re-resolving the
@@ -458,7 +526,8 @@ export interface EmbedTextResult {
  */
 export async function embedText(
   text: string,
-  inputType?: 'document' | 'query'
+  inputType?: 'document' | 'query',
+  attribution?: EmbeddingAttribution
 ): Promise<EmbedTextResult> {
   const provider = await resolveProvider();
 
@@ -473,7 +542,20 @@ export async function embedText(
 
   // Best-effort cost log. Embeddings should never fail a caller because
   // of an accounting write.
+  //
+  // The four spreads are written out here and again in `embedBatch` rather than
+  // shared through a helper. A helper call is opaque to
+  // `tests/unit/lib/orchestration/llm/cost-log-fk-attribution.test.ts`, which
+  // reads these call sites statically to stop a fourth non-id reaching a
+  // foreign key — and a guard that cannot see the site it guards is the shape
+  // this whole area keeps failing at.
   void logCost({
+    ...(attribution?.agentId ? { agentId: attribution.agentId } : {}),
+    ...(attribution?.conversationId ? { conversationId: attribution.conversationId } : {}),
+    ...(attribution?.workflowExecutionId
+      ? { workflowExecutionId: attribution.workflowExecutionId }
+      : {}),
+    ...(attribution?.metadata ? { metadata: attribution.metadata } : {}),
     model: provider.model,
     provider: provider.providerType,
     inputTokens,
@@ -508,7 +590,8 @@ export interface EmbedBatchResult {
 export async function embedBatch(
   texts: string[],
   batchSize: number = DEFAULT_BATCH_SIZE,
-  inputType?: 'document' | 'query'
+  inputType?: 'document' | 'query',
+  attribution?: EmbeddingAttribution
 ): Promise<EmbedBatchResult> {
   const provider = await resolveProvider();
   const allEmbeddings: number[][] = [];
@@ -560,6 +643,12 @@ export async function embedBatch(
   // rolled-up row keeps `AiCostLog` from exploding on bulk imports.
   const cost = calculateEmbeddingCost(provider.model, totalInputTokens);
   void logCost({
+    ...(attribution?.agentId ? { agentId: attribution.agentId } : {}),
+    ...(attribution?.conversationId ? { conversationId: attribution.conversationId } : {}),
+    ...(attribution?.workflowExecutionId
+      ? { workflowExecutionId: attribution.workflowExecutionId }
+      : {}),
+    ...(attribution?.metadata ? { metadata: attribution.metadata } : {}),
     model: provider.model,
     provider: provider.providerType,
     inputTokens: totalInputTokens,

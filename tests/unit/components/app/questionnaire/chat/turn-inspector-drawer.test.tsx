@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * TurnInspectorDrawer (admin-only) component tests.
  *

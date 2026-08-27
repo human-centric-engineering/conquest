@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionnairePackButton — the workspace-header CTA that promotes the Questionnaire Pack out of
  * the Structure tab's "Export / download" dropdown, so it's reachable from every workspace tab.

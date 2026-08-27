@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Component test: the F5.3 review queue (`EvaluationRunDetail` + `FindingReviewCard`).
  *

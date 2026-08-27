@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ScopeSettingsCard — the session length budget (C7).
  *

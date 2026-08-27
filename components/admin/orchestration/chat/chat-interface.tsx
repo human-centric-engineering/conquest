@@ -10,6 +10,38 @@
  * Used by the Learning Hub advisor tab and available for embedding in
  * other admin panels.
  *
+ * ## Reusing this outside admin
+ *
+ * The three endpoints it calls default to the admin routes but are all props —
+ * `streamEndpoint`, `transcribeEndpoint`, `deleteConversationEndpoint` — so a
+ * consumer page, an app-owned route that pins `contextType`/`contextId`
+ * server-side, or a fork's own surface can point them elsewhere. The wire shape
+ * is identical either way.
+ *
+ * **Admin-only by design, whatever you point the endpoints at.** These render
+ * operator-facing detail that is wrong on an end-user surface, so turn them off
+ * rather than discovering them in production:
+ *
+ *   - `showInlineTrace` (default `false`) gates BOTH the tool-call trace strip
+ *     and the per-turn cost / token breakdown — one switch, not two. Leaving it
+ *     off is the whole of what you need to do here. On a customer-facing
+ *     surface the trace replays the user's own input through a component with
+ *     different redaction rules than the surface it sits on, and a cost readout
+ *     puts a price tag on someone thinking out loud.
+ *   - **Approval cards have no switch.** `ApprovalCard` renders whenever a turn
+ *     carries `pendingApproval`, and there is no prop to suppress it. If your
+ *     surface's users are not operators with authority to approve, either
+ *     ensure the agent never emits an approval step, or rebuild the rendering.
+ *     This is the one item on this list you cannot turn off.
+ *
+ * **If you are weighing a rebuild**, the parts that are genuinely the
+ * platform's contract and worth reusing directly are `parseChatStreamEvent`
+ * (the Zod union over the wire format — a second copy is a second thing to keep
+ * in step with `streaming-handler.ts`) and `getUserFacingError`. Both are
+ * importable on their own. Rebuilding the rendering while reusing those two is
+ * a legitimate outcome; #526 exists because that should be a design judgement
+ * rather than a consequence of a hardcoded URL.
+ *
  * Streaming contract:
  *   - Uses `fetch` + `ReadableStream.getReader()` (not EventSource)
  *   - Parses standard SSE frames (`event:` + `data:` separated by `\n\n`)
@@ -88,6 +120,7 @@ import {
 import type { AttachmentEntry } from '@/lib/hooks/use-attachments';
 import { IMAGE_ATTACHMENT_MIME, DOCUMENT_ATTACHMENT_MIME } from '@/lib/hooks/use-attachments';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
+import { useTimeout } from '@/lib/hooks/use-timeout';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -102,6 +135,30 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 const MIN_THINKING_MS = 1500;
 
 /**
+ * `setTimeout` as an awaitable that settles early when `signal` aborts.
+ *
+ * A bare `await new Promise(r => setTimeout(r, ms))` keeps running after the
+ * component unmounts — the reconnect backoff below waits up to 4s, then
+ * resumes against a component that is gone. Threading the same signal that
+ * already cancels the in-flight fetch means the delay dies with it (#597).
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const settle = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', settle);
+      resolve();
+    };
+    const timer = setTimeout(settle, ms);
+    signal.addEventListener('abort', settle, { once: true });
+  });
+}
+
+/**
  * How long a persisted conversation survives in localStorage before
  * being treated as stale and discarded. Long enough to span a session
  * of admin work; short enough that stale conversations don't
@@ -114,6 +171,26 @@ const PERSISTENCE_TTL_MS = 24 * 60 * 60 * 1000;
 export interface ChatInterfaceProps {
   /** Agent slug to send to `POST /chat/stream`. */
   agentSlug: string;
+  /**
+   * Where to POST each turn. Defaults to the admin stream route.
+   *
+   * A non-admin surface supplies its own — a consumer page, or an app-owned
+   * route that pins `contextType`/`contextId` server-side (which the platform
+   * consumer route deliberately drops). The request and SSE response shapes are
+   * identical, so nothing else changes. (#526)
+   */
+  streamEndpoint?: string;
+  /**
+   * Where the mic button POSTs audio for transcription. Defaults to the admin
+   * transcribe route. Only consulted when `voiceInputEnabled` and `agentId`
+   * are both set.
+   */
+  transcribeEndpoint?: string;
+  /**
+   * Where "clear conversation" sends its DELETE. Defaults to the admin
+   * conversation route. Receives the conversation id; return the full URL.
+   */
+  deleteConversationEndpoint?: (conversationId: string) => string;
   /**
    * Agent row id — passed to the transcription endpoint so the
    * audio path can resolve the right `enableVoiceInput` row.
@@ -558,6 +635,11 @@ function serializeTranscript(
 
 export function ChatInterface({
   agentSlug,
+  // Endpoint props default to the admin routes, so every existing caller is
+  // unchanged. See the "Reusing this outside admin" note above. (#526)
+  streamEndpoint = API.ADMIN.ORCHESTRATION.CHAT_STREAM,
+  transcribeEndpoint = API.ADMIN.ORCHESTRATION.CHAT_TRANSCRIBE,
+  deleteConversationEndpoint = API.ADMIN.ORCHESTRATION.conversationById,
   agentId,
   voiceInputEnabled = false,
   imageInputEnabled = false,
@@ -604,6 +686,7 @@ export function ChatInterface({
   const [expandedPanels, setExpandedPanels] = useState<Record<number, MetaPanel | null>>({});
 
   const abortRef = useRef<AbortController | null>(null);
+  const schedule = useTimeout();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentsControlRef = useRef<{
@@ -797,13 +880,22 @@ export function ChatInterface({
       const ensureMinThinking = async (): Promise<void> => {
         const elapsed = Date.now() - streamStartedAt;
         if (elapsed < MIN_THINKING_MS) {
-          await new Promise((resolve) => setTimeout(resolve, MIN_THINKING_MS - elapsed));
+          await abortableDelay(MIN_THINKING_MS - elapsed, controller.signal);
         }
       };
 
+      /**
+       * Every `await ensureMinThinking()` is followed by a state write. That
+       * delay now settles immediately on abort rather than running its full
+       * 1500ms, which shrinks the window but does not close it — the turn can
+       * still resume after unmount and set error state on a component that is
+       * gone. Callers check this and bail, as the reconnect path already does.
+       */
+      const abandoned = (): boolean => controller.signal.aborted;
+
       for (let attempt = 0; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
         try {
-          const res = await fetch(API.ADMIN.ORCHESTRATION.CHAT_STREAM, {
+          const res = await fetch(streamEndpoint, {
             method: 'POST',
             credentials: 'include',
             signal: controller.signal,
@@ -822,6 +914,7 @@ export function ChatInterface({
           if (!res.ok || !res.body) {
             // HTTP-level errors are not retriable — wait for thinking to feel natural
             await ensureMinThinking();
+            if (abandoned()) return;
             if (res.status === 429) {
               setError(getUserFacingError('rate_limited'));
             } else {
@@ -956,6 +1049,7 @@ export function ChatInterface({
                 const code =
                   typeof parsed.data.code === 'string' ? parsed.data.code : 'internal_error';
                 await ensureMinThinking();
+                if (abandoned()) return;
                 setError(getUserFacingError(code));
                 return;
               } else if (parsed.type === 'budget_exceeded_per_turn') {
@@ -971,6 +1065,7 @@ export function ChatInterface({
                 // where the SSE stream closes naturally on the next
                 // reader.read() returning done=true).
                 await ensureMinThinking();
+                if (abandoned()) return;
                 setError(getUserFacingError('budget_exceeded_per_turn'));
               } else if (parsed.type === 'done') {
                 setWarning(null);
@@ -1036,11 +1131,19 @@ export function ChatInterface({
           if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const delayMs = Math.min(1000 * Math.pow(2, attempt), 4000);
             setWarning('Connection interrupted. Reconnecting...');
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await abortableDelay(delayMs, controller.signal);
+            // `abortableDelay` resolves on abort rather than rejecting, so the
+            // loop would otherwise `continue` into another `fetch`. Against the
+            // real fetch that rejects `AbortError` immediately and is harmless,
+            // but a stubbed `fetch` in a test ignores the signal and the turn
+            // proceeds to read a stream and set state after unmount — the exact
+            // post-teardown work this change set removes.
+            if (controller.signal.aborted) return;
             continue;
           }
 
           await ensureMinThinking();
+          if (abandoned()) return;
           setError({
             title: 'Connection Lost',
             message: 'Could not reconnect to the chat stream.',
@@ -1052,6 +1155,7 @@ export function ChatInterface({
     },
     [
       agentSlug,
+      streamEndpoint,
       conversationId,
       contextType,
       contextId,
@@ -1094,20 +1198,23 @@ export function ChatInterface({
     (text: string) => {
       const attempt = (): void => {
         if (streamingRef.current) {
-          setTimeout(attempt, 500);
+          // Unmounting freezes `streamingRef.current` at its last value, so a
+          // bare setTimeout here re-queues itself for ever once the component
+          // is gone. `schedule` cancels the pending tick and breaks the chain.
+          schedule(attempt, 500);
           return;
         }
         void sendMessageWrapped(text);
       };
       attempt();
     },
-    [sendMessageWrapped]
+    [sendMessageWrapped, schedule]
   );
 
   const handleClear = useCallback(async () => {
     if (conversationId) {
       try {
-        await fetch(API.ADMIN.ORCHESTRATION.conversationById(conversationId), {
+        await fetch(deleteConversationEndpoint(conversationId), {
           method: 'DELETE',
           credentials: 'include',
         });
@@ -1122,7 +1229,7 @@ export function ChatInterface({
     setWarning(null);
     typing.reset();
     onConversationCleared?.();
-  }, [conversationId, typing, onConversationCleared]);
+  }, [conversationId, deleteConversationEndpoint, typing, onConversationCleared]);
 
   const handleDownload = useCallback(() => {
     if (typeof window === 'undefined' || messages.length === 0) return;
@@ -1567,7 +1674,7 @@ export function ChatInterface({
           {voiceInputEnabled && agentId && (
             <MicButton
               agentId={agentId}
-              endpoint="/api/v1/admin/orchestration/chat/transcribe"
+              endpoint={transcribeEndpoint}
               disabled={streaming}
               onTranscript={(text) =>
                 // Append to whatever the operator has already typed

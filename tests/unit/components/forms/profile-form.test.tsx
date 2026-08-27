@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ProfileForm Component Tests
  *
@@ -289,6 +291,42 @@ describe('components/forms/profile-form', () => {
       await waitFor(() => {
         expect(screen.getByText(/location must be less than 100 characters/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('async lifecycle (#597)', () => {
+    it('cancels the success-banner timer when unmounted before it fires', async () => {
+      // The banner is hidden again by a timer. Unmounting does not cancel a
+      // bare `setTimeout`, so pre-fix the callback fired against a component
+      // that no longer existed — harmless in the browser, but in a test run it
+      // lands after the environment is torn down and throws `window is not
+      // defined` outside any test, failing the run with nothing to point at.
+      const user = userEvent.setup({ delay: null });
+      vi.mocked(apiClient.patch).mockResolvedValue({ success: true, data: mockUser });
+
+      const setSpy = vi.spyOn(globalThis, 'setTimeout');
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+      const { unmount } = render(<ProfileForm user={mockUser} />);
+
+      const nameInput = screen.getByLabelText('Name');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Jane Doe');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/profile updated successfully/i)).toBeInTheDocument();
+      });
+
+      // Identify the banner's own timer by its 3000ms delay, so the assertion
+      // is about that timer rather than "some timer somewhere was cleared".
+      const bannerIndex = setSpy.mock.calls.findIndex((call) => call[1] === 3000);
+      expect(bannerIndex).toBeGreaterThanOrEqual(0);
+      const bannerTimerId = setSpy.mock.results[bannerIndex]?.value;
+
+      unmount();
+
+      expect(clearSpy.mock.calls.map((call) => call[0])).toContain(bannerTimerId);
     });
   });
 

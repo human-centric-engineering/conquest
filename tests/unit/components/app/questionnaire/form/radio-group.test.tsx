@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * RadioGroup — app-local single-select control (P-presentation). Pins: renders an option per
  * entry, reflects the selected value, emits on change, and respects the disabled state.

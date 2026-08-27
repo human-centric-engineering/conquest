@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Document Manager Unit Tests
  *
@@ -317,7 +319,16 @@ describe('uploadDocument', () => {
 
     await uploadDocument(content, 'doc.md', 'user-001');
 
-    expect(embedBatch).toHaveBeenCalledWith(['First chunk', 'Second chunk']);
+    expect(embedBatch).toHaveBeenCalledWith(
+      ['First chunk', 'Second chunk'],
+      undefined,
+      undefined,
+      // Ingestion has no agent or conversation behind it, so the cost row is
+      // tagged with the document instead of landing attributable to nothing.
+      expect.objectContaining({
+        metadata: expect.objectContaining({ kind: 'knowledge_ingest' }),
+      })
+    );
   });
 
   it('calls $executeRawUnsafe once per chunk with ::vector cast SQL', async () => {

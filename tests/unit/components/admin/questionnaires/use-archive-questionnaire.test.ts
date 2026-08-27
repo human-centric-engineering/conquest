@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * useArchiveQuestionnaire — shared client hook for the Archive + Restore actions.
  *

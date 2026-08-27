@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SessionComplete — respondent report integration (insights states + delivery gating).
  *

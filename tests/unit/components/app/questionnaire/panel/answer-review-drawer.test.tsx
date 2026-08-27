@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AnswerReviewDrawer — the mobile bottom-sheet face of the answer panel.
  *

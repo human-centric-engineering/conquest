@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ConfigImportExport — unit tests for the Settings tab import / export toolbar.
  *

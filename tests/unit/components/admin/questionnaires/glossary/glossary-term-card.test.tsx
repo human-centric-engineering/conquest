@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * GlossaryTermCard component tests (P16).
  *

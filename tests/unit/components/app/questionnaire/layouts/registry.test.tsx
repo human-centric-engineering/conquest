@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The layout registry's guarantees — the ones a compiler cannot make on its own.
  *

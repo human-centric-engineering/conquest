@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SlotBreadthMeter — the breadth (coverage) axis for a data-slot row.
  *

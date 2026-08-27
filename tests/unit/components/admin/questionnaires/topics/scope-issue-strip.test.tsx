@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * The Conditional Topics issue strip (F17.25) — the summary half of the two-level pattern
  * `config-conflicts.tsx` established.

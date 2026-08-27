@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CohortSectionBody tests (F14.5).
  *

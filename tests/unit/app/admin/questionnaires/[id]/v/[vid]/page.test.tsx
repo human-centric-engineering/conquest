@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Overview tab page (`/admin/questionnaires/[id]/v/[vid]`) tests.
  *

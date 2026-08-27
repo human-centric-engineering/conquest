@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CohortChart component tests (F14.2).
  *

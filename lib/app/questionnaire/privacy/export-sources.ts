@@ -134,10 +134,27 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
     // default. `publicRef` is a human-readable admin lookup reference, not a
     // bearer token, so it stays in — it is how the subject can cite a specific
     // session back to an operator.
+    // The child rows are INCLUDED, not merely referenced. Sunrise 0.10.0's
+    // fork-accounting rule (#660) made this discrepancy visible: the scopeNote
+    // above has always promised turns, answers, scores and the report are
+    // "reached through the session and included with it", and the plain
+    // findMany did not include them — so every row below had to be excluded
+    // with a reason that was not true. The subject's own words live in
+    // `turns.userMessage`; a bundle without them is the short answer this
+    // module's rules exist to prevent.
     fetch: ({ userId }) =>
       prisma.appQuestionnaireSession.findMany({
         where: { respondentUserId: userId },
         orderBy: { createdAt: 'desc' },
+        include: {
+          answers: true,
+          dataSlotFills: true,
+          events: true,
+          turns: true,
+          turnEvaluations: true,
+          scores: true,
+          respondentReport: true,
+        },
       }),
   },
   {
@@ -180,6 +197,37 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
         // address alone — and that unredeemed row is still the subject's data.
         where: { OR: [{ userId }, { email }] },
         omit: { tokenHash: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+  },
+  {
+    model: 'AppCohortMember',
+    section: 'cohortMemberships',
+    disposition: 'export',
+    description:
+      'Rosters you appear on — the address and name you were listed under, any subgroup you were assigned to, whether you are still active, and when you were added or removed.',
+    scopeNote:
+      'Matched on your email address, because a roster entry is not a login and carries no account id. The admin note a cohort owner may have written against your entry IS included: it is a note about you.',
+    // Surfaced by the Sunrise 0.10.0 fork-accounting rule (#660), which asks a
+    // fork to say something about EVERY model rather than only the user-linked
+    // ones. This table holds a name and an address and had no disposition.
+    fetch: ({ email }) =>
+      prisma.appCohortMember.findMany({
+        where: { email },
+        orderBy: { addedAt: 'desc' },
+      }),
+  },
+  {
+    model: 'AppWaitlistSignup',
+    section: 'waitlistSignups',
+    disposition: 'export',
+    description:
+      'Waitlist sign-ups made with your address — the name and address given, what you said you would use ConQuest for, and which page you signed up from.',
+    scopeNote:
+      'Matched on your email address; a waitlist sign-up is made before any account exists, so there is no account id to match on. The admin triage flag is included — it is a fact recorded against your sign-up.',
+    fetch: ({ email }) =>
+      prisma.appWaitlistSignup.findMany({
+        where: { email },
         orderBy: { createdAt: 'desc' },
       }),
   },
@@ -514,9 +562,188 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
  * App models deliberately left out of the export, each with the reason the
  * subject is shown in `meta`.
  *
- * Empty by design: every app table carrying a user id is currently exportable
- * or attributable. The constant exists so that the first table which genuinely
- * should be withheld has a place to go with its reason attached, rather than
- * being dropped from the manifest.
+ * Written for Sunrise 0.10.0's fork-accounting rule (#660): every model in a
+ * fork-owned schema file must be declared a source or excluded with a reason.
+ * Core asks for all of them rather than guessing, because it reads its own
+ * column vocabulary and not ours — a table keyed `respondentUserId` or
+ * `createdBy` is invisible to its scan, and those are exactly the ones nobody
+ * remembers.
+ *
+ * Three kinds of thing are excluded here, and only three:
+ *
+ *  1. **Rows delivered inside an exported parent.** Everything hanging off
+ *     `AppQuestionnaireSession` is returned with it (see that source's
+ *     `include`), so listing it again would double the bundle and tell the
+ *     subject the same thing twice. These say where to look, not "we hold
+ *     nothing".
+ *  2. **Questionnaire structure and configuration.** The instrument an admin
+ *     authored — sections, question slots, topics, scoring setup, routing.
+ *     It is the *question*, not anyone's answer. Authorship of the parent is
+ *     already covered as `attribution` above.
+ *  3. **Aggregates over many respondents.** Cohort-level insight and digests,
+ *     which are k-anonymity-gated by construction and are nobody's personal
+ *     data individually.
+ *
+ * A reason here is read by a data subject, so each says what the table holds
+ * and why they are not getting it — never just "internal".
  */
-export const APP_EXCLUDED_SOURCES: AppExcludedSource[] = [];
+export const APP_EXCLUDED_SOURCES: AppExcludedSource[] = [
+  // ── 1. Delivered inside the exported session ──────────────────────────────
+  {
+    model: 'AppAnswerSlot',
+    reason:
+      'Your answers to each question. Included with the questionnaire session they belong to rather than listed separately, so they arrive in the context that gives them meaning.',
+  },
+  {
+    model: 'AppDataSlotFill',
+    reason:
+      'The values the conversation captured about you against a questionnaire’s data fields. Included with the questionnaire session they belong to.',
+  },
+  {
+    model: 'AppQuestionnaireTurn',
+    reason:
+      'Every message you and the interviewer exchanged, in your own words. Included in full with the questionnaire session it belongs to.',
+  },
+  {
+    model: 'AppQuestionnaireSessionEvent',
+    reason:
+      'The timeline of what happened during your session — starts, pauses, resumes and completions. Included with the questionnaire session it belongs to.',
+  },
+  {
+    model: 'AppRespondentScore',
+    reason:
+      'Scores calculated from your answers. Included with the questionnaire session they were calculated from.',
+  },
+  {
+    model: 'AppRespondentReport',
+    reason:
+      'The report generated for you at the end of a session. Included with the questionnaire session it summarises. Reports written for a whole multi-step run are reached through that run instead.',
+  },
+  {
+    model: 'AppExperienceRunLeg',
+    reason:
+      'Each leg of a multi-step experience you took — which step, and what was carried into it. Reached through the experience run it belongs to, which is exported.',
+  },
+
+  // ── 2. Questionnaire structure and configuration ──────────────────────────
+  {
+    model: 'AppQuestionnaire',
+    reason:
+      'A questionnaire’s title and status — the instrument itself, not anyone’s answers to it. Where you created one, that authorship is listed above under the cohorts and questionnaires you created.',
+  },
+  {
+    model: 'AppQuestionnaireVersion',
+    reason:
+      'A published or draft version of a questionnaire — the wording of the questions as they stood. It is the question, not your answer.',
+  },
+  {
+    model: 'AppQuestionnaireSection',
+    reason:
+      'The sections a questionnaire is divided into. Structure of the instrument; holds no data about you.',
+  },
+  {
+    model: 'AppQuestionSlot',
+    reason:
+      'An individual question as written by the questionnaire’s author, with the instructions governing how it should be asked. Holds no data about you.',
+  },
+  {
+    model: 'AppQuestionSlotTag',
+    reason: 'Links a question to a tag. Two identifiers and nothing else.',
+  },
+  {
+    model: 'AppQuestionTag',
+    reason:
+      'The tag vocabulary an author uses to organise questions. A reference list; holds no data about you.',
+  },
+  {
+    model: 'AppDataSlot',
+    reason:
+      'The definition of a field a questionnaire collects — its name, type and rules. The shape of the answer, not the answer.',
+  },
+  {
+    model: 'AppDataSlotQuestion',
+    reason:
+      'Links a data field to the questions that can fill it. Two identifiers and nothing else.',
+  },
+  {
+    model: 'AppDataSlotDraft',
+    reason:
+      'An author’s unpublished draft of a data field definition. Editing state for the instrument; holds no data about you.',
+  },
+  {
+    model: 'AppQuestionnaireConfig',
+    reason:
+      'A questionnaire’s behaviour settings — how the interviewer paces itself, what it may and may not say, whether a respondent can finish early. Policy for the conversation, not a record of yours.',
+  },
+  {
+    model: 'AppQuestionnaireTopic',
+    reason:
+      'The topics a questionnaire can cover and the rules deciding which apply. Which topics applied to *you* is recorded on your session, which is exported.',
+  },
+  {
+    model: 'AppQuestionnaireTopicDraft',
+    reason: 'An author’s unpublished draft of a topic. Editing state; holds no data about you.',
+  },
+  {
+    model: 'AppQuestionnaireRoundItem',
+    reason:
+      'Which questionnaires a round includes, and in what order. Configuration of the round; holds no data about you.',
+  },
+  {
+    model: 'AppQuestionnaireSourceDocument',
+    reason:
+      'The document an author uploaded for a questionnaire’s structure to be extracted from. Authored material, not respondent data.',
+  },
+  {
+    model: 'AppQuestionnaireExtractionChange',
+    reason:
+      'The edit history of a questionnaire’s extracted structure, including who reverted a change. It records edits to the instrument; where you made one, that is authorship of the questionnaire rather than data about you.',
+  },
+  {
+    model: 'AppQuestionnaireError',
+    reason:
+      'Technical faults logged while a questionnaire ran, with context deliberately redacted before it is stored. Kept for diagnosis; it holds no answer of yours and is not written to describe a person.',
+  },
+  {
+    model: 'AppGlossaryDefinition',
+    reason:
+      'A definition of a term used in a questionnaire, so the interviewer and the respondent mean the same thing by it. Reference material; holds no data about you.',
+  },
+  {
+    model: 'AppExperienceStep',
+    reason:
+      'A step in a multi-step experience, as configured by its author. Your progress through the steps is exported with your experience run.',
+  },
+  {
+    model: 'AppExperienceRoutingRule',
+    reason:
+      'The rules deciding which step a respondent goes to next. Configuration; how you were actually routed is recorded on your experience run, which is exported.',
+  },
+  {
+    model: 'AppExperienceMeeting',
+    reason:
+      'A facilitated meeting’s schedule, breakout clock and status. Where you facilitated one, that is a role in running the session rather than data recorded about you; what you contributed as a participant is in your own session.',
+  },
+  {
+    model: 'AppExperienceBreakoutRoom',
+    reason:
+      'A breakout room’s name and which questionnaire it runs. Configuration of the meeting; holds no data about who was in it.',
+  },
+  {
+    model: 'AppDemoClient',
+    reason:
+      'The branding — colours and logo — applied to a white-labelled questionnaire. Presentation settings; holds no data about you.',
+  },
+
+  // ── 3. Aggregates across many respondents ─────────────────────────────────
+  {
+    model: 'AppExperienceInsight',
+    reason:
+      'A statement synthesised from what a group of participants said, with a count of how many it rests on. It is the group’s output, not any one person’s, and is withheld from an individual export for the same reason it is k-anonymity-gated in the product: singling out one contributor is what the aggregation exists to prevent. Your own contribution is in your session, which is exported.',
+  },
+  {
+    model: 'AppRoundLearningDigest',
+    reason:
+      'What was learned across all respondents in a round, with a count of how many it draws on. An aggregate over many people rather than a record about you; your own answers are exported with your session.',
+  },
+];

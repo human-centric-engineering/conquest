@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * QuestionField — renders the right control per question type and emits normalised values
  * (P-presentation). Pins the per-type contract the autosave + server validation rely on:

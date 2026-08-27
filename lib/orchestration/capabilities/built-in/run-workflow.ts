@@ -269,6 +269,17 @@ export class RunWorkflowCapability extends BaseCapability<Args, Data> {
 
     const engine = new OrchestrationEngine();
 
+    // The parent's cost tags minus its `stepId` — see the forwarding site
+    // below for why stripping beats relying on every sink to overwrite.
+    // `undefined` when the parent carried nothing, or carried only a
+    // `stepId`, so the child's options omit the key entirely rather than
+    // gaining an empty object.
+    const childCostLogMetadata = ((): Record<string, unknown> | undefined => {
+      if (!context.costLogMetadata) return undefined;
+      const { stepId: _parentStepId, ...rest } = context.costLogMetadata;
+      return Object.keys(rest).length > 0 ? rest : undefined;
+    })();
+
     let executionId: string | undefined;
     let result: Data | undefined;
     let failure: { error: string; failedStepId?: string } | undefined;
@@ -288,7 +299,31 @@ export class RunWorkflowCapability extends BaseCapability<Args, Data> {
           // ("refuse to run outside scope"), so inherit-by-default is the safe
           // choice; an explicit different-scope override can be added later if a
           // real case appears.
-          ...(context.scope ? { scope: context.scope } : {}),
+          // **Only an authoritative scope is inherited.** `ExecuteOptions` has
+          // no authority field — the engine persists `options.scope` onto
+          // `AiWorkflowExecution.scope` and `createContext` later reads that
+          // column back as authoritative by construction. So passing a hint
+          // scope here would launder an untrusted consumer's
+          // `ChatRequest.scope` into a durable, trusted column, and every
+          // crash-resume would re-bless it. An earlier version tried to forward
+          // the flag alongside; that field is discarded by `ExecuteOptions`,
+          // so the guard was a silent no-op. Dropping the value is the guard.
+          ...(context.scope && context.scopeIsAuthoritative ? { scope: context.scope } : {}),
+          // The child execution inherits the parent's cost tags, minus the
+          // parent's `stepId`. Without the forwarding, an evaluation whose
+          // subject workflow contains a `run_workflow` step tagged the parent's
+          // rows and none of the child's.
+          //
+          // `stepId` is stripped rather than relied on being overwritten. Every
+          // child EXECUTOR does spread it last — but `judge_call` hands the
+          // metadata to the chat handler, which writes
+          // `metadata: request.costLogMetadata` verbatim with no merge and no
+          // `stepId` of its own. So a parent step id would survive into a cost
+          // row belonging to a different execution. Latent today (that row
+          // carries no `workflowExecutionId`, so no reader joins it), but the
+          // guarantee should be structural rather than a convention every
+          // future sink has to honour (#600).
+          ...(childCostLogMetadata ? { costLogMetadata: childCostLogMetadata } : {}),
         }
       )) {
         if (event.type === 'workflow_started') {

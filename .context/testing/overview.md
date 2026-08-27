@@ -21,7 +21,7 @@ Comprehensive testing documentation for the Sunrise project. This guide provides
 - **Modern API**: Compatible with Jest API but faster and lighter
 - **TypeScript**: First-class TypeScript support without additional config
 
-**Environment**: Uses `happy-dom` for fast DOM testing (configured in `vitest.config.ts`). Happy-dom is a lightweight alternative to jsdom with better performance for most testing scenarios.
+**Environment**: `node` by default; a file that needs a DOM opts in with a first-line `// @vitest-environment happy-dom` docblock (happy-dom being a lightweight alternative to jsdom). 605 of 1084 test files run on node. See [`environments.md`](./environments.md) — it matters for correctness as well as speed, because under happy-dom `lib/env.ts` validates only the _client_ schema.
 
 ### React Testing Library
 
@@ -152,7 +152,7 @@ npm run smoke:orchestration  # requires `npm run dev` running
 
 Full guide and template: [`scripts/smoke/README.md`](../../scripts/smoke/README.md).
 
-### Component Tests (`tests/components/` - future)
+### Component Tests (`tests/unit/components/`)
 
 Tests for React components using React Testing Library. Verify user interactions, rendering, and accessibility.
 
@@ -205,7 +205,10 @@ describe('LoginForm', () => {
 
 The global test setup file (`tests/setup.ts`) runs before all tests and configures:
 
-1. **Environment Variables**: Sets required env vars (`DATABASE_URL`, `BETTER_AUTH_SECRET`, etc.) before any imports to satisfy validation
+1. **Environment Variables**: Sets required env vars (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
+   `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`) before any imports to satisfy validation, plus
+   two behavioural flags: `RESEND_API_KEY=''` (no mail is ever sent) and
+   `RATE_LIMIT_BYPASS='true'` (see below — it has a real trap in it)
 2. **Next.js Mocks**: Pre-mocks `next/navigation` and `next/headers` for component testing
 3. **Analytics Mocks**: Mocks analytics hooks to allow component testing without providers
 4. **Cleanup**: Restores all mocks in `afterEach` to prevent test pollution
@@ -227,6 +230,41 @@ afterEach(() => { vi.restoreAllMocks(); });
 ```
 
 Tests can override these mocks per-file using `vi.mock()` at the top of the test file.
+
+### `RATE_LIMIT_BYPASS=true` — know this one before writing a rate-limit test
+
+`tests/setup.ts` sets it globally. `applyRateLimit()` respects the flag, so in
+every test that does not clear it, rate limiting **is a no-op**.
+
+That is the right default: unit and component tests exercise route handlers
+directly, the project-root proxy does not run, and an incidental limiter call
+should not fail an unrelated test. The hazard is narrow and specific — a test
+written to prove a limit is enforced passes against a limiter that was never
+armed. It asserts nothing and looks green.
+
+Any test about rate-limit behaviour must clear the flag itself and reset bucket
+state per test. Use `vi.stubEnv`, which both existing rate-limit suites use and
+which unwinds automatically — a direct `process.env` assignment leaks into every later file in
+the same worker:
+
+```typescript
+beforeEach(() => {
+  // tests/setup.ts sets this globally; clear it so the limiter actually runs
+  vi.stubEnv('RATE_LIMIT_BYPASS', '');
+  // plus whatever reset the store under test needs — buckets are module state
+});
+```
+
+Worked examples: `tests/unit/lib/security/rate-limit-middleware.test.ts` and
+`rate-limit-extension.test.ts:389`.
+
+This matters more here than the equivalent flag would elsewhere, because rate
+limiting in this codebase is _automatic_: section caps are applied by `proxy.ts`
+from the policy table, so a new `/api/v1/**` route inherits them with no handler
+code. There is nothing in a route file to remind you the protection exists, and
+therefore nothing to remind you it is switched off in tests.
+
+See [`.context/security/rate-limiting.md`](../security/rate-limiting.md).
 
 ## Testing Workflow Commands
 
@@ -344,6 +382,8 @@ The test-engineer agent (`.claude/agents/test-engineer.md`) is spawned by `/test
 
 **See also**:
 
+- [`environments.md`](./environments.md) - node by default, happy-dom opt-in; why, and what to do when a test needs a DOM
+- [`scoped-runs.md`](./scoped-runs.md) - Running only the tests a branch needs, and the whole-tree guards no module graph reaches
 - [`patterns.md`](./patterns.md) - Best practices and patterns (AAA, type safety, async, mocking)
 - [`mocking.md`](./mocking.md) - Mock strategies by dependency (Prisma, better-auth, Next.js, logger)
 - [`decisions.md`](./decisions.md) - Architectural decisions and rationale
@@ -352,10 +392,12 @@ The test-engineer agent (`.claude/agents/test-engineer.md`) is spawned by `/test
 **npm Commands**:
 
 ```bash
-npm test                  # Run all tests
-npm run test:watch        # Watch mode for development
-npm run test:coverage     # Run with coverage report
-npm run validate          # all local gates
+npm run test:changed          # Tests this branch affects + whole-tree guards
+npm run test:changed:coverage # ...and gate coverage per changed file (≥80% each)
+npm test                      # Full suite
+npm run test:watch            # Watch mode for development
+npm run test:coverage         # Full suite with a whole-repo coverage report
+npm run validate              # all local gates
 ```
 
 **Directories**:

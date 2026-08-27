@@ -18,6 +18,19 @@ npm run validate         # CHANGELOG + Node version + type-check + lint + format
 npm run check:changelog  # CHANGELOG.md structure only (also runs inside validate)
 npm run format:prisma:check  # Prisma schema formatting only (also runs inside validate)
 npm run format:prisma    # rewrite prisma/schema with the pinned Prisma formatter
+
+# Pre-PR checks — NOT in validate. All four compare against a base revision and
+# are run by /pre-pr; each falls back to the merge base with origin/main.
+npm run check:lockfile        # lost libc/os/cpu, and an unexplained overrides change
+npm run check:exports         # symbols added/removed/renamed on a lib/**/index.ts barrel
+npm run check:changelog-drift # an [Unreleased] bullet a later commit on the branch made untrue
+npm run check:missing-tests   # changed files with no test (add --verbose for why; --self-test to prove it reports)
+
+# Fork migration aid — not part of any gate. After merging Sunrise's
+# node-by-default test environment, adds the happy-dom directive to the
+# fork's own tests that demonstrably need one. See testing/environments.md.
+npm run fix:dom-tests         # run the suite, mark what failed for want of a DOM, confirm
+npm run fix:dom-tests -- --dry-run
 ```
 
 ## Database (Prisma)
@@ -40,10 +53,17 @@ npx prisma validate         # Validate schema syntax
 ## Testing
 
 ```bash
-npm run test             # Run tests with Vitest
-npm run test:watch       # Run tests in watch mode
-npm run test:coverage    # Run tests with coverage report
+npm run test:changed          # Tests this branch affects + whole-tree guards
+npm run test:changed:coverage # ...and gate coverage per changed file (≥80% each)
+npm run test                  # Full suite
+npm run test:watch            # Watch mode for development
+npm run test:coverage         # Full suite with a whole-repo coverage report
 ```
+
+The scoped pair is what `/pre-pr` runs; the full pair is for a merge from
+`main`, a release cut, or any time you want the whole picture. A scoped run
+cannot tell you the branch broke nothing elsewhere — CI's `test-full` job is the
+backstop. See [`testing/scoped-runs.md`](./testing/scoped-runs.md).
 
 ## Email
 

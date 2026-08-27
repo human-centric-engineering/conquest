@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * RespondentReportEditor — component tests.
  *

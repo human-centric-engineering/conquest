@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Demo-client Overview tab — unit tests.
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * CorrectionStrip — the chat-side "fix what I just noted" affordance (Variant B). Pins that it
  * lists what the latest turn captured, opens the inline editor on Fix, and renders nothing when
