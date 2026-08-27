@@ -227,8 +227,9 @@ backstop alone:
   check **only** when `embeddingsRequired` (the version's `selectionStrategy` is `adaptive`). The
   launch gate (`status` route → `loadLaunchReadiness`) blocks `draft → launched` until every slot
   is embedded; the checklist row links to the Settings tab. This is **launch-only** — the _preview_
-  gate (`createPreviewSession` → `loadLaunchReadiness(vid, { includeEmbeddings: false })`) skips it,
-  so an admin can still rehearse a draft before embedding (the lazy backstop covers the turn loop).
+  gate (`createPreviewSession` → `loadLaunchReadiness` with `includeEmbeddings: false`, one of the
+  two launch-only checks it opts out of) skips it, so an admin can still rehearse a draft before
+  embedding (the lazy backstop covers the turn loop).
   A non-adaptive version never sees this check.
 
 ### Embedding staleness (operator caveat)

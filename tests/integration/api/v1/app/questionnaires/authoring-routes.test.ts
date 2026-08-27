@@ -69,6 +69,21 @@ const prismaMock = vi.hoisted(() => ({
   // see only the checks they are about.
   appQuestionnaireTopic: {
     count: vi.fn(async () => 0),
+    // Read only when the version was flagged as describing routing and has no proposal yet — the
+    // "has an admin authored a topic since?" half of the auto-trigger eligibility rule.
+    findFirst: vi.fn(async (): Promise<unknown> => null),
+  },
+  // The Routing Analyst's pending proposal. Default null — no unreviewed-proposal row — so the
+  // readiness assertions below see only the checks they are about. Typed `unknown` rather than
+  // inferred: an `async () => null` mock infers `Promise<null>`, and a test that stubs a real
+  // proposal onto it then fails to type-check.
+  appQuestionnaireTopicDraft: {
+    findUnique: vi.fn(async (): Promise<unknown> => null),
+  },
+  // The durable "the analyst already ran" signal behind the same row.
+  appAiRun: {
+    findFirst: vi.fn(async (): Promise<unknown> => null),
+    count: vi.fn(async () => 0),
   },
   // The route-local countLaunchBlockers reads these when leaving `launched`: live invitations
   // (F3.2) and real respondent sessions (isPreview:false) both pin the version.
@@ -149,6 +164,14 @@ beforeEach(() => {
   // Default the likert-slot read (launch readiness + key-collision both hit this mock) to empty,
   // so no describe relies on an ancestor's leftover value; tests that need slots override locally.
   prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
+  // Re-defaulted per test, not just declared once on the hoisted mock: `clearAllMocks` clears
+  // calls but keeps implementations, so one test's pending proposal would otherwise block every
+  // launch after it in file order.
+  prismaMock.appQuestionnaireTopicDraft.findUnique.mockResolvedValue(null);
+  prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
+  prismaMock.appQuestionnaireTopic.findFirst.mockResolvedValue(null);
+  prismaMock.appAiRun.findFirst.mockResolvedValue(null);
+  prismaMock.appAiRun.count.mockResolvedValue(0);
   // countLaunchBlockers defaults: no live invitations / respondent sessions (un-launch allowed).
   prismaMock.appQuestionnaireInvitation.count.mockResolvedValue(0);
   prismaMock.appQuestionnaireSession.count.mockResolvedValue(0);
@@ -370,6 +393,106 @@ describe('status PATCH', () => {
     );
     // Status route never forks.
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+  });
+
+  it("blocks launch while the Routing Analyst's proposal is unreviewed", async () => {
+    // The proposal is not live: the runtime scope resolver and every other launch check read only
+    // the live topic set. Without this gate a version whose Topics tab was never opened launches
+    // asking everyone everything, with a paid model call sitting unread beside it.
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+      conditionalTopicsCandidate: null,
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
+    prismaMock.appQuestionnaireTopicDraft.findUnique.mockResolvedValue({
+      topics: {
+        v: 1,
+        topics: [
+          {
+            key: 'franchisees',
+            label: 'Franchise owners',
+            phase: 'conditional',
+            criteria: 'when they run a franchise',
+            depth: 'full',
+            // Nested, as `narrowProposedTopicSet` reads it (`t.members`).
+            members: { questionKeys: [], dataSlotKeys: [] },
+          },
+        ],
+        rules: [],
+        gaps: [],
+      },
+    });
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.success).toBe(false);
+    expect(json.error.details).toMatchObject({ conditionalTopicsReview: expect.any(Array) });
+    expect(prismaMock.appQuestionnaireVersion.update).not.toHaveBeenCalled();
+  });
+
+  it('records the warnings an admin launched over, without refusing the launch', async () => {
+    // "Ask everyone everything" is a legitimate choice, so the row is a warning. But launching past
+    // one is a decision somebody made, and the audit entry is where that stops being deniable.
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+      conditionalTopicsCandidate: null,
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
+    // Conditional topics exist; the feature is off (no `conditionalTopics` on the config blob).
+    prismaMock.appQuestionnaireTopic.count.mockResolvedValue(3);
+    prismaMock.appQuestionnaireVersion.update.mockResolvedValue({
+      id: 'v1',
+      versionNumber: 1,
+      status: 'launched',
+    });
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+
+    expect(res.status).toBe(200);
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'questionnaire_version.status',
+        metadata: { launchedOverWarnings: ['conditionalTopicsOff'] },
+      })
+    );
+  });
+
+  it('leaves the metadata off a clean launch', async () => {
+    // An empty array on every launch would make the field noise; its absence already reads as
+    // "the checklist was clean".
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+      conditionalTopicsCandidate: null,
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
+    prismaMock.appQuestionnaireVersion.update.mockResolvedValue({
+      id: 'v1',
+      versionNumber: 1,
+      status: 'launched',
+    });
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+
+    expect(res.status).toBe(200);
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.not.objectContaining({ metadata: expect.anything() })
+    );
   });
 
   it('blocks launch when a likert scale is unlabelled (scaleLabels gate)', async () => {

@@ -383,10 +383,12 @@ describe('createPreviewSession (admin preview)', () => {
     (launchabilityMock.loadLaunchReadiness as Mock).mockResolvedValue({ ready: false, checks: [] });
     const result = await createPreviewSession('v1');
     expect(result).toMatchObject({ ok: false, status: 409, code: 'NOT_READY_FOR_PREVIEW' });
-    // Preview opts out of the adaptive embeddings check — the live turn loop embeds lazily, so a
-    // draft can be rehearsed before its slots are embedded.
+    // Preview opts out of two launch-only checks: the adaptive embeddings one (the live turn loop
+    // embeds lazily, so a draft can be rehearsed before its slots are embedded) and the unreviewed
+    // -proposal one (rehearsing the draft is how an admin decides what to do about that proposal).
     expect(launchabilityMock.loadLaunchReadiness).toHaveBeenCalledWith('v1', {
       includeEmbeddings: false,
+      includeConditionalTopicsReview: false,
     });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });

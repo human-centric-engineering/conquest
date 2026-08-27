@@ -131,6 +131,78 @@ describe('launchReadinessChecks — conditional topics is off but conditional to
   });
 });
 
+describe('the unreviewed-proposal check', () => {
+  it('blocks launch while a proposal is waiting for review', () => {
+    // A pending `AppQuestionnaireTopicDraft` is not live — the runtime scope resolver, the planner
+    // and every other launch check read only the live topic set. So without this row the entire
+    // detect → propose chain is invisible from the launch gate, and the version goes live asking
+    // everyone everything while a paid model call sits unread.
+    const checks = launchReadinessChecks({ ...READY, conditionalTopicsDraftTopicCount: 4 });
+    const review = checks.find((c) => c.key === 'conditionalTopicsReview')!;
+
+    expect(review.ok).toBe(false);
+    expect(review.severity).toBe('blocker');
+    expect(review.label).toBe('4 suggested topics are waiting for review');
+    expect(isLaunchReady({ ...READY, conditionalTopicsDraftTopicCount: 4 })).toBe(false);
+  });
+
+  it('singularises a one-topic proposal', () => {
+    const review = launchReadinessChecks({
+      ...READY,
+      conditionalTopicsDraftTopicCount: 1,
+    }).find((c) => c.key === 'conditionalTopicsReview');
+    expect(review?.label).toBe('1 suggested topic is waiting for review');
+  });
+
+  it('blocks on a flagged document whose proposal has not been produced yet', () => {
+    // The non-streaming ingest path: the candidacy verdict is cached on the version and the
+    // analyst runs on the first Topics-tab visit. An admin who never opens that tab has no draft
+    // AND, before this, no signal.
+    const checks = launchReadinessChecks({ ...READY, conditionalTopicsDetectedUnreviewed: true });
+    const review = checks.find((c) => c.key === 'conditionalTopicsReview')!;
+
+    expect(review.ok).toBe(false);
+    expect(review.label).toMatch(/describes who should be asked what/);
+  });
+
+  it('prefers the proposal wording when both facts are somehow set', () => {
+    // They are mutually exclusive in practice (the auto-trigger flag goes false the moment a draft
+    // lands). If they ever both arrive, a proposal on screen is the more actionable of the two.
+    const review = launchReadinessChecks({
+      ...READY,
+      conditionalTopicsDraftTopicCount: 2,
+      conditionalTopicsDetectedUnreviewed: true,
+    }).find((c) => c.key === 'conditionalTopicsReview');
+    expect(review?.label).toBe('2 suggested topics are waiting for review');
+  });
+
+  it('is absent when there is nothing waiting, whatever the rest of the scope config says', () => {
+    expect(
+      launchReadinessChecks({ ...READY, conditionalTopicsDraftTopicCount: 0 }).map((c) => c.key)
+    ).not.toContain('conditionalTopicsReview');
+    expect(
+      launchReadinessChecks({
+        ...READY,
+        conditionalTopicsEnabled: true,
+        conditionalTopicsConditionalCount: 3,
+      }).map((c) => c.key)
+    ).not.toContain('conditionalTopicsReview');
+  });
+
+  it('sits above both conditional-topics rows', () => {
+    // Reviewing the proposal is what decides what the other two describe: accepting it may add the
+    // conditional topics the "off" warning counts, and coherence can only judge a live topic set.
+    const keys = launchReadinessChecks({
+      ...READY,
+      conditionalTopicsDraftTopicCount: 1,
+      conditionalTopicsConditionalCount: 2,
+    }).map((c) => c.key);
+    expect(keys.indexOf('conditionalTopicsReview')).toBeLessThan(
+      keys.indexOf('conditionalTopicsOff')
+    );
+  });
+});
+
 describe('blocksLaunch', () => {
   it('is true only for a failed blocker', () => {
     const checks = launchReadinessChecks({

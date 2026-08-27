@@ -110,6 +110,13 @@ export default async function OverviewTab({ params }: PageProps) {
   // is choosing between them, so every respondent is asked all of them. A warning, never a gate.
   const conditionalTopicsConditionalCount =
     scope === null ? 0 : scope.topics.filter((t) => t.phase === 'conditional').length;
+  // What the document asked for that nobody has looked at: a proposal waiting for review, or a
+  // document flagged as describing routing whose proposal has not been produced yet. Both come
+  // from the same cached topics payload the two rows above use — no extra fetch. The server gate
+  // resolves the same two facts for itself; this is what stops the checklist from staying silent
+  // about a launch the server is about to refuse.
+  const conditionalTopicsDraftTopicCount = scope?.draft?.topics.length ?? 0;
+  const conditionalTopicsDetectedUnreviewed = scope?.autoTriggerPending === true;
 
   // Settings conflicts for the saved version, from the same detector the Settings tab runs live —
   // built here from the SAVED config (the editor builds its own from unsaved local state, so the
@@ -203,6 +210,8 @@ export default async function OverviewTab({ params }: PageProps) {
               conditionalTopicsEnabled={conditionalTopicsEnabled}
               conditionalTopicsErrorCount={conditionalTopicsErrorCount}
               conditionalTopicsConditionalCount={conditionalTopicsConditionalCount}
+              conditionalTopicsDraftTopicCount={conditionalTopicsDraftTopicCount}
+              conditionalTopicsDetectedUnreviewed={conditionalTopicsDetectedUnreviewed}
               configSaved={graph.config.saved}
               dataSlotsRequired={true}
               dataSlotsReady={dataSlotCount > 0}

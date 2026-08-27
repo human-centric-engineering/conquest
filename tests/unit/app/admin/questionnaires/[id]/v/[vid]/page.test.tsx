@@ -64,18 +64,22 @@ vi.mock('@/components/admin/cq-stat-tiles', () => ({
 }));
 
 vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
-  // The two conditional-topics counts are rendered rather than dropped: the page is the only place
+  // The four conditional-topics facts are rendered rather than dropped: the page is the only place
   // that derives them from the topics payload, and the checklist decides an admin-facing warning
-  // from them (F17.22 Phase 4).
+  // (F17.22 Phase 4) and a launch BLOCKER (F17.32) from them.
   LaunchChecklist: (props: {
     versionNumber: number;
     conditionalTopicsErrorCount?: number;
     conditionalTopicsConditionalCount?: number;
+    conditionalTopicsDraftTopicCount?: number;
+    conditionalTopicsDetectedUnreviewed?: boolean;
   }) => (
     <div
       data-testid="launch-checklist"
       data-scope-errors={props.conditionalTopicsErrorCount}
       data-scope-conditionals={props.conditionalTopicsConditionalCount}
+      data-scope-draft-topics={props.conditionalTopicsDraftTopicCount}
+      data-scope-unreviewed={String(props.conditionalTopicsDetectedUnreviewed)}
     >
       launch v{props.versionNumber}
     </div>
@@ -278,6 +282,53 @@ describe('OverviewTab', () => {
       const checklist = screen.getByTestId('launch-checklist');
       expect(checklist).toHaveAttribute('data-scope-conditionals', '2');
       expect(checklist).toHaveAttribute('data-scope-errors', '1');
+    });
+
+    it('passes the unreviewed-proposal facts through to the checklist (F17.32)', async () => {
+      // The seam that must not break: the SERVER gate resolves these two facts for itself, so a
+      // page that dropped them would leave the checklist silent about a launch the server is
+      // about to refuse — the admin presses Launch and gets a 400 with no row to explain it.
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
+      );
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+        topics: [],
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+        issues: [],
+        inventory: { questions: [], dataSlots: [] },
+        draft: { v: 1, topics: [{ key: 'a' }, { key: 'b' }, { key: 'c' }], rules: [], gaps: [] },
+        autoTriggerPending: false,
+      });
+
+      render(await renderPage());
+
+      const checklist = screen.getByTestId('launch-checklist');
+      expect(checklist).toHaveAttribute('data-scope-draft-topics', '3');
+      expect(checklist).toHaveAttribute('data-scope-unreviewed', 'false');
+    });
+
+    it('passes the flagged-but-unproposed fact through as well (F17.32)', async () => {
+      // The non-streaming ingest path's state: a cached verdict and no draft at all. Reading only
+      // the draft would make this half of the row unreachable from the Overview.
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
+      );
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+        topics: [],
+        settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+        issues: [],
+        inventory: { questions: [], dataSlots: [] },
+        draft: null,
+        autoTriggerPending: true,
+      });
+
+      render(await renderPage());
+
+      const checklist = screen.getByTestId('launch-checklist');
+      expect(checklist).toHaveAttribute('data-scope-draft-topics', '0');
+      expect(checklist).toHaveAttribute('data-scope-unreviewed', 'true');
     });
 
     it('does not render the LaunchChecklist when the version is launched', async () => {
