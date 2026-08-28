@@ -31,6 +31,8 @@ import {
   runChunk,
   adaptiveGroups,
   groupKey,
+  resolveEslintBin,
+  main,
   DEFAULT_CHUNKS,
   LINTABLE,
 } from '@/scripts/ci/chunked-lint.mjs';
@@ -215,5 +217,92 @@ describe('runChunk', () => {
       ['a.ts', '--cache'],
       expect.objectContaining({ shell: false })
     );
+  });
+});
+
+describe('resolveEslintBin', () => {
+  it('prefers the locally installed binary', () => {
+    // A bare `eslint` would resolve against PATH, which on a runner is whatever
+    // happens to be installed globally rather than the version in the lockfile.
+    expect(resolveEslintBin()).toMatch(/node_modules[/\\]\.bin[/\\]eslint/);
+  });
+});
+
+describe('main', () => {
+  const deps = (over: Record<string, unknown> = {}) => ({
+    log: () => {},
+    env: {},
+    run: () => Promise.resolve(0),
+    ...over,
+  });
+
+  it('does nothing, successfully, when there is nothing to lint', async () => {
+    const run = vi.fn();
+    await expect(main([], deps({ targets: [], run }))).resolves.toBe(0);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('runs one eslint process per chunk', async () => {
+    // Typed signature, not a bare `vi.fn()`: without it `mock.calls` is `[]`
+    // and indexing a call is a type error rather than a read.
+    const run = vi.fn((_files: string[], _argv: string[]) => Promise.resolve(0));
+    const targets = ['a/1.ts', 'b/1.ts', 'c/1.ts', 'd/1.ts'];
+
+    await main([], deps({ targets, chunks: 4, run }));
+
+    expect(run).toHaveBeenCalledTimes(4);
+    // Every target reached exactly one process — the partition property again,
+    // this time through the real loop rather than through `chunk()` alone.
+    expect(run.mock.calls.flatMap((c) => c[0]).sort()).toEqual(targets);
+  });
+
+  it('returns the WORST exit code, not the last one', async () => {
+    // The loop keeps going after a failing chunk so the author sees every
+    // problem in one run. That is only safe if the failure still propagates —
+    // returning the last code would turn "chunk 1 failed, chunk 2 passed" into
+    // a green lint.
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await expect(
+      main([], deps({ targets: ['a/1.ts', 'b/1.ts', 'c/1.ts', 'd/1.ts'], chunks: 4, run }))
+    ).resolves.toBe(1);
+    expect(run).toHaveBeenCalledTimes(4);
+  });
+
+  it('forwards its argv to every chunk', async () => {
+    // `--cache` and friends have to reach each process; dropping them silently
+    // turns every CI run cold, which is the cost this script is trying to bound.
+    const run = vi.fn((_files: string[], _argv: string[]) => Promise.resolve(0));
+    await main(
+      ['--cache', '--max-warnings=0'],
+      deps({ targets: ['a/1.ts', 'b/1.ts'], chunks: 2, run })
+    );
+
+    for (const call of run.mock.calls) {
+      expect(call[1]).toEqual(['--cache', '--max-warnings=0']);
+    }
+  });
+
+  it('reads the chunk count from LINT_CHUNKS', async () => {
+    const run = vi.fn(() => Promise.resolve(0));
+    const targets = ['a/1.ts', 'b/1.ts', 'c/1.ts', 'd/1.ts'];
+
+    await main([], { log: () => {}, env: { LINT_CHUNKS: '2' }, run, targets });
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the default when LINT_CHUNKS is nonsense', async () => {
+    const run = vi.fn(() => Promise.resolve(0));
+    const targets = Array.from({ length: 8 }, (_, i) => `d${i}/1.ts`);
+
+    await main([], { log: () => {}, env: { LINT_CHUNKS: 'lots' }, run, targets });
+
+    expect(run).toHaveBeenCalledTimes(DEFAULT_CHUNKS);
   });
 });
