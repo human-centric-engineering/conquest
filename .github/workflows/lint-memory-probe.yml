@@ -1,0 +1,84 @@
+# Measures peak lint memory ON A RUNNER, which is the only place the number
+# means anything.
+#
+# WHY THIS EXISTS. The lint job OOM'd on #273 against `CI_NODE_HEAP_MB=6144`,
+# and this repo is going private — where `ubuntu-latest` is a 7GB machine, so
+# the usable ceiling drops to ~5120 and "raise the heap" stops being available.
+# Choosing a fix needs a number, and a developer laptop cannot supply one: three
+# runs of the IDENTICAL command on the machine this was designed on spanned
+# 3.39-4.70GB, a 1.31GB spread, against a saving we need of ~1.5GB. Every local
+# A/B was therefore unfalsifiable. A runner is isolated, single-tenant, and is
+# the environment that actually has to hold.
+#
+# TEMPORARY. Delete this file once `CI_LINT_CHUNKS` is settled — it exists to
+# answer one question, not to run forever. It is `workflow_dispatch` only so it
+# never runs on a PR and never gates anything.
+#
+# Reads `Maximum resident set size` from GNU `/usr/bin/time -v` (the runner is
+# Linux; the `-l` form used locally is BSD/macOS). That field is in KILOBYTES.
+name: Lint memory probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      chunks:
+        description: 'Comma-separated LINT_CHUNKS values to measure (1 = control, no chunking)'
+        required: false
+        default: '1,4,8'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Peak RSS per chunk count
+    runs-on: ubuntu-latest
+    # Generous: the control arm is a whole-tree lint, and a chunked arm pays the
+    # TypeScript Program once per chunk, so 8 chunks is meaningfully slower.
+    timeout-minutes: 60
+    env:
+      # Deliberately ABOVE the real ceiling. The probe must MEASURE the peak,
+      # not be killed at it — capping here would report "OOM" for every arm and
+      # tell us nothing about which is smallest. The verdict comes from
+      # comparing the numbers against 5120 afterwards, not from surviving it.
+      NODE_OPTIONS: '--max-old-space-size=8192'
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Runner facts
+        run: |
+          echo "cores:  $(nproc)"
+          echo "memory: $(free -g | awk '/^Mem:/{print $2}') GB"
+          echo "files:  $(node --input-type=module -e "
+            import {lintTargets} from './scripts/ci/chunked-lint.mjs';
+            console.log((await lintTargets()).length);")"
+
+      - name: Measure
+        run: |
+          # `--no-cache` everywhere: a warm cache would measure a cache hit, and
+          # the run we have to survive is the COLD one — #273 bumped
+          # typescript-eslint, which invalidates every entry.
+          IFS=',' read -ra ARMS <<< "${{ inputs.chunks }}"
+          printf '%-8s %-12s %s\n' "chunks" "peak" "seconds" | tee -a "$GITHUB_STEP_SUMMARY"
+          for n in "${ARMS[@]}"; do
+            start=$(date +%s)
+            # `|| true` — a lint ERROR is not a probe failure. We are measuring
+            # memory, and stopping on a rule violation would abandon the
+            # remaining arms and produce a partial table.
+            LINT_CHUNKS="$n" /usr/bin/time -v \
+              node scripts/ci/chunked-lint.mjs --no-cache \
+              > "/tmp/lint-$n.log" 2> "/tmp/time-$n.log" || true
+            kb=$(grep "Maximum resident set size" "/tmp/time-$n.log" | grep -oE '[0-9]+$')
+            printf '%-8s %-12s %s\n' \
+              "$n" \
+              "$(awk -v k="${kb:-0}" 'BEGIN{printf "%.2f GB", k/1048576}')" \
+              "$(( $(date +%s) - start ))" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ceiling to beat: 5120 MB (5.00 GB) on a 7GB private runner." >> "$GITHUB_STEP_SUMMARY"

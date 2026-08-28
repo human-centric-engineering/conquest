@@ -265,9 +265,27 @@ jobs:
             lint-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
             lint-${{ runner.os }}-
       - run: npm ci
+      # Chunked, NOT one whole-tree pass. A single `eslint .` peaks at 4.70GB
+      # here, against a `CI_NODE_HEAP_MB` of 6144 — and this repo is going
+      # private, where `ubuntu-latest` is a 7GB machine rather than 16GB. It
+      # already OOM'd on #273. `lint:ci` runs the same file set as one sequential
+      # chunk per process, so the job's peak is the LARGEST chunk instead of the
+      # whole tree: measured 4.70GB at 1 chunk, 3.50GB at 4, 3.02GB at 8, against
+      # an irreducible 2.64GB floor (the TypeScript Program, which every chunk
+      # rebuilds).
+      #
+      # Sequential chunks in ONE job rather than a matrix of N jobs, deliberately:
+      # a matrix pays N checkouts and N `npm ci`s, which on a private repo is
+      # metered runner time. This trades wall-clock instead, which is the cheaper
+      # currency here.
+      #
+      # `CI_LINT_CHUNKS` is the knob. Raise it if a future tree OOMs again; it
+      # needs no code change, the same way `CI_NODE_HEAP_MB` works.
       - name: ESLint (code changes only)
         if: needs.config.outputs.code == 'true'
-        run: npm run lint
+        env:
+          LINT_CHUNKS: ${{ vars.CI_LINT_CHUNKS || 4 }}
+        run: npm run lint:ci
       - run: npm run format:check
       # CHANGELOG.md is the one file a fork reads before deciding what an
       # upgrade will cost it, and the release process edits it by text
