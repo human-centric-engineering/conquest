@@ -28,7 +28,9 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
+  RESPONDENT_DESIGNS,
   RESPONDENT_LAYOUTS,
+  DEFAULT_RESPONDENT_DESIGN,
   DEFAULT_RESPONDENT_LAYOUT,
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
@@ -119,6 +121,14 @@ export default async function QuestionnaireSessionPage({
     RESPONDENT_LAYOUTS,
     DEFAULT_RESPONDENT_LAYOUT
   );
+  // How the surface is DRAWN (F-design). Narrowed here for the same reason, and one more: the
+  // attribute this becomes is what the design stylesheet keys on, so an unnarrowed value would
+  // match no block and quietly paint the platform's own corners.
+  const respondentDesign = narrowToEnum(
+    row.config?.respondentDesign ?? DEFAULT_RESPONDENT_DESIGN,
+    RESPONDENT_DESIGNS,
+    DEFAULT_RESPONDENT_DESIGN
+  );
   // The rung the text-size stepper opens on. Resolved to an INDEX here, the same as every other
   // surface, so no consumer has to know that the column stores a name.
   const chatTextScaleIndex = indexForTextSize(row.config?.chatTextSize);
@@ -201,7 +211,12 @@ export default async function QuestionnaireSessionPage({
 
   return (
     <div className={`${RESPONDENT_SHELL} h-[calc(100vh-12rem)]`}>
-      <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
+      <BrandThemeProvider
+        theme={theme}
+        header={bandHeader}
+        anonymous={anonymous}
+        design={respondentDesign}
+      >
         <SessionEntry
           glossary={glossary}
           glossaryAppendix={glossaryAppendix}

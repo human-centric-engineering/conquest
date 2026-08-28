@@ -41,7 +41,7 @@ import type { CSSProperties, ReactNode } from 'react';
 
 import { AppHeader } from '@/components/layouts/app-header';
 import { PublicNav, PublicNavMenu } from '@/components/layouts/public-nav';
-import { PublicFooter } from '@/components/layouts/public-footer';
+import { RespondentFooter } from '@/components/app/questionnaire/chrome/respondent-footer';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { RespondentThemeToggle } from '@/components/app/questionnaire/chrome/respondent-theme-toggle';
 import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
@@ -128,7 +128,11 @@ export function RespondentChrome({
           the surface grows past the viewport, and the internal scroll never engages. */}
       <main className={cn('min-h-0 flex-1', shell && RESPONDENT_SHELL, className)}>{children}</main>
 
-      {mode === 'full' && <PublicFooter />}
+      {/* Ours, not the platform's marketing footer: one quiet line of legal links and the consent
+          control. `PublicFooter` restates the header's four nav links and adds an attribution row,
+          which on a questionnaire is duplication plus three extra ways to leave mid-answer. See
+          RespondentFooter's header for the full argument. */}
+      {mode === 'full' && <RespondentFooter />}
     </div>
   );
 }

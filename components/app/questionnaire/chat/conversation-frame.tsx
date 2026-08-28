@@ -42,7 +42,16 @@ export interface ConversationFrameProps {
 
 export function ConversationFrame({ transcript, composer, className }: ConversationFrameProps) {
   return (
-    <div className={cn('bg-card flex h-full min-h-0 flex-col rounded-xl border', className)}>
+    <div
+      // `cq-conversation-frame` is a handle for the design axis, not a style: `marque` turns this
+      // card's left hairline into an accent spine, so the conversation reads as a bound document.
+      // A class rather than a prop because a design is CSS and this component has no business
+      // knowing which one is active.
+      className={cn(
+        'cq-conversation-frame bg-card flex h-full min-h-0 flex-col rounded-xl border',
+        className
+      )}
+    >
       {transcript}
       {/* The seam AND the breathing room, both supplied here rather than by the composer: they are
           properties of stacking two things in one card, and a composer standing alone in a rail

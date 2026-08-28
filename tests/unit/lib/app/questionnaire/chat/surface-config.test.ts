@@ -63,6 +63,7 @@ describe('loadVersionSurface', () => {
       chatTextSize: true,
       presentationMode: true,
       respondentLayout: true,
+      respondentDesign: true,
       respondentChrome: true,
       answerSlotPanelScope: true,
       inlineCorrectionEnabled: true,

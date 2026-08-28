@@ -121,6 +121,7 @@ function surfaceConfig(overrides: Partial<RespondentSurfaceConfig> = {}): Respon
     attachmentInputEnabled: true,
     presentationMode: 'chat',
     respondentLayout: 'classic',
+    respondentDesign: 'rounded',
     chatTextScaleIndex: 1,
     answerPanelScope: 'hidden',
     reasoningPlacement: 'inline',
@@ -159,7 +160,7 @@ function surfaceConfig(overrides: Partial<RespondentSurfaceConfig> = {}): Respon
 }
 
 /** The live-meeting poll payload for a running breakout. */
-function liveRunning(stepId = 'step-1') {
+function liveRunning(stepId: string | null = 'step-1') {
   return {
     status: 'running',
     currentStepId: stepId,
@@ -362,5 +363,75 @@ describe('MeetingParticipantBoot — a second breakout', () => {
     const workspace = screen.getByTestId('workspace');
     expect(workspace.getAttribute('data-session-id')).toBe('sess-b');
     expect(workspace.getAttribute('data-presentation-mode')).toBe('form');
+  });
+});
+
+/**
+ * What the participant sees when the join itself does not succeed.
+ *
+ * The join is the one request this surface makes before it can do anything, and it has two failure
+ * shapes that must NOT look alike. Arriving early is not an error — the meeting exists, the
+ * participant is in the right place, and the room simply has not been opened yet; telling them
+ * something went wrong would send them looking for a support channel over a thirty-second wait.
+ * Anything else IS an error and has to say so, with the server's own words when it gave any.
+ *
+ * These paths are also the reason the catch block reads the message defensively. A rejection is not
+ * guaranteed to be an `Error` — a thrown string, or a rejected promise carrying a response body,
+ * both reach here — and `err.message` on a non-Error is `undefined`, which would print an empty
+ * paragraph under "We couldn't get you in" and tell the participant nothing at all.
+ */
+describe('MeetingParticipantBoot — when the join fails', () => {
+  it('reads "not started" as arriving early, not as an error', async () => {
+    apiPost.mockRejectedValue(new Error('Meeting not started'));
+
+    renderBoot();
+
+    expect(await screen.findByText(/hasn.t started yet/i)).toBeInTheDocument();
+    // The distinction that matters: no error copy anywhere on the screen.
+    expect(screen.queryByText(/couldn.t get you in/i)).not.toBeInTheDocument();
+  });
+
+  it('surfaces any other failure as an error, in the server’s own words', async () => {
+    apiPost.mockRejectedValue(new Error('This meeting has been cancelled'));
+
+    renderBoot();
+
+    expect(await screen.findByText(/couldn.t get you in/i)).toBeInTheDocument();
+    expect(screen.getByText('This meeting has been cancelled')).toBeInTheDocument();
+  });
+
+  it('falls back to its own wording when the rejection is not an Error', async () => {
+    // A thrown string has no `.message`; without the `instanceof` guard this renders an empty
+    // paragraph under the heading, which is a worse failure than the generic sentence.
+    apiPost.mockRejectedValue('kaboom');
+
+    renderBoot();
+
+    expect(await screen.findByText(/couldn.t get you in/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not get you in\. please try again/i)).toBeInTheDocument();
+  });
+
+  it('joins without a session when the room seats nobody yet', async () => {
+    // A scribe room where somebody else holds the pen, or a breakout not yet opened: the join
+    // succeeds and returns a run, but no session. The participant is in and waiting, so the
+    // holding copy shows rather than a workspace with no session to answer.
+    apiPost.mockResolvedValue({ runId: RUN_ID, meetingId: MEETING_ID, sessionId: null });
+    primePolls(null);
+
+    renderBoot();
+
+    expect(await screen.findByText(/listen out for the facilitator/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace')).not.toBeInTheDocument();
+  });
+
+  it('says the session is over once the meeting has ended', async () => {
+    // The same holding screen, different sentence — and the difference is the whole point: "this
+    // will open when the next part begins" is a lie once the facilitator has closed the meeting.
+    apiPost.mockResolvedValue({ runId: RUN_ID, meetingId: MEETING_ID, sessionId: null });
+    primePolls(null, { ...liveRunning(null), status: 'ended' });
+
+    renderBoot();
+
+    expect(await screen.findByText(/end of this session/i)).toBeInTheDocument();
   });
 });

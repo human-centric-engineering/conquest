@@ -20,6 +20,7 @@ import {
   resolvePresentationModeForVersion,
   resolveRespondentChromeForVersion,
   resolveChatTextScaleIndexForVersion,
+  resolveRespondentDesignForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -104,6 +105,7 @@ export default async function PublicQuestionnairePage({
     anonymous,
     presentationMode,
     respondentLayout,
+    respondentDesign,
     chatTextScaleIndex,
     respondentChrome,
     answerPanelScope,
@@ -123,6 +125,7 @@ export default async function PublicQuestionnairePage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveRespondentDesignForVersion(versionId),
     resolveChatTextScaleIndexForVersion(versionId),
     resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
@@ -182,7 +185,12 @@ export default async function PublicQuestionnairePage({
           </header>
         )}
         <div className="min-h-0 flex-1">
-          <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
+          <BrandThemeProvider
+            theme={theme}
+            header={bandHeader}
+            anonymous={anonymous}
+            design={respondentDesign}
+          >
             <AnonymousSessionBoot
               glossary={glossary}
               glossaryAppendix={glossaryAppendix}

@@ -182,6 +182,34 @@ export type SlotPlacement =
        * behaviour, where the box grows with what is typed up to a cap.
        */
       fills?: boolean;
+      /**
+       * This region gives the slot ROOM, and expects it to be present in that room rather than
+       * tucked into a corner of it.
+       *
+       * Read today only by `composer`, where it is the difference between the two answer boxes the
+       * product has. Set, the composer draws its own brand-tinted surface with the controls inside
+       * along its bottom edge, opening at prose height. Unset, it is a field with its controls on
+       * the line beside it, one line tall and growing with what is typed.
+       *
+       * Two layouts set it, for two different reasons that come to the same thing:
+       *
+       *   - **Broadsheet** holds it in an otherwise empty margin. A field with no surface of its own
+       *     would float there unfindable, and a row of buttons beside a rail-width field leaves the
+       *     mic and Send marooned at opposite ends of a mostly-empty line.
+       *   - **Horizon** puts one question on a centred stage with everything else folded away, so
+       *     the answer box is the only other thing on screen and there is open space above it. A
+       *     one-line field in that expanse reads as an afterthought, when the layout's whole
+       *     argument is *this question, and your answer to it*.
+       *
+       * Classic and Focus deliberately leave it unset. There a scrolling transcript is pressing
+       * down on the composer and competing for the same fixed viewport, so an empty answer box that
+       * held four lines would be taking them from the conversation.
+       *
+       * Separate from `fills` on purpose, even though only Broadsheet sets both. They answer
+       * different questions — *how tall* and *how present* — and Horizon is the proof: it wants the
+       * surface and the prose height without the box becoming its whole column.
+       */
+      prominent?: boolean;
     }
   | { kind: 'overlay'; via: 'sheet' | 'drawer' | 'modal' | 'gesture' }
   | { kind: 'omitted'; because: string };

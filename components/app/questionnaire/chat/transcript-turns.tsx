@@ -102,10 +102,14 @@ export function UserBubble({ content }: { content: string }) {
       <div
         // No font-size class: the size is inherited from the `.cq-chat-scale` transcript wrapper so
         // the respondent's preference drives it.
-        className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 leading-relaxed whitespace-pre-wrap"
+        // `cq-user-bubble` is the design axis's handle on this block, and the fill moved to a
+        // custom property so a design can restate it without fighting an inline value. The fallback
+        // is the literal that used to be here, so a transcript rendered OUTSIDE a design scope (the
+        // read-only admin replay) is byte-for-byte what it always was.
+        className="cq-user-bubble max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 leading-relaxed whitespace-pre-wrap"
         style={{
           backgroundColor:
-            'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 12%, transparent)',
+            'var(--cq-user-bubble-bg, color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 12%, transparent))',
           color: 'var(--color-foreground)',
         }}
       >
@@ -118,9 +122,14 @@ export function UserBubble({ content }: { content: string }) {
 export function AssistantTurn({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
+      {/* The interviewer's mark. A 8px accent dot by default — and the one element the `marque`
+          design repurposes, painting the CLIENT's logo mark over it so their brand signs every
+          question rather than sitting in a banner people stop seeing. The accent stays underneath
+          as the background COLOUR, so a client with no mark degrades to a small brand block instead
+          of to nothing. See app/respondent-design.css. */}
       <span
         aria-hidden="true"
-        className="mt-2.5 h-2 w-2 shrink-0 rounded-full"
+        className="cq-turn-mark mt-2.5 h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: 'var(--app-accent-color, var(--color-primary))' }}
       />
       <div className="min-w-0 flex-1 pt-0.5">{children}</div>

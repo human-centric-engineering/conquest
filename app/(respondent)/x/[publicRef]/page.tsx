@@ -20,6 +20,7 @@ import {
   resolvePresentationModeForVersion,
   resolveRespondentChromeForVersion,
   resolveChatTextScaleIndexForVersion,
+  resolveRespondentDesignForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -110,6 +111,7 @@ export default async function ExperienceRunPage({
     anonymous,
     presentationMode,
     respondentLayout,
+    respondentDesign,
     chatTextScaleIndex,
     respondentChrome,
     answerPanelScope,
@@ -127,6 +129,7 @@ export default async function ExperienceRunPage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveRespondentDesignForVersion(versionId),
     resolveChatTextScaleIndexForVersion(versionId),
     resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
@@ -150,7 +153,12 @@ export default async function ExperienceRunPage({
     // inherit its brand — see `canvasBackdropVars`.
     <RespondentChrome mode={respondentChrome} canvasStyle={canvasBackdropVars(theme)}>
       <div className="h-full min-h-0 px-4">
-        <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
+        <BrandThemeProvider
+          theme={theme}
+          header={bandHeader}
+          anonymous={anonymous}
+          design={respondentDesign}
+        >
           <RunSessionBoot
             sessionId={sessionId}
             glossary={glossary}

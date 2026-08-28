@@ -56,3 +56,35 @@ describe('SessionProgressBar', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
   });
 });
+
+/**
+ * `sharesLine` — the caption stands down rather than printing on top of its neighbour.
+ *
+ * On the lifecycle strip the bar is `flex-1` beside a `shrink-0` reference chip, so under about
+ * 450px the bar's box shrinks past its own caption. The caption is `shrink-0`, so it neither wraps
+ * nor truncates: it overflows, and "0% completed" was rendering straight through "Ref: HY26-91TE".
+ *
+ * jsdom computes no layout and evaluates no media query, so the declaration is the assertion. What
+ * makes it worth having is the pair of properties underneath: the caption goes, the ARIA value
+ * stays, so nothing a screen reader relies on is riding on a visual breakpoint.
+ */
+describe('sharing a line', () => {
+  it('puts the caption behind a breakpoint when the bar shares its line', () => {
+    render(<SessionProgressBar coverage={0.5} sharesLine />);
+    const caption = screen.getByText('50% completed');
+    expect(caption).toHaveClass('hidden');
+    expect(caption).toHaveClass('sm:inline');
+  });
+
+  it('keeps the caption unconditional when the bar owns its line', () => {
+    // The default. A bar in the chat header or the standalone `progress` slot has the room.
+    render(<SessionProgressBar coverage={0.5} />);
+    expect(screen.getByText('50% completed')).not.toHaveClass('hidden');
+  });
+
+  it('never sheds the value itself — that lives on the bar, not the caption', () => {
+    render(<SessionProgressBar coverage={0.5} sharesLine />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-label', 'Questionnaire progress');
+  });
+});

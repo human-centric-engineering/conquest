@@ -44,6 +44,20 @@ export interface TranscriptDownloadProps {
   accessToken?: string;
   /** Trigger styling — `ghost` on the lifecycle strip, `outline` on the completion screen. */
   variant?: 'ghost' | 'outline';
+  /**
+   * Below `sm`, show the download icon alone — no "Chat Transcript", no chevron.
+   *
+   * On by default for the lifecycle strip's caller, because there the trigger shares its line with
+   * the coverage bar and the support-reference chip, and at ~450px the full label was what pushed
+   * that line into a collision. It is the right thing to shed: it is a low-frequency action, the
+   * download glyph is unambiguous, and the button keeps its accessible name either way.
+   *
+   * NOT on the completion screen, where taking the transcript away is one of the two things the
+   * page is FOR and an icon-only button on a phone would bury it. Hence an explicit prop rather
+   * than reading `variant`: how a button looks and how much room it is willing to give up are two
+   * different questions that happen to have the same answer today.
+   */
+  collapseLabel?: boolean;
   className?: string;
 }
 
@@ -64,6 +78,7 @@ export function TranscriptDownload({
   sessionId,
   accessToken,
   variant = 'ghost',
+  collapseLabel = false,
   className,
 }: TranscriptDownloadProps) {
   const [busy, setBusy] = useState<TranscriptAction | null>(null);
@@ -154,7 +169,13 @@ export function TranscriptDownload({
     <span className={cn('inline-flex items-center gap-2', className)}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant={variant} size="sm" disabled={downloading}>
+          <Button
+            type="button"
+            variant={variant}
+            size="sm"
+            disabled={downloading}
+            className={cn(collapseLabel && 'max-sm:w-9 max-sm:px-0')}
+          >
             {downloading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             ) : copied ? (
@@ -162,8 +183,18 @@ export function TranscriptDownload({
             ) : (
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            {downloading ? 'Preparing…' : copied ? 'Copied' : 'Chat Transcript'}
-            <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+            {/* `sr-only`, not `hidden`: this text IS the button's accessible name, and it is also
+                how the live states ("Preparing…", "Copied") reach a screen-reader user. Hiding it
+                would leave an icon-only control with no name at all; an `aria-label` would give it
+                one but would then override these states with a constant. `sr-only` is absolutely
+                positioned, so it costs the collapsed button no width. */}
+            <span className={cn(collapseLabel && 'max-sm:sr-only')}>
+              {downloading ? 'Preparing…' : copied ? 'Copied' : 'Chat Transcript'}
+            </span>
+            <ChevronDown
+              className={cn('h-3.5 w-3.5 opacity-60', collapseLabel && 'max-sm:hidden')}
+              aria-hidden="true"
+            />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">

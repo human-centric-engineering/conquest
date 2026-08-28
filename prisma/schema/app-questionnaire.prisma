@@ -286,6 +286,15 @@ model AppQuestionnaireConfig {
   // (RESPONDENT_LAYOUTS — types.ts)
   respondentLayout String @default("classic") // classic | focus | broadsheet | horizon
 
+  // How that arrangement is DRAWN: rounded (soft corners, the conversational look every
+  // questionnaire has always had), press (straight lines and hairline rules, editorial), or marque
+  // (straight lines plus the client's brand carried structurally — logo mark on every interviewer
+  // turn, accent spine, colour-block header). A third axis, orthogonal to respondentLayout and
+  // respondentChrome: a design is CSS only and changes no DOM, so no combination can cost a
+  // feature. Defaults to rounded, and an unrecognised value resolves to rounded too.
+  // (RESPONDENT_DESIGNS — types.ts)
+  respondentDesign String @default("rounded") // rounded | press | marque
+
   // How much of ConQuest shows AROUND that arrangement: full (the site header and footer, as every
   // respondent page has always had), co_branded (a slim ConQuest line above the client's own brand
   // band, nothing below), or white_label (the questionnaire alone). Orthogonal to respondentLayout

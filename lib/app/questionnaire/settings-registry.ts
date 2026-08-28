@@ -57,6 +57,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import {
   RESPONDENT_CHROME_LABELS,
+  RESPONDENT_DESIGN_LABELS,
   RESPONDENT_LAYOUT_LABELS,
 } from '@/lib/app/questionnaire/layout/catalog';
 import { CHAT_TEXT_SIZE_LABELS } from '@/lib/app/questionnaire/chat/text-scale';
@@ -310,6 +311,11 @@ export const SETTING_DESCRIPTORS = {
     group: 'Respondent experience',
     tier: 'standard',
     rows: (c) => [{ label: 'Layout', value: RESPONDENT_LAYOUT_LABELS[c.respondentLayout] }],
+  },
+  respondentDesign: {
+    group: 'Respondent experience',
+    tier: 'standard',
+    rows: (c) => [{ label: 'Design', value: RESPONDENT_DESIGN_LABELS[c.respondentDesign] }],
   },
   respondentChrome: {
     group: 'Respondent experience',

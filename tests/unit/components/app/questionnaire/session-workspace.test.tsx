@@ -128,10 +128,12 @@ vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => 
   SessionLifecycleBar: ({
     onPause,
     onResume,
+    leading,
     trailing,
   }: {
     onPause: () => void;
     onResume: () => void;
+    leading?: ReactNode;
     trailing?: ReactNode;
   }) => (
     <div data-testid="lifecycle-bar">
@@ -141,7 +143,10 @@ vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => 
       <button type="button" onClick={onResume}>
         bar-resume
       </button>
-      {/* The mode toggle is passed here as `trailing` — render it so the test can drive it. */}
+      {/* Both clusters, rendered so the tests can drive either: the surface switcher arrives in
+          `leading` (it anchors the real strip's left edge), the text-size / interviewer / review
+          tools in `trailing`. */}
+      {leading}
       {trailing}
     </div>
   ),

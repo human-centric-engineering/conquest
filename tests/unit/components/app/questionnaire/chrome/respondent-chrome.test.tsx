@@ -31,8 +31,8 @@ vi.mock('@/components/layouts/public-nav', () => ({
   PublicNav: () => <nav data-testid="conquest-nav" />,
   PublicNavMenu: () => <div data-testid="conquest-nav-menu" />,
 }));
-vi.mock('@/components/layouts/public-footer', () => ({
-  PublicFooter: () => <footer data-testid="conquest-footer" />,
+vi.mock('@/components/app/questionnaire/chrome/respondent-footer', () => ({
+  RespondentFooter: () => <footer data-testid="conquest-footer" />,
 }));
 
 import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';

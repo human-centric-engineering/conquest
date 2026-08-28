@@ -1,5 +1,5 @@
 /**
- * Human-facing copy for the respondent layouts and chrome modes — the ONE source of it.
+ * Human-facing copy for the respondent layouts, designs and chrome modes — the ONE source of it.
  *
  * Three surfaces need to name a layout: the admin picker in the config editor, the settings
  * registry (which feeds the Questionnaire Pack's shareable "Experience setup" table), and the
@@ -16,8 +16,10 @@
 
 import {
   RESPONDENT_CHROMES,
+  RESPONDENT_DESIGNS,
   RESPONDENT_LAYOUTS,
   type RespondentChrome,
+  type RespondentDesign,
   type RespondentLayout,
 } from '@/lib/app/questionnaire/types';
 
@@ -55,6 +57,37 @@ export const RESPONDENT_LAYOUT_META: Record<RespondentLayout, RespondentLayoutMe
 export const RESPONDENT_LAYOUT_LABELS: Record<RespondentLayout, string> = Object.fromEntries(
   RESPONDENT_LAYOUTS.map((key) => [key, RESPONDENT_LAYOUT_META[key].label])
 ) as Record<RespondentLayout, string>;
+
+/**
+ * Human-facing copy for each DESIGN — the third axis, and the one an admin is most likely to
+ * confuse with the others, so the copy works hardest here at saying what it is NOT.
+ *
+ * Written for an admin choosing on a client's behalf, usually with the client in the room: it
+ * describes the feeling and who it suits, not the mechanism. "Square corners and hairline rules" is
+ * a decision somebody can have an opinion about; "resets `--radius-*` to 0" is not.
+ */
+export const RESPONDENT_DESIGN_META: Record<RespondentDesign, RespondentLayoutMeta> = {
+  rounded: {
+    label: 'ConQuest Rounded',
+    description:
+      'Soft corners and warm rules — the friendly, conversational look every questionnaire has always had. The default, and the safe choice for anything that should feel like a chat.',
+  },
+  press: {
+    label: 'Press',
+    description:
+      'Straight lines, hairline rules and no shadows — the register of a printed report. Suits serious instruments, professional audiences, and clients whose own brand is spare. Only the answer box keeps a soft corner, because it is the one thing a respondent touches.',
+  },
+  marque: {
+    label: 'Marque',
+    description:
+      'Straight lines, and the client’s brand built into the page rather than sat on top of it: their logo signs every question the interviewer asks, an accent spine runs down the conversation, and the header is a block of their colour. Best for a client with a strong mark who wants the questionnaire to be unmistakably theirs.',
+  },
+};
+
+/** Just the labels — the exported settings table and anywhere else without room for a description. */
+export const RESPONDENT_DESIGN_LABELS: Record<RespondentDesign, string> = Object.fromEntries(
+  RESPONDENT_DESIGNS.map((key) => [key, RESPONDENT_DESIGN_META[key].label])
+) as Record<RespondentDesign, string>;
 
 /**
  * Human-facing copy for each chrome mode, declared here for the same reason the layouts are: the

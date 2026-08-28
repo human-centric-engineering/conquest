@@ -383,6 +383,13 @@ export function MeetingParticipantBoot({
       theme={brand}
       header={activeSurface?.header ?? null}
       anonymous={activeSurface?.anonymous ?? false}
+      // From the per-session surface bundle, like every other authored choice here: a breakout can
+      // run a DIFFERENT questionnaire from the one the participant joined with, so the design has to
+      // follow the session rather than the room. Optional for the same reason `header` and
+      // `anonymous` above are: `brand` falls back to the not-yet-ready `surface?.config`, so this
+      // does render with `activeSurface` still null, and the provider's own `rounded` default is
+      // the right answer for that moment.
+      design={activeSurface?.respondentDesign}
     >
       {body}
     </BrandThemeProvider>

@@ -37,6 +37,7 @@ export const SURFACE_CONFIG_SELECT = {
   attachmentsEnabled: true,
   presentationMode: true,
   respondentLayout: true,
+  respondentDesign: true,
   respondentChrome: true,
   chatTextSize: true,
   answerSlotPanelScope: true,
@@ -63,6 +64,7 @@ export interface VersionSurface {
     attachmentsEnabled: boolean;
     presentationMode: string;
     respondentLayout: string;
+    respondentDesign: string;
     respondentChrome: string;
     chatTextSize: string;
     answerSlotPanelScope: string;

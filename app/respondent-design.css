@@ -1,0 +1,221 @@
+/* app/respondent-design.css
+ *
+ * The DESIGN axis of the respondent surface — corners, rules, shadows, and how much of the
+ * client's brand is structural rather than decorative.
+ *
+ * Imported once in app/layout.tsx AFTER brand-theme.css. Selectors are intentionally UNLAYERED,
+ * for the same reason brand-theme.css's are: an unlayered rule beats every rule in a `@layer`
+ * regardless of specificity, which is what lets a two-token block here restate a corner that a
+ * Tailwind utility set on the element itself. Nothing in this file needs `!important`.
+ *
+ * ## Why the whole feature is a stylesheet
+ *
+ * A design is CSS and nothing else. It sets no props, renders no DOM, and cannot reach into a
+ * layout — which means the axis multiplies out safely: four layouts x three designs x three chrome
+ * modes is thirty-six combinations, and not one of them can drop a slot, hide a control, or leave a
+ * respondent unable to answer, because there is no mechanism here for doing so. That is the reason
+ * to spend the effort on CSS rather than on a second component tree.
+ *
+ * The scope is `[data-design]`, set by `BrandThemeProvider` on the wrapper that already carries
+ * `data-surface`, `data-brand` and `data-canvas` — so it covers the questionnaire and stops at the
+ * ConQuest chrome around it, which is correct: a design belongs to the questionnaire, not to us.
+ * Portalled panels (the answers drawer, the interviewer switcher, the final-check modal) land on
+ * `document.body` and re-apply the attribute at their own root via `RespondentSurfaceAttrs`.
+ *
+ * ## The three designs
+ *
+ *   - `rounded` — the default, and deliberately ALMOST EMPTY below. Soft corners and warm rules are
+ *     what the components already draw, so the design that keeps them adds nothing. That is the
+ *     property worth protecting: a questionnaire that never touches this setting must render the
+ *     bytes it always did, and the cheapest way to guarantee that is for its block to have nothing
+ *     in it to go wrong.
+ *   - `press`  — straight lines, hairline rules, no resting shadows. The editorial register.
+ *   - `marque` — straight lines too, plus the client's brand as STRUCTURE.
+ *
+ * @see lib/app/questionnaire/types.ts — RESPONDENT_DESIGNS
+ * @see lib/app/questionnaire/layout/catalog.ts — the admin-facing copy
+ * @see .context/app/questionnaire/respondent-designs.md
+ */
+
+/* ==== Shared tokens ====
+ *
+ * Declared on the attribute itself rather than per design, so every design inherits a complete set
+ * and a new one only has to restate what it changes.
+ */
+[data-design] {
+  /* The respondent's own answer block. Lifted out of an inline style in `transcript-turns.tsx` so a
+     design can restate it without an `!important` fight; the literal here is the value that was
+     inline before the axis existed, which is what keeps `rounded` a genuine no-op. */
+  --cq-user-bubble-bg: color-mix(
+    in srgb,
+    var(--app-accent-color, var(--color-primary)) 12%,
+    transparent
+  );
+}
+
+/* ==== ConQuest Rounded (default) ====
+ *
+ * No rules, on purpose. See the header: the default design is the absence of a design, and an empty
+ * block is the only implementation that cannot regress the ninety-odd questionnaires already using
+ * it. The selector stays so the stylesheet still names all three, and so the test that asserts a
+ * block per RESPONDENT_DESIGNS value has something to find.
+ */
+[data-design='rounded'] {
+  /* intentionally empty */
+}
+
+/* ==== Straight lines — shared by `press` and `marque` ====
+ *
+ * Tailwind v4 compiles `rounded-sm|md|lg|xl|2xl` to `border-radius: var(--radius-*)`, so resetting
+ * those custom properties on a subtree flattens every one of them at once — no component knows, and
+ * no class list changes. `rounded-full` is the exception: it compiles to a literal
+ * `calc(infinity * 1px)` with no variable to intercept, so the pills are named explicitly below.
+ */
+[data-design='press'],
+[data-design='marque'] {
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+}
+
+/* The pills: the surface switcher and its sliding indicator, the text-size stepper, the review
+   trigger, the coverage bar and its fill. Flattened deliberately rather than exempted — a capsule
+   control in a square design is the one element that would read as an oversight. */
+[data-design='press'] .rounded-full,
+[data-design='marque'] .rounded-full {
+  border-radius: 0;
+}
+
+/* Resting lift, off. `:where()` keeps the specificity at zero so anything below can restate a
+   shadow without a specificity war; being unlayered is what makes it beat the utility.
+   `:not(:focus-visible)` is not a nicety — Tailwind draws focus rings as box-shadows, and a design
+   that quietly deleted them would be an accessibility regression wearing an aesthetic. */
+[data-design='press']
+  :where(.shadow-xs, .shadow-sm, .shadow, .shadow-md, .shadow-lg):not(:focus-visible),
+[data-design='marque']
+  :where(.shadow-xs, .shadow-sm, .shadow, .shadow-md, .shadow-lg):not(:focus-visible) {
+  box-shadow: none;
+}
+
+/* ==== Press ====
+ *
+ * The register of a printed report: straight lines, hairline rules doing the separating that
+ * shadows used to, and nothing decorative left over.
+ */
+
+[data-design='press'] {
+  /* A touch more contrast in the rules. With the shadows gone the borders are the only thing
+     separating a card from its ground, and the default hairline was tuned against a drop shadow
+     that is no longer there. */
+  --color-border: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --color-input: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+
+  /* The respondent's answers stop being bubbles — see below. */
+  --cq-user-bubble-bg: transparent;
+}
+
+/* THE exception to the straight lines, and the reason the design is not simply "square": the field
+   is the one thing on the page a respondent touches, and a touchable object should read as an
+   object. 2px — enough to soften a corner under a fingertip, not enough to look like a bubble. */
+[data-design='press'] textarea,
+[data-design='press'] input,
+[data-design='press'] .cq-composer {
+  border-radius: 2px;
+}
+
+/* The respondent's own answer as a MARGIN NOTE rather than a speech bubble: no fill, and a rule
+   down the edge it is set against. Right-aligned text with a right-hand rule is how a printed page
+   marks an aside, and it is the single move that makes a Press transcript read as a document
+   instead of as a chat log with the corners filed off. */
+[data-design='press'] .cq-user-bubble {
+  border-right: 2px solid var(--app-accent-color, var(--color-primary));
+  padding-right: 0.875rem;
+}
+
+/* ==== Marque ====
+ *
+ * Straight lines, and the client's brand built INTO the page rather than sat on top of it. Three
+ * moves, and each one takes something the surface was already drawing and makes it carry the brand.
+ */
+
+[data-design='marque'] {
+  /* A firmer fill than the default, because here the respondent's answers are the only unbranded
+     blocks on a page that is otherwise full of the client's colour, and a 12% wash disappears
+     against it. */
+  --cq-user-bubble-bg: color-mix(
+    in srgb,
+    var(--app-accent-color, var(--color-primary)) 18%,
+    transparent
+  );
+  --color-border: color-mix(in srgb, var(--color-foreground) 14%, transparent);
+}
+
+/* ONE — the logo signs every question.
+ *
+ * The 8px accent dot beside each interviewer turn becomes the client's mark. This is the move the
+ * design exists for: a banner is seen once and then stops being seen, whereas a mark set against
+ * every question the interviewer asks is present for the whole twenty minutes without ever
+ * competing with a word of the text.
+ *
+ * `--app-logo-mark-url` is set only when the client actually has a mark. When it is absent this
+ * `background-image` is invalid at computed-value time and resolves to `none`, which leaves the
+ * element's inline `background-color` — the accent — showing through as a small brand block. So the
+ * degradation is a deliberate second design, not a hole. */
+[data-design='marque'] .cq-turn-mark {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.25rem;
+  background-image: var(--app-logo-mark-url);
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* TWO — a spine down the conversation.
+ *
+ * The conversation card's left hairline becomes a 3px accent rule, so the column reads as bound
+ * rather than floated. It replaces a border that was already there: no space is taken and no layout
+ * shifts, which is what lets this hold across all four arrangements. */
+[data-design='marque'] .cq-conversation-frame {
+  border-left: 3px solid var(--app-accent-color, var(--color-primary));
+}
+
+/* THREE — the header is a block of their colour.
+ *
+ * A 3px accent rule closes the brand band, turning a strip that merely sits above the conversation
+ * into something that opens it. Applied to the band only (`> header`), never to a heading inside
+ * the conversation. */
+[data-design='marque'] > header {
+  border-bottom: 3px solid var(--app-accent-color, var(--color-primary));
+}
+
+/* Progress as an ambient rule rather than a capsule: squared by the shared block above, and
+   thickened here so it reads as the page's own edge under the band. */
+[data-design='marque'] [role='progressbar'] {
+  height: 3px;
+}
+
+/* The answer box as the one live object on a static page: a full accent edge, square. Both composer
+   forms are covered — the prominent box draws `.cq-composer`, the quiet one is a bare field — so
+   Marque looks like itself in all four layouts. */
+[data-design='marque'] .cq-composer {
+  border-width: 2px;
+  border-color: var(--app-accent-color, var(--color-primary));
+}
+[data-design='marque'] textarea {
+  border-bottom: 2px solid var(--app-accent-color, var(--color-primary));
+}
+/* ...but only ONE of the two, per composer. The prominent form's field sits inside the accent-edged
+   box, where the rule above would land across the middle of it — between the text and the controls
+   on its bottom edge — reading as a divider rather than as the object's edge. The box already
+   carries the accent, so the field inside it goes back to drawing nothing, which is the same
+   division of labour the quiet/prominent split uses everywhere else. Ordinary descendant
+   specificity, not `:not()`: it has to hold in every browser a respondent might arrive in. */
+[data-design='marque'] .cq-composer textarea {
+  border-bottom: 0;
+}

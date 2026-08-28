@@ -46,11 +46,26 @@ import {
   type RespondentSurfaceAttrs,
 } from '@/components/app/questionnaire/chat/respondent-surface-context';
 import { themeToCssVariables, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
+import { DEFAULT_RESPONDENT_DESIGN, type RespondentDesign } from '@/lib/app/questionnaire/types';
 import { buildScheduleView, type ScheduleStatus } from '@/lib/app/questionnaire/header/schedule';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
 
 interface BrandThemeProviderProps {
   theme: ResolvedTheme;
+  /**
+   * How the surface is DRAWN. Lands here rather than on the workspace because a design is CSS and
+   * this element is where the surface's CSS identity already lives — `data-surface`, `data-brand`
+   * and `data-canvas` are all pinned on the same div, and the stylesheet that reads them is the
+   * stylesheet that reads this.
+   *
+   * That placement is the whole reason the feature costs almost no components: a design cannot
+   * reach into a layout and rearrange it, cannot drop a slot, and cannot disagree with itself
+   * between two parts of the tree. It sets an attribute; the CSS does the rest.
+   *
+   * Defaults to `rounded` so a caller that has not been taught about the axis yet — and any future
+   * one — renders exactly what every questionnaire has always looked like.
+   */
+  design?: RespondentDesign;
   /** Title + round window shown in the band. Absent → logo-only band (legacy behaviour). */
   header?: BandHeader | null;
   /**
@@ -121,6 +136,7 @@ export function BrandThemeProvider({
   theme,
   header,
   anonymous = false,
+  design = DEFAULT_RESPONDENT_DESIGN,
   className,
   children,
 }: BrandThemeProviderProps) {
@@ -167,6 +183,9 @@ export function BrandThemeProvider({
     'data-surface': 'respondent',
     ...(isConquest ? { 'data-brand': 'conquest' as const } : {}),
     ...(hasCanvas ? { 'data-canvas': 'custom' as const } : {}),
+    // Unconditional, unlike the two above: every questionnaire has a design, and a portal that
+    // omitted it would fall back to the platform's own corners rather than to `rounded`.
+    'data-design': design,
     style,
   };
 
@@ -181,6 +200,11 @@ export function BrandThemeProvider({
       data-surface="respondent"
       data-brand={isConquest ? 'conquest' : undefined}
       data-canvas={hasCanvas ? 'custom' : undefined}
+      // The design axis, read by `app/respondent-design.css`. On this element rather than on
+      // `<html>` (where `data-surface` is set, per-request, by proxy.ts) because a design belongs to
+      // a QUESTIONNAIRE, not to a request: two versions with different designs can be open in two
+      // tabs, and an admin previewing one must not repaint the admin surface behind it.
+      data-design={design}
       style={style}
       // `bg-background` — which now resolves to the client's canvas — rather than the
       // transparent box this used to be. Transparent worked only because the ancestor it

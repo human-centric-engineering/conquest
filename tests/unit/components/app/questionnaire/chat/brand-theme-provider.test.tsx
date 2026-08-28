@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+
+import { RESPONDENT_DESIGNS } from '@/lib/app/questionnaire/types';
 import { render, screen } from '@testing-library/react';
 
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
@@ -466,6 +468,50 @@ describe('BrandThemeProvider', () => {
         </BrandThemeProvider>
       );
       expect(screen.getByText(/responses are anonymous/i)).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The DESIGN axis is one attribute, and everything else about it is a stylesheet.
+   *
+   * That is the design of the feature rather than an accident of it: `app/respondent-design.css`
+   * keys entirely off `[data-design]`, so this element is the whole runtime surface area. Two
+   * properties therefore have to hold, and neither is visible in jsdom (which evaluates no CSS):
+   * the attribute is always present, and it always carries a name the stylesheet has a block for.
+   */
+  describe('design axis', () => {
+    it('defaults to `rounded` when the caller says nothing', () => {
+      // Not "omits the attribute" — ALWAYS `rounded`. An absent attribute would match no block at
+      // all and leave the platform's own corners, which is a different look from the default one.
+      const { container } = render(
+        <BrandThemeProvider theme={BASE}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(container.firstChild).toHaveAttribute('data-design', 'rounded');
+    });
+
+    it.each(RESPONDENT_DESIGNS)('carries `%s` through to the surface root', (design) => {
+      const { container } = render(
+        <BrandThemeProvider theme={BASE} design={design}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(container.firstChild).toHaveAttribute('data-design', design);
+    });
+
+    it('sits on the same element as the rest of the surface identity', () => {
+      // `data-surface` re-scopes the palette and the inline style carries the client's brand. If a
+      // future edit moved the design attribute to a different element, a portalled panel would
+      // re-apply one and not the other, and the drawer would slide up in the wrong design.
+      const { container } = render(
+        <BrandThemeProvider theme={BASE} design="press">
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const root = container.firstChild as HTMLElement;
+      expect(root).toHaveAttribute('data-surface', 'respondent');
+      expect(root).toHaveAttribute('data-design', 'press');
     });
   });
 });

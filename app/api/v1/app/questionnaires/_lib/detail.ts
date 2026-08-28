@@ -27,6 +27,7 @@ import {
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
   RESPONDENT_CHROMES,
+  RESPONDENT_DESIGNS,
   RESPONDENT_LAYOUTS,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
@@ -42,6 +43,7 @@ import {
   type FieldProvenance,
   type PresentationMode,
   type RespondentChrome,
+  type RespondentDesign,
   type RespondentLayout,
   type ProfileFieldConfig,
   type ReasoningPlacement,
@@ -134,6 +136,7 @@ export const CONFIG_SELECT = {
   answerSlotPanelScope: true,
   presentationMode: true,
   respondentLayout: true,
+  respondentDesign: true,
   respondentChrome: true,
   chatTextSize: true,
   inlineCorrectionEnabled: true,
@@ -192,6 +195,7 @@ type ConfigRow = {
   answerSlotPanelScope: string;
   presentationMode: string;
   respondentLayout: string;
+  respondentDesign: string;
   respondentChrome: string;
   chatTextSize: string;
   inlineCorrectionEnabled: boolean;
@@ -298,6 +302,21 @@ function asRespondentLayout(value: string): RespondentLayout {
 }
 
 /**
+ * Narrow a stored `respondentDesign` to the enum (default when unknown).
+ *
+ * The unknown branch bites harder here than on the other two axes. A layout or a chrome mode that
+ * this build does not recognise still resolves through a `Record` lookup that would throw or render
+ * nothing obvious; a design is a stylesheet block keyed on an attribute VALUE, so an unknown one
+ * matches no block at all and silently leaves the platform's own corners in place. Narrowing on
+ * read means the attribute can only ever carry a name the CSS has a block for.
+ */
+function asRespondentDesign(value: string): RespondentDesign {
+  return (RESPONDENT_DESIGNS as readonly string[]).includes(value)
+    ? (value as RespondentDesign)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.respondentDesign;
+}
+
+/**
  * Narrow a stored `respondentChrome` to the enum (default when unknown).
  *
  * Same asymmetry as the layout: the PATCH validator rejects an unknown value because an admin
@@ -366,6 +385,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
     respondentLayout: asRespondentLayout(row.respondentLayout),
+    respondentDesign: asRespondentDesign(row.respondentDesign),
     // `indexForTextSize` round-trips through the ladder index rather than narrowing the string
     // directly, so the projection and the respondent surface resolve an unknown rung the same way
     // by construction — there is only one place that decides what an unrecognised name means.

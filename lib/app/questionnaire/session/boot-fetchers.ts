@@ -32,6 +32,7 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
+  RESPONDENT_DESIGNS,
   RESPONDENT_LAYOUTS,
   PROFILE_FIELD_TYPES,
   PROFILE_FIELD_VALIDATION_MODES,
@@ -312,6 +313,10 @@ const surfaceConfigSchema = z.object({
   // one does not must still render — as Classic — instead of failing the whole parse and leaving
   // the respondent with a dead surface.
   respondentLayout: z.enum(RESPONDENT_LAYOUTS).catch(DEFAULT_QUESTIONNAIRE_CONFIG.respondentLayout),
+  // Same `.catch` reasoning, and it matters slightly more here: an unknown DESIGN name would
+  // reach the surface as a `data-design` attribute matching no stylesheet block at all, so the
+  // failure would be silent rather than obvious.
+  respondentDesign: z.enum(RESPONDENT_DESIGNS).catch(DEFAULT_QUESTIONNAIRE_CONFIG.respondentDesign),
   answerPanelScope: z
     .enum(ANSWER_SLOT_PANEL_SCOPES)
     .catch(DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope),

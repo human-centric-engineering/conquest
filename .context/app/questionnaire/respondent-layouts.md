@@ -149,6 +149,44 @@ Neither builds a feature, fetches anything, or reads session state — they take
 position them. That is arrangement, shared, and it is the opposite of the thing the contract
 forbids (a layout constructing a feature for itself).
 
+### The composer has two forms, and the placement picks
+
+`ChatComposer` renders one of two arrangements, chosen by the layout's declaration rather than by
+the composer:
+
+| `placements.composer` | Form                                                                                                                                                        | Who                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `prominent` unset     | **Quiet** — a field with the attachment / mic / send buttons on the line beside it, one line tall to start and auto-growing to a cap. No border of its own. | Classic, Focus      |
+| `prominent: true`     | **One box** — field and controls share a bordered, brand-tinted surface with the controls inside along its bottom edge; opens at prose height.              | Broadsheet, Horizon |
+
+The question the flag answers is _how present should the answer box be_, and the two layouts that
+say "very" arrive from different directions. Broadsheet's margin is bare rail: nothing is drawn
+around the composer there, so it has to draw itself or float unfindable, and a row of buttons beside
+a rail-width field would leave the mic and Send marooned at opposite ends of a mostly-empty line.
+Horizon puts one question on a centred stage with everything else folded away, so the answer box is
+the only other thing on screen and there is open space above it — a one-line field in that expanse
+reads as an afterthought when the layout's whole argument is _this question, and your answer to it_.
+
+Classic and Focus say "modestly", and that is not timidity: there a scrolling transcript is pressing
+down on the composer and competing for the same fixed viewport, so an empty box holding four lines
+would be taking them from the conversation.
+
+This has been got wrong in both directions inside one week. The one-box form shipped applied
+everywhere, which gave Classic a four-line bordered field under a rule; the correction then took it
+off Horizon, the one stacked layout that had earned it. Hence
+`tests/unit/components/app/questionnaire/chat/composer-forms.test.tsx`, which pins the membership as
+a **set** — gaining the flag and losing it both land there and have to be argued for.
+
+A design is a THIRD axis, orthogonal to this one: a layout decides where the parts sit, a design
+decides what they look like. `prominent` is a layout's statement about the composer's ROLE in its
+arrangement, and it holds under every design — see
+[respondent-designs.md](./respondent-designs.md).
+
+`prominent` is deliberately separate from `fills` even though only Broadsheet sets both, and Horizon
+is the proof: it wants the surface and the prose height, but its stage above still needs the room,
+so a composer that became the whole column would take the layout apart. _How tall_ and _how present_
+are two questions.
+
 ## The conversation is four slots
 
 `releaseNotice`, `history`, `currentExchange` and `composer` — where there was one `conversation`
