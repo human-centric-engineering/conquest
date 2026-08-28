@@ -504,7 +504,9 @@ this apply — yields concise keys (`describe_current_morale_work`, not the whol
 a slugified sentence.
 
 An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-run),
-`target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`.
+`target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`. The
+per-finding route is API-only as of F5.4 — the review surface writes exclusively through the batch
+(below), which reports the same reasons per finding in its result rather than as an HTTP error.
 
 ## F5.4 — triage the run, then apply it as a batch
 
@@ -570,6 +572,46 @@ that quietly drops three of eleven changes is worse than no batch, so the route 
 200** when the run resolves — "every accepted change was already stale" is an answer the reviewer
 needs the detail of, and an error envelope would throw that detail away. The response also carries
 every finding re-derived, so the queue re-renders from one round trip.
+
+### The surface — a queue you triage, and one bar that executes it
+
+Three places carry the state, and between them they answer "what have I decided" and "has any of it
+happened" without the reviewer having to ask:
+
+**The card** offers exactly two verbs, and neither reaches the questionnaire. The sentence over
+them is future-tense on purpose — "Accepting queues this change. Applying the run then removes this
+question from the questionnaire" — because a card that promised a click did something would be the
+same lie the old per-finding Apply told, moved one step earlier. Once accepted, the card says
+outright that it is **not applied yet**: someone who accepts twenty suggestions and walks away must
+not believe the questionnaire changed.
+
+**The header tiles** count Accepted and Dismissed apart rather than rolling them into one
+"reviewed" figure, which answered neither of the two questions a reviewer is actually tracking —
+how much is queued to apply, and how much did I throw away. The Accepted tile's hint carries the
+warning too ("queued — not applied yet"), because a count of accepted suggestions is exactly where
+someone would assume the work was done.
+
+**The batch bar** is a permanent band, not a toast on each Accept. Being told twenty times through
+a dialog that accepting changes nothing teaches a reviewer to dismiss the dialog without reading;
+a count that sits there saying "6 accepted changes, not applied yet" is unmissable and never in the
+way. It reports from the whole run and never the filtered view — a bar reading "3 accepted" while
+eleven were about to be applied would be worse than no bar at all.
+
+Pressing apply with the queue half-triaged raises a confirmation, not a block: "do the ones I have
+looked at" is a legitimate thing to want, so the dialog states what will and will not happen
+(`N still have no decision. Applying now writes the M you accepted and leaves the rest alone`) and
+lets it through. Afterwards the result panel stays on screen until the next batch, because it is
+the **only** place a change that did not land is ever named. Each skipped finding is given a reason
+in the reviewer's terms — `stale` becomes "the question changed since this evaluation ran" — and
+noted as _still accepted_, so fixing the cause and pressing apply again picks it up without
+re-triaging. Applied changes link straight to the new version in Build.
+
+The instruction box sits behind a link rather than on every card: most findings are accepted as
+proposed, and forty textareas is noise that makes the two decisions harder to reach. It saves on
+blur via `set_instruction`, and `accept` carries anything still unsaved as a belt to that braces.
+Its in-flight state is tracked **apart from** the decision buttons' — clicking Accept blurs the
+box, which starts the save, and a shared busy flag disabled the button in the instant between the
+blur and the click landing on it, swallowing the very click that caused the save.
 
 ### Versioning — fork only when needed
 

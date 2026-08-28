@@ -123,8 +123,19 @@ export function EvaluationRunHeadline({
 }: Props) {
   const severity = tallySeverities(findings);
 
-  const reviewed = findings.filter((f) => f.status !== 'pending').length;
-  const pending = findings.length - reviewed;
+  // Decisions, counted separately rather than rolled into one "reviewed" number. Accepting and
+  // dismissing are the two things a reviewer spends the whole session doing, and how many of each
+  // they have done is the state they need back at a glance — a combined "12 / 40 reviewed" answers
+  // neither "how much is queued to apply" nor "how much did I throw away".
+  let accepted = 0;
+  let dismissed = 0;
+  let appliedCount = 0;
+  for (const f of findings) {
+    if (f.status === 'accepted') accepted += 1;
+    else if (f.status === 'declined') dismissed += 1;
+    else if (f.status === 'applied') appliedCount += 1;
+  }
+  const pending = findings.length - accepted - dismissed - appliedCount;
   const staleCount = findings.filter((f) => f.stale).length;
 
   // Per-dimension severity splits, computed once for the strip.
@@ -149,9 +160,23 @@ export function EvaluationRunHeadline({
     { label: 'Minor', value: severity.minor },
     { label: 'Info', value: severity.info },
     {
-      label: 'Reviewed',
-      value: `${reviewed} / ${findings.length}`,
-      hint: pending > 0 ? `${pending} still pending` : 'queue clear',
+      label: 'Accepted',
+      value: accepted,
+      // The hint carries the thing the number alone cannot: whether these have taken effect. It
+      // is the same warning the batch bar makes unmissable, in the place a reviewer reads totals.
+      hint:
+        accepted > 0
+          ? 'queued — not applied yet'
+          : appliedCount > 0
+            ? `${appliedCount} already applied`
+            : 'nothing queued',
+    },
+    {
+      label: 'Dismissed',
+      value: dismissed,
+      // Worded apart from the batch bar's "N still to review" on purpose: the same sentence in
+      // two places reads as one number echoing rather than two views of the run.
+      hint: pending > 0 ? `${pending} not yet decided` : 'all reviewed',
     },
   ];
 

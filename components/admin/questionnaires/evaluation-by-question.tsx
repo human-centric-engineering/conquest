@@ -77,8 +77,6 @@ interface Props {
   questionnaireId: string;
   versionId: string;
   runId: string;
-  canApply: boolean;
-  dataSlotsAvailable: boolean;
   /** The run's cross-judge alternatives, keyed by target — empty for runs that predate the step. */
   reconciledByKey: Map<string, ReconciledSuggestion>;
   /**
@@ -127,8 +125,6 @@ function GroupCard({
   questionnaireId,
   versionId,
   runId,
-  canApply,
-  dataSlotsAvailable,
   reconciledByKey,
   verdictByKey,
   onToggle,
@@ -271,8 +267,6 @@ function GroupCard({
                 questionnaireId={questionnaireId}
                 versionId={versionId}
                 runId={runId}
-                canApply={canApply}
-                dataSlotsAvailable={dataSlotsAvailable}
                 lead="dimension"
                 onUpdate={onUpdate}
               />

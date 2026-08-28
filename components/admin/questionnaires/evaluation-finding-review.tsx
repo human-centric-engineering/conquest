@@ -55,25 +55,15 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
+import { QUESTION_TYPE_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
 import {
-  QUESTION_TYPES,
-  QUESTION_TYPE_LABELS,
-  questionTypeLabel,
-} from '@/lib/app/questionnaire/types';
-import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
+  EVALUATION_DIMENSION_SPECS,
+  MAX_APPLY_INSTRUCTION,
+} from '@/lib/app/questionnaire/evaluation';
 import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationFindingView, FindingTargetKind } from '@/lib/app/questionnaire/views';
 import {
@@ -113,9 +103,6 @@ interface Props {
   questionnaireId: string;
   versionId: string;
   runId: string;
-  canApply: boolean;
-  /** Whether the version has data slots — drives the "slot the new question" checkbox on add_question. */
-  dataSlotsAvailable?: boolean;
   /**
    * Which fact the card leads with — the one its surrounding heading does *not* already supply.
    * Under a judge heading (`'target'`, the default) that's which question is meant; under a
@@ -163,9 +150,6 @@ function effectOf(op: ProposedEdit): string {
       return `Adds this as a new ${QUESTION_TYPE_LABELS[op.type]} question.`;
   }
 }
-
-/** The fork caveat, appended wherever a click writes to the questionnaire. */
-const FORK_NOTE = 'A launched version is forked to a new draft first.';
 
 /**
  * Where the finding's subject sits, as a short chip ("Question 3 · Background", "Section",
@@ -247,15 +231,20 @@ export function FindingReviewCard({
   questionnaireId,
   versionId,
   runId,
-  canApply,
-  dataSlotsAvailable = false,
   lead = 'target',
   onUpdate,
 }: Props) {
-  const [busy, setBusy] = useState<null | 'decline' | 'edit' | 'apply'>(null);
+  const [busy, setBusy] = useState<null | 'accept' | 'decline'>(null);
+  // Tracked apart from `busy` so it cannot disable the decision buttons. Clicking Accept blurs the
+  // instruction box, which starts this save — and a `busy` that covered both would disable the
+  // button in the instant between the blur and the click landing on it, silently swallowing the
+  // click that caused the save in the first place.
+  const [savingSteer, setSavingSteer] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [addToDataSlots, setAddToDataSlots] = useState(true);
+  // The steer, held locally so typing is not a round trip per keystroke. `finding.applyInstruction`
+  // is the server's copy; this is the draft of it.
+  const [instruction, setInstruction] = useState(finding.applyInstruction ?? '');
+  const [showInstruction, setShowInstruction] = useState(Boolean(finding.applyInstruction));
 
   const sev = findingSeverityBadge(finding.severity);
   const statusBadge = findingReviewStatusBadge(finding.status);
@@ -280,16 +269,7 @@ export function FindingReviewCard({
     lead === 'target' && finding.target && NAMED_TARGET_KINDS.has(finding.target.kind)
       ? finding.target
       : null;
-  const editorBase = `/admin/questionnaires/${questionnaireId}/v/${versionId}/structure`;
-  // Prose-only / refine link opens the editor in edit mode; an add_question carries the finding ref
-  // so the editor can pre-fill a highlighted new-question composer (see EvaluationSeedComposer).
-  const editorHref = `${editorBase}?edit=1`;
-  const seedHref = `${editorBase}?edit=1&seedFinding=${encodeURIComponent(`${runId}:${finding.id}`)}`;
-  const applyDisabledTitle = !canApply
-    ? 'Design evaluation is disabled'
-    : finding.stale
-      ? 'The structure changed since this run — re-run the evaluation'
-      : undefined;
+  const editorHref = `/admin/questionnaires/${questionnaireId}/v/${versionId}/structure?edit=1`;
   const findingPath = API.APP.QUESTIONNAIRES.versionEvaluationFinding(
     questionnaireId,
     versionId,
@@ -297,84 +277,49 @@ export function FindingReviewCard({
     finding.id
   );
 
-  // The heading and sentence over the work-actions. Three shapes, because there are three genuinely
-  // different situations and one generic "Actions" heading over all of them is what left a reviewer
-  // unable to tell whether a click would change the questionnaire.
-  const work = addOp
-    ? {
-        heading: 'Add this question to the questionnaire',
-        effect: `${effectOf(addOp)} ${FORK_NOTE}`,
-      }
-    : finding.applicable === 'apply' && op
-      ? {
-          heading: 'Change the questionnaire now',
-          effect: `${effectOf(op)}${finding.editedOverride ? ' (your edited version)' : ''} ${FORK_NOTE}`,
-        }
-      : {
-          heading: 'Make this change by hand',
-          effect:
-            'There is no one-click edit for this one — open the structure editor and make the change there.',
-        };
-
   /**
-   * Reject the suggestion. Nothing in the questionnaire changes.
+   * What accepting this one would put in the batch — the sentence under the Accept button.
    *
-   * The review route also accepts `action: 'accept'` — recording agreement without acting — and
-   * still does; it is simply no longer offered here. Four verbs on one card (accept, dismiss, edit,
-   * apply) is three too many when two of them are English near-synonyms that do opposite things,
-   * and "accept" was the one carrying no consequence: applying already records agreement, and the
-   * fork-lineage rule that made batch-agree-then-apply worth having is enforced server-side
-   * (`evaluation-apply.ts` converges repeated applies on one draft), not by the admin batching.
+   * Still declarative and still names the actual edit, for the reason `effectOf` exists: an
+   * imperative above a button reads as an instruction to the reader. What changed is the tense.
+   * Nothing happens on click any more, so promising that it does would be the same lie the old
+   * per-finding Apply told, just earlier.
    */
-  async function dismiss() {
-    setBusy('decline');
+  const effect = op ? (finding.applicable === 'apply' || addOp ? effectOf(op) : null) : null;
+
+  const dirty = instruction.trim() !== (finding.applyInstruction ?? '');
+
+  /** Persist the steer on its own, without touching the decision. */
+  async function saveInstruction() {
+    if (!dirty || savingSteer) return;
+    setSavingSteer(true);
     setError(null);
-    const res = await sendJson(findingPath, 'PATCH', { action: 'decline' });
-    setBusy(null);
+    const res = await sendJson(findingPath, 'PATCH', {
+      action: 'set_instruction',
+      instruction,
+    });
+    setSavingSteer(false);
     if (!res.ok) return setError(res.message);
     onUpdate(res.data as EvaluationFindingView);
   }
 
-  async function apply() {
-    setBusy('apply');
+  /**
+   * Record a decision. Neither verb touches the questionnaire — that is the whole shape of the
+   * flow now: triage the run, then execute the accepted set in one batch.
+   *
+   * Accept carries whatever is currently in the box, so a reviewer who types a steer and presses
+   * Accept without leaving the field does not lose it to a blur that never happened.
+   */
+  async function decide(action: 'accept' | 'decline') {
+    setBusy(action);
     setError(null);
-    const res = await sendJson(
-      API.APP.QUESTIONNAIRES.versionEvaluationFindingApply(
-        questionnaireId,
-        versionId,
-        runId,
-        finding.id
-      ),
-      'POST'
-    );
+    // `instruction` only rides along when there is something unsaved to send. Omitting the key
+    // (rather than sending null) is what stops an accept from clearing a steer saved earlier.
+    const body: { action: string; instruction?: string } =
+      action === 'accept' && dirty ? { action, instruction } : { action };
+    const res = await sendJson(findingPath, 'PATCH', body);
     setBusy(null);
     if (!res.ok) return setError(res.message);
-    const data = res.data as { finding: EvaluationFindingView | null };
-    if (data.finding) onUpdate(data.finding, res.meta as ApplyMeta | undefined);
-
-    // For a newly-added question, optionally slot it (into an existing data slot or a new one) on
-    // whichever version it landed on. Best-effort fire-and-forget: the question is already added.
-    if (addOp && dataSlotsAvailable && addToDataSlots) {
-      const meta = res.meta as ApplyMeta | undefined;
-      const targetVersionId = data.finding?.appliedToVersionId ?? meta?.versionId ?? versionId;
-      void fetch(API.APP.QUESTIONNAIRES.versionDataSlotsAssign(questionnaireId, targetVersionId), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      }).catch(() => {
-        // swallow — slotting is a follow-up; the suggestion was applied.
-      });
-    }
-  }
-
-  async function saveEdit(nextOp: ProposedEdit) {
-    setBusy('edit');
-    setError(null);
-    const res = await sendJson(findingPath, 'PATCH', { action: 'edit', editedOverride: nextOp });
-    setBusy(null);
-    if (!res.ok) return setError(res.message);
-    setEditing(false);
     onUpdate(res.data as EvaluationFindingView);
   }
 
@@ -522,8 +467,101 @@ export function FindingReviewCard({
           </div>
         )}
 
-        {finding.appliedToVersionId && (
-          <p className="text-muted-foreground mt-1 text-xs">
+        {/* The reviewer's own steer, and the only new control on the card.
+            It replaced a typed op form (pick an answer type, pick an ordinal) that asked the
+            reviewer to express a preference as an exact edit. What they actually want to say is
+            "keep it under 15 words" — so let them say that, and let the batch's AI leg reconcile
+            it with the judge's suggestion. Collapsed behind a link until wanted: most findings are
+            accepted as proposed, and a textarea on every card in a queue of forty is noise. */}
+        {!isTerminal &&
+          (showInstruction ? (
+            <div className="space-y-1.5">
+              <Label htmlFor={`steer-${finding.id}`} className="text-xs font-medium">
+                Anything to add about how this change should be made?
+              </Label>
+              <Textarea
+                id={`steer-${finding.id}`}
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                onBlur={() => void saveInstruction()}
+                maxLength={MAX_APPLY_INSTRUCTION}
+                rows={2}
+                placeholder="e.g. keep it under 15 words, and don't mention tenure"
+                className="text-sm"
+              />
+              <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-xs')}>
+                Optional. Written in your words and handed to the AI when this run&apos;s accepted
+                changes are applied, alongside the suggestion above.
+                {savingSteer && ' Saving…'}
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowInstruction(true)}
+              className="text-muted-foreground hover:text-foreground cursor-pointer text-xs underline underline-offset-2"
+            >
+              Add an instruction for how to make this change
+            </button>
+          ))}
+
+        {/* A steer written and then left on a decided card still has to be visible, or the
+            reviewer cannot tell which of forty findings they said something about. */}
+        {isTerminal && finding.applyInstruction && (
+          <LabelledField label="Your instruction">
+            <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-sm')}>
+              {finding.applyInstruction}
+            </p>
+          </LabelledField>
+        )}
+
+        {/* Two verbs, and neither one touches the questionnaire.
+            That is the shape of the whole flow: triage the run, then execute the accepted set in
+            one batch, rather than deciding the order of a dozen structural edits by the order you
+            happened to click. So the sentence over the buttons is in the future tense — promising
+            that a click changes something would be the same lie the old per-finding Apply told,
+            moved earlier. */}
+        {!isTerminal && (
+          <div className="mt-4 rounded-md border p-3">
+            <FieldLabel>Record a decision — nothing changes yet</FieldLabel>
+            <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1 text-sm')}>
+              {effect
+                ? `Accepting queues this change. Applying the run then ${effect.charAt(0).toLowerCase()}${effect.slice(1)}`
+                : 'There is no automatic edit for this one — accepting records that you agree, and you make the change in the editor.'}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={busy !== null} onClick={() => void decide('accept')}>
+                {busy === 'accept' ? 'Accepting…' : 'Accept'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => void decide('decline')}
+              >
+                {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
+              </Button>
+              {!effect && (
+                <Button asChild size="sm" variant="ghost">
+                  <Link href={editorHref}>Open in editor →</Link>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* The warning, on the card that earned it. Someone who accepts twenty suggestions and
+            walks away must not believe the questionnaire changed — the run-level bar says so in
+            aggregate, and this says so on the thing they just clicked. */}
+        {finding.status === 'accepted' && (
+          <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-3 text-sm')}>
+            Accepted — <strong className="text-foreground font-medium">not applied yet</strong>.
+            Nothing changes in the questionnaire until you apply this run&apos;s accepted changes.
+          </p>
+        )}
+
+        {finding.status === 'applied' && finding.appliedToVersionId && (
+          <p className="text-muted-foreground mt-3 text-sm">
             Applied to{' '}
             <Link
               href={`/admin/questionnaires/${questionnaireId}/v/${finding.appliedToVersionId}/structure`}
@@ -535,256 +573,8 @@ export function FindingReviewCard({
           </p>
         )}
 
-        {editing && op ? (
-          <EditOverrideForm
-            op={op}
-            busy={busy === 'edit'}
-            onCancel={() => setEditing(false)}
-            onSave={(next) => void saveEdit(next)}
-          />
-        ) : (
-          !isTerminal && (
-            /* What the buttons DO, said in words above them.
-               Four verbs — accept, dismiss, edit, apply — that are near-synonyms in English and do
-               very different things here, and a divider between them was carrying the whole
-               distinction. Tooltips did not help: a reviewer deciding whether to click is not going
-               to hover four buttons to find out which one edits the questionnaire. So the two kinds
-               of action are separated into labelled sections, each stating its own consequence in a
-               sentence, and the sentence for the applying section names the *actual* edit. */
-            <div className="mt-4 rounded-md border">
-              <div className="p-3">
-                <FieldLabel>{work.heading}</FieldLabel>
-                <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1 text-sm')}>
-                  {work.effect}
-                </p>
-
-                {addOp && dataSlotsAvailable && (
-                  <label
-                    htmlFor={`add-slot-${finding.id}`}
-                    className="text-muted-foreground mt-2.5 flex items-center gap-2 text-sm"
-                  >
-                    <Checkbox
-                      id={`add-slot-${finding.id}`}
-                      checked={addToDataSlots}
-                      onCheckedChange={setAddToDataSlots}
-                      disabled={busy !== null}
-                    />
-                    {/* Names its subject explicitly: under a gap group the surrounding heading is
-                        about the questionnaire's coverage, so a bare "add to a data slot" reads as
-                        if the slot attaches to that heading rather than to the question drafted. */}
-                    Also add the new question to a data slot (create one if needed)
-                  </label>
-                )}
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {addOp ? (
-                    <>
-                      <Button
-                        size="sm"
-                        disabled={busy !== null || finding.stale || !canApply}
-                        title={applyDisabledTitle}
-                        onClick={() => void apply()}
-                      >
-                        {busy === 'apply' ? 'Adding…' : 'Add to questionnaire'}
-                      </Button>
-                      <Button asChild size="sm" variant="secondary">
-                        <Link href={seedHref}>Open in editor</Link>
-                      </Button>
-                    </>
-                  ) : finding.applicable === 'apply' && op ? (
-                    <>
-                      <Button
-                        size="sm"
-                        disabled={busy !== null || finding.stale || !canApply}
-                        title={applyDisabledTitle}
-                        onClick={() => void apply()}
-                      >
-                        {busy === 'apply' ? 'Applying…' : 'Apply this change'}
-                      </Button>
-                      {isEditableOp(op) && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy !== null}
-                          onClick={() => setEditing(true)}
-                        >
-                          Edit first
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <Button asChild size="sm" variant="secondary">
-                      <Link href={editorHref}>Open in editor →</Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {/* Ruled off, below, and quieter — the geometry says this is the lesser action
-                  before a word is read. It is also the only other one: two verbs that are plainly
-                  opposites, each under a heading saying which is which. */}
-              <div className="bg-muted/40 border-t p-3">
-                <FieldLabel>Or dismiss it</FieldLabel>
-                <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1 text-sm')}>
-                  Rejects this suggestion and marks it decided. Nothing in the questionnaire
-                  changes.
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => void dismiss()}
-                  >
-                    {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )
-        )}
-
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
       </div>
     </li>
   );
-}
-
-/** Ops the inline form can edit (text ops + type + ordinal). Others edit via the main editor. */
-function isEditableOp(op: ProposedEdit): boolean {
-  return (
-    op.op === 'replace_prompt' ||
-    op.op === 'edit_guidelines' ||
-    op.op === 'edit_goal' ||
-    op.op === 'change_type' ||
-    op.op === 'reorder'
-  );
-}
-
-/** Compact, op-aware edit form. Covers the high-value edits; structured config edits stay in the editor. */
-function EditOverrideForm({
-  op,
-  busy,
-  onCancel,
-  onSave,
-}: {
-  op: ProposedEdit;
-  busy: boolean;
-  onCancel: () => void;
-  onSave: (next: ProposedEdit) => void;
-}) {
-  const [text, setText] = useState(initialText(op));
-  const [type, setType] = useState(op.op === 'change_type' ? op.type : 'free_text');
-  const [ordinal, setOrdinal] = useState(op.op === 'reorder' ? String(op.ordinal) : '0');
-
-  function build(): ProposedEdit | null {
-    switch (op.op) {
-      case 'replace_prompt':
-        return text.trim() ? { op: 'replace_prompt', prompt: text.trim() } : null;
-      case 'edit_guidelines':
-        return { op: 'edit_guidelines', guidelines: text.trim() ? text.trim() : null };
-      case 'edit_goal':
-        return text.trim() ? { op: 'edit_goal', goal: text.trim() } : null;
-      case 'change_type':
-        return { op: 'change_type', type };
-      case 'reorder': {
-        const n = Number.parseInt(ordinal, 10);
-        if (Number.isNaN(n) || n < 0) return null;
-        return {
-          op: 'reorder',
-          ordinal: n,
-          ...(op.targetSectionKey ? { targetSectionKey: op.targetSectionKey } : {}),
-        };
-      }
-      default:
-        return op;
-    }
-  }
-
-  const built = build();
-
-  return (
-    <div className="bg-muted/40 mt-3 space-y-2 rounded-md border p-3">
-      {(op.op === 'replace_prompt' || op.op === 'edit_guidelines' || op.op === 'edit_goal') && (
-        <div className="space-y-1">
-          <Label className="text-xs">
-            {op.op === 'replace_prompt'
-              ? 'New prompt'
-              : op.op === 'edit_goal'
-                ? 'New goal'
-                : 'Guidelines'}{' '}
-            <FieldHelp title="Edit before applying">
-              <p>
-                Tweak the wording the judge proposed. Applying writes this to the draft version.
-              </p>
-            </FieldHelp>
-          </Label>
-          <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} />
-        </div>
-      )}
-
-      {op.op === 'change_type' && (
-        <div className="space-y-1">
-          <Label className="text-xs">
-            New answer type{' '}
-            <FieldHelp title="Change answer type">
-              <p>
-                Applying resets the question&apos;s type configuration to this type&apos;s default —
-                you can refine choices/scale afterwards in the editor.
-              </p>
-            </FieldHelp>
-          </Label>
-          <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
-            <SelectTrigger className="h-8 w-48 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {QUESTION_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {QUESTION_TYPE_LABELS[t]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {op.op === 'reorder' && (
-        <div className="space-y-1">
-          <Label className="text-xs">
-            Position (0-based){' '}
-            <FieldHelp title="Move the question">
-              <p>
-                The 0-based position within its section. Out-of-range values are clamped on apply.
-              </p>
-            </FieldHelp>
-          </Label>
-          <input
-            type="number"
-            min={0}
-            value={ordinal}
-            onChange={(e) => setOrdinal(e.target.value)}
-            className="border-input h-8 w-24 rounded-md border px-2 text-xs"
-          />
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        <Button size="sm" disabled={busy || !built} onClick={() => built && onSave(built)}>
-          {busy ? 'Saving…' : 'Save edit'}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Seed the textarea from the op's editable text field. */
-function initialText(op: ProposedEdit): string {
-  if (op.op === 'replace_prompt') return op.prompt;
-  if (op.op === 'edit_guidelines') return op.guidelines ?? '';
-  if (op.op === 'edit_goal') return op.goal;
-  return '';
 }
