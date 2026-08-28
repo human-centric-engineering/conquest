@@ -31,11 +31,25 @@ refusing a document over a fidelity nicety is worse than persisting it with the 
 record. All three land on the `extraction_verify` `AppAiRun.detail`, and the two deterministic ones
 are omitted from it when zero, so a key being present already means something happened.
 
-| Check                     | How                                                                                               | Says                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `disallowedEditCount`     | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
-| `unattributedPromptCount` | Deterministic — counts prompts matching neither the source nor any change record's `after`        | Whether the wording in the editor is the author's, or the model's   |
-| `coverage`                | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+| Check                    | How                                                                                               | Says                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `disallowedEditCount`    | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
+| `unattributedPromptKeys` | Deterministic — the KEYS of prompts matching neither the source nor any change record's `after`   | Whether the wording in the editor is the author's, or the model's   |
+| `coverage`               | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+
+**The unattributed check reports keys, not just a number.** A count was the right signal for a
+corpus run — "is the instruction landing?" is answered by a number — and the wrong one for an
+admin, who otherwise has to diff a whole draft against the document by eye to find which two
+questions it means. `unattributedPromptCount` is still written beside the keys, derived from
+`.length` rather than tracked separately, because two fields describing one list eventually
+disagree.
+
+**One module owns the row's shape from both ends.** `lib/app/questionnaire/ingestion/fidelity-detail.ts`
+builds the `detail` blob and reads it back. The block used to be inlined in both stream routes,
+identically, and the commit that added `unattributedPromptCount` reached only one of them on its
+first pass — which on a provenance row is indistinguishable from an ingest that had nothing to
+report. The omit-when-empty rule is the reader's contract, not tidiness: a present key means
+something happened.
 
 `uncountable` is a first-class answer and should be common: plenty of instruments do not number
 their questions, and the prompt explicitly tells the critic that a guessed count is worse than an

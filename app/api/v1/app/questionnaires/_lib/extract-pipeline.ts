@@ -78,7 +78,7 @@ export interface GuardedUpload {
   adminMeta: AdminMetadata;
   /** PDF table-extraction flag, consumed by {@link extractFromDocument}. */
   extractTables: boolean;
-  /** Requiredness choice (`'all'` default / `'source'`) — consumed by the ingest route only. */
+  /** Requiredness choice (`'all'` default / `'source'`) — consumed by ingest AND re-ingest. */
   requiredMode: RequiredMode;
 }
 
@@ -128,23 +128,28 @@ export interface FidelityRecord {
    */
   disallowedEditCount: number;
   /**
-   * How many persisted question prompts match NEITHER a span of the source document NOR the `after`
-   * prompt of any change record the extractor filed. That is an edit nobody can see: the editorial
-   * log is what the review surface renders and what F2.3 reverts, so a reworded prompt with no
-   * record is unreviewable and un-revertable, and the Structure editor shows it as if the author
-   * had written it.
+   * The KEYS of questions whose prompt matches NEITHER a span of the source document NOR the
+   * `after` prompt of any change record the extractor filed. That is an edit nobody can see: the
+   * editorial log is what the review surface renders and what F2.3 reverts, so a reworded prompt
+   * with no record is unreviewable and un-revertable, and the Structure editor shows it as if the
+   * author had written it.
+   *
+   * Keys, not a count. The count came first and was the right signal for a corpus run — "is the
+   * instruction landing?" is answered by a number — but it is the wrong one for an admin, who
+   * needs to know WHICH questions to re-read against the document. The count is derived from the
+   * length wherever it is still wanted.
    *
    * Deterministic, like {@link disallowedEditCount} — it compares strings, not judgement, which is
    * the point. The fidelity critic marks reworded questions `ok` (correctly: they still ask the
    * same thing), so no per-question verdict can catch this; only the source can.
    *
-   * Two known sources of a legitimate non-zero count, both worth seeing rather than suppressing: a
+   * Two known sources of a legitimate non-empty list, both worth seeing rather than suppressing: a
    * question whose prompt is synthesised rather than quoted (a merged matrix stem), and a repair
    * `correct` — `mergeRepairs` replaces the whole question but records only its type/config,
    * so a prompt the specialist changed on the way past is unattributed for exactly the same reason.
    * Reported, never enforced: by the time it is readable the questions already exist.
    */
-  unattributedPromptCount: number;
+  unattributedPromptKeys: string[];
   durationMs: number;
 }
 

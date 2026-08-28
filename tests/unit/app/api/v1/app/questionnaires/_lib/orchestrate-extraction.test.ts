@@ -678,7 +678,7 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     });
   }
 
-  it('counts zero when the prompt is a span of the source, despite the source hard-wrapping it', async () => {
+  it('names nothing when the prompt is a span of the source, despite the source hard-wrapping it', async () => {
     // PARSED_DOC breaks "What is your name?" across a line and an indent. A raw substring test
     // fails here, which would report every long verbatim question as an edit.
     cleanCritic();
@@ -687,11 +687,11 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual([]);
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it('counts a reworded prompt that no change record claims, and warns', async () => {
+  it('names the question whose reworded prompt no change record claims, and warns', async () => {
     cleanCritic();
     extractionWithPrompt('Please tell me what your name is.');
     const { ctx, log } = makeCtx();
@@ -699,14 +699,19 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual(['name']);
     expect(log.warn).toHaveBeenCalledWith(
       'ingest reworded question prompts without recording the edit',
-      expect.objectContaining({ unattributedPromptCount: 1, totalQuestions: 1 })
+      expect.objectContaining({
+        unattributedPromptCount: 1,
+        // The keys are the actionable half: a count tells an admin to go looking, this says where.
+        unattributedPromptKeys: ['name'],
+        totalQuestions: 1,
+      })
     );
   });
 
-  it('counts zero when the same rewording IS declared in the editorial log', async () => {
+  it('names nothing when the same rewording IS declared in the editorial log', async () => {
     cleanCritic();
     extractionWithPrompt('Please tell me what your name is.', [
       {
@@ -722,7 +727,7 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual([]);
     expect(log.warn).not.toHaveBeenCalled();
   });
 
@@ -743,7 +748,7 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(0);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual([]);
   });
 
   it('does not let a record for a DIFFERENT wording attribute this one', async () => {
@@ -763,7 +768,7 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual(['name']);
   });
 
   it('is not fooled by a change record that carries no prompt at all', async () => {
@@ -782,6 +787,6 @@ describe('orchestrateExtraction — unattributed prompt edits', () => {
     const { result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.fidelity?.unattributedPromptCount).toBe(1);
+    if (result.ok) expect(result.value.fidelity?.unattributedPromptKeys).toEqual(['name']);
   });
 });

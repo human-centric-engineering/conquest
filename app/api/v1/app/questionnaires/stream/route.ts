@@ -41,6 +41,7 @@ import {
   type IngestScopeProposal,
 } from '@/app/api/v1/app/questionnaires/_lib/routing-analysis';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
+import { buildFidelityDetail } from '@/lib/app/questionnaire/ingestion/fidelity-detail';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
 /**
@@ -177,24 +178,10 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
           costUsd: fidelity.costUsd,
           outputSnapshot: fidelity.verdicts,
           durationMs: fidelity.durationMs,
-          detail: {
-            flaggedCount: fidelity.flaggedCount,
-            // The three count-level signals, on the row a corpus run reads. `flaggedCount` says how
-            // many questions look wrong; these say whether the SET is, and whether its wording is
-            // the author's — both of which every per-question verdict can be `ok` and still miss.
-            // Omitted when zero so a clean ingest's row stays readable and a present key means
-            // something happened.
-            ...(fidelity.coverage ? { coverage: fidelity.coverage } : {}),
-            ...(fidelity.disallowedEditCount > 0
-              ? { disallowedEditCount: fidelity.disallowedEditCount }
-              : {}),
-            ...(fidelity.unattributedPromptCount > 0
-              ? { unattributedPromptCount: fidelity.unattributedPromptCount }
-              : {}),
-            totalCount: fidelity.totalCount,
-            repairOutcome: fidelity.repairOutcome,
-            fileName: file.name,
-          },
+          // Built by the shared writer rather than inline, because this block used to be
+          // duplicated verbatim in both stream routes and the last field added to it reached only
+          // one of them. `fidelity-detail.ts` owns the shape from both ends — writer and reader.
+          detail: buildFidelityDetail({ ...fidelity, fileName: file.name }),
           ...(fidelity.repairOutcome === 'verifier_unavailable'
             ? {
                 error:
