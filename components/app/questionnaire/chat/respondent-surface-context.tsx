@@ -31,6 +31,8 @@
 
 import { createContext, useContext, type CSSProperties, type ReactNode } from 'react';
 
+import type { RespondentDesign } from '@/lib/app/questionnaire/types';
+
 export interface RespondentSurfaceAttrs {
   /** Put on the portalled root: re-scopes the palette to the respondent canvas. */
   'data-surface': 'respondent';
@@ -42,6 +44,17 @@ export interface RespondentSurfaceAttrs {
    * portalled panel over a midnight canvas is not a white card (see app/brand-theme.css).
    */
   'data-canvas'?: 'custom';
+  /**
+   * The questionnaire's DESIGN — corners, rules, and how structural the brand is. Always present,
+   * unlike the two above, because every questionnaire has a design (`rounded` by default) whereas
+   * only some have a ConQuest fallback or a custom ground.
+   *
+   * It has to travel to portals for the same reason the palette does, and the symptom is louder: a
+   * `press` questionnaire whose answers drawer slid up with soft corners and a drop shadow would
+   * not look like a subtle inconsistency, it would look like a different product. The answers
+   * drawer is the portal that matters most here — one layout keeps it on screen at every width.
+   */
+  'data-design': RespondentDesign;
   /** The client's `--app-*` brand variables. */
   style: CSSProperties;
 }

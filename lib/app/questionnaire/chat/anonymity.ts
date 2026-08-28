@@ -30,14 +30,17 @@ import {
   narrowToEnum,
   PRESENTATION_MODES,
   RESPONDENT_CHROMES,
+  RESPONDENT_DESIGNS,
   RESPONDENT_LAYOUTS,
   DEFAULT_RESPONDENT_CHROME,
+  DEFAULT_RESPONDENT_DESIGN,
   DEFAULT_RESPONDENT_LAYOUT,
   REASONING_PLACEMENTS,
   type AccessMode,
   type AnswerSlotPanelScope,
   type PresentationMode,
   type RespondentChrome,
+  type RespondentDesign,
   type RespondentLayout,
   type ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
@@ -110,6 +113,25 @@ export async function resolveRespondentLayoutForVersion(
     version?.config?.respondentLayout ?? DEFAULT_RESPONDENT_LAYOUT,
     RESPONDENT_LAYOUTS,
     DEFAULT_RESPONDENT_LAYOUT
+  );
+}
+
+/**
+ * Resolve `respondentDesign` for a launched version — how the surface is DRAWN. Absent config, or a
+ * name this build does not know, → `rounded`: the look every questionnaire has always had. The
+ * failure mode a rollback would otherwise cause is specific to this axis — a design is a stylesheet
+ * block keyed on the attribute's value, so an unknown value does not fall back, it matches NOTHING
+ * and leaves the surface with the platform defaults for corners it never asked for. Narrowing here
+ * means the attribute can only ever carry a name the CSS has a block for.
+ */
+export async function resolveRespondentDesignForVersion(
+  versionId: string
+): Promise<RespondentDesign> {
+  const version = await loadVersionSurface(versionId);
+  return narrowToEnum(
+    version?.config?.respondentDesign ?? DEFAULT_RESPONDENT_DESIGN,
+    RESPONDENT_DESIGNS,
+    DEFAULT_RESPONDENT_DESIGN
   );
 }
 

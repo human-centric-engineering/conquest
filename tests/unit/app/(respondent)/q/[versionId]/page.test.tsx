@@ -38,6 +38,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnswerPanelScopeForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveRespondentLayoutForVersion: vi.fn(),
+  resolveRespondentDesignForVersion: vi.fn(),
   resolveRespondentChromeForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
@@ -118,6 +119,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentLayoutForVersion,
+  resolveRespondentDesignForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
@@ -179,6 +181,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
     vi.mocked(resolveRespondentLayoutForVersion).mockResolvedValue('classic');
+    vi.mocked(resolveRespondentDesignForVersion).mockResolvedValue('rounded');
     vi.mocked(resolveRespondentChromeForVersion).mockResolvedValue('full');
     vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('full_progress');
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');

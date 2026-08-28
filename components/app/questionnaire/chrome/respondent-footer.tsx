@@ -20,8 +20,9 @@
  *
  * So this is the ConQuest footer: the legal cluster and the consent control, on one quiet line, and
  * nothing else. It is deliberately the *smallest* footer that is still a real one — CUSTOMIZATION.md
- * §4 is explicit that a fork supplying its own frame has to render **Cookie Preferences** itself,
- * because consent is a legal requirement in many jurisdictions rather than a design choice. It does.
+ * §6 ("When a surface needs a different frame") is explicit that a fork supplying its own frame has
+ * to render **Cookie Preferences** itself, because consent is a legal requirement in many
+ * jurisdictions rather than a design choice. It does.
  *
  * Legal links stay seam-driven (`footerLegalItems` in `lib/app/public-nav.ts`) so this footer and
  * the marketing one cannot disagree about where Privacy lives. The header nav list is deliberately

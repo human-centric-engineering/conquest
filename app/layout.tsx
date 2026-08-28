@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { headers } from 'next/headers';
 import '@/app/globals.css';
 import '@/app/brand-theme.css'; // fork-owned per-surface palette; must cascade after globals
+import '@/app/respondent-design.css'; // the questionnaire DESIGN axis; must cascade after both
 import {
   Bricolage_Grotesque,
   Fraunces,

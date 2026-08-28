@@ -25,9 +25,8 @@
  * @see lib/app/questionnaire/layout/slots.ts — the `prominent` placement flag
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { vi } from 'vitest';
 
 import { ConversationProvider } from '@/components/app/questionnaire/chat/conversation-context';
 import { ChatComposer } from '@/components/app/questionnaire/chat/chat-composer';
@@ -55,7 +54,15 @@ function renderComposer(prominent: boolean) {
   const stream = streamStub();
   return render(
     <ConversationProvider stream={stream} animateOpening={false}>
-      <ChatComposer sessionId="s1" stream={stream} voiceInputEnabled prominent={prominent} />
+      {/* Both optional affordances ON, so the parity test below is asserting the full control
+          cluster rather than the subset a default config happens to enable. */}
+      <ChatComposer
+        sessionId="s1"
+        stream={stream}
+        voiceInputEnabled
+        attachmentInputEnabled
+        prominent={prominent}
+      />
     </ConversationProvider>
   );
 }
@@ -108,6 +115,10 @@ describe('what the two forms must NOT differ on', () => {
     expect(screen.getByLabelText('Your answer')).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /voice|mic/i })).toBeInTheDocument();
+    // The attachment picker is the affordance most at risk here: it is the only one whose CHROME
+    // the forms actually change (borderless inside the box, the default outline on the line), so a
+    // future edit reaching for the styling is one keystroke from dropping the control instead.
+    expect(screen.getByTestId('attachment-picker-button')).toBeInTheDocument();
   });
 });
 

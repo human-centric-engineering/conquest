@@ -62,6 +62,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { RespondentDesignPicker } from '@/components/admin/questionnaires/respondent-design-picker';
 import { RespondentLayoutPicker } from '@/components/admin/questionnaires/respondent-layout-picker';
 import { RESPONDENT_CHROME_META } from '@/lib/app/questionnaire/layout/catalog';
 import { FieldHelp } from '@/components/ui/field-help';
@@ -124,6 +125,7 @@ import {
   type PresentationMode,
   RESPONDENT_CHROMES,
   type RespondentChrome,
+  type RespondentDesign,
   type RespondentLayout,
   type ProfileFieldConfig,
   type ProfileFieldType,
@@ -630,6 +632,9 @@ export function ConfigEditor({
   const [respondentLayout, setRespondentLayout] = useState<RespondentLayout>(
     config.respondentLayout
   );
+  const [respondentDesign, setRespondentDesign] = useState<RespondentDesign>(
+    config.respondentDesign
+  );
   const [respondentChrome, setRespondentChrome] = useState<RespondentChrome>(
     config.respondentChrome
   );
@@ -750,6 +755,7 @@ export function ConfigEditor({
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
     setRespondentLayout(config.respondentLayout);
+    setRespondentDesign(config.respondentDesign);
     setRespondentChrome(config.respondentChrome);
     setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
@@ -1015,6 +1021,7 @@ export function ConfigEditor({
         answerSlotPanelScope,
         presentationMode,
         respondentLayout,
+        respondentDesign,
         respondentChrome,
         // Inline answer correction (Variant B): respondent-facing UX.
         inlineCorrectionEnabled,
@@ -1538,6 +1545,37 @@ export function ConfigEditor({
               <RespondentLayoutPicker
                 value={respondentLayout}
                 onChange={setRespondentLayout}
+                disabled={busy}
+              />
+            </div>
+            <div className="mb-4 space-y-1.5">
+              <Label className="text-sm font-medium">
+                Design{' '}
+                <FieldHelp title="Respondent design">
+                  How the respondent&apos;s screen is DRAWN — corners, rules, and how much of the
+                  client&apos;s brand is built into the page. Separate from the layout, which
+                  decides where the parts sit, and from ConQuest branding, which decides what
+                  surrounds them; all three combine freely and none of them can remove a feature,
+                  because a design changes only the styling.
+                  <br />
+                  <br />
+                  ConQuest Rounded is the default and is what every questionnaire has always looked
+                  like. Press is straight lines and hairline rules — the register of a printed
+                  report, for serious instruments and professional audiences; only the answer box
+                  keeps a soft corner, because it is the one thing a respondent touches. Marque is
+                  straight lines too, and puts the client&apos;s brand into the structure: their
+                  logo mark signs every question the interviewer asks, an accent spine runs down the
+                  conversation, and their colour closes the header.
+                  <br />
+                  <br />
+                  Marque is at its best for a client with a strong logo mark. Without one it still
+                  works — the mark beside each question falls back to a small block of their accent
+                  colour — but the design has less to say.
+                </FieldHelp>
+              </Label>
+              <RespondentDesignPicker
+                value={respondentDesign}
+                onChange={setRespondentDesign}
                 disabled={busy}
               />
             </div>

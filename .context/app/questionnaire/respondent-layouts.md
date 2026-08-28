@@ -177,6 +177,11 @@ off Horizon, the one stacked layout that had earned it. Hence
 `tests/unit/components/app/questionnaire/chat/composer-forms.test.tsx`, which pins the membership as
 a **set** — gaining the flag and losing it both land there and have to be argued for.
 
+A design is a THIRD axis, orthogonal to this one: a layout decides where the parts sit, a design
+decides what they look like. `prominent` is a layout's statement about the composer's ROLE in its
+arrangement, and it holds under every design — see
+[respondent-designs.md](./respondent-designs.md).
+
 `prominent` is deliberately separate from `fills` even though only Broadsheet sets both, and Horizon
 is the proof: it wants the surface and the prose height, but its stage above still needs the room,
 so a composer that became the whole column would take the layout apart. _How tall_ and _how present_

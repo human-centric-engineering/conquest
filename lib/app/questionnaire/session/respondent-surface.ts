@@ -41,6 +41,7 @@ import type {
   AnswerSlotPanelScope,
   PresentationMode,
   ReasoningPlacement,
+  RespondentDesign,
   RespondentLayout,
 } from '@/lib/app/questionnaire/types';
 
@@ -68,6 +69,13 @@ export interface RespondentSurfaceConfig {
   presentationMode: PresentationMode;
   /** How the surface is ARRANGED (F-layouts). Defaults to `classic` — see RESPONDENT_LAYOUTS. */
   respondentLayout: RespondentLayout;
+  /**
+   * How the surface is DRAWN (F-design) — corners, rules, and how structural the client's brand is.
+   * Defaults to `rounded` — see RESPONDENT_DESIGNS. Carried in this bundle for the same reason the
+   * layout is: a client-booted surface never re-runs a server component, so a breakout that could
+   * not read this would silently draw a `marque` questionnaire in the default look.
+   */
+  respondentDesign: RespondentDesign;
   /** How much of the live answer panel shows; `hidden` is the chat-only surface. */
   answerPanelScope: AnswerSlotPanelScope;
   /**

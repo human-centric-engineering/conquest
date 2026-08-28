@@ -48,8 +48,9 @@ visibly wrong today: the conversation jumped wider the instant the page loaded.
   Pricing / Contact) and adds an attribution line, which on a questionnaire means the same four
   links printed twice on one screen, three more routes away mid-answer, and a copyright claim made
   to somebody answering a _client's_ questions. Swapping the frame rather than editing the platform
-  component is the documented move for a surface that needs a different one (CUSTOMIZATION.md §4);
-  the obligation that comes with it — Cookie Preferences has to appear somewhere — is met.
+  component is the documented move for a surface that needs a different one (CUSTOMIZATION.md §6,
+  "When a surface needs a different frame"); the obligation that comes with it — Cookie Preferences
+  has to appear somewhere — is met.
 - **`co_branded`** — a slim ConQuest wordmark above the questionnaire's own brand band, and nothing
   below. Deliberately **not a link**: a respondent mid-questionnaire offered a route to our pricing
   page is a respondent who might take it, and this mode was chosen precisely to keep them here.

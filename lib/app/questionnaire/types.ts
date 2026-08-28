@@ -354,6 +354,38 @@ export type RespondentLayout = (typeof RESPONDENT_LAYOUTS)[number];
 export const DEFAULT_RESPONDENT_LAYOUT: RespondentLayout = 'classic';
 
 /**
+ * How the respondent surface is DRAWN — the design axis.
+ *
+ * Orthogonal to {@link RESPONDENT_LAYOUTS} and {@link RESPONDENT_CHROMES}, and the three are worth
+ * holding apart because they answer different questions. A layout decides *where the parts sit*.
+ * Chrome decides *what surrounds them*. A design decides *what they look like* — corners, rules,
+ * shadows, and how much of the client's brand is structural rather than decorative. Every
+ * combination is valid, and none of them can drop a feature: a design changes CSS, never DOM, so
+ * there is nothing for it to remove.
+ *
+ *   - `rounded` — soft corners, warm rules, the conversational look every questionnaire has always
+ *     had. The default, forever: an absent or unrecognised value resolves here, so no existing
+ *     version changes appearance.
+ *   - `press`   — straight lines and hairline rules, in the editorial register. The answer box is
+ *     the single exception and keeps a 2px corner, because it is the one thing on the page a
+ *     respondent touches and a touchable object should read as an object.
+ *   - `marque`  — straight lines too, but with the client's brand carried as STRUCTURE: the logo
+ *     mark signs every interviewer turn instead of sitting in a banner people stop seeing, an
+ *     accent spine runs down the conversation, and the header is a colour block rather than a
+ *     tinted strip.
+ *
+ * This tuple grows only as designs are actually implemented, never ahead of them: the design
+ * catalog is `satisfies Record<RespondentDesign, …>` and the stylesheet is asserted to carry a
+ * block per value, so adding a name here without a design to back it fails a test rather than
+ * shipping a questionnaire that silently looks like the default.
+ */
+export const RESPONDENT_DESIGNS = ['rounded', 'press', 'marque'] as const;
+export type RespondentDesign = (typeof RESPONDENT_DESIGNS)[number];
+
+/** The design every questionnaire gets unless it says otherwise. Referenced wherever one is narrowed. */
+export const DEFAULT_RESPONDENT_DESIGN: RespondentDesign = 'rounded';
+
+/**
  * How much of ConQuest shows around the respondent surface — the CHROME axis.
  *
  * Orthogonal to {@link RESPONDENT_LAYOUTS}, and the distinction is worth holding: a layout decides
@@ -1513,6 +1545,15 @@ export type QuestionnaireConfigShape = {
    */
   respondentLayout: RespondentLayout;
   /**
+   * How the respondent surface is DRAWN — corners, rules, and how structural the client's brand is.
+   * Orthogonal to {@link respondentLayout} (which arranges the parts) and to
+   * {@link respondentChrome} (which decides what surrounds them). A design is CSS and nothing else,
+   * so no combination can cost a feature.
+   * Defaults to `rounded`, which is what every questionnaire has always looked like.
+   * See {@link RESPONDENT_DESIGNS}.
+   */
+  respondentDesign: RespondentDesign;
+  /**
    * How much of ConQuest shows AROUND the respondent surface — the site header and footer, a slim
    * co-branded line, or nothing at all. Orthogonal to {@link respondentLayout}, which arranges the
    * questionnaire's own parts inside whatever chrome this leaves.
@@ -1719,6 +1760,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
   respondentLayout: DEFAULT_RESPONDENT_LAYOUT,
+  respondentDesign: DEFAULT_RESPONDENT_DESIGN,
   respondentChrome: DEFAULT_RESPONDENT_CHROME,
   chatTextSize: DEFAULT_CHAT_TEXT_SIZE,
   inlineCorrectionEnabled: false,
