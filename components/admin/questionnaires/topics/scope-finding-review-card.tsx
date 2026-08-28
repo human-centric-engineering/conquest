@@ -11,7 +11,7 @@
  * are reviewed as proposed and either applied as-is or dismissed — tweaking them is what the
  * Topics tab itself is for.
  *
- * Accept/Dismiss/Edit hit the PATCH review route; Apply hits the apply route (which may fork the
+ * Dismiss/Edit hit the PATCH review route; Apply hits the apply route (which may fork the
  * version — the parent shows the fork banner from the returned meta).
  */
 
@@ -19,7 +19,6 @@ import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Tip } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { API } from '@/lib/api/endpoints';
@@ -35,10 +34,17 @@ import {
   findingSeverityBadge,
 } from '@/components/admin/questionnaires/evaluation-status-badge';
 import {
+  FieldLabel,
   LabelledField,
+  MetaRow,
   PROSE_MEASURE,
   QuotedProse,
 } from '@/components/admin/questionnaires/evaluation-field';
+
+/** Turn an imperative op description into the middle of a sentence: "Applying will reword…". */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
 
 interface ApplyMeta {
   forked: boolean;
@@ -95,7 +101,7 @@ export function ScopeFindingReviewCard({
   canApply,
   onUpdate,
 }: Props) {
-  const [busy, setBusy] = useState<null | 'accept' | 'decline' | 'edit' | 'apply'>(null);
+  const [busy, setBusy] = useState<null | 'decline' | 'edit' | 'apply'>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
@@ -116,10 +122,18 @@ export function ScopeFindingReviewCard({
     finding.id
   );
 
-  async function decide(action: 'accept' | 'decline') {
-    setBusy(action);
+  /**
+   * Reject the suggestion. Nothing in the questionnaire changes.
+   *
+   * The review route also accepts `action: 'accept'` and still does; it is simply no longer offered
+   * here. Four verbs on one card (accept, dismiss, edit, apply) is three too many when two of them
+   * are English near-synonyms that do opposite things, and "accept" was the one carrying no
+   * consequence — applying already records agreement. Kept in step with the design-evaluation card.
+   */
+  async function dismiss() {
+    setBusy('decline');
     setError(null);
-    const res = await sendJson(findingPath, 'PATCH', { action });
+    const res = await sendJson(findingPath, 'PATCH', { action: 'decline' });
     setBusy(null);
     if (!res.ok) return setError(res.message);
     onUpdate(res.data as ScopeEvaluationFindingView);
@@ -182,17 +196,22 @@ export function ScopeFindingReviewCard({
       className={`overflow-hidden rounded-md border ${isTerminal ? 'opacity-60' : ''} ${finding.stale ? 'border-amber-400' : ''}`}
     >
       <div className="bg-muted/40 border-b px-3 py-2.5">
-        <div className="flex flex-wrap items-center gap-2">
+        {/* One badge, not three — severity is the only fact here a reviewer triages on, so it is
+            the only one that gets colour. The judge, the rule key and the recorded decision are
+            context, and context reads better as a sentence than as a row of competing pills.
+            Kept in step with the design-evaluation card: these three surfaces are the same card
+            wearing different data, and they only stay legible while they stay identical. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <Badge variant={sev.variant} className="text-xs">
             {sev.label}
           </Badge>
-          <span className="text-muted-foreground text-xs">
+          <MetaRow>
             {SCOPE_EVALUATION_DIMENSION_SPECS[finding.dimension].label.replace(/ Judge$/, '')}
-          </span>
-          <code className="bg-background rounded px-1.5 py-0.5 text-xs">{finding.targetKey}</code>
-          <Badge variant={statusBadge.variant} className="text-xs">
-            {statusBadge.label}
-          </Badge>
+            {finding.targetKey}
+            {/* Pending is the default state of every card here; saying so on all of them says
+                nothing. A decision actually recorded is worth a word. */}
+            {finding.status === 'pending' ? null : statusBadge.label}
+          </MetaRow>
           {finding.stale && !isTerminal && (
             <Badge variant="outline" className="border-amber-500 text-xs text-amber-700">
               Stale — re-run
@@ -201,35 +220,26 @@ export function ScopeFindingReviewCard({
         </div>
       </div>
 
-      <div className="space-y-2.5 p-3">
-        <LabelledField label="Suggestion">
-          <p className={`${PROSE_MEASURE} text-sm`}>
-            <QuotedProse text={finding.proposedChange} />
-          </p>
-        </LabelledField>
+      {/* Two paragraphs, unlabelled: the first says what to do, the muted one under it says why.
+          Headline then deck — the oldest reading convention there is, and it needs no eyebrow.
+          Three stacked eyebrows only taught the eye to skip all of them; the one that survives
+          names a block that genuinely could be misread as prose. */}
+      <div className="space-y-3 p-3">
+        <p className={`${PROSE_MEASURE} text-sm leading-relaxed`}>
+          <QuotedProse text={finding.proposedChange} />
+        </p>
 
-        <LabelledField label="Rationale">
-          <p className={`${PROSE_MEASURE} text-muted-foreground text-sm`}>
-            <QuotedProse text={finding.rationale} />
-          </p>
-        </LabelledField>
+        <p className={`${PROSE_MEASURE} text-muted-foreground text-sm leading-relaxed`}>
+          <QuotedProse text={finding.rationale} />
+        </p>
 
         {finding.sourceQuote && (
           <LabelledField label="Evidence">
             <blockquote
-              className={`${PROSE_MEASURE} text-muted-foreground border-l-2 pl-3 text-xs italic`}
+              className={`${PROSE_MEASURE} text-muted-foreground border-l-2 pl-3 text-sm`}
             >
               {finding.sourceQuote}
             </blockquote>
-          </LabelledField>
-        )}
-
-        {op && (
-          <LabelledField label="Edit">
-            <p className="text-xs">
-              <span className="font-medium">{describeScopeProposedEdit(op)}</span>
-              {finding.editedOverride && <span className="text-muted-foreground"> · edited</span>}
-            </p>
           </LabelledField>
         )}
 
@@ -263,71 +273,73 @@ export function ScopeFindingReviewCard({
           </div>
         ) : (
           !isTerminal && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1">
-                <Tip label="These only record what you decided — neither one edits the config.">
-                  <span className="text-muted-foreground mr-1 cursor-help text-xs font-normal">
-                    Record a decision:
-                  </span>
-                </Tip>
-                <Tip label="Records that you agree, without changing the config. Triage the whole run, then apply the ones you kept.">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    disabled={busy !== null}
-                    onClick={() => void decide('accept')}
-                  >
-                    {busy === 'accept' ? 'Accepting…' : 'Accept'}
-                  </Button>
-                </Tip>
-                <Tip label="Rejects this suggestion. Nothing in the config changes.">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    disabled={busy !== null}
-                    onClick={() => void decide('decline')}
-                  >
-                    {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
-                  </Button>
-                </Tip>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
+            /* What the buttons DO, said in words above them. Four verbs — accept, dismiss, edit,
+               apply — that are near-synonyms in English and do very different things here, and a
+               divider between them was carrying the whole distinction. Tooltips did not help: a
+               reviewer deciding whether to click is not going to hover four buttons to find out
+               which one writes to the questionnaire. Kept in step with the design-evaluation card,
+               which is the same card wearing different data. */
+            <div className="mt-4 rounded-md border">
+              <div className="p-3">
                 {op && finding.applicable === 'apply' ? (
                   <>
-                    {isEditableOp(op) && (
-                      <Tip label="Adjust the suggested text before applying it.">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy !== null}
-                          onClick={startEdit}
-                        >
-                          Edit
-                        </Button>
-                      </Tip>
-                    )}
-                    <Tip
-                      label={`Changes the config now — ${describeScopeProposedEdit(op).toLowerCase()}. A launched version is forked to a new draft first.`}
-                    >
+                    <FieldLabel>Change the questionnaire’s topic setup now</FieldLabel>
+                    <p className={`${PROSE_MEASURE} text-muted-foreground mt-1 text-sm`}>
+                      Applying will {lowerFirst(describeScopeProposedEdit(op))}
+                      {finding.editedOverride ? ' (your edited version)' : ''}. A launched version
+                      is forked to a new draft first.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
                         size="sm"
                         disabled={busy !== null || finding.stale || !canApply}
                         title={applyDisabledTitle}
                         onClick={() => void apply()}
                       >
-                        {busy === 'apply' ? 'Applying…' : 'Apply'}
+                        {busy === 'apply' ? 'Applying…' : 'Apply this change'}
                       </Button>
-                    </Tip>
+                      {isEditableOp(op) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy !== null}
+                          onClick={startEdit}
+                        >
+                          Edit first
+                        </Button>
+                      )}
+                    </div>
                   </>
                 ) : (
-                  <span className="text-muted-foreground text-xs">
-                    No structured edit — make this change on the Topics tab, then mark it decided
-                    above.
-                  </span>
+                  <>
+                    <FieldLabel>Make this change by hand</FieldLabel>
+                    <p className={`${PROSE_MEASURE} text-muted-foreground mt-1 text-sm`}>
+                      There is no one-click edit for this one — make the change on the Topics tab,
+                      then record your decision below.
+                    </p>
+                  </>
                 )}
+              </div>
+
+              {/* Ruled off, below, and quieter — the geometry says this is the lesser action
+                  before a word is read. It is also the only other one: two verbs that are plainly
+                  opposites, each under a heading saying which is which. */}
+              <div className="bg-muted/40 border-t p-3">
+                <FieldLabel>Or dismiss it</FieldLabel>
+                <p className={`${PROSE_MEASURE} text-muted-foreground mt-1 text-sm`}>
+                  Rejects this suggestion and marks it decided. Nothing in the questionnaire
+                  changes.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== null}
+                    onClick={() => void dismiss()}
+                  >
+                    {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
+                  </Button>
+                </div>
               </div>
             </div>
           )

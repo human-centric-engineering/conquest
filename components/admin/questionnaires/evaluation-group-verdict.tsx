@@ -4,35 +4,54 @@
  * The panel's verdict on one question — the thing a reviewer reads before anything else.
  *
  * The run-detail page used to open with seven judges' worth of individual findings and leave the
- * reviewer to work out what the panel collectively wanted. This band inverts that: the **verb**
- * first (reword / move / delete / change the answer type), then the wording the judges can all live
- * with, and only then — on request — the individual judgements that produced it.
+ * reviewer to work out what the panel collectively wanted. This section inverts that: what is on
+ * the table, who is behind each option, and the wording several judges can live with — and only
+ * then, in the tabs below it, the individual judgements that produced it.
+ *
+ * ## One block per proposed action, ruled off from its neighbours
+ *
+ * The verdict used to be a single line: the winning verb, its backing, and any dissent appended as
+ * trailing clauses ("Reword it · 2 of 3 judges · 1 judge says delete it instead"). That is the whole
+ * panel compressed into one sentence, and a reader has to parse three clauses before knowing what
+ * the options even are. Worse, the caveats that hung off the end of it — "Type-Fit is not resolved
+ * by rewording" — floated free of the thing they were a caveat about.
+ *
+ * So each proposed action is now its own block under its own heading ("A reword, as proposed by 2 of
+ * 3 judges"), the blocks are separated by rules, and every caveat sits inside the block it
+ * qualifies. The reviewer reads a list of options, not a sentence to be unpacked.
  *
  * Three things it must never do:
  *
- *  1. **Manufacture agreement.** When judges proposed different actions, the dissent is printed
- *     next to the headline, not hidden behind it. `summariseGroupActions` keeps every proposal.
+ *  1. **Manufacture agreement.** Every proposed action gets a block, in support order. The dissent
+ *     is not a footnote on the winner; it is the next heading down.
  *  2. **Overstate the rewrite.** A reconciled alternative names the judges it satisfies, and the
  *     `unresolved` line names the ones no wording can — because a rewrite presented as the answer
- *     to a type-fit complaint is worse than no rewrite at all.
+ *     to a type-fit complaint is worse than no rewrite at all. Both live in the block holding the
+ *     wording, so neither can drift away from what it is talking about.
  *  3. **Swallow the reconciled text into a control.** The wording is the most copy-pasted string on
  *     the page, so it lives outside the disclosure button where it can be selected.
  */
 
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationDimension } from '@/lib/app/questionnaire/evaluation';
-import type {
-  GroupAction,
-  GroupActionKind,
-  GroupActionSummary,
+import {
+  ACTION_NOUNS,
+  type GroupAction,
+  type GroupActionKind,
+  type GroupActionSummary,
 } from '@/lib/app/questionnaire/evaluation/group-actions';
 import type { ReconciledSuggestion } from '@/lib/app/questionnaire/evaluation/reconcile-schema';
-import { PROSE_MEASURE, QUESTION_FACE } from '@/components/admin/questionnaires/evaluation-field';
+import {
+  FieldLabel,
+  MetaRow,
+  PROSE_MEASURE,
+  QUESTION_FACE,
+  QUESTION_MEASURE,
+} from '@/components/admin/questionnaires/evaluation-field';
 
 /** Judge names read better without the noun — "Clarity, Audience-Match", not "Clarity Judge, …". */
-function judgeName(dimension: EvaluationDimension): string {
+export function judgeName(dimension: EvaluationDimension): string {
   return EVALUATION_DIMENSION_SPECS[dimension].label.replace(/ Judge$/, '');
 }
 
@@ -41,14 +60,10 @@ function judgeNames(dimensions: EvaluationDimension[]): string {
 }
 
 /**
- * Accent per verb, as a rule down the left edge rather than a fill.
+ * Accent per verb, as a rule down the left edge of its block rather than a fill.
  *
- * It used to be a tinted, rounded panel — a box inside the group's box inside the page, which read
- * as clutter and made the verdict compete with the header band above it for "the filled thing you
- * look at first". A hairline keeps the tone and stops being a frame.
- *
- * Colour carries a hint, never the message — every action also states itself in words, so this
- * survives greyscale, colour-blindness, and a reviewer skimming at speed.
+ * Colour carries a hint, never the message — every action also states itself in words in its
+ * heading, so this survives greyscale, colour-blindness, and a reviewer skimming at speed.
  */
 const ACTION_TONE: Record<GroupActionKind, string> = {
   delete: 'border-destructive/50',
@@ -69,8 +84,7 @@ const ACTION_TONE: Record<GroupActionKind, string> = {
  *
  * The denominator is the judges that flagged THIS question, not the seven on the panel. "2 of 7"
  * would be measuring the wrong thing: the other five had nothing to say about this question, so
- * counting them as absent votes reads as weaker support than the panel actually gave. Who flagged
- * it at all is answered by the judge chips once the card is open.
+ * counting them as absent votes reads as weaker support than the panel actually gave.
  */
 function backing(action: GroupAction, flaggers: number): string {
   const n = action.judges.length;
@@ -78,110 +92,171 @@ function backing(action: GroupAction, flaggers: number): string {
   return `${n} of ${flaggers} judges`;
 }
 
+/**
+ * Which block the reconciled wordings belong under.
+ *
+ * The reconciler produces alternative *prompts*, which are an answer to "reword it" and to nothing
+ * else. Hanging them off whichever action happens to lead would, on a question where the deletion
+ * won, print proposed wording under a heading reading "A deletion, as proposed by 2 judges" — as if
+ * the panel wanted the question deleted and rewritten. So they attach to the reword block when
+ * there is one, and only fall back to the leading action when there is not.
+ */
+function wordingHost(actions: GroupAction[]): GroupAction | undefined {
+  return actions.find((a) => a.kind === 'reword') ?? actions[0];
+}
+
 interface Props {
   summary: GroupActionSummary;
   /** The run's reconciled alternatives for this target; `undefined` when nothing was reconciled. */
   reconciled: ReconciledSuggestion | undefined;
-  /** Show every alternative rather than just the leading one (the expanded card does). */
-  expanded: boolean;
 }
 
-export function EvaluationGroupVerdict({ summary, reconciled, expanded }: Props) {
-  const { primary, others, contested, judgeCount } = summary;
+export function EvaluationGroupVerdict({ summary, reconciled }: Props) {
+  const { primary, others, judgeCount } = summary;
   if (!primary) return null;
 
+  const actions = [primary, ...others];
   const alternatives = reconciled?.alternatives ?? [];
-  // Collapsed, one wording is the recommendation; a second is a trade-off worth deciding, and that
-  // decision belongs in the drill-down rather than in a card the reviewer is still scanning.
-  const shown = expanded ? alternatives : alternatives.slice(0, 1);
-  const hidden = alternatives.length - shown.length;
+  const host = wordingHost(actions);
 
   return (
-    <div className={cn('border-l-2 py-0.5 pl-4', ACTION_TONE[primary.kind])}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-sm font-semibold tracking-tight">{primary.label}</span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {backing(primary, judgeCount)}
-        </span>
+    <section>
+      {/* Named in full rather than eyebrowed. "VERDICT" over a block of options assumes the reader
+          already knows which verdict, reached by whom — this page has three different panels on it
+          and a run of seven judges, so the heading says both. */}
+      <h4 className="text-sm font-medium">The overall verdict from the evaluation judges:</h4>
 
-        {/* Dissent, printed beside the headline. A reviewer must never learn only after opening the
-            card that one judge wanted the question gone. One string, not styled fragments: it has
-            to read as a sentence at a glance. */}
-        {contested &&
-          others.map((other) => (
-            <span key={other.kind} className="text-muted-foreground text-xs">
-              {`· ${
-                other.judges.length === 1 ? '1 judge says' : `${other.judges.length} judges say`
-              } ${other.label.toLowerCase()} instead`}
-            </span>
-          ))}
-      </div>
+      <div className="bg-background mt-2 divide-y rounded-md border">
+        {actions.map((action) => {
+          const holdsWording = action === host && alternatives.length > 0;
+          return (
+            <div key={action.kind} className={cn('border-l-2 px-3 py-3', ACTION_TONE[action.kind])}>
+              <h5 className="text-sm font-medium">
+                {ACTION_NOUNS[action.kind]}, as proposed by {backing(action, judgeCount)}
+              </h5>
+              <MetaRow className="mt-1">{judgeNames(action.judges)}</MetaRow>
 
-      {shown.length > 0 && (
-        <div className="mt-2 space-y-2">
-          {shown.map((alt, i) => (
-            <div key={i}>
-              {/* Selectable: this is the string a reviewer copies into the editor. Set in the
-                  questionnaire's own face, because that is exactly what it is — proposed wording,
-                  not advice about wording. */}
-              <p
-                className={cn(
-                  QUESTION_FACE,
-                  'text-foreground max-w-[60ch] text-base leading-snug text-pretty'
-                )}
-              >
-                “{alt.prompt}”
-              </p>
-              <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-0.5 text-xs')}>
-                Satisfies {judgeNames(alt.addresses)}
-                {alt.note && expanded ? ` — ${alt.note}` : ''}
-              </p>
+              {holdsWording && (
+                <div className="mt-2.5 space-y-2.5">
+                  {alternatives.map((alt, i) => (
+                    <div key={i}>
+                      {/* Selectable: this is the string a reviewer copies into the editor. Set in
+                          the questionnaire's own face, because that is exactly what it is —
+                          proposed wording, not advice about wording. */}
+                      <p
+                        className={cn(
+                          QUESTION_FACE,
+                          QUESTION_MEASURE,
+                          'text-foreground text-base leading-snug text-pretty'
+                        )}
+                      >
+                        “{alt.prompt}”
+                      </p>
+                      <MetaRow className="mt-1">
+                        {`Satisfies ${judgeNames(alt.addresses)}`}
+                        {alt.note ? alt.note : null}
+                      </MetaRow>
+                    </div>
+                  ))}
+
+                  {/* The caveat lives inside the block holding the wording it is a caveat about.
+                      Floating at the end of the verdict it read as a free-standing statement about
+                      a judge, which is how "Type-Fit is not resolved by rewording" ended up
+                      looking like a finding of its own. */}
+                  {reconciled && reconciled.unresolved.length > 0 && (
+                    <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-sm')}>
+                      {`No wording satisfies ${judgeNames(reconciled.unresolved)} — that ${
+                        reconciled.unresolved.length === 1 ? 'judge needs' : 'judges need'
+                      } a structural change, not a rewrite.`}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* No wording under this block: either nothing was reconciled, or this is a dissenting
+                  action. Point at the tab that carries the argument rather than leaving the heading
+                  to stand alone. */}
+              {!holdsWording && (
+                <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1.5 text-sm')}>
+                  {action.judges.length === 1
+                    ? `See the ${judgeNames(action.judges)} tab below for the reasoning.`
+                    : 'See the judge tabs below for the reasoning.'}
+                </p>
+              )}
             </div>
-          ))}
-
-          {hidden > 0 && (
-            <p className="text-muted-foreground text-xs italic">
-              {hidden} alternative wording{hidden === 1 ? '' : 's'} below.
-            </p>
-          )}
-
-          {reconciled && reconciled.unresolved.length > 0 && (
-            <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-xs')}>
-              {`${judgeNames(reconciled.unresolved)} ${
-                reconciled.unresolved.length === 1 ? 'is' : 'are'
-              } not resolved by rewording — that needs a structural change.`}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* No reconciled wording: either one judge flagged it (nothing to reconcile) or the
-          reconcile step did not run. Say nothing rather than implying the panel fell silent. */}
-      {shown.length === 0 && primary.kind !== 'review' && (
-        <p className="text-muted-foreground mt-1 text-xs">
-          Proposed by {judgeNames(primary.judges)}.
-        </p>
-      )}
-    </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-/** The judges that flagged a target, as quiet chips — detail, shown once a card is open. */
-export function JudgeChips({
+/**
+ * The judges that flagged a target, as a tab strip — one tab per judge, one judge's findings shown
+ * at a time.
+ *
+ * Every judge's findings used to be stacked in one column below the verdict, so a question flagged
+ * by four judges was a page of near-identical cards, each with its own apply controls, and the
+ * reviewer scrolled past three of them to reach the fourth. Tabs make "whose reasoning am I
+ * reading" a choice rather than a scroll position, and keep exactly one set of decision controls
+ * on screen at a time.
+ *
+ * A single judge still gets a strip of one. The label says who is talking, and a lone tab is a
+ * cheaper thing to read than a special case is to explain.
+ */
+export function JudgeTabs({
   dimensions,
+  counts,
   gap,
+  active,
+  onSelect,
+  idBase,
 }: {
   dimensions: EvaluationDimension[];
+  /** Findings per judge — a judge that raised two points says so on its tab. */
+  counts: Record<string, number>;
   gap: boolean;
+  active: EvaluationDimension;
+  onSelect: (dimension: EvaluationDimension) => void;
+  /** Prefix for the `id` / `aria-controls` pair, unique per group. */
+  idBase: string;
 }) {
+  const one = dimensions.length === 1;
+
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-muted-foreground text-xs">{gap ? 'Raised by' : 'Flagged by'}</span>
-      {dimensions.map((d) => (
-        <Badge key={d} variant="secondary" className="text-[11px] font-normal">
-          {judgeName(d)}
-        </Badge>
-      ))}
+    <div>
+      <FieldLabel>
+        {gap ? 'Raised by' : 'Flagged by'} the following {one ? 'judge' : 'judges'}:
+      </FieldLabel>
+      <div role="tablist" className="mt-1.5 flex flex-wrap items-end gap-1 border-b">
+        {dimensions.map((d) => {
+          const selected = d === active;
+          return (
+            <button
+              key={d}
+              type="button"
+              role="tab"
+              id={`${idBase}-tab-${d}`}
+              aria-selected={selected}
+              aria-controls={`${idBase}-panel-${d}`}
+              onClick={() => onSelect(d)}
+              className={cn(
+                '-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-sm transition-colors',
+                selected
+                  ? 'border-primary text-foreground font-medium'
+                  : 'text-muted-foreground hover:text-foreground border-transparent'
+              )}
+            >
+              {judgeName(d)}
+              {counts[d] > 1 && (
+                <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
+                  {counts[d]}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
