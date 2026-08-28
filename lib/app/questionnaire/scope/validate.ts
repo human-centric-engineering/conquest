@@ -209,17 +209,17 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
         message: `"${topic.label}" is asked of everyone, so the questionnaire's instruction to add it when something comes up can never change anything. If it should only be asked sometimes, make it conditional.`,
       });
     }
-    // A trigger with no words to listen for records the instruction but not what would satisfy it.
-    // Harmless today — nothing reads them — and worth flagging while the document is still to hand,
-    // because the words are much cheaper to supply now than to reconstruct later.
-    if (topic.trigger && topic.trigger.cues.length === 0) {
-      issues.push({
-        severity: 'warning',
-        code: 'trigger_without_cues',
-        topicKey: topic.key,
-        message: `"${topic.label}" records what the questionnaire said to watch for, but no words to listen for. Nothing depends on them yet.`,
-      });
-    }
+    // `trigger_without_cues` is NOT raised, and its absence is the considered position rather than
+    // an oversight. It said a topic records what to watch for "but no words to listen for" — which
+    // is true, and which no control on any admin surface can fix: cues are written by the analyst
+    // from the document, the topic editor shows a trigger read-only, and nothing reads a cue yet.
+    // A warning whose only honest response is "I know, and I cannot" teaches an admin to skim the
+    // panel, which costs the warnings beside it that ARE actionable.
+    //
+    // The code stays registered in `conditional-topics-tabs.ts` because it has a future: the
+    // mid-interview-trigger spec raises it as an ERROR once an evaluator reads cues, at which point
+    // empty cues really are a defect and the fix is a re-analysis. See
+    // `.context/app/planning/features/f17-mid-interview-triggers.md`.
     // Light depth on a topic EVERYONE gets does not sample — it deletes. `membersAtDepth`
     // (scope/resolve.ts) applies depth to every phase, not just conditional ones, so the members it
     // drops from an always-run topic are asked of nobody. Reported regardless of `enabled` for the

@@ -1032,6 +1032,21 @@ export function TopicListEditor({
                                     by then — not if it first comes up later. Kept here as a record
                                     of what the questionnaire asked for.
                                   </p>
+                                  {/* The one edit worth having while nothing fires a trigger. The
+                                      record is written by an agent reading a document, and an agent
+                                      can be wrong — without this, a condition it invented is
+                                      permanent, shown on this card and on the routing panel, with
+                                      no way for the admin who can see it is wrong to say so.
+                                      Removing is not authoring: it discards a mis-read, and the
+                                      analyst writes a fresh one on the next re-analysis. */}
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => mutate(index, { trigger: null })}
+                                    className="text-muted-foreground hover:text-foreground mt-2 cursor-pointer text-xs underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    This isn’t in the questionnaire — remove it
+                                  </button>
                                 </div>
                               )}
                             </div>
