@@ -138,7 +138,11 @@ export function BrandThemeProvider({
   const isConquest = !theme.hasBrandIdentity;
   // A client ground of their own. Drives `data-canvas`, which re-derives the whole neutral
   // palette from that colour — without it a dark canvas gets light ink and white cards.
-  const hasCanvas = Boolean(theme.canvasColor);
+  //
+  // EITHER ground counts. A client may set only the dark canvas (nothing forbids it on the
+  // form), and reading `canvasColor` alone left that case emitting `--app-canvas-dark` while
+  // the re-derivation never fired — brand ground, neutral cards and borders on top of it.
+  const hasCanvas = Boolean(theme.canvasColor || theme.canvasColorDark);
   // Either mark anchors the left of the band, so the title anchors opposite it.
   const hasMark = hasLogo || isConquest;
   // The band paints a background of its own (the client's surface, or the ConQuest band tone)

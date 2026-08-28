@@ -114,7 +114,8 @@ function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
     <div
       data-surface="respondent"
       data-brand={resolved.hasBrandIdentity ? undefined : 'conquest'}
-      data-canvas={resolved.canvasColor ? 'custom' : undefined}
+      // Either ground, matching `BrandThemeProvider` — a dark-only canvas must re-derive here too.
+      data-canvas={resolved.canvasColor || resolved.canvasColorDark ? 'custom' : undefined}
       style={{
         ...vars,
         // The type the client chose, applied to the preview so the pairing is legible as a
@@ -240,7 +241,17 @@ export function DemoClientThemePreview({
           !theme.logoUrl &&
           !theme.surfaceColor &&
           !theme.ctaColorEnd &&
-          !theme.canvasColor && (
+          !theme.canvasColor &&
+          // The brand-kit fields count too. Without them a client whose only theme setting is a
+          // typeface, a mark or the dark lockup reads as "Welcome copy" in the Theme column —
+          // the list saying they have no brand when they do.
+          !theme.canvasColorDark &&
+          !theme.inkColor &&
+          !theme.inkColorDark &&
+          !theme.accentColorEnd &&
+          !theme.logoMarkUrl &&
+          !theme.logoDarkUrl &&
+          !theme.fontPairing && (
             // Only welcome copy / logo toggle is set — nothing visual to swatch.
             <span className="text-muted-foreground text-xs">Welcome copy</span>
           )}

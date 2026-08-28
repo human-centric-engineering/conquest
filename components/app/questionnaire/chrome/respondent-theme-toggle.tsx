@@ -29,6 +29,7 @@
  * than declaring a colour of its own.
  */
 
+import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 
 import { useTheme } from '@/hooks/use-theme';
@@ -37,16 +38,24 @@ import { cn } from '@/lib/utils';
 export function RespondentThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const next = theme === 'light' ? 'dark' : 'light';
+  // The name states the DESTINATION, and the destination is only knowable on the client:
+  // `ThemeProvider` initialises to `light` on the server and reads storage after mount, so
+  // interpolating `theme` straight into the label handed a respondent whose stored preference is
+  // dark a server-rendered "Switch to dark mode" against a client "Switch to light mode" — a
+  // hydration attribute mismatch on every load. Gating on mount makes both paints agree on the
+  // neutral name and lets the accurate one land a tick later, which is the same trick the icons
+  // below play with CSS. It cannot be done in CSS here: an accessible name assembled from
+  // display-swapped spans is only correct where CSS actually runs.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const label = mounted ? `Switch to ${next} mode` : 'Toggle theme';
 
   return (
     <button
       type="button"
       onClick={() => setTheme(next)}
-      // Named by what it DOES, in plain words, and stating the destination rather than the
-      // current state — "Dark mode" alone leaves a screen-reader user guessing whether it
-      // describes the button or the page.
-      aria-label={`Switch to ${next} mode`}
-      title={`Switch to ${next} mode`}
+      aria-label={label}
+      title={label}
       className={cn(
         'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md opacity-70',
         'transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-current focus-visible:outline-none',

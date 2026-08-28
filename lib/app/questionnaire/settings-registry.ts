@@ -319,10 +319,7 @@ export const SETTING_DESCRIPTORS = {
   chatTextSize: {
     group: 'Respondent experience',
     tier: 'standard',
-    // "Opens at", not "Text size": the row is describing a starting rung, and a client reading the
-    // exported settings table should not come away thinking the questionnaire is pinned to a size
-    // the respondent can in fact change at any point.
-    rows: (c) => [{ label: 'Text opens at', value: CHAT_TEXT_SIZE_LABELS[c.chatTextSize] }],
+    rows: (c) => [{ label: 'Text size', value: CHAT_TEXT_SIZE_LABELS[c.chatTextSize] }],
   },
   presentationMode: {
     group: 'Respondent experience',

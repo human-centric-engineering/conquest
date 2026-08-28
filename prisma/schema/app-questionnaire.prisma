@@ -693,10 +693,10 @@ model AppDemoClient {
   // modes on any layout, so a canvas that only worked in one of them was never an option.
   canvasColorDark String? // the page ground (hex) in dark mode; null → derived from canvasColor
   inkColorDark    String? // text on the dark ground (hex); null → derived for contrast from it
-  accentColorEnd String? // second accent (hex) — Horizon's aura, Broadsheet's rule. NOT ctaColorEnd, which is the CTA gradient's partner
-  logoMarkUrl    String? // square mark (~1:1), for layouts that want a mark rather than a lockup
-  logoDarkUrl    String? // light-on-dark lockup — needed the moment a canvas or band can be dark
-  fontPairing    String? // one of FONT_PAIRINGS (theming/fonts.ts); null/unknown → 'neutral' (today's system stack)
+  accentColorEnd  String? // second accent (hex) — Horizon's aura, Broadsheet's rule. NOT ctaColorEnd, which is the CTA gradient's partner
+  logoMarkUrl     String? // square mark (~1:1), for layouts that want a mark rather than a lockup
+  logoDarkUrl     String? // light-on-dark lockup — needed the moment a canvas or band can be dark
+  fontPairing     String? // one of FONT_PAIRINGS (theming/fonts.ts); null/unknown → 'neutral' (today's system stack)
 
   // Respondent Report: this client's dedicated KnowledgeTag id (KnowledgeTag is a platform model;
   // a plain String, no @relation — UG-1 and a deliberate seam, so the app never forks the platform

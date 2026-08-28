@@ -1582,18 +1582,22 @@ export function ConfigEditor({
             </div>
             <div className="mb-4 space-y-1.5">
               <Label className="text-sm font-medium">
-                Text opens at{' '}
-                <FieldHelp title="Opening text size">
-                  How large the conversation text is when a respondent first arrives. Standard is
-                  the size every questionnaire has used until now. Choose Large or Largest for a
-                  questionnaire you will run on a projector or a boardroom screen, Small for a dense
-                  instrument read on a laptop.
+                Text size{' '}
+                <FieldHelp title="Text size">
+                  How large the conversation text is. Standard is the size every questionnaire has
+                  used until now. Choose Large or Largest for a questionnaire you will run on a
+                  projector or a boardroom screen, Small for a dense instrument read on a laptop.
                   <br />
                   <br />
-                  This is only the <strong>starting</strong> size. Respondents can always resize the
-                  text themselves from the controls beside the conversation, and anyone who has
-                  already done so keeps their own size here — you cannot set it for them, and you
-                  cannot take the control away.
+                  Anything other than Standard is applied when a respondent arrives, including to
+                  someone who has resized a questionnaire before — so you will see your own choice
+                  when you preview it. Change it here and they pick up the new size on their next
+                  visit.
+                  <br />
+                  <br />
+                  It is a starting size, not a lock. Respondents can always resize the conversation
+                  from the controls beside it, and once they do, their size stands until you move
+                  this setting again. You cannot take the control away from them.
                 </FieldHelp>
               </Label>
               <Select
@@ -1613,11 +1617,11 @@ export function ConfigEditor({
                 </SelectContent>
               </Select>
               {/* Stated under the control, not only in the popover. An admin who reads this as a
-                  lock would author around it — and the one thing this setting must not imply is
-                  that it overrides a respondent's own accessibility choice. */}
+                  lock would author around it — the size is where the conversation opens, and the
+                  respondent keeps the last word on it. */}
               <p className="text-muted-foreground text-xs leading-relaxed">
-                The starting size only — respondents can still resize the conversation, and a
-                respondent who already has will keep their own size.
+                The size the conversation opens at — respondents can still resize it, and their own
+                size then stands until you change this setting again.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

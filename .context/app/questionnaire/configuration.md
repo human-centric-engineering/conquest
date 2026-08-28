@@ -101,14 +101,14 @@ compile time. Both the read path and the component resolver fall back to `classi
 absent or unrecognised value, so no existing questionnaire changes appearance and a rollback
 cannot blank a live surface. See `.context/app/questionnaire/respondent-layouts.md`.
 
-`chatTextSize` (`small` | `standard` | `large` | `largest`) chooses where the respondent's
-text-size ladder OPENS — the rung a respondent who has never touched the in-session stepper
-starts on. Deliberately a starting point and not a cap: it is handed to the respondent's
-stored preference as its `initial`, so anyone who has ever used the stepper keeps their own
-size and this value is never consulted for them. There is no switch that removes the
-stepper, and no authored value that can pin it — an accessibility affordance an author
-could override would not be one. Absent or unrecognised resolves to `standard`, the size
-every questionnaire had before the setting existed. See
+`chatTextSize` (`small` | `standard` | `large` | `largest`) chooses the size the conversation
+OPENS at. An explicitly authored rung — anything but `standard`, which is the column default
+and reads as "never set" — is adopted on arrival even by a respondent who has stepped before,
+once per authored value: step away from it and your size stands until the author moves the
+setting again. Deliberately a starting point and not a cap. There is no switch that removes
+the in-session stepper, and no authored value that can pin it — an accessibility affordance
+an author could permanently override would not be one. Absent or unrecognised resolves to
+`standard`, the size every questionnaire had before the setting existed. See
 `.context/app/questionnaire/chat-text-size.md`.
 
 `respondentChrome` (F-chrome) chooses how much of ConQuest shows AROUND the respondent

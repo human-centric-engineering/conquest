@@ -8,12 +8,14 @@
  * larger text needs it in every conversation, including the next leg of an Experience, and should
  * set it once.
  *
- * What the questionnaire DOES own is where the ladder starts. `config.chatTextSize` names the rung
- * a respondent who has never touched the stepper begins on — a demo on a boardroom screen opens at
- * Largest, a dense instrument opens at Small. It is a STARTING POINT, not a cap: it is passed as
- * the `initial` of the respondent's stored preference, so anyone who has ever stepped keeps their
- * own size and the admin's choice is simply never consulted for them. An admin cannot reach into a
- * respondent's setting, and a respondent cannot be locked out of theirs.
+ * What the questionnaire DOES own is the size it OPENS at. `config.chatTextSize` names a rung, and
+ * an explicitly authored one (anything other than Standard) is adopted on arrival even by someone
+ * who has stepped before — a demo on a boardroom screen opens at Largest, a dense instrument opens
+ * at Small, and the author can see their own choice when they preview it. It is adopted ONCE per
+ * authored value: step away from it and your rung stands on every later visit, until the author
+ * moves the setting again. Standard is left indistinguishable from "not set" on purpose, so the
+ * common case — an author who never touched this — still carries a respondent's own rung between
+ * questionnaires untouched. The stepper is always present and the authored rung is never a cap.
  *
  * The value is a multiplier applied to the transcript's base size via a CSS custom property, so a
  * step changes one inherited `font-size` and nothing re-layouts beyond reflow. See the
@@ -38,6 +40,20 @@ export const DEFAULT_CHAT_TEXT_SCALE: ChatTextScale =
  * rather than mapping a stale number onto the wrong size.
  */
 export const CHAT_TEXT_SCALE_STORAGE_KEY = 'cq-chat-text-scale.v1';
+
+/**
+ * localStorage key recording the authored rung this browser has ALREADY adopted.
+ *
+ * The whole of the "adopt once" rule lives in the comparison against this value. Arriving at a
+ * questionnaire whose authored rung differs from what is recorded here moves the respondent to it
+ * and rewrites the record; arriving at one that matches leaves their current rung alone, which is
+ * what makes a step away from the authored size survive a reload. Absent (never adopted anything)
+ * counts as "differs".
+ *
+ * Global, like the rung itself: it is a fact about this reader, not about one questionnaire, and
+ * scoping it per version would silently re-impose the authored size on every leg of an Experience.
+ */
+export const CHAT_TEXT_AUTHORED_STORAGE_KEY = 'cq-chat-text-authored.v1';
 
 /**
  * The NAMES for the rungs, index-aligned with {@link CHAT_TEXT_SCALES}.

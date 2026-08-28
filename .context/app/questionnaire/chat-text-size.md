@@ -11,22 +11,33 @@ storage key being global rather than session- or version-scoped (below), and it 
 there is no admin toggle to disable the stepper: an accessibility affordance that an
 author can switch off is not an accessibility affordance.
 
-What a questionnaire _does_ own is where the ladder **opens**: `config.chatTextSize`
-names the rung a respondent who has never touched the stepper starts on. A demo shown on
-a boardroom screen opens at Largest; a dense instrument read on a laptop opens at Small.
+What a questionnaire _does_ own is the size it **opens at**: `config.chatTextSize`. A demo
+shown on a boardroom screen opens at Largest; a dense instrument read on a laptop opens at
+Small.
 
-The two coexist because of one ordering, and only that ordering — the authored rung is
-passed as `useLocalStorage`'s `initial`, which storage supersedes the moment anything is
-stored. So:
+The two coexist under one rule: **an explicitly authored rung is adopted once per authored
+value.**
 
-- nobody has stepped → the questionnaire's rung;
-- anybody has ever stepped, on this questionnaire or any other → their own rung, and the
-  authored value is never consulted for them again.
+- The author left it at Standard (the column default, indistinguishable from "never set")
+  → nothing is imposed; the respondent's own rung carries over from whatever they last set,
+  on this questionnaire or any other.
+- The author named Small / Large / Largest → the respondent moves to it on arrival, _even
+  if they have stepped before_, and `cq-chat-text-authored.v1` records what was adopted.
+- They step away from it → their rung stands on every later visit, because the marker still
+  matches the authored value.
+- The author moves the setting again → the marker no longer matches, so it is adopted once
+  more.
 
-An author therefore cannot pin, cap, or reset a respondent's accessibility preference —
-they can only choose what a first-time reader sees. Inverting that (authored value wins
-per session) was rejected: a respondent who had set larger text would have it silently
-taken away by every new questionnaire, which is worse than having no setting at all.
+An author can therefore say how the conversation opens and correct it later, but cannot pin
+or cap a size, cannot repeatedly reset one, and cannot take the stepper away.
+
+**Why not `initial` alone.** The first cut passed the authored rung as `useLocalStorage`'s
+`initial`, which storage supersedes the moment anything is stored. That read well — an
+author can never touch an accessibility preference — but it made the setting inert for
+anyone who had ever used the stepper, starting with the author previewing their own choice.
+A setting whose author cannot see it working is not a setting. The marker key is the
+narrowest thing that fixes it: the authored rung wins the arrival, the respondent wins
+everything after.
 
 ## Where it's wired
 
@@ -38,7 +49,7 @@ taken away by every new questionnaire, which is worse than having no setting at 
 | Admin control       | `components/admin/questionnaires/config-editor.tsx` → Settings tab, _Respondent experience_           |
 | Version resolvers   | `chat/anonymity.ts` (`resolveChatTextScaleIndexForVersion`) · `session/resolve-respondent-surface.ts` |
 | Control             | `components/app/questionnaire/chat/chat-text-size.tsx`                                                |
-| State + persistence | `components/app/questionnaire/session-workspace.tsx` (`useLocalStorage`, sets `--cq-chat-scale`)      |
+| State + persistence | `lib/hooks/use-session-workspace.ts` (`useLocalStorage`, the adoption effect, `--cq-chat-scale`)      |
 | Rendering           | `app/globals.css` → `.cq-chat-scale` utility                                                          |
 | Viewport factor     | `app/globals.css` → `.cq-respondent-shell` media queries (`--cq-chat-viewport-scale`)                 |
 | Transcript wrapper  | `components/app/questionnaire/chat/questionnaire-chat.tsx` (the `cq-chat-scale` div)                  |
@@ -123,23 +134,42 @@ deliberately out-specifies `.prose-sm` (0,1,0) so it holds regardless of layer o
 
 ## Persistence
 
-`useLocalStorage(CHAT_TEXT_SCALE_STORAGE_KEY, normalizeScaleIndex(chatTextScaleIndex))` —
-key `cq-chat-text-scale.v1`, initial value the questionnaire's authored rung (see above).
+Two keys, both in `lib/hooks/use-session-workspace.ts`:
 
-The `initial` is normalised on the way in because the prop crosses a wire on the meeting
-surface (`RespondentSurfaceConfig.chatTextScaleIndex`, over the boot payload), and an
-out-of-range index there would otherwise be the one path into the `calc()` that
-normalisation does not already cover.
+| Key                        | Holds                                                  |
+| -------------------------- | ------------------------------------------------------ |
+| `cq-chat-text-scale.v1`    | the respondent's current rung (the ladder **index**)   |
+| `cq-chat-text-authored.v1` | the authored rung this browser has **already adopted** |
 
+`useLocalStorage(CHAT_TEXT_SCALE_STORAGE_KEY, normalizeScaleIndex(chatTextScaleIndex))`
+holds the first. The `initial` is normalised on the way in because the prop crosses a wire
+on the meeting surface (`RespondentSurfaceConfig.chatTextScaleIndex`, over the boot
+payload), and an out-of-range index there would otherwise be the one path into the
+`calc()` that normalisation does not already cover.
+
+The second is read and written by the adoption effect, directly rather than through
+`useLocalStorage`: it must be read **once, after** the stored rung has hydrated, and a
+second `useLocalStorage` would hydrate in the same pass and race it.
+
+- **Effect ordering is load-bearing.** The adoption effect is declared _after_ the
+  `useLocalStorage` call, so React queues it second and the authored rung lands last. Move
+  it above and the stored rung wins — which is the bug this replaced.
+- **Fires once per mount**, guarded by a ref rather than by effect deps: a re-render that
+  changes the prop must not re-adopt mid-session.
+- **Both storage accesses are `try`/`catch`ed.** An unreadable marker reads as "nothing
+  adopted" (re-adopting is the recoverable outcome); a failed write still adopts for this
+  visit, so private mode costs a repeat adoption, not a lost size.
 - **Global, not per session.** Someone who needs larger text needs it in the next leg of
-  an Experience too, and on the next questionnaire. They should set it once — and, as
-  above, this is exactly why the authored rung cannot override it on the next arrival.
+  an Experience too, and on the next questionnaire. They should set it once. The marker is
+  global for the same reason — scoping it per version would re-impose the authored size on
+  every leg of an Experience.
 - **Versioned key.** `.v1` lets a future change to the ladder ignore stale indices rather
   than mapping a stale number onto the wrong size.
 - **Hydrates after mount.** `useLocalStorage` is SSR-safe and starts from the initial
-  value, so first paint is the questionnaire's authored rung and settles to the stored size. That is a `font-size`
-  change only — no layout shift beyond reflow — which is why the preference is applied as
-  a custom property rather than by swapping classes or rendering a different tree.
+  value, so first paint is the questionnaire's authored rung and settles to the stored size
+  (then, if it is being adopted, back to the authored one). That is a `font-size` change
+  only — no layout shift beyond reflow — which is why the preference is applied as a custom
+  property rather than by swapping classes or rendering a different tree.
 
 ## Accessibility
 

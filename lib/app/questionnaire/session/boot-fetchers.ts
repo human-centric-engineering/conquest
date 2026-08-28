@@ -279,21 +279,23 @@ const resolvedThemeSchema = z.object({
   ctaColorEnd: z.string().nullable(),
   logoBackgroundColor: z.string().nullable(),
   hasBrandIdentity: z.boolean(),
-  // The brand kit. Every field here is a hand-written mirror of `ResolvedTheme` and a
-  // MISSING one is silently stripped on the client — the resolver would have filled it
-  // server-side and the respondent would simply never see it. `.catch()` on the two
-  // derived fields rather than a bare default, so a payload from a build that resolves
-  // them differently degrades that one affordance instead of failing the whole parse.
-  canvasColor: z.string().nullable(),
-  onCanvas: z.string().nullable(),
-  canvasColorDark: z.string().nullable(),
-  onCanvasDark: z.string().nullable(),
+  // The brand kit. Every field here is a hand-written mirror of `ResolvedTheme`, and every one
+  // carries `.catch()` so a MISSING or unrecognised value degrades that ONE affordance instead
+  // of failing the parse. `.nullable()` alone did not do that: an absent key still fails the
+  // field, which fails `resolvedThemeSchema`, which fails `surfaceConfigSchema`, which makes
+  // `fetchSurfaceConfig` return null — so during a rolling deploy (new bundle, old server) a
+  // client-booted surface would lose voice input, layout, answer-panel scope, reasoning,
+  // glossary and text size all at once, over one theme field the resolver had not learnt yet.
+  canvasColor: z.string().nullable().catch(null),
+  onCanvas: z.string().nullable().catch(null),
+  canvasColorDark: z.string().nullable().catch(null),
+  onCanvasDark: z.string().nullable().catch(null),
   canvasIsDark: z.boolean().catch(false),
-  accentColorEnd: z.string().nullable(),
-  logoMarkUrl: z.string().nullable(),
-  logoDarkUrl: z.string().nullable(),
-  bandLogoUrl: z.string().nullable(),
-  bandLogoDarkUrl: z.string().nullable(),
+  accentColorEnd: z.string().nullable().catch(null),
+  logoMarkUrl: z.string().nullable().catch(null),
+  logoDarkUrl: z.string().nullable().catch(null),
+  bandLogoUrl: z.string().nullable().catch(null),
+  bandLogoDarkUrl: z.string().nullable().catch(null),
   fontPairing: z.enum(FONT_PAIRINGS).catch(DEFAULT_FONT_PAIRING),
 });
 

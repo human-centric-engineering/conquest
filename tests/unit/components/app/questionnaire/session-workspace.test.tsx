@@ -20,7 +20,10 @@ import { useRouter } from 'next/navigation';
 import { createMockRouter } from '@/tests/types/mocks';
 
 import type { PanelSlotView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
-import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
+import {
+  CHAT_TEXT_AUTHORED_STORAGE_KEY,
+  CHAT_TEXT_SCALE_STORAGE_KEY,
+} from '@/lib/app/questionnaire/chat/text-scale';
 import type { RespondentLayout } from '@/lib/app/questionnaire/types';
 
 const sendMessage = vi.fn();
@@ -1006,9 +1009,10 @@ describe('SessionWorkspace', () => {
     });
 
     /**
-     * `config.chatTextSize`, resolved server-side to a ladder index. It decides where the ladder
-     * OPENS and nothing else — the ordering against the respondent's stored preference is the
-     * whole point of the setting, so it is asserted from both directions.
+     * `config.chatTextSize`, resolved server-side to a ladder index. It decides the size the
+     * conversation OPENS at, and the rule that makes it both effective and safe is "adopt once per
+     * authored value" — so it is asserted from every direction: a first-timer, a respondent who
+     * has stepped, the same respondent returning, and an author who never touched the setting.
      */
     describe('the questionnaire-authored opening rung', () => {
       it('opens at the authored rung when the respondent has never used the stepper', () => {
@@ -1016,13 +1020,58 @@ describe('SessionWorkspace', () => {
         expect(scale()).toBe('1.3');
       });
 
-      it('never overrides a respondent who has already chosen — their stored size wins', () => {
-        // The invariant that makes this setting safe to ship. An admin cannot reach into a
-        // respondent's accessibility preference, on this questionnaire or any later one: the
-        // authored value is only ever `useLocalStorage`'s `initial`, which storage supersedes.
+      it('adopts the authored rung over a respondent who has stepped before', () => {
+        // The reason this setting exists. Handing the authored rung to `useLocalStorage` as its
+        // `initial` was not enough: `initial` applies only while nothing is stored, so the setting
+        // was inert for anyone who had ever touched the stepper — the author previewing their own
+        // choice above all.
         window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(0));
         render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(scale()).toBe('1.3');
+      });
+
+      it('records the adopted rung so the adoption happens once, not on every visit', () => {
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(window.localStorage.getItem(CHAT_TEXT_AUTHORED_STORAGE_KEY)).toBe('3');
+      });
+
+      it('leaves a respondent who stepped AWAY from the authored rung on their own size', () => {
+        // The other half of "adopt once". Re-adopting on every mount would make the stepper
+        // useless on any questionnaire with an authored size — every reload would undo it.
+        window.localStorage.setItem(CHAT_TEXT_AUTHORED_STORAGE_KEY, JSON.stringify(3));
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(1));
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(scale()).toBe('1');
+      });
+
+      it('re-adopts when the marker is unreadable rather than stranding the setting', () => {
+        // Storage is untrusted: another tab, a hand-edit, or an older build can leave something
+        // that is not JSON here. Treating that as "nothing adopted" re-applies the authored rung;
+        // treating it as "already adopted" would silently switch the setting off for that browser.
+        window.localStorage.setItem(CHAT_TEXT_AUTHORED_STORAGE_KEY, 'not-json');
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(1));
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(scale()).toBe('1.3');
+        // …and the unreadable marker is replaced, so the next visit does not adopt again.
+        expect(window.localStorage.getItem(CHAT_TEXT_AUTHORED_STORAGE_KEY)).toBe('3');
+      });
+
+      it('adopts again once the author moves the setting to a different rung', () => {
+        // Same respondent, same browser, but the questionnaire now says something else. Without
+        // this an author could never correct a size for people who had already been in.
+        window.localStorage.setItem(CHAT_TEXT_AUTHORED_STORAGE_KEY, JSON.stringify(3));
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(3));
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={0} />);
         expect(scale()).toBe('0.9');
+      });
+
+      it('leaves the respondent alone when the author never set a size', () => {
+        // Standard is the column default and indistinguishable from "not set", so it must not
+        // reach in. This is what keeps a respondent's own size carrying between questionnaires.
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(3));
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={1} />);
+        expect(scale()).toBe('1.3');
+        expect(window.localStorage.getItem(CHAT_TEXT_AUTHORED_STORAGE_KEY)).toBeNull();
       });
 
       it('still lets the respondent step down from an authored Largest', () => {

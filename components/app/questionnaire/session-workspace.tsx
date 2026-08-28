@@ -141,11 +141,12 @@ export interface SessionWorkspaceProps {
    */
   respondentLayout?: RespondentLayout;
   /**
-   * The rung the text-size stepper OPENS on (`config.chatTextSize`, already resolved to a ladder
-   * index by the server). Only the starting point: it is handed to the respondent's stored
-   * preference as its `initial`, so anyone who has ever stepped keeps their own size and this is
-   * never consulted for them. Omitted (a client-booted surface with no config yet) → the standard
-   * rung, which is what every session opened at before the setting existed.
+   * The rung the conversation OPENS at (`config.chatTextSize`, already resolved to a ladder index
+   * by the server). An explicitly authored rung — anything but the standard one — is adopted on
+   * arrival even by a respondent who has stepped before, once per authored value; after that their
+   * own rung stands until the author moves the setting again. See the adoption effect in
+   * `useSessionWorkspace` for the full rule. Omitted (a client-booted surface with no config yet)
+   * → the standard rung, which is what every session opened at before the setting existed.
    */
   chatTextScaleIndex?: number;
   /**
