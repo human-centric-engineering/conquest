@@ -27,6 +27,29 @@ export interface ToggleItem {
   Icon: LucideIcon;
 }
 
+/**
+ * Below which viewport width the segment LABELS stand down and each segment becomes its icon —
+ * keyed on how many segments there are, because that is what decides when the pill runs out of room.
+ *
+ * A fixed threshold cannot work here. The set is generic: two segments for plain chat ⇄ form, three
+ * with an Intro recap, four when the interviewer picker rides along — and every extra segment
+ * carries a word, so a four-segment strip is roughly twice the width of a two-segment one. A single
+ * breakpoint tuned for two leaves the four-segment case wrapping onto a second line on a phone;
+ * tuned for four, it strips the words off a two-segment pill that had plenty of room for them.
+ *
+ * The values are the widths at which each set stops fitting beside the text-size stepper and the
+ * review trigger on the lifecycle strip's control line. Written as whole literal class names rather
+ * than composed from the count, because Tailwind scans source text: an interpolated
+ * `max-[${n}px]:hidden` produces no CSS at all, and would fail silently as a label that never hides.
+ */
+const LABELS_HIDE_BELOW: Record<number, string> = {
+  2: 'max-[360px]:hidden',
+  3: 'max-[420px]:hidden',
+  4: 'max-[540px]:hidden',
+};
+/** Anything larger than the sets we ship: assume it needs the room at every phone width. */
+const LABELS_HIDE_FALLBACK = 'max-[640px]:hidden';
+
 const DEFAULT_ITEMS: ToggleItem[] = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
   { id: 'form', label: 'Form', Icon: ListChecks },
@@ -42,6 +65,7 @@ export interface ModeToggleProps {
 
 export function ModeToggle({ value, onChange, items = DEFAULT_ITEMS, className }: ModeToggleProps) {
   const count = items.length;
+  const labelHiddenClass = LABELS_HIDE_BELOW[count] ?? LABELS_HIDE_FALLBACK;
   // Clamp so an unknown value parks the indicator under the first segment rather than off-track.
   const activeIndex = Math.max(
     0,
@@ -89,10 +113,10 @@ export function ModeToggle({ value, onChange, items = DEFAULT_ITEMS, className }
             )}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {/* Icon + word at every normal width. Only on EXTREMELY small screens (≤360px) does the
-                word drop to icon-only, so a crowded 4-segment strip can't overflow. `aria-label`
-                keeps each tab named when the word is hidden. */}
-            <span className="max-[360px]:hidden">{label}</span>
+            {/* Icon + word wherever the pill has room for both; below that, the icon alone. Where
+                "below that" is depends on how many segments there are — see `LABELS_HIDE_BELOW`.
+                `aria-label` on the button keeps each tab named when the word is hidden. */}
+            <span className={labelHiddenClass}>{label}</span>
           </button>
         );
       })}

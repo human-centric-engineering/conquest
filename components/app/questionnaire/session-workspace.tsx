@@ -476,20 +476,23 @@ export function SessionWorkspace({
       // wrapped row on mobile. Hidden once the side panel returns (`lg`) — but ONLY where a panel
       // returns at all: in a layout that relocates review into the sheet, this is the sole route to
       // the captured answers and must stay at every width.
-      className={cn('rounded-full', panelInline && 'lg:hidden')}
+      // Below `sm` the clipboard glyph stands alone. It shares the control line with the surface
+      // switcher, and the switcher's labels are the ones worth keeping: it is the row's subject and
+      // its words are what tell the respondent where they are. Review is a single secondary action
+      // with a distinctive icon and an `aria-label` that survives the collapse.
+      className={cn('rounded-full max-sm:w-9 max-sm:px-0', panelInline && 'lg:hidden')}
       onClick={() => setReviewOpen(true)}
       aria-haspopup="dialog"
       aria-expanded={reviewOpen}
       aria-label={`Review answers${reviewCountLabel ? `, ${reviewCountLabel}` : ''}`}
     >
       <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      {/* Keep the word on normal mobile; only ≤360px collapse to the icon alone. The count is
-          redundant with the top progress bar, so it stays a ≥sm nicety. `aria-label` keeps the
-          control named when it's icon-only. */}
-      <span className="max-[360px]:hidden">Review answers</span>
-      {reviewCountLabel && (
-        <span className="text-muted-foreground ml-1.5 hidden sm:inline">· {reviewCountLabel}</span>
-      )}
+      {/* `aria-label` above keeps the control named when the word is hidden — and it is where the
+          count now lives. The count used to be printed here too, and directly under a bar already
+          reading "0% completed" it rendered as "Review answers · 0% complete": the same fact, in
+          nearly the same words, twice in two rows, on the row that had the least width to spare. A
+          screen-reader user has no bar to glance at, so it stays in the label; a sighted one does. */}
+      <span className="max-sm:hidden">Review answers</span>
     </Button>
   ) : null;
 
@@ -497,17 +500,41 @@ export function SessionWorkspace({
   // chat is in play — there's nothing to take away from an empty session.
   const transcriptDownload =
     showChat && turnCount > 1 ? (
-      <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="ghost" />
+      <TranscriptDownload
+        sessionId={sessionId}
+        accessToken={accessToken}
+        variant="ghost"
+        // On the strip it shares its line with the coverage bar and the reference chip, so below
+        // `sm` it gives up its words and keeps the glyph.
+        collapseLabel
+      />
     ) : null;
 
-  // Right-cluster controls. Kept `undefined` when none apply so the lifecycle strip still collapses
-  // to nothing on a plain form-only session (the bar renders the strip whenever `trailing` is present).
+  // Fallback home for the cross-device entry: with the intro disabled there is no splash footer to
+  // carry it, and the strip is the only other row that costs it nothing.
+  const resumeByRefOnStrip = showIntro ? undefined : resumeByRef;
+
+  // The strip's two clusters. Both stay `undefined` when nothing applies, so the lifecycle bar still
+  // collapses to nothing on a plain form-only session (it renders a line whenever either is present).
+  //
+  // The switcher leads and the tools trail, rather than everything piling into one right-aligned
+  // cluster. It is the widest control on the strip and the one that says where you are, so it
+  // anchors the left against the progress bar above; the tools — text size, the interviewer chip,
+  // review — are secondary and sit together at the trailing edge. Cross-device resume joins the
+  // switcher on the left, where it already lived.
+  const leadingControls =
+    modeToggle || resumeByRefOnStrip ? (
+      <>
+        {modeToggle}
+        {resumeByRefOnStrip}
+      </>
+    ) : undefined;
+
   const trailingControls =
-    textSize || interviewerChip || modeToggle || reviewTrigger ? (
+    textSize || interviewerChip || reviewTrigger ? (
       <>
         {textSize}
         {interviewerChip}
-        {modeToggle}
         {reviewTrigger}
       </>
     ) : undefined;
@@ -541,9 +568,7 @@ export function SessionWorkspace({
         onResume={() => void lifecycle.resume()}
         download={transcriptDownload ?? undefined}
         trailing={trailingControls}
-        // Fallback home for the cross-device entry: with the intro disabled there is no splash
-        // footer to carry it, and the strip is the only other row that costs it nothing.
-        leading={showIntro ? undefined : resumeByRef}
+        leading={leadingControls}
       />
     ),
     // The bar draws its own progress. This standalone atom is for layouts that decompose the strip

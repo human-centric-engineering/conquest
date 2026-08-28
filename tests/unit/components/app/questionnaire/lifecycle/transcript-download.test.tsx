@@ -181,3 +181,34 @@ describe('TranscriptDownload', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.?t copy/i);
   });
 });
+
+/**
+ * `collapseLabel` — the strip's trigger gives up its words below `sm`, and keeps its name.
+ *
+ * On the lifecycle strip this button shares the status line with the coverage bar and the
+ * reference chip, and at ~450px "Chat Transcript" plus a chevron was what tipped that line into a
+ * collision. The words go; the glyph stays.
+ *
+ * The assertion that matters is `sr-only` rather than `hidden`. This text IS the button's
+ * accessible name, and it is also how "Preparing…" and "Copied" reach a screen-reader user — so
+ * `hidden` would leave a nameless icon, and an `aria-label` would name it but freeze it, drowning
+ * both live states under one constant. `sr-only` is absolutely positioned, so it costs the
+ * collapsed button no width while staying in the a11y tree.
+ */
+describe('collapsing the trigger label', () => {
+  it('keeps the name when the words are visually collapsed', () => {
+    render(<TranscriptDownload sessionId="sess-1" collapseLabel />);
+    const trigger = screen.getByRole('button', { name: /chat transcript/i });
+    const label = screen.getByText('Chat Transcript');
+    expect(label).toHaveClass('max-sm:sr-only');
+    expect(label).not.toHaveClass('hidden');
+    expect(trigger).toContainElement(label);
+  });
+
+  it('leaves the label unconditional by default — the completion screen keeps its words', () => {
+    // There, taking the transcript away is one of the two things the page is for; an icon-only
+    // button on a phone would bury it.
+    render(<TranscriptDownload sessionId="sess-1" variant="outline" />);
+    expect(screen.getByText('Chat Transcript')).not.toHaveClass('max-sm:sr-only');
+  });
+});

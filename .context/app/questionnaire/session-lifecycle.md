@@ -110,9 +110,24 @@ view. Lifecycle actions change status server-side, then push the authoritative s
 shared stream via `stream.applyStatus(...)` (so the composer enables/disables in lockstep) and
 refetch.
 
-- **`SessionLifecycleBar`** — a quiet strip above the chat: Pause/Resume control, soft
-  cost-budget hint, session ref + transcript download, action errors. Renders nothing when
-  there's nothing to say. The **anonymity notice is not on this strip** — it rides the brand
+- **`SessionLifecycleBar`** — a quiet strip above the chat, in **two lines split by kind**, each
+  of which drops out when it has nothing to carry:
+  - **Status** — the coverage bar, the session ref chip, the transcript download. Facts about the
+    session; none of them changes what is on screen.
+  - **Controls** — the surface switcher on the left (via `leading`), then the cost hint, the paused
+    notice and any action error, then the tools cluster on the right (via `trailing`: text size,
+    interviewer chip, review trigger) with Pause/Resume.
+
+  The split is not cosmetic. Everything used to right-align into one wrapping `ml-auto` cluster, so
+  on a laptop the controls fragmented into three ragged lines above the conversation. Moving the
+  ref and download to the status line is what buys the controls a single row back; anchoring the
+  switcher on the left gives the row two cohesive clusters, so the worst case when it genuinely
+  runs out of width is two tidy lines rather than three ragged ones. The review trigger's
+  "· N% complete" suffix was dropped from the visible button for the same reason — under a bar
+  already reading "0% completed" it printed the same fact twice, on the row with least room to
+  spare. It survives in the control's `aria-label`, where there is no bar to glance at.
+
+  Renders nothing when there's nothing to say. The **anonymity notice is not on this strip** — it rides the brand
   band above the conversation (`BrandThemeProvider`), one quiet line under the questionnaire
   title, aligned with it, so it costs no row of its own. The admin session viewer has no band,
   so it shows an `Anonymous` badge in its own header row instead. Its `SessionProgressBar`
@@ -120,6 +135,7 @@ refetch.
   "N% completed" text beside it is a separate `showProgressPercentText` prop (config default
   `true`), threaded from each respondent page down through `SessionWorkspace` — see
   [configuration.md § Progress display & completeness milestones](./configuration.md#progress-display--completeness-milestones-f-progress).
+
 - **`CompletionOffer`** — a Submit CTA above the chat, shown when `canSubmit`. "Keep going"
   dismisses it; it reappears on the next settle if still offerable.
 - **`SessionComplete`** — replaces the workspace on `completed`: a calm, themed confirmation

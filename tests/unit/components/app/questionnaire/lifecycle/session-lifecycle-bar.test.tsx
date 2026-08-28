@@ -160,3 +160,66 @@ describe('SessionLifecycleBar', () => {
     expect(screen.getByRole('button', { name: /enter your code/i })).toBeInTheDocument();
   });
 });
+
+/**
+ * The strip is two lines split by KIND, and the split is what buys the controls a single row.
+ *
+ * Everything used to right-align into one wrapping cluster — bar on top, then ref, download, text
+ * size, switcher and review all fighting for the same `ml-auto` span. On a laptop that fragmented
+ * into three ragged lines above the conversation. jsdom computes no layout, so what is asserted is
+ * the arrangement that decides it: which line each part is on, and that the two lines are siblings
+ * rather than one wrapping row.
+ */
+describe('status line vs control line', () => {
+  /** The two lines are the strip root's element children, in order. */
+  function lines(container: HTMLElement) {
+    return Array.from(container.firstElementChild?.children ?? []) as HTMLElement[];
+  }
+
+  it('puts the reference and the download on the STATUS line, beside the bar', () => {
+    // Both are facts about this session, not things that change what is on screen — and moving them
+    // off the control line is precisely what gave the controls their row back.
+    const { container } = renderBar({
+      view: view({ ref: 'EWG5GZTG' }),
+      download: <button type="button">Download transcript</button>,
+      trailing: <button type="button">Review answers</button>,
+    });
+
+    const [status, controls] = lines(container);
+    expect(status).toContainElement(screen.getByRole('button', { name: /support reference/i }));
+    expect(status).toContainElement(screen.getByRole('button', { name: /download transcript/i }));
+    expect(status).toContainElement(screen.getByRole('progressbar'));
+    expect(controls).toContainElement(screen.getByRole('button', { name: /review answers/i }));
+  });
+
+  it('puts the leading switcher and the trailing tools on the SAME control line', () => {
+    // The row's whole point: a left anchor and a trailing cluster, not two stacked right-aligned
+    // fragments. If these ever land on different lines the "one row" claim is gone.
+    const { container } = renderBar({
+      view: view({ ref: 'EWG5GZTG' }),
+      leading: <button type="button">Chat</button>,
+      trailing: <button type="button">Review answers</button>,
+    });
+
+    const [, controls] = lines(container);
+    expect(controls).toContainElement(screen.getByRole('button', { name: 'Chat' }));
+    expect(controls).toContainElement(screen.getByRole('button', { name: /review answers/i }));
+  });
+
+  it('drops the control line entirely when there is nothing to operate', () => {
+    // The common case — an anonymous active session with no pause control — is one thin bar and a
+    // reference, and it must not pay for a second empty row.
+    const { container } = renderBar({ view: view({ ref: 'EWG5GZTG' }) });
+    expect(lines(container)).toHaveLength(1);
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+  });
+
+  it('drops the status line when there is no view and no reference', () => {
+    const { container } = renderBar({
+      view: null,
+      trailing: <button type="button">Review answers</button>,
+    });
+    expect(lines(container)).toHaveLength(1);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+});
