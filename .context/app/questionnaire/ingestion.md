@@ -56,6 +56,37 @@ their questions, and the prompt explicitly tells the critic that a guessed count
 honest shrug. It is also told not to reason backwards from the number of questions it was given,
 without which the check is circular.
 
+#### Where the admin sees this
+
+The **Changes tab** (`…/v/:vid/extraction-changes`), in a band above the change log, because two of
+the three findings are about edits MISSING from that log — "this question was reworded and no
+change record says so" is only legible next to the table that would have recorded it.
+
+`GET …/versions/:vid/changes` carries a `fidelity` block for the version's newest
+`extraction_verify` run (`ExtractionChangeListResponse.fidelity`, null when no verify pass ran).
+Newest, not only: a re-ingest writes a second row and an older one describes questions that no
+longer exist. It rides the endpoint's existing `Promise.all`, on the `[versionId, createdAt]` index.
+
+The band **renders only when there is something to say** — `hasFidelityFindings`. A clean
+extraction shows nothing at all, because a panel that always appears saying "all good" is a panel
+people stop reading, which costs exactly the runs where it does have something. On the same
+reasoning it stays silent for `uncountable` coverage (the common, correct answer) and for
+`disallowedEditCount` alone, which is a question about the build rather than about this
+questionnaire and carries no admin action.
+
+Two things it reports that a naive reading would get wrong:
+
+- **`flaggedCount`, never `flagged.length`.** The verdicts are reconstructed from the run's output
+  snapshot, which the store caps and marks truncated — so on a long questionnaire the list can be
+  empty while three questions really were flagged.
+- **The unattributed count from a legacy row.** Rows written before the check reported keys carry a
+  count and no keys; the reader keeps the stored count so such a version reports "2 questions" it
+  cannot name, rather than silently reading as clean.
+
+`readFidelityDetail` `.catch()`es every field, deliberately. It parses a `Json` column written by a
+past build, and the wrong failure mode is not a crash — it is returning nothing, which renders
+identically to a faithful extraction.
+
 #### Why an unrecorded rewrite is the one worth counting
 
 The extractor is allowed to reword — `rewrite_prompt`, `correct_spelling` and `correct_grammar` are

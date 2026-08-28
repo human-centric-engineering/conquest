@@ -76,6 +76,9 @@ function makeChangesResponse(
   return {
     changes: [],
     counts: { applied: 0, reverted: 0, superseded: 0 },
+    // No verify pass ran — the common case for a composed questionnaire and for any version
+    // predating the fidelity critic.
+    fidelity: null,
     ...over,
   };
 }

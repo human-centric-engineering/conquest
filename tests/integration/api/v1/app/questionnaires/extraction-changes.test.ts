@@ -50,6 +50,8 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
+  // The fidelity critic's run for the version, joined onto the list payload.
+  appAiRun: { findFirst: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 // test-review:accept mock-realism — executeTransaction runs the callback eagerly with
@@ -153,6 +155,8 @@ beforeEach(() => {
   prismaMock.appQuestionnaireExtractionChange.groupBy.mockResolvedValue([]);
   prismaMock.appQuestionnaireExtractionChange.update.mockResolvedValue({});
   prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
+  // No verify pass by default — the shape a composed questionnaire and every pre-critic version has.
+  prismaMock.appAiRun.findFirst.mockResolvedValue(null);
   // Safe defaults for the executor write mocks. `vi.clearAllMocks()` resets call
   // history but NOT implementations set via `mockResolvedValue`, so without these a
   // value set in one test would bleed into later tests in execution order.
@@ -223,6 +227,82 @@ describe('GET changes', () => {
     const body = await res.json();
     expect(body.data.changes[0].revertable).toBe(false);
     expect(body.data.changes[0].revertBlockedReason).toBe('graph_drift');
+  });
+
+  /**
+   * The fidelity read, joined onto this payload rather than given its own endpoint.
+   *
+   * These assert the JOIN and the QUERY, not the projection — `readFidelityDetail` has its own
+   * unit tests. What can only go wrong here is the route reading the wrong row: an older
+   * re-ingest's, or one belonging to a different kind of run.
+   */
+  it('joins the version’s fidelity read onto the list payload', async () => {
+    prismaMock.appAiRun.findFirst.mockResolvedValue({
+      detail: {
+        flaggedCount: 1,
+        totalCount: 22,
+        repairOutcome: 'repair_failed',
+        coverage: { sourceQuestionCount: 22, assessment: 'missing_questions' },
+        unattributedPromptCount: 1,
+        unattributedPromptKeys: ['register_owner'],
+        fileName: 'instrument.docx',
+      },
+      outputSnapshot: [{ key: 'register_owner', verdict: 'suspect', issue: 'type_mismatch' }],
+      status: 'succeeded',
+      createdAt: new Date('2026-08-20T10:30:00.000Z'),
+    });
+
+    const res = await listGET(req(), ctx(VERSION_PARAMS));
+    const body = await res.json();
+
+    expect(body.data.fidelity).toMatchObject({
+      totalCount: 22,
+      flaggedCount: 1,
+      repairOutcome: 'repair_failed',
+      unattributedPromptKeys: ['register_owner'],
+      fileName: 'instrument.docx',
+    });
+  });
+
+  it('reads the NEWEST verify run for this version, and only that kind', async () => {
+    await listGET(req(), ctx(VERSION_PARAMS));
+
+    // Newest-first because a re-ingest writes a second row and the older one describes questions
+    // that no longer exist; kind-scoped because every other AppAiRun kind has a different `detail`.
+    expect(prismaMock.appAiRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { versionId: 'v1', kind: 'extraction_verify' },
+        orderBy: { createdAt: 'desc' },
+      })
+    );
+  });
+
+  it('returns a null fidelity read when no verify pass ever ran', async () => {
+    const res = await listGET(req(), ctx(VERSION_PARAMS));
+    const body = await res.json();
+
+    expect(body.data.fidelity).toBeNull();
+  });
+
+  it('keeps the fidelity read when the change list is filtered', async () => {
+    // It describes the extraction as a whole. A `status=reverted` filter is a statement about
+    // which CHANGES to show, not about which findings still apply.
+    prismaMock.appAiRun.findFirst.mockResolvedValue({
+      detail: { flaggedCount: 2, totalCount: 9, repairOutcome: 'repaired' },
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: new Date('2026-08-20T10:30:00.000Z'),
+    });
+
+    const res = await listGET(
+      req(
+        'http://localhost:3000/api/v1/app/questionnaires/qn-1/versions/v1/changes?status=reverted'
+      ),
+      ctx(VERSION_PARAMS)
+    );
+    const body = await res.json();
+
+    expect(body.data.fidelity?.flaggedCount).toBe(2);
   });
 
   it('passes the status filter through to the query', async () => {

@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { Wand2 } from 'lucide-react';
 
 import { ExtractionChangesTable } from '@/components/admin/questionnaires/extraction-changes-table';
+import { ExtractionFidelityBand } from '@/components/admin/questionnaires/extraction-fidelity-band';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -67,6 +68,11 @@ export default async function ExtractionChangesTab({ params }: PageProps) {
           </div>
         </div>
       </div>
+
+      {/* Above the table on purpose: two of its three findings are about edits MISSING from the
+          log below, which only reads as a statement next to the log. Renders nothing when the
+          extraction was clean. */}
+      {changes && <ExtractionFidelityBand fidelity={changes.fidelity} />}
 
       {changes ? (
         <ExtractionChangesTable

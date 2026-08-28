@@ -16,7 +16,13 @@
  * component, so this file must stay in the client bundle's reach.
  */
 
-import type { VerifyCoverage } from '@/lib/app/questionnaire/ingestion/verify-schema';
+import { z } from 'zod';
+
+import {
+  coverageSchema,
+  questionVerdictSchema,
+  type VerifyCoverage,
+} from '@/lib/app/questionnaire/ingestion/verify-schema';
 
 /** What happened to the questions the critic flagged. Mirrors `FidelityRecord.repairOutcome`. */
 export const REPAIR_OUTCOMES = [
@@ -71,4 +77,147 @@ export function buildFidelityDetail(input: FidelityDetailInput): Record<string, 
     repairOutcome: input.repairOutcome,
     fileName: input.fileName,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Read side                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** One question the critic flagged `suspect`, as the admin surface shows it. */
+export interface FlaggedQuestion {
+  key: string;
+  /** What kind of unfaithfulness, when the critic named one. */
+  issue: string | null;
+  /** The critic's one-line explanation, when it gave one. */
+  detail: string | null;
+}
+
+/**
+ * What an admin can be told about how faithfully this version was extracted.
+ *
+ * Everything here is READ-ONLY and advisory. None of it blocks an ingest — by the time any of it
+ * is knowable the questions already exist — and none of it is a setting. It exists because the
+ * signals were being computed, logged, and then shown to nobody.
+ */
+export interface VersionFidelityView {
+  /** How many questions the critic checked. */
+  totalCount: number;
+  /**
+   * The ones it flagged `suspect`, with the reason when it gave one.
+   *
+   * Can be EMPTY while {@link flaggedCount} is non-zero: the verdicts are reconstructed from the
+   * run's output snapshot, which the store caps and marks truncated. Render the count, not the
+   * list's length, or a long questionnaire silently reports itself clean.
+   */
+  flagged: FlaggedQuestion[];
+  /** How many the critic flagged, as the row recorded it — authoritative over `flagged.length`. */
+  flaggedCount: number;
+  /**
+   * What became of the flagged ones. `repair_failed` and `skipped_systemic` are the two that
+   * matter to a reader: the questions stayed as extracted, and nothing else says so.
+   */
+  repairOutcome: RepairOutcome;
+  /** The critic's read on the question COUNT, or null when it did not report one. */
+  coverage: VerifyCoverage | null;
+  /** Keys of questions reworded with no change record. Empty on a legacy row that stored a count only. */
+  unattributedPromptKeys: string[];
+  /**
+   * How many were reworded without a record. Usually `unattributedPromptKeys.length`, but read
+   * separately so a row written before the keys existed still reports its number rather than
+   * silently reading as clean — see {@link readFidelityDetail}.
+   */
+  unattributedPromptCount: number;
+  /** Editorial edits the extractor was instructed not to make. Build health; not shown to admins. */
+  disallowedEditCount: number;
+  /** The document this describes, when the row recorded it. */
+  fileName: string | null;
+  /** When the check ran (ISO). */
+  checkedAt: string;
+  /** True when the critic never reached a provider — every "nothing was flagged" here is vacuous. */
+  verifierUnavailable: boolean;
+}
+
+const detailSchema = z.object({
+  flaggedCount: z.number().int().nonnegative().catch(0),
+  totalCount: z.number().int().nonnegative().catch(0),
+  repairOutcome: z.enum(REPAIR_OUTCOMES).catch('none_flagged'),
+  coverage: coverageSchema.nullish().catch(null),
+  disallowedEditCount: z.number().int().nonnegative().nullish().catch(null),
+  unattributedPromptCount: z.number().int().nonnegative().nullish().catch(null),
+  unattributedPromptKeys: z.array(z.string()).nullish().catch(null),
+  fileName: z.string().nullish().catch(null),
+});
+
+/**
+ * Project a stored `extraction_verify` row onto {@link VersionFidelityView}, or null.
+ *
+ * ## Every field is `.catch()`-ed, deliberately
+ *
+ * This reads a `Json` column written by a past build. A row from before the coverage dimension
+ * existed has no `coverage`; a row from before the keys existed has a count and no keys; a row
+ * from a future build may have fields this one has never heard of. None of those is a reason to
+ * tell an admin nothing — the alternative to a partial answer here is a blank panel that looks
+ * exactly like a clean ingest. So a malformed field degrades to its empty value and the rest of
+ * the row still renders. This is the read-path posture the rest of the app uses rather than a
+ * migration, because there is nothing to migrate TO: the older rows are honest records of what
+ * older builds knew.
+ *
+ * `null` is returned only when there is no row at all — no verify pass ran for this version.
+ */
+export function readFidelityDetail(input: {
+  detail: unknown;
+  outputSnapshot: unknown;
+  status: string;
+  createdAt: Date;
+}): VersionFidelityView | null {
+  const parsed = detailSchema.safeParse(input.detail);
+  if (!parsed.success) return null;
+  const d = parsed.data;
+
+  // The verdicts live on the output snapshot rather than the detail, so the flagged list is
+  // reconstructed rather than stored twice. A snapshot that is missing or truncated (the store
+  // caps it at AI_RUN_SNAPSHOT_MAX_CHARS) yields an empty list, which is why `flaggedCount` is
+  // carried from the detail rather than derived: on a long questionnaire the list can be empty
+  // while three questions really were flagged.
+  const verdicts = z.array(questionVerdictSchema).catch([]).parse(input.outputSnapshot);
+  const flagged: FlaggedQuestion[] = verdicts
+    .filter((v) => v.verdict === 'suspect')
+    .map((v) => ({ key: v.key, issue: v.issue ?? null, detail: v.detail ?? null }));
+
+  const keys = d.unattributedPromptKeys ?? [];
+  return {
+    totalCount: d.totalCount,
+    flagged,
+    flaggedCount: d.flaggedCount,
+    repairOutcome: d.repairOutcome,
+    coverage: d.coverage ?? null,
+    unattributedPromptKeys: keys,
+    // The stored count wins when present, so a legacy row that recorded "2" without saying which
+    // two still reports 2 rather than reading as clean. Falls back to the list's length for a row
+    // that somehow carried keys without a count.
+    unattributedPromptCount: d.unattributedPromptCount ?? keys.length,
+    disallowedEditCount: d.disallowedEditCount ?? 0,
+    fileName: d.fileName ?? null,
+    checkedAt: input.createdAt.toISOString(),
+    verifierUnavailable: d.repairOutcome === 'verifier_unavailable' || input.status === 'failed',
+  };
+}
+
+/**
+ * Whether this view has anything worth putting in front of an admin.
+ *
+ * `disallowedEditCount` is excluded on purpose: it answers "is the extractor's do-not-split
+ * instruction landing?", which is a question about the BUILD, not about this questionnaire. There
+ * is no action an admin could take on it, and a panel that appears with nothing actionable in it
+ * trains people to close the panel.
+ */
+export function hasFidelityFindings(view: VersionFidelityView): boolean {
+  return (
+    view.verifierUnavailable ||
+    view.flaggedCount > 0 ||
+    view.unattributedPromptCount > 0 ||
+    (view.coverage !== null &&
+      view.coverage.assessment !== 'matches' &&
+      view.coverage.assessment !== 'uncountable')
+  );
 }

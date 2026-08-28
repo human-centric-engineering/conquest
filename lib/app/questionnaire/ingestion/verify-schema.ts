@@ -27,7 +27,7 @@ export const VERIFY_ISSUES = [
 ] as const;
 export type VerifyIssue = (typeof VERIFY_ISSUES)[number];
 
-const questionVerdictSchema = z.object({
+export const questionVerdictSchema = z.object({
   /** The extracted question's key (must be one from the input set). */
   key: z.string().min(1),
   verdict: z.enum(['ok', 'suspect']),
@@ -62,7 +62,7 @@ export type MatrixGroupHint = z.infer<typeof matrixGroupHintSchema>;
  * states its own count — through numbering, an explicit "20 questions", or a complete visible list
  * — supports anything else.
  */
-const coverageSchema = z.object({
+export const coverageSchema = z.object({
   /** The count the SOURCE claims, when it says. Null whenever `assessment` is `uncountable`. */
   sourceQuestionCount: z.number().int().nonnegative().nullable(),
   assessment: z.enum(['matches', 'extra_questions', 'missing_questions', 'uncountable']),
