@@ -363,6 +363,28 @@ describe('POST …/reingest/stream — happy path', () => {
     );
   });
 
+  /**
+   * The streaming route is the one the dialog actually calls, so it carries the same handoff
+   * assertion as its non-streaming twin: the requiredness choice was parsed here all along and
+   * simply never passed on, leaving every re-ingest to inherit `writeGraph`'s `'optional'`.
+   */
+  it('forwards the requiredness choice to the writer, defaulting to all-required', async () => {
+    const chosen = await POST(
+      makeRequest('onboarding.md', DOC, 'text/markdown', { requiredMode: 'source' }),
+      ctx(PARAMS)
+    );
+    await drainSse(chosen);
+    expect(reingestVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ requiredness: 'source' })
+    );
+
+    vi.mocked(reingestVersion).mockClear();
+
+    const omitted = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    await drainSse(omitted);
+    expect(reingestVersion).toHaveBeenCalledWith(expect.objectContaining({ requiredness: 'all' }));
+  });
+
   it('writes an admin audit row tagged mode: stream with the re-ingest counts', async () => {
     const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
     await drainSse(res);

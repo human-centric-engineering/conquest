@@ -184,9 +184,14 @@ export function parseAdminMetadata(formData: FormData): AdminMetadata {
 }
 
 /**
- * How imported questions resolve their `required` flag (mirrors the persist
- * writer's `RequirednessPolicy`). Ingest-only — re-ingest never re-decides
- * requiredness — so it is parsed separately from the shared {@link AdminMetadata}.
+ * How imported questions resolve their `required` flag (mirrors the persist writer's
+ * `RequirednessPolicy`, minus `'optional'` — that one is the rewrite path's, not an admin choice).
+ *
+ * Read by ingest AND re-ingest: both rebuild a question graph from a document, so both have to
+ * decide this, and both dialogs ask. It used to be ingest-only, which is precisely how re-ingest
+ * ended up writing a policy no dialog offered — the value was parsed here and then dropped on the
+ * floor by the route. Parsed separately from the shared {@link AdminMetadata} because it steers the
+ * writer rather than describing the questionnaire.
  */
 export const REQUIRED_MODES = ['all', 'source'] as const;
 export type RequiredMode = (typeof REQUIRED_MODES)[number];

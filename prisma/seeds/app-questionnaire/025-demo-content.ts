@@ -268,8 +268,11 @@ const unit: SeedUnit = {
       });
       demoVersionId = version.id;
 
-      // Section + slot graph — same writer the ingestion route uses.
-      const counts = await writeGraph(tx, version.id, DEMO_EXTRACTION);
+      // Section + slot graph — same writer the ingestion route uses. `'optional'` is stated
+      // rather than inherited (the parameter no longer defaults) and preserves exactly what the
+      // demo has always seeded: DEMO_EXTRACTION marks no question required, so `'source'` would
+      // be identical and `'all'` would change the demo's shape.
+      const counts = await writeGraph(tx, version.id, DEMO_EXTRACTION, 'optional');
 
       // Config row — the launch gate requires the row to exist. Mirror the schema
       // defaults, overriding only the demo-relevant knobs:

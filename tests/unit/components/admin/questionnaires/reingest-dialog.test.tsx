@@ -189,6 +189,37 @@ describe('ReingestDialog', () => {
     expect(postedFormData(fetchMock).has('instructions')).toBe(false);
   });
 
+  /**
+   * Requiredness (the choice re-ingest never offered).
+   *
+   * The dialog had no such control, and the route dropped the parsed value, so every re-ingest
+   * rebuilt the draft with every question optional. Asserting on the posted FormData rather than
+   * on the radio's checked state is deliberate: a control that renders but never reaches the
+   * server is exactly the failure being fixed.
+   */
+  it('defaults to marking every rebuilt question required, and says so in the form body', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('all');
+  });
+
+  it("posts 'source' when the admin picks the document's own required markers", async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('radio', { name: /document’s required markers/i }));
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('source');
+  });
+
   it('renders the extracted counts on a successful (non-deduped) re-ingest', async () => {
     mockFetchSuccess({ sectionCount: 3, questionCount: 12, changeCount: 4, deduped: false });
     const user = await openDialog();

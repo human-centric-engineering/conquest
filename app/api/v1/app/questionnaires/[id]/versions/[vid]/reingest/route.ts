@@ -2,8 +2,8 @@
  * Questionnaire re-ingest endpoint (F2.4).
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/reingest
- *   Multipart upload of a *replacement* source document (.pdf / .docx / .md /
- *   .txt) against an existing **draft** version. Re-runs the same opinionated
+ *   Multipart upload of a *replacement* source document (`UPLOAD_EXTENSIONS`)
+ *   against an existing **draft** version. Re-runs the same opinionated
  *   extractor as a fresh ingest and **replaces that draft's extracted graph +
  *   editorial change log** with the new one. Destructive of manual edits / tag
  *   assignments on the draft — the UI confirms before calling.
@@ -78,7 +78,7 @@ const handleReingest = withAdminAuth<{ id: string; vid: string }>(
     // Guard + identify the upload (size, format, admin metadata, SHA-256).
     const guard = await parseAndGuardUpload(request);
     if (!guard.ok) return guard.response;
-    const { file, fileHash, adminMeta } = guard.value;
+    const { file, fileHash, adminMeta, requiredMode } = guard.value;
 
     // Version-scoped dedup short-circuit: the upload is byte-identical to the
     // version's CURRENT (most recent) source document → no-op (no re-extraction,
@@ -134,6 +134,7 @@ const handleReingest = withAdminAuth<{ id: string; vid: string }>(
         versionId: vid,
         extraction,
         admin: adminMeta,
+        requiredness: requiredMode,
         source: {
           fileName: file.name,
           fileHash,

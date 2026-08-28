@@ -92,16 +92,16 @@ the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProg
 contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
 [Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
-| Field              | In       | Notes                                                                                   |
-| ------------------ | -------- | --------------------------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth. |
-| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).         |
-| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.               |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                          |
-| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**      |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                 |
-| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.               |
-| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.           |
+| Field              | In       | Notes                                                                                    |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth.  |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).          |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.                |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                           |
+| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**       |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                  |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required. Re-ingest too. |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.            |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
@@ -128,8 +128,8 @@ lines later. Server-side the pair are `hasAllowedExtension` and `hasParseableExt
 
 ### Requiredness (`requiredMode`)
 
-The upload dialog offers two modes, defaulting to **all required** (the checked-by-default
-choice that mirrors create + edit):
+The upload dialog **and the re-ingest dialog** offer two modes, defaulting to **all required** (the
+checked-by-default choice that mirrors create + edit):
 
 - **`all`** (default) — every extracted question is written `required: true`.
 - **`source`** — honour the document's own required markers. The extractor reads an asterisk,
@@ -421,17 +421,25 @@ database.
 `writeGraph` resolves each slot's `required` flag from a `RequirednessPolicy`
 (`persistIngestion`'s `requiredness` input, default `'all'`):
 
-| Policy       | Slot `required`       | Set by                                                          |
-| ------------ | --------------------- | --------------------------------------------------------------- |
-| `'all'`      | `true`                | upload `requiredMode=all`; compose `requiredAll≠false`          |
-| `'source'`   | `q.required ?? false` | upload `requiredMode=source`                                    |
-| `'optional'` | `false`               | compose `requiredAll=false`; refine (`replaceVersionStructure`) |
+| Policy       | Slot `required`       | Set by                                                                                 |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------- |
+| `'all'`      | `true`                | upload + **re-ingest** `requiredMode=all`; compose `requiredAll≠false`                 |
+| `'source'`   | `q.required ?? false` | upload + **re-ingest** `requiredMode=source`                                           |
+| `'optional'` | `false`               | compose `requiredAll=false`; refine (`replaceVersionStructure`); the demo-content seed |
 
-`writeGraph`'s own default is `'optional'`, so the conversational-refine path
-(`replaceVersionStructure`) is unchanged — only `persistIngestion` defaults to
-`'all'`. The editor's bulk "All questions required" checkbox writes `required`
-directly via `updateMany` (`PATCH …/versions/:vid/questions`), not through this
-policy.
+**`writeGraph` takes the policy with no default, and that is the fix rather than a style
+preference.** It used to default to `'optional'`, and re-ingest — which called it with three
+arguments — inherited that: every re-ingest rebuilt the draft with **every question optional**, a
+policy neither dialog offers and no admin ever picked. The omission read as a decision. Now every
+caller states one, so the same mistake is a type error.
+
+Re-ingest asks the question the same way ingest does, defaulting to `'all'`. There is deliberately
+**no "keep what this version had"** option: a re-ingest re-extracts from a new document and mints
+new question keys, so per-question flags tuned by hand have nothing to carry over onto — they were
+being discarded either way, and the dialog now says so instead of writing all-optional in silence.
+
+The editor's bulk "All questions required" checkbox writes `required` directly via `updateMany`
+(`PATCH …/versions/:vid/questions`), not through this policy.
 
 ### Choice-option normalisation
 

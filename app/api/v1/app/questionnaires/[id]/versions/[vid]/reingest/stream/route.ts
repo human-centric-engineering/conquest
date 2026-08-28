@@ -134,7 +134,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
     // Capture the narrowed upload in its own const — control-flow narrowing of `guard.ok`
     // does not carry into the nested `drive()` generator closure below.
     const upload = guard.value;
-    const { file, fileHash, adminMeta } = upload;
+    const { file, fileHash, adminMeta, requiredMode } = upload;
 
     // Version-scoped dedup short-circuit — identical to the non-streaming route: matches
     // only the version's CURRENT (most recent) source doc, and only when the admin supplied
@@ -207,6 +207,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
           versionId: vid,
           extraction,
           admin: adminMeta,
+          requiredness: requiredMode,
           source: {
             fileName: file.name,
             fileHash,

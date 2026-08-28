@@ -94,7 +94,13 @@ beforeEach(() => {
 
 describe('reingestVersion — destructive replace', () => {
   it('clears the prior change log, sections, and tag vocabulary scoped to the version', async () => {
-    await reingestVersion({ versionId: 'ver-1', extraction: extraction(), admin: {}, source });
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: extraction(),
+      admin: {},
+      requiredness: 'all',
+      source,
+    });
 
     expect(tx.appQuestionnaireExtractionChange.deleteMany).toHaveBeenCalledWith({
       where: { versionId: 'ver-1' },
@@ -106,7 +112,13 @@ describe('reingestVersion — destructive replace', () => {
   });
 
   it('deletes the prior graph before writing the new one', async () => {
-    await reingestVersion({ versionId: 'ver-1', extraction: extraction(), admin: {}, source });
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: extraction(),
+      admin: {},
+      requiredness: 'all',
+      source,
+    });
 
     // The section delete must precede the first section create (global call order).
     const deleteOrder = (tx.appQuestionnaireSection.deleteMany as Mock).mock.invocationCallOrder[0];
@@ -115,7 +127,13 @@ describe('reingestVersion — destructive replace', () => {
   });
 
   it('writes the new graph and appends the new source document', async () => {
-    await reingestVersion({ versionId: 'ver-1', extraction: extraction(), admin: {}, source });
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: extraction(),
+      admin: {},
+      requiredness: 'all',
+      source,
+    });
 
     expect(tx.appQuestionnaireSection.create).toHaveBeenCalledTimes(1);
     expect(tx.appQuestionSlot.createMany).toHaveBeenCalledTimes(1);
@@ -128,7 +146,13 @@ describe('reingestVersion — destructive replace', () => {
   });
 
   it('keeps the version id/number/status — only goal/audience are updated', async () => {
-    await reingestVersion({ versionId: 'ver-1', extraction: extraction(), admin: {}, source });
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: extraction(),
+      admin: {},
+      requiredness: 'all',
+      source,
+    });
 
     const updateArg = (tx.appQuestionnaireVersion.update as Mock).mock.calls[0][0];
     expect(updateArg.where).toEqual({ id: 'ver-1' });
@@ -142,7 +166,13 @@ describe('reingestVersion — destructive replace', () => {
     current = { status: 'launched', goal: null, audience: null };
 
     await expect(
-      reingestVersion({ versionId: 'ver-1', extraction: extraction(), admin: {}, source })
+      reingestVersion({
+        versionId: 'ver-1',
+        extraction: extraction(),
+        admin: {},
+        requiredness: 'all',
+        source,
+      })
     ).rejects.toBeInstanceOf(ReingestNotDraftError);
 
     // The destructive deletes never ran — the launched version's graph is intact.
@@ -156,6 +186,7 @@ describe('reingestVersion — destructive replace', () => {
       versionId: 'ver-1',
       extraction: extraction(),
       admin: {},
+      requiredness: 'all',
       source,
     });
 
@@ -181,6 +212,7 @@ describe('reingestVersion — goal/audience merge', () => {
       versionId: 'ver-1',
       extraction: extraction({ inferredGoal: undefined, changes: [] }),
       admin: {},
+      requiredness: 'all',
       source,
     });
 
@@ -195,6 +227,7 @@ describe('reingestVersion — goal/audience merge', () => {
       versionId: 'ver-1',
       extraction: extraction(),
       admin: { goal: 'Admin goal' },
+      requiredness: 'all',
       source,
     });
 
@@ -207,6 +240,7 @@ describe('reingestVersion — goal/audience merge', () => {
       versionId: 'ver-1',
       extraction: extraction({ inferredAudience: { role: 'manager' } }),
       admin: {},
+      requiredness: 'all',
       source,
     });
 
@@ -217,5 +251,91 @@ describe('reingestVersion — goal/audience merge', () => {
     const updateArg = (tx.appQuestionnaireVersion.update as Mock).mock.calls[0][0];
     expect(updateArg.data.audience).toEqual({ role: 'manager' });
     expect(updateArg.data.audienceProvenance).toEqual({ role: 'inferred' });
+  });
+});
+
+/**
+ * Requiredness on a re-ingest.
+ *
+ * These exist because the writer used to take no policy at all: it called `writeGraph` with three
+ * arguments and inherited that function's `'optional'` default, so every re-ingest silently
+ * unmarked every question in the draft — a third policy neither dialog offers and no admin ever
+ * chose. The assertions are on the `required` flag of the WRITTEN rows rather than on the argument
+ * passed down, because passing the policy on and honouring it are two different claims and only
+ * the second one is the bug.
+ */
+describe('reingestVersion — requiredness', () => {
+  /** Mixed markers, so `'all'` and `'source'` cannot agree by accident. */
+  function mixedExtraction(): ExtractQuestionnaireStructureData {
+    return extraction({
+      questions: [
+        {
+          sectionOrdinal: 0,
+          key: 'name',
+          prompt: 'Your name?',
+          suggestedType: 'free_text',
+          extractionConfidence: 0.9,
+          required: true,
+        },
+        {
+          sectionOrdinal: 0,
+          key: 'nickname',
+          prompt: 'Anything you prefer to be called?',
+          suggestedType: 'free_text',
+          extractionConfidence: 0.9,
+        },
+      ],
+    });
+  }
+
+  /** The `required` flag of each slot row the writer handed `createMany`, in written order. */
+  function writtenRequired(): boolean[] {
+    const arg = (tx.appQuestionSlot.createMany as Mock).mock.calls[0][0] as {
+      data: { key: string; required: boolean }[];
+    };
+    return arg.data.map((row) => row.required);
+  }
+
+  it("marks every rebuilt question required under 'all', including one the document did not flag", async () => {
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: mixedExtraction(),
+      admin: {},
+      requiredness: 'all',
+      source,
+    });
+
+    expect(writtenRequired()).toEqual([true, true]);
+  });
+
+  it("honours the document's own markers under 'source'", async () => {
+    await reingestVersion({
+      versionId: 'ver-1',
+      extraction: mixedExtraction(),
+      admin: {},
+      requiredness: 'source',
+      source,
+    });
+
+    // Exactly the split the extractor read: flagged stays required, unflagged does not become one.
+    expect(writtenRequired()).toEqual([true, false]);
+  });
+
+  it('never writes an all-optional graph unless that is what it was asked for', async () => {
+    // The regression itself. Under either policy an admin can choose, a question the document
+    // marks required survives as required — which is what silently stopped being true when the
+    // policy was left to a default.
+    for (const requiredness of ['all', 'source'] as const) {
+      vi.clearAllMocks();
+      (executeTransaction as Mock).mockImplementation((cb: (t: typeof tx) => unknown) => cb(tx));
+      await reingestVersion({
+        versionId: 'ver-1',
+        extraction: mixedExtraction(),
+        admin: {},
+        requiredness,
+        source,
+      });
+      expect(writtenRequired()[0]).toBe(true);
+    }
   });
 });
