@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "node scripts/dev-server.mjs next-start",
     "lint": "node scripts/run-capped.mjs eslint . --cache --cache-strategy content --cache-location .next/cache/eslint/",
+    "lint:ci": "node scripts/ci/chunked-lint.mjs --cache --cache-strategy content --cache-location .next/cache/eslint/",
     "lint:fix": "node scripts/run-capped.mjs eslint . --fix --cache --cache-strategy content --cache-location .next/cache/eslint/",
     "lint:staged": "lint-staged",
     "type-check": "tsc --noEmit",
