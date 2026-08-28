@@ -22,6 +22,7 @@
  */
 
 import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
+import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import {
   ACCESS_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
@@ -127,6 +128,23 @@ export async function resolveRespondentChromeForVersion(
     RESPONDENT_CHROMES,
     DEFAULT_RESPONDENT_CHROME
   );
+}
+
+/**
+ * Resolve the ladder INDEX the respondent's text-size stepper opens on for a launched version.
+ *
+ * Returns an index rather than the stored name because the one consumer — the workspace's
+ * `useLocalStorage(key, initial)` — needs an index, and doing the lookup here means the surfaces
+ * pass a number they cannot mis-map. Absent config, or a rung this build does not know, resolves
+ * to the standard rung: the size every questionnaire had before the setting existed.
+ *
+ * This is the OPENING rung only. It is handed down as the `initial` of a stored preference, so a
+ * respondent who has ever used the stepper keeps their own size and this value is never consulted
+ * for them — an authored default cannot pin, cap, or reset anyone's accessibility setting.
+ */
+export async function resolveChatTextScaleIndexForVersion(versionId: string): Promise<number> {
+  const version = await loadVersionSurface(versionId);
+  return indexForTextSize(version?.config?.chatTextSize);
 }
 
 /**

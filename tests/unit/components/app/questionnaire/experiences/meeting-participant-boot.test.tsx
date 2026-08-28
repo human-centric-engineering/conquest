@@ -121,6 +121,7 @@ function surfaceConfig(overrides: Partial<RespondentSurfaceConfig> = {}): Respon
     attachmentInputEnabled: true,
     presentationMode: 'chat',
     respondentLayout: 'classic',
+    chatTextScaleIndex: 1,
     answerPanelScope: 'hidden',
     reasoningPlacement: 'inline',
     reasoningDwellMs: 4321,

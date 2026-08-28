@@ -1004,6 +1004,42 @@ describe('SessionWorkspace', () => {
       render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
       expect(screen.queryByRole('button', { name: 'Increase text size' })).toBeNull();
     });
+
+    /**
+     * `config.chatTextSize`, resolved server-side to a ladder index. It decides where the ladder
+     * OPENS and nothing else — the ordering against the respondent's stored preference is the
+     * whole point of the setting, so it is asserted from both directions.
+     */
+    describe('the questionnaire-authored opening rung', () => {
+      it('opens at the authored rung when the respondent has never used the stepper', () => {
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(scale()).toBe('1.3');
+      });
+
+      it('never overrides a respondent who has already chosen — their stored size wins', () => {
+        // The invariant that makes this setting safe to ship. An admin cannot reach into a
+        // respondent's accessibility preference, on this questionnaire or any later one: the
+        // authored value is only ever `useLocalStorage`'s `initial`, which storage supersedes.
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(0));
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        expect(scale()).toBe('0.9');
+      });
+
+      it('still lets the respondent step down from an authored Largest', () => {
+        // A starting point, not a floor. Opening at the top rung must leave "smaller" live, or an
+        // admin authoring for a boardroom screen has pinned every laptop respondent to 1.3.
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={3} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Decrease text size' }));
+        expect(scale()).toBe('1.15');
+      });
+
+      it('opens at the standard rung when handed an index off the ladder', () => {
+        // The prop crosses a wire (the meeting boot's JSON payload). A NaN or an out-of-range
+        // index reaching the calc() would drop the transcript's font-size entirely.
+        render(<SessionWorkspace sessionId="s1" presentationMode="chat" chatTextScaleIndex={99} />);
+        expect(scale()).toBe('1');
+      });
+    });
   });
 
   it('swaps to the completion confirmation (not the chat) once submitted', () => {

@@ -46,6 +46,7 @@ vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
 import { resolveRespondentSurfaceConfig } from '@/lib/app/questionnaire/session/resolve-respondent-surface';
 import {
   resolveAnonymousForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
@@ -69,6 +70,7 @@ const FULL_CONFIG = {
   inlineCorrectionEnabled: true,
   showProgressPercentText: false,
   anonymousMode: true,
+  chatTextSize: 'largest',
 };
 
 /**
@@ -88,7 +90,7 @@ function primeConfig(config: Record<string, unknown> | null, demoClientId: strin
   });
 }
 
-/** Run the nine per-field resolvers that the bundle duplicates. */
+/** Run the ten per-field resolvers that the bundle duplicates. */
 async function perFieldResolvers() {
   const [
     voiceInputEnabled,
@@ -100,6 +102,7 @@ async function perFieldResolvers() {
     inlineCorrectionEnabled,
     showProgressPercentText,
     anonymous,
+    chatTextScaleIndex,
   ] = await Promise.all([
     resolveVoiceEnabledForVersion('ver-1'),
     resolveAttachmentsEnabledForVersion('ver-1'),
@@ -110,6 +113,7 @@ async function perFieldResolvers() {
     resolveInlineCorrectionForVersion('ver-1'),
     resolveShowProgressPercentTextForVersion('ver-1'),
     resolveAnonymousForVersion('ver-1'),
+    resolveChatTextScaleIndexForVersion('ver-1'),
   ]);
   return {
     voiceInputEnabled,
@@ -122,6 +126,7 @@ async function perFieldResolvers() {
     inlineCorrectionEnabled,
     showProgressPercentText,
     anonymous,
+    chatTextScaleIndex,
   };
 }
 
@@ -144,6 +149,11 @@ describe('resolveRespondentSurfaceConfig — parity with the per-field resolvers
     expect(bundle?.presentationMode).toBe('chat');
     expect(bundle?.answerPanelScope).toBe('hidden');
     expect(bundle?.voiceInputEnabled).toBe(false);
+    // The authored opening rung reaches a breakout the same as it reaches `/q`. Before the bundle
+    // carried it, a participant whose questionnaire opened at Largest got the standard size the
+    // moment they were moved into a breakout room — the exact class of silent drop this parity
+    // test exists to catch.
+    expect(bundle?.chatTextScaleIndex).toBe(3);
   });
 
   it('matches field-for-field when the version has NO config row (1:1 and lazy)', async () => {
@@ -175,7 +185,12 @@ describe('resolveRespondentSurfaceConfig — parity with the per-field resolvers
   });
 
   it('falls back per field when the row carries an unrecognised enum value', async () => {
-    primeConfig({ ...FULL_CONFIG, presentationMode: 'telepathy', answerSlotPanelScope: 'psychic' });
+    primeConfig({
+      ...FULL_CONFIG,
+      presentationMode: 'telepathy',
+      answerSlotPanelScope: 'psychic',
+      chatTextSize: 'enormous',
+    });
 
     const bundle = await resolveRespondentSurfaceConfig('sess-1');
     const expected = await perFieldResolvers();
@@ -183,6 +198,9 @@ describe('resolveRespondentSurfaceConfig — parity with the per-field resolvers
     expect(bundle).toMatchObject(expected);
     expect(bundle?.presentationMode).toBe('both');
     expect(bundle?.answerPanelScope).toBe('full_progress');
+    // Standard, not "whatever indexOf returned" — an unknown rung must not resolve to -1 and reach
+    // the transcript's calc() as a NaN, which would drop its font-size declaration entirely.
+    expect(bundle?.chatTextScaleIndex).toBe(1);
   });
 });
 

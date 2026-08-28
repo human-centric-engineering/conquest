@@ -21,6 +21,7 @@ import { resolveSessionCapture } from '@/lib/app/questionnaire/profile/resolve-c
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
+import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
@@ -118,6 +119,9 @@ export default async function QuestionnaireSessionPage({
     RESPONDENT_LAYOUTS,
     DEFAULT_RESPONDENT_LAYOUT
   );
+  // The rung the text-size stepper opens on. Resolved to an INDEX here, the same as every other
+  // surface, so no consumer has to know that the column stores a name.
+  const chatTextScaleIndex = indexForTextSize(row.config?.chatTextSize);
   // Answer-panel scope (F7.2) — `hidden` renders the chat-only surface (no side panel, no mobile
   // review sheet). Resolved here so the layout is right in the SSR paint.
   const answerPanelScope = narrowToEnum(
@@ -213,6 +217,7 @@ export default async function QuestionnaireSessionPage({
           initialFormView={formPanel?.view}
           presentationMode={presentationMode}
           respondentLayout={respondentLayout}
+          chatTextScaleIndex={chatTextScaleIndex}
           answerPanelScope={answerPanelScope}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}

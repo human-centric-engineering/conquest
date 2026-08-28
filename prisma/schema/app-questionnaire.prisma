@@ -295,6 +295,16 @@ model AppQuestionnaireConfig {
   // (RESPONDENT_CHROMES — types.ts)
   respondentChrome String @default("full") // full | co_branded | white_label
 
+  // Where the respondent's text-size ladder STARTS. The stepper on the session strip stays the
+  // respondent's own (there is no switch to remove it, and this cannot cap it) — this only names
+  // the rung someone who has never touched it opens on. A demo on a boardroom screen wants
+  // largest; a dense instrument read on a laptop wants small. Anyone who has ever stepped keeps
+  // their own stored size and never sees this value. Stores the NAME, not the ladder index, so
+  // retuning the multipliers cannot silently change what an authored value means. Defaults to
+  // standard, and an unrecognised value resolves to standard too — the size every questionnaire
+  // had before this column existed. (CHAT_TEXT_SIZES — chat/text-scale.ts)
+  chatTextSize String @default("standard") // small | standard | large | largest
+
   // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
   // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer
   // panel row) rather than by sending a fresh chat turn. Corrections route through the form-edit path

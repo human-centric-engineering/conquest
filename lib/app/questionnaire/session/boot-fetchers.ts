@@ -37,6 +37,10 @@ import {
   PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
+import {
+  CHAT_TEXT_SCALES,
+  DEFAULT_CHAT_TEXT_SCALE_INDEX,
+} from '@/lib/app/questionnaire/chat/text-scale';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 import { DEFAULT_FONT_PAIRING, FONT_PAIRINGS } from '@/lib/app/questionnaire/theming';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
@@ -309,6 +313,16 @@ const surfaceConfigSchema = z.object({
   answerPanelScope: z
     .enum(ANSWER_SLOT_PANEL_SCOPES)
     .catch(DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope),
+  // Already an index on the wire (the server resolved the name), so this validates the range
+  // rather than an enum. `.catch` for the same reason every field here has one, and the fallback
+  // is the standard rung: a payload from a build with a longer ladder must open the conversation
+  // at a readable size rather than fail the parse and drop every other affordance with it.
+  chatTextScaleIndex: z
+    .number()
+    .int()
+    .min(0)
+    .max(CHAT_TEXT_SCALES.length - 1)
+    .catch(DEFAULT_CHAT_TEXT_SCALE_INDEX),
   reasoningPlacement: z.enum(REASONING_PLACEMENTS).nullable().catch(null),
   reasoningDwellMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs),
   reasoningPerItemMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs),

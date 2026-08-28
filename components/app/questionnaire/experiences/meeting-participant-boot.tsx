@@ -338,6 +338,7 @@ export function MeetingParticipantBoot({
               attachmentInputEnabled={activeSurface?.attachmentInputEnabled}
               presentationMode={activeSurface?.presentationMode}
               respondentLayout={activeSurface?.respondentLayout}
+              chatTextScaleIndex={activeSurface?.chatTextScaleIndex}
               answerPanelScope={activeSurface?.answerPanelScope}
               reasoningPlacement={activeSurface?.reasoningPlacement}
               reasoningDwellMs={activeSurface?.reasoningDwellMs}

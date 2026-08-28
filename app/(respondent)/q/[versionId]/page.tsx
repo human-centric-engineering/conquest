@@ -19,6 +19,7 @@ import {
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentChromeForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -103,6 +104,7 @@ export default async function PublicQuestionnairePage({
     anonymous,
     presentationMode,
     respondentLayout,
+    chatTextScaleIndex,
     respondentChrome,
     answerPanelScope,
     voiceConfigured,
@@ -121,6 +123,7 @@ export default async function PublicQuestionnairePage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveChatTextScaleIndexForVersion(versionId),
     resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
@@ -188,6 +191,7 @@ export default async function PublicQuestionnairePage({
               anonymous={anonymous}
               presentationMode={presentationMode}
               respondentLayout={respondentLayout}
+              chatTextScaleIndex={chatTextScaleIndex}
               answerPanelScope={answerPanelScope}
               reasoningPlacement={reasoningPlacement}
               reasoningDwellMs={reasoningDwell.dwellMs}

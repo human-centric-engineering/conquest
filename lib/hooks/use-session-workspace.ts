@@ -105,6 +105,13 @@ export interface UseSessionWorkspaceOptions {
    * review-sheet auto-close below depends on it here. Defaults to `true`, which is Classic.
    */
   panelReturnsAtLg?: boolean;
+  /**
+   * The ladder rung the text-size stepper OPENS on (`config.chatTextSize`, resolved server-side to
+   * an index). Handed to the respondent's stored preference as its `initial`, so it applies only
+   * to someone who has never used the stepper — see the storage note below. Defaults to the
+   * standard rung, which is what every session opened at before the setting existed.
+   */
+  chatTextScaleIndex?: number;
   inlineCorrectionEnabled?: boolean;
   readOnly?: boolean;
   intro?: ResolvedSessionIntro | null;
@@ -203,6 +210,7 @@ export function useSessionWorkspace({
   initialFormView,
   autoStart = false,
   panelReturnsAtLg = true,
+  chatTextScaleIndex = DEFAULT_CHAT_TEXT_SCALE_INDEX,
   presentationMode = 'both',
   answerPanelScope = 'full_progress',
   inlineCorrectionEnabled = false,
@@ -305,11 +313,17 @@ export function useSessionWorkspace({
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   // Respondent-owned chat text size, persisted globally rather than per session: someone who needs
   // larger text needs it in the next leg of an Experience too, and should not re-set it each time.
-  // `useLocalStorage` hydrates after mount (SSR-safe), so the first paint is the default size and
-  // settles to the stored one — a font-size change only, no layout shift beyond reflow.
+  // `useLocalStorage` hydrates after mount (SSR-safe), so the first paint is the authored opening
+  // size and settles to the stored one — a font-size change only, no layout shift beyond reflow.
+  //
+  // The questionnaire's `chatTextSize` enters as the INITIAL, which is the whole of its authority:
+  // `useLocalStorage` returns `initial` only while nothing is stored, so a respondent who has ever
+  // touched the stepper keeps their own size on every questionnaire they take and the authored
+  // value is never consulted for them. That ordering is deliberate — an accessibility setting a
+  // questionnaire author could overwrite on each new session would not be one.
   const [storedTextScaleIndex, setTextScaleIndex] = useLocalStorage<number>(
     CHAT_TEXT_SCALE_STORAGE_KEY,
-    DEFAULT_CHAT_TEXT_SCALE_INDEX
+    normalizeScaleIndex(chatTextScaleIndex)
   );
   // Storage is untrusted (stale ladder, another tab, hand-edited); normalise before it can reach a
   // `calc()`, where a NaN would silently drop the transcript's font-size entirely.

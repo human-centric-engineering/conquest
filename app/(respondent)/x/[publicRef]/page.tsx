@@ -18,6 +18,7 @@ import {
   resolveAnswerPanelScopeForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentChromeForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -108,6 +109,7 @@ export default async function ExperienceRunPage({
     anonymous,
     presentationMode,
     respondentLayout,
+    chatTextScaleIndex,
     respondentChrome,
     answerPanelScope,
     voiceInputEnabled,
@@ -124,6 +126,7 @@ export default async function ExperienceRunPage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveChatTextScaleIndexForVersion(versionId),
     resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
@@ -155,6 +158,7 @@ export default async function ExperienceRunPage({
             anonymous={anonymous}
             presentationMode={presentationMode}
             respondentLayout={respondentLayout}
+            chatTextScaleIndex={chatTextScaleIndex}
             answerPanelScope={answerPanelScope}
             reasoningPlacement={reasoningPlacement}
             reasoningDwellMs={reasoningDwell.dwellMs}

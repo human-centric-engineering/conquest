@@ -99,7 +99,7 @@ describe('ChatTextSize', () => {
     );
     const status = screen.getByRole('status');
     expect(status.getAttribute('aria-live')).toBe('polite');
-    expect(status.textContent).toContain('Default');
+    expect(status.textContent).toContain('Standard');
 
     rerender(React.createElement(ChatTextSize, { index: TOP, onStep: vi.fn() }));
     expect(screen.getByRole('status').textContent).toContain('Largest');
@@ -112,6 +112,6 @@ describe('ChatTextSize', () => {
         onStep: vi.fn(),
       })
     );
-    expect(screen.getByRole('status').textContent).toContain('Default');
+    expect(screen.getByRole('status').textContent).toContain('Standard');
   });
 });

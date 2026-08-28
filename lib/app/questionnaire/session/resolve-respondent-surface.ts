@@ -19,6 +19,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
+import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import {
   resolveGlossaryAppendixForVersion,
   resolveGlossaryForHints,
@@ -114,6 +115,10 @@ export async function resolveRespondentSurfaceConfig(
       ANSWER_SLOT_PANEL_SCOPES,
       DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
     ),
+    // Resolved to the ladder index here rather than passed on as a name, so a client-booted
+    // surface gets the same number `resolveChatTextScaleIndexForVersion` hands the page-rendered
+    // ones. `indexForTextSize` absorbs an absent config row and an unknown rung alike.
+    chatTextScaleIndex: indexForTextSize(config?.chatTextSize),
     // The asymmetry is deliberate and matches `resolveReasoningPlacementForVersion`: only an
     // EXPLICIT `enabled: false` on an existing config row turns the stream off. A version with no
     // config row at all gets the default placement, not null.

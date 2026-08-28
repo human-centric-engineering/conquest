@@ -216,6 +216,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       presentationMode: 'chat',
       respondentLayout: 'classic',
       respondentChrome: 'full',
+      chatTextSize: 'standard' as const,
       captureMode: 'form',
       inlineCorrectionEnabled: true,
       sessionResumeEnabled: true,
