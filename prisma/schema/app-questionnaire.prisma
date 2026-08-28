@@ -1996,6 +1996,14 @@ model AppQuestionnaireEvaluationFinding {
   sourceQuote        String? // offending text when the finding points at one
   proposedEdit       Json? // optional structured op (ProposedEdit); null when prose-only or degraded (F5.3)
   editedOverride     Json? // admin-edited op; takes precedence over proposedEdit at apply (F5.3)
+  /// Free-text steer the admin attached while triaging, replayed at batch apply (F5.4).
+  ///
+  /// Not an op and never parsed into one here: it is the reviewer's own words ("keep it under 15
+  /// words, don't mention tenure"), handed to the Structure Edit Agent alongside the judge's
+  /// suggestion so the applied wording reflects both. A finding with no instruction applies its
+  /// structured op deterministically, exactly as before — the AI leg is opt-in per finding, by
+  /// the admin typing something.
+  applyInstruction   String? // admin's steer for AI-assisted apply; null when none was given
   status             String    @default("pending") // pending | accepted | declined | applied (stale is derived, not stored)
   decidedByUserId    String? // admin who accepted/declined/edited; plain String, no FK (UG-1)
   decidedAt          DateTime?

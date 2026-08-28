@@ -55,6 +55,7 @@ import {
 } from '@/lib/app/questionnaire/data-slots/generation';
 import { buildJudgePrompt } from '@/lib/app/questionnaire/evaluation/judge-prompt';
 import { buildReconcilePrompt } from '@/lib/app/questionnaire/evaluation/reconcile-prompt';
+import { buildSteerPrompt } from '@/lib/app/questionnaire/evaluation/steer-prompt';
 import { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
 import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
@@ -89,6 +90,7 @@ import {
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
   RECONCILER_AGENT_SLUG,
+  QUESTIONNAIRE_STEER_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 // ---------------------------------------------------------------------------
@@ -1279,6 +1281,44 @@ const RECONCILER: PromptAgentCatalogEntry = {
   ],
 };
 
+const SUGGESTION_STEER: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_STEER_AGENT_SLUG,
+  name: 'Suggestion Steer',
+  stage: 'evaluation',
+  summary:
+    "Rewrites one accepted suggestion so it follows the reviewer's own instruction, without changing what kind of change it is.",
+  dispatch:
+    'Once per accepted finding that carries a reviewer instruction, at batch apply — never for a run nobody steered.',
+  builderModule: 'lib/app/questionnaire/evaluation/steer-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: `${QUESTIONNAIRE_STEER_AGENT_SLUG}.reword`,
+      label: 'Steer: reword to the reviewer’s constraint',
+      description:
+        "Rewrites the judge's proposed wording to follow the reviewer's note, and names anything wording alone cannot do.",
+      build: () =>
+        norm(
+          buildSteerPrompt({
+            instruction: '{{ the reviewer’s own words about this change }}',
+            op: { op: 'replace_prompt', prompt: '{{ the judge’s proposed wording }}' },
+            proposedChange: '{{ what the judge suggested }}',
+            rationale: '{{ why the judge suggested it }}',
+            dimensionLabel: EVALUATION_DIMENSION_SPECS.clarity.label,
+            question: {
+              key: 'q1',
+              prompt: '{{ question 1 }}',
+              type: 'likert',
+              required: true,
+            },
+            goal: SAMPLE_VERSION_STRUCTURE.goal,
+            audience: SAMPLE_VERSION_STRUCTURE.audience,
+          })
+        ),
+    }),
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Catalog assembly
 // ---------------------------------------------------------------------------
@@ -1312,5 +1352,6 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     ...JUDGES,
     ...SCOPE_JUDGES,
     RECONCILER,
+    SUGGESTION_STEER,
   ];
 }

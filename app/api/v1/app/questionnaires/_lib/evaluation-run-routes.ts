@@ -156,6 +156,7 @@ export const FINDING_SELECT = {
   sourceQuote: true,
   proposedEdit: true,
   editedOverride: true,
+  applyInstruction: true,
   status: true,
   decidedByUserId: true,
   decidedAt: true,
@@ -175,6 +176,7 @@ export interface FindingRow {
   sourceQuote: string | null;
   proposedEdit: unknown;
   editedOverride: unknown;
+  applyInstruction: string | null;
   status: string;
   decidedByUserId: string | null;
   decidedAt: Date | null;
@@ -218,6 +220,7 @@ function toFindingView(row: FindingRow): EvaluationFindingView {
     status: narrowToEnum(row.status, FINDING_REVIEW_STATUSES, 'pending'),
     proposedEdit,
     editedOverride,
+    applyInstruction: row.applyInstruction,
     decidedByUserId: row.decidedByUserId,
     decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
     appliedAt: row.appliedAt ? row.appliedAt.toISOString() : null,

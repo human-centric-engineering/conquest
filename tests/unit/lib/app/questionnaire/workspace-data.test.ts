@@ -919,6 +919,7 @@ function makeFinding(over: Partial<EvaluationFindingView> = {}): EvaluationFindi
       sectionKey: 'Background',
     },
     editedOverride: null,
+    applyInstruction: null,
     decidedByUserId: null,
     decidedAt: null,
     appliedAt: null,

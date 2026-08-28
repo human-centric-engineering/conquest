@@ -19,7 +19,9 @@ Run in this order. Stop-and-fix at each stage before moving on; cheap gates firs
 
 ### 1. Automated validation (`/pre-pr`)
 
-Run the `/pre-pr` skill. It covers `npm run validate` (type-check + lint + format), `npm run test:coverage`, migration-drift check, and the anti-pattern scan. Fix every failure it reports, re-running `npm run validate` / the relevant check until clean. Do not proceed while automated checks are red.
+Run the `/pre-pr` skill. It covers `npm run validate:changed` (type-check + branch-scoped lint + format), `npm run test:changed:coverage`, migration-drift check, and the anti-pattern scan. Fix every failure it reports, re-running `npm run validate:changed` / the relevant check until clean. Do not proceed while automated checks are red.
+
+**Every re-run in this loop is a `:changed` run.** A gate loop re-runs its checks after each fix, and the whole-tree `validate` re-lints two thousand files to re-check the two you just edited — which on a large fork is also the step that OOMs. `validate:changed` scopes lint and format to the branch diff **plus uncommitted work**, so the fixes you have not amended in yet are still covered, and leaves `tsc --noEmit` whole-program because a scoped type-check cannot see the consumers of what changed. Reach for plain `npm run validate` only when something suggests the blast radius is wider than the diff — a merge from `main`, a lint-config change, or a finding in a file the branch never touched.
 
 ### 2. Test quality (`/test-review`)
 
@@ -27,7 +29,7 @@ Run `/test-review` (scoped to $ARGUMENTS if given, else branch diff). It writes 
 
 ### 3. Correctness (`/code-review`)
 
-Run `/code-review` on the diff (scoped to $ARGUMENTS if given). Apply the high-confidence findings. Re-run `npm run validate` after any code change.
+Run `/code-review` on the diff (scoped to $ARGUMENTS if given). Apply the high-confidence findings. Re-run `npm run validate:changed` after any code change.
 
 ### 4. Security (`/security-review`)
 

@@ -38,6 +38,17 @@ import { cn } from '@/lib/utils';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   EVALUATION_DIMENSION_SPECS,
   FINDING_REVIEW_STATUSES,
@@ -51,7 +62,11 @@ import type {
   EvaluationRunDetail as EvaluationRunDetailView,
 } from '@/lib/app/questionnaire/views';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
-import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-finding-review';
+import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
+import {
+  FindingReviewCard,
+  whenSteersSettled,
+} from '@/components/admin/questionnaires/evaluation-finding-review';
 import { EvaluationRunHeadline } from '@/components/admin/questionnaires/evaluation-run-headline';
 import { EvaluationByQuestion } from '@/components/admin/questionnaires/evaluation-by-question';
 import {
@@ -69,6 +84,51 @@ import {
   summariseGroupActions,
   type GroupActionSummary,
 } from '@/lib/app/questionnaire/evaluation/group-actions';
+
+/** One accepted finding the batch could not execute, and why. */
+interface BatchSkipped {
+  findingId: string;
+  targetKey: string;
+  reason: string;
+  detail?: string;
+}
+
+/** The batch route's response body. */
+interface BatchApplyResponse {
+  versionId: string;
+  versionNumber: number;
+  forked: boolean;
+  applied: {
+    findingId: string;
+    targetKey: string;
+    op: string;
+    /** Present only where the reviewer's instruction shaped the change the AI wrote. */
+    steer?: { note: string; unhonoured: string | null };
+  }[];
+  skipped: BatchSkipped[];
+  findings: EvaluationFindingView[];
+}
+
+/**
+ * Why one change did not land, in the reviewer's terms.
+ *
+ * The engine's reasons are its own vocabulary (`stale`, `target_gone`) and mean nothing to someone
+ * who has just pressed a button — and this list is the only place a dropped change is ever
+ * mentioned, so an unexplained code here is a change that silently disappeared.
+ */
+const SKIP_REASONS: Record<string, string> = {
+  stale: 'the question changed since this evaluation ran — re-run it to judge the new wording',
+  target_gone: 'the question it was about no longer exists',
+  op_invalid: 'the suggested edit does not fit the question as it now stands',
+  needs_authoring: 'there is no automatic edit for it — make this one in the editor',
+  needs_ai: 'the AI could not rewrite it to follow your instruction — try applying again',
+  steer_unsupported:
+    'your instruction needs wording to change, and this one moves, retypes or removes the question — clear the instruction, or make this change in the editor',
+};
+
+function skipReason(skip: BatchSkipped): string {
+  return SKIP_REASONS[skip.reason] ?? skip.detail ?? skip.reason;
+}
 
 interface ForkNotice {
   versionId: string;
@@ -159,12 +219,81 @@ export function EvaluationRunDetail({
   const [severity, setSeverity] = useState<'all' | FindingSeverity>('all');
   const [dimension, setDimension] = useState<EvaluationDimension | null>(null);
 
+  // The batch. `confirming` holds the unreviewed-count the dialog is warning about; `outcome` is
+  // the last batch's report, which stays on screen because it is the only place the skipped
+  // findings and their reasons are named.
+  const [applying, setApplying] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<BatchApplyResponse | null>(null);
+
+  /** The applied changes the reviewer's own instruction shaped — reported apart from the rest. */
+  const steered = outcome?.applied.filter((a) => a.steer) ?? [];
+
   function handleUpdate(
     next: EvaluationFindingView,
     meta?: { forked: boolean; versionId: string; versionNumber: number }
   ) {
     setFindings((prev) => prev.map((f) => (f.id === next.id ? next : f)));
     if (meta?.forked) setFork({ versionId: meta.versionId, versionNumber: meta.versionNumber });
+  }
+
+  /**
+   * Execute every accepted finding, in one call.
+   *
+   * The response carries the whole run re-derived, so the queue re-renders from it rather than
+   * from optimistic local edits — findings that were skipped as stale come back with the fresh
+   * `stale` flag that explains why, which no client-side guess could produce.
+   */
+  async function handleApplyAccepted() {
+    setApplying(true);
+    setApplyError(null);
+    try {
+      // Pressing this button blurs whichever instruction box was open, which STARTS that steer's
+      // save — it does not finish it. Firing the batch in the same tick let the server read the
+      // finding before the PATCH committed and apply the judge's wording with the reviewer's
+      // sentence discarded: the exact silent substitution the AI leg exists to prevent, and
+      // invisible afterwards, since the result panel would report no steer at all.
+      await whenSteersSettled();
+
+      const res = await fetch(
+        API.APP.QUESTIONNAIRES.versionEvaluationApply(questionnaireId, versionId, run.id),
+        { method: 'POST', credentials: 'same-origin' }
+      );
+      const json = await parseApiResponse<BatchApplyResponse>(res);
+      if (!res.ok || !json.success) {
+        setApplyError(json.success ? 'Request failed' : json.error.message);
+        return;
+      }
+      setOutcome(json.data);
+      setFindings(json.data.findings);
+      if (json.data.forked) {
+        setFork({ versionId: json.data.versionId, versionNumber: json.data.versionNumber });
+      }
+
+      // Slot any newly-added questions, once for the whole batch rather than once per card as the
+      // per-finding apply did. Best-effort and deliberately unawaited: the questions are already
+      // added, and a failure here must not read as the batch having failed.
+      const addedQuestions = json.data.applied.some((a) => a.op === 'add_question');
+      if (addedQuestions && dataSlotsAvailable) {
+        void fetch(
+          API.APP.QUESTIONNAIRES.versionDataSlotsAssign(questionnaireId, json.data.versionId),
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          }
+        ).catch(() => {
+          // swallow — slotting is a follow-up; the questions landed.
+        });
+      }
+    } catch {
+      setApplyError('Network error');
+    } finally {
+      setApplying(false);
+      setConfirming(false);
+    }
   }
 
   async function handleRetryJudge(judge: EvaluationDimension) {
@@ -257,6 +386,27 @@ export function EvaluationRunDetail({
     return map;
   }, [visible]);
 
+  /**
+   * The run's decision state — the numbers the header tiles and the batch bar both read.
+   *
+   * Counted from every finding, never from the filtered set: a reviewer who has narrowed to Major
+   * has not thereby decided fewer things, and a batch bar that said "3 accepted" while eleven were
+   * about to be applied would be actively dangerous.
+   */
+  const tally = useMemo(() => {
+    let accepted = 0;
+    let dismissed = 0;
+    let pending = 0;
+    let applied = 0;
+    for (const f of findings) {
+      if (f.status === 'accepted') accepted += 1;
+      else if (f.status === 'declined') dismissed += 1;
+      else if (f.status === 'applied') applied += 1;
+      else pending += 1;
+    }
+    return { accepted, dismissed, pending, applied };
+  }, [findings]);
+
   const filtered = status !== 'all' || severity !== 'all' || dimension !== null;
 
   return (
@@ -285,6 +435,144 @@ export function EvaluationRunDetail({
         retryingDimension={retrying}
         retryError={retryError}
       />
+
+      {/* The batch bar — the run's only route to the questionnaire, and the standing answer to
+          "have my decisions taken effect?".
+
+          It is a permanent band rather than a toast on each Accept, deliberately. The reviewer
+          needs to be told that accepting changes nothing, and being told that twenty times in a
+          row through a dialog teaches them to dismiss it without reading; a count that sits there
+          saying "6 accepted, not applied" is unmissable and never in the way. It reports from the
+          whole run, never the filtered view — a bar reading "3 accepted" while eleven were about
+          to be applied would be worse than no bar. */}
+      {(tally.accepted > 0 || tally.pending > 0) && (
+        <div className="bg-card flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">
+              {tally.accepted === 0
+                ? 'Nothing accepted yet'
+                : `${tally.accepted} accepted change${tally.accepted === 1 ? '' : 's'}, not applied yet`}
+            </p>
+            <p className="text-muted-foreground mt-0.5 max-w-[68ch] text-sm">
+              {tally.accepted === 0
+                ? 'Work through the suggestions below, accepting the ones you want. Nothing reaches the questionnaire until you apply them together.'
+                : 'Nothing has changed in the questionnaire. Applying writes every accepted change at once — a launched version is copied to a new draft first, and you review the result in Build.'}
+            </p>
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            {tally.pending > 0 && (
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {tally.pending} still to review
+              </span>
+            )}
+            <Button
+              size="sm"
+              disabled={applying || tally.accepted === 0 || !canApply}
+              title={canApply ? undefined : 'Design evaluation is disabled'}
+              onClick={() => (tally.pending > 0 ? setConfirming(true) : void handleApplyAccepted())}
+            >
+              {applying
+                ? 'Applying…'
+                : `Apply ${tally.accepted} accepted change${tally.accepted === 1 ? '' : 's'}`}
+            </Button>
+          </div>
+
+          {applyError && <p className="w-full text-xs text-red-600">{applyError}</p>}
+        </div>
+      )}
+
+      {/* Pressing apply with the queue half-triaged is not an error — it is a legitimate "do the
+          ones I have looked at" — so this states what will and will not happen and lets it
+          through, rather than blocking on a rule the reviewer did not agree to. */}
+      <AlertDialog open={confirming} onOpenChange={(open) => !open && setConfirming(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>You haven&apos;t finished reviewing this evaluation</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tally.pending} suggestion{tally.pending === 1 ? '' : 's'} still{' '}
+              {tally.pending === 1 ? 'has' : 'have'} no decision. Applying now writes the{' '}
+              {tally.accepted} you accepted and leaves the rest alone — you can carry on reviewing
+              and apply again afterwards.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep reviewing</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleApplyAccepted()}>
+              Apply {tally.accepted} anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* The result. Stays on screen until the next batch, because it is the only place a change
+          that did NOT land is ever named — a batch that quietly drops three of eleven is worse
+          than no batch, and the reviewer has to be able to act on each reason. */}
+      {outcome && (
+        <div className="bg-card rounded-xl border p-4">
+          <h3 className="text-sm font-medium">
+            {outcome.applied.length === 0
+              ? 'Nothing could be applied'
+              : `${outcome.applied.length} change${outcome.applied.length === 1 ? '' : 's'} applied to v${outcome.versionNumber}`}
+          </h3>
+
+          {outcome.applied.length > 0 && (
+            <p className="text-muted-foreground mt-1 max-w-[68ch] text-sm">
+              {outcome.forked
+                ? 'The launched version was copied to a new draft, and the changes landed there.'
+                : 'The changes landed on this draft.'}{' '}
+              <Link
+                href={`/admin/questionnaires/${questionnaireId}/v/${outcome.versionId}/structure`}
+                className="underline"
+              >
+                Open v{outcome.versionNumber} in Build →
+              </Link>
+            </p>
+          )}
+
+          {/* What the AI did with the reviewer's own words. `unhonoured` is the load-bearing half:
+              a steer that only partly landed has to be visible at the moment it lands, or
+              "applied" reads as "all of it applied" and the gap is found later in the
+              questionnaire. */}
+          {steered.length > 0 && (
+            <div className="mt-3">
+              <FieldLabel>
+                {steered.length === 1
+                  ? '1 change written to your instruction'
+                  : `${steered.length} changes written to your instructions`}
+              </FieldLabel>
+              <ul className="mt-1.5 space-y-1">
+                {steered.map((item) => (
+                  <li key={item.findingId} className="text-muted-foreground max-w-[68ch] text-sm">
+                    <span className="text-foreground">{item.targetKey}</span> — {item.steer?.note}
+                    {item.steer?.unhonoured && (
+                      <span className="text-foreground block text-xs">
+                        Not done: {item.steer.unhonoured}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {outcome.skipped.length > 0 && (
+            <div className="mt-3">
+              <FieldLabel>{outcome.skipped.length} not applied</FieldLabel>
+              <ul className="mt-1.5 space-y-1">
+                {outcome.skipped.map((skip) => (
+                  <li key={skip.findingId} className="text-muted-foreground max-w-[68ch] text-sm">
+                    <span className="text-foreground">{skip.targetKey}</span> — {skipReason(skip)}
+                    {/* Still accepted, not dropped: the reviewer's decision stands, so fixing the
+                        cause and applying again picks it up without re-triaging. */}
+                    {skip.reason !== 'target_gone' && ' (still accepted).'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {fork && (
         <div className="rounded-md border border-amber-400 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
@@ -382,8 +670,6 @@ export function EvaluationRunDetail({
           questionnaireId={questionnaireId}
           versionId={versionId}
           runId={run.id}
-          canApply={canApply}
-          dataSlotsAvailable={dataSlotsAvailable}
           reconciledByKey={reconciledByKey}
           verdictByKey={verdictByKey}
           openKey={openKey}
@@ -445,8 +731,6 @@ export function EvaluationRunDetail({
                       questionnaireId={questionnaireId}
                       versionId={versionId}
                       runId={run.id}
-                      canApply={canApply}
-                      dataSlotsAvailable={dataSlotsAvailable}
                       onUpdate={handleUpdate}
                     />
                   ))}

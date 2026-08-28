@@ -920,6 +920,18 @@ export const QUESTIONNAIRE_ADVISOR_AGENT_SLUG = 'app-questionnaire-advisor';
 export const QUESTIONNAIRE_EDIT_AGENT_SLUG = 'app-questionnaire-structure-editor';
 
 /**
+ * Slug of the seeded Suggestion Steer `AiAgent` — the AI leg of design-evaluation batch apply.
+ *
+ * A distinct agent from the Structure Edit Agent, and deliberately so: that one reads an
+ * instruction about a WHOLE document and never rewrites wording, while this one rewrites the
+ * wording of ONE change a reviewer has already accepted, to follow the sentence they wrote about
+ * it. Same instruction-shaped input, opposite mandate — one persona could not honestly carry both.
+ * Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts`. Seeded by
+ * `098-suggestion-steer-agent.ts`.
+ */
+export const QUESTIONNAIRE_STEER_AGENT_SLUG = 'app-questionnaire-suggestion-steer';
+
+/**
  * Slug of the seeded **Turn Evaluator** judge `AiAgent` — the interview-quality evaluator the
  * Preview Turn Inspector runs over ONE completed turn (`lib/app/questionnaire/turn-evaluation`).
  * Unlike the other questionnaire agents it is NOT `app-`prefixed: it is a generic reasoning judge

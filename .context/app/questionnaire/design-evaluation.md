@@ -175,33 +175,59 @@ The alternatives reach the [Questionnaire Pack](./questionnaire-pack.md) through
 `EvaluationRunDetail.reconciled`, rendered under the question they belong to with dimension keys
 mapped to judge labels — and the run-detail page reads the same field (below).
 
-### The verdict band — what the reviewer sees first
+### Three layers: the question, the verdict, one judge
 
-A by-question card leads with the **verb**, not the evidence: reword / move / delete / change the
-answer type, derived from the findings' effective ops by the pure `summariseGroupActions`
-(`evaluation/group-actions.ts`), followed by the reconciled wording and only then — on expand — the
-individual judgements. The page used to open at the evidence and leave the reviewer to infer the
-verb by reading four suggestions per question.
+A by-question group is read in three steps, and the reviewer chooses when to take each one.
 
-Three rules hold it honest:
+**Closed** is an index entry: the question, its answer type, its severity tally, and — when the panel
+split — that the judges disagree. Nothing else. A verdict printed on every row of a long queue is a
+paragraph the reviewer has to read past to reach the next question.
 
-- **Never manufacture a consensus.** The primary action is the one with the most judges behind it;
-  every dissenting action is printed beside it ("· 1 judge says delete this question instead"). The
-  reviewer is arbitrating, and needs both halves to do it.
+**Open** adds the panel's combined verdict, inside the _same filled header area_ as the question and
+flush with it. The verdict is a property of the question above it, not a detail underneath it;
+sitting in the same indented column as the individual judges, it read as the first of them rather
+than the summary of all of them.
+
+**A judge's tab** is the third step: one judge's reasoning, with its own apply controls, indented
+beneath the header area. Stacked in one column, a question flagged by four judges was four
+near-identical cards each carrying its own Apply button, and the reviewer scrolled past three to
+reach the fourth. `JudgeTabs` makes "whose reasoning am I reading" a choice rather than a scroll
+position, and keeps exactly one set of decision controls on screen.
+
+The verdict itself is **one block per proposed action**, ruled off from its neighbours, each under a
+heading naming what it is and who is behind it ("A reword, as proposed by 2 of 3 judges"). It was
+one line — the winning verb with the dissent appended as a trailing clause — which is the whole
+panel compressed into a sentence the reader has to unpack before knowing what the options are.
+`ACTION_NOUNS` supplies the noun forms: as a heading, the imperative "Reword it" reads as an
+instruction being given rather than a label for the thing described.
+
+Four rules hold it honest:
+
+- **Never manufacture a consensus.** Every proposed action gets its own block, in support order. The
+  dissent is not a footnote on the winner; it is the next heading down.
 - **Ties break by consequence, not by order.** One judge saying delete and one saying reword surfaces
-  the deletion. Not because it is likelier to be right, but because it is the harder change to undo
-  and a collapsed card must never hide it.
-- **The verb follows `editedOverride ?? proposedEdit`** — what apply actually runs. A header reading
-  "Reword it" above a button that deletes the question would be lying about its own control.
+  the deletion. Not because it is likelier to be right, but because it is the harder change to undo.
+- **A closed card may hide the verdict, never the disagreement.** `contested` is on the closed
+  header, so a reviewer skimming the queue can never discover only after opening a card that a judge
+  wanted the question deleted.
+- **The verb follows `editedOverride ?? proposedEdit`** — what apply actually runs. A heading reading
+  "A reword" above a button that deletes the question would be lying about its own control.
 
 The backing count's denominator is the judges that **flagged this question**, not the seven on the
 panel: the other five had nothing to say about it, and counting them as absent votes would read as
-weaker support than the panel actually gave. Who flagged it at all is answered by the judge chips
-once the card is open.
+weaker support than the panel actually gave.
 
-**One card open at a time.** These cards are tall when open (several finding cards, each with its own
-apply controls), so two at once means scrolling past finished work to reach unfinished work. The
-accordion also matches how the reviewing goes: fix one, move to the next.
+Reconciled wordings attach to the **reword** block when there is one, and only fall back to the
+leading action when there is not. They answer "reword it" and nothing else, so hanging them off
+whichever action happened to win would, on a question where the deletion led, print proposed wording
+under a heading reading "A deletion, as proposed by 2 judges". The `unresolved` caveat lives inside
+that same block for the same reason — floating at the end of the verdict, "Type-Fit is not resolved
+by rewording" read as a free-standing finding about a judge rather than as a limit on the wording
+directly above it.
+
+**One card open at a time.** These cards are tall when open (a verdict, a tab strip, a finding with
+its own apply controls), so two at once means scrolling past finished work to reach unfinished work.
+The accordion also matches how the reviewing goes: fix one, move to the next.
 
 ### Reading it: a column, a header band, an indent, and two faces
 
@@ -229,16 +255,20 @@ that boundary is information rather than decoration.
 
 **Weight is not one of the signals.** The question and the proposed wordings are set at regular
 weight. They already carry a face change, a size step, and (for the heading) a filled band behind
-them; adding bold on top made a page of long questions heavier to read rather than easier. The one
-thing still bold is the verdict's verb — two words, and the only anchor the eye needs per group.
+them; adding bold on top made a page of long questions heavier to read rather than easier. Nothing
+on the page is bold: `font-medium` is the heaviest thing it uses, and it is spent on the verdict's
+verb, the eyebrows, and the one-line caption saying what applying would do.
 
 **Two faces, one rule: the questionnaire's own words are set in the ConQuest display serif**
 (`QUESTION_FACE` in `evaluation-field.tsx`). That covers the card heading, the reconciled wording, a
 drafted new question, the evidence quote, and — via `QuotedProse` — any span a judge put in quotes
 inside a sentence. On the run this was built against, 27 of 40 suggestions were of the shape "Add a
 direct question on runway, such as: “If your main income stopped tomorrow…”", where the wording
-being proposed was buried mid-sentence in the same face as the advice around it; it now changes face
-and slants, and can be found without reading the sentence carrying it.
+being proposed was buried mid-sentence in the same face as the advice around it; it now changes
+face, and can be found without reading the sentence carrying it. Roman, not italic: the face and the
+quotation marks are already two signals, and the slant was a third that landed on the longest
+strings at the smallest sizes — a whole proposed question set in slanted serif is the hardest thing
+on the card to read, which is exactly backwards.
 
 Two constraints on that:
 
@@ -474,7 +504,179 @@ this apply — yields concise keys (`describe_current_morale_work`, not the whol
 a slugified sentence.
 
 An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-run),
-`target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`.
+`target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`. The
+per-finding route is API-only as of F5.4 — the review surface writes exclusively through the batch
+(below), which reports the same reasons per finding in its result rather than as an HTTP error.
+
+## F5.4 — triage the run, then apply it as a batch
+
+Per-finding apply was the only path, and it made the reviewer decide the **order** of a dozen
+structural edits by the order they happened to click, one confirmation at a time, with no way to
+change their mind about the fifth after seeing the ninth. It also put four verbs on every card —
+accept, dismiss, edit, apply — two of which are English near-synonyms that do very different things.
+
+The flow is now triage-then-execute. Reviewing writes nothing structural: an admin works the whole
+run marking suggestions **Accept** or **Dismiss**, optionally attaching a free-text steer to any of
+them, and then presses one button that executes every accepted suggestion together. A queue of
+irreversible clicks becomes one reviewable decision.
+
+### The reviewer's steer — `applyInstruction`
+
+A nullable column on the finding, and the only new state the feature adds. It is the reviewer's own
+words about how to make the change ("keep it under 15 words, don't mention tenure") — never parsed
+into an op here, just carried. `null` means "apply the structured op exactly as the judge proposed
+it", so **the AI leg is opt-in per finding, by the admin typing something**; a run where nobody
+types anything applies exactly as deterministically as it did before, and reaches no provider at
+all.
+
+It replaced the typed `editedOverride` form on the card, which asked the reviewer to pick an exact
+op when what they actually wanted to express was a preference. The `edit` action stays in
+`reviewFindingSchema` and apply still honours stored overrides — the capability is API-accessible,
+it is just no longer a control. `set_instruction` writes the steer **without touching `status`**: a
+reviewer may note what they want before deciding whether they want it, and losing that on the way to
+a decision is the kind of small betrayal that stops people using the box at all. Bounded at
+`MAX_APPLY_INSTRUCTION` (2 000) because it is replayed verbatim into an LLM prompt; an emptied box
+normalises to `null` so "cleared it" and "never typed anything" are one state.
+
+### The batch — a loop with an order and an honest report
+
+`POST …/evaluations/:runId/apply` → `_lib/evaluation-batch-apply.ts`. The writing is still
+`applyFinding`, unchanged: same re-validation, same fork-lineage rule, same 409 reasons. Reusing it
+is the point — a batch must not be a second apply path with its own validation, or the two drift and
+one of them is the one with the hole. Three things the loop adds:
+
+**An execution order that does not sabotage itself** (`APPLY_RANK`). The reviewer accepted a _set_,
+not a sequence, so the batch has to choose one, and the naive choice (the order the judges emitted
+them) loses work for nothing. Two cases decide the ranking:
+
+- **A delete runs last.** Accept "reword Q4" and "delete Q4" — a real outcome, since two judges can
+  disagree and a reviewer can agree with both in the moment. Deleting first makes the reword
+  `target_gone`; rewording first makes the delete a clean no-loss. Same end state; only one order
+  reports it without an error.
+- **A move runs after content edits.** `reorder` carries an absolute ordinal computed against the
+  structure the judge saw. Content edits do not shift ordinals but another move does, so moves
+  cluster at the end where they shift a stable base.
+
+Ties fall back to `(dimension, ordinal, id)` — a total order, so the same accepted set always
+executes the same way rather than shuffling between presses.
+
+**A live re-read between findings.** `applyFinding` takes the current structure to re-check
+staleness against, and in a batch that structure is a moving target: the third finding must be
+judged against what the first two just wrote. Without it, two judges rewording the same question
+would both "succeed" and the second would silently overwrite the first. Once a fork has happened the
+re-read follows it — judging the batch's own work against a version it is no longer editing would
+find no drift at all.
+
+**A per-finding outcome.** Nothing is swallowed: every accepted finding comes back applied, or
+skipped with a reason (`stale`, `target_gone`, `op_invalid`, `needs_authoring`, `needs_ai`,
+`steer_unsupported`). A batch
+that quietly drops three of eleven changes is worse than no batch, so the route **always returns
+200** when the run resolves — "every accepted change was already stale" is an answer the reviewer
+needs the detail of, and an error envelope would throw that detail away. The response also carries
+every finding re-derived, so the queue re-renders from one round trip.
+
+### The surface — a queue you triage, and one bar that executes it
+
+Three places carry the state, and between them they answer "what have I decided" and "has any of it
+happened" without the reviewer having to ask:
+
+**The card** offers exactly two verbs, and neither reaches the questionnaire. The sentence over
+them is future-tense on purpose — "Accepting queues this change. Applying the run then removes this
+question from the questionnaire" — because a card that promised a click did something would be the
+same lie the old per-finding Apply told, moved one step earlier. Once accepted, the card says
+outright that it is **not applied yet**: someone who accepts twenty suggestions and walks away must
+not believe the questionnaire changed.
+
+**The header tiles** count Accepted and Dismissed apart rather than rolling them into one
+"reviewed" figure, which answered neither of the two questions a reviewer is actually tracking —
+how much is queued to apply, and how much did I throw away. The Accepted tile's hint carries the
+warning too ("queued — not applied yet"), because a count of accepted suggestions is exactly where
+someone would assume the work was done.
+
+**The batch bar** is a permanent band, not a toast on each Accept. Being told twenty times through
+a dialog that accepting changes nothing teaches a reviewer to dismiss the dialog without reading;
+a count that sits there saying "6 accepted changes, not applied yet" is unmissable and never in the
+way. It reports from the whole run and never the filtered view — a bar reading "3 accepted" while
+eleven were about to be applied would be worse than no bar at all.
+
+Pressing apply with the queue half-triaged raises a confirmation, not a block: "do the ones I have
+looked at" is a legitimate thing to want, so the dialog states what will and will not happen
+(`N still have no decision. Applying now writes the M you accepted and leaves the rest alone`) and
+lets it through. Afterwards the result panel stays on screen until the next batch, because it is
+the **only** place a change that did not land is ever named. Each skipped finding is given a reason
+in the reviewer's terms — `stale` becomes "the question changed since this evaluation ran" — and
+noted as _still accepted_, so fixing the cause and pressing apply again picks it up without
+re-triaging. Applied changes link straight to the new version in Build.
+
+The instruction box sits behind a link rather than on every card: most findings are accepted as
+proposed, and forty textareas is noise that makes the two decisions harder to reach. It saves on
+blur via `set_instruction`, and `accept` carries anything still unsaved as a belt to that braces.
+Its in-flight state is tracked **apart from** the decision buttons' — clicking Accept blurs the
+box, which starts the save, and a shared busy flag disabled the button in the instant between the
+blur and the click landing on it, swallowing the very click that caused the save.
+
+### Versioning — fork only when needed
+
+Unchanged, and deliberately so: the batch inherits it from `applyFinding` rather than reimplementing
+it. A launched version is deep-copied to a fresh draft before the first write; an editable draft is
+written in place; and a second batch from the same run converges on the draft the first one made
+(`findRunReviewDraft`). So repeated batches do not pile up versions, and the draft is the one thing
+the reviewer opens in Build afterwards.
+
+### The AI leg — the reviewer's steer, executed
+
+A finding carrying an `applyInstruction` cannot be executed by its structured op alone: the steer
+has to reach the wording. So before a single write happens, every steered finding goes through the
+**Suggestion Steer** agent (`app-questionnaire-suggestion-steer`,
+`lib/app/questionnaire/evaluation/steer-edit.ts`) — one structured completion each, rewriting that
+change's text to follow the reviewer's sentence.
+
+It is deliberately **not** routed through the Structure Edit Agent, which the F5.4 notes originally
+proposed. That agent's op vocabulary (`set_required`, `transform_prompt`, `move_question`…) is
+whole-document and mechanical; it cannot express `split_question`, `change_type`, `edit_guidelines`
+or `add_question` at all, and its persona is explicitly "never rewrite wording unless told to". Two
+opposite mandates on one binding would have meant a parallel op vocabulary anyway, so the steer got
+its own agent and its own prompt.
+
+**The model never touches the data.** Three things enforce that, and they are structural rather than
+prompt-shaped:
+
+- **It can only return text.** `steeredEditSchema` has one member per steerable op carrying only
+  that op's free-text fields. There is no field for a slot key, an answer type, a section, an
+  ordinal or a `typeConfig` — a model that decides the question should really be moved has no way to
+  say so.
+- **The op kind cannot change.** `mergeSteeredEdit` refuses a revision whose `op` differs from the
+  judge's and rebuilds the op from the original for every field the model was not offered. The
+  reviewer accepted "split this question"; they get a split, worded their way, keeping the judge's
+  `secondKey`. This is the one outright refusal in the leg — an op switch is the model overruling
+  the reviewer's own decision.
+- **It re-enters the ordinary apply path.** The rewritten op rides in as `editedOverride`, so
+  `applyFinding` validates it exactly as it validates an admin's typed override: same slot check,
+  same staleness re-check, same fork rule. The AI leg is a rewriter sitting in front of apply, not a
+  second way in.
+
+**Three ops carry no wording** (`delete_question`, `reorder`, `change_type`), so an instruction on
+one has nothing to act on. Those are reported as `steer_unsupported` without a model call, because
+asking a model to reword a deletion is nonsense and applying it with the reviewer's sentence
+dropped is the silent-substitution failure this leg exists to prevent. For the same reason a steer
+that _fails_ (no provider, a failed call, an op switch) is reported as `needs_ai` and the judge's
+own op is **not** applied as a consolation: the reviewer asked for their version of the change, and
+quietly giving them a different one under the same button is worse than a skip. The finding stays
+`accepted` either way.
+
+**Honesty about what did not land.** The result carries `note` (what the instruction changed, in one
+line) and `unhonoured` (the part of it wording alone could not satisfy — an answer type, a scale, an
+ordering), and the result panel shows both next to the applied change. A steer that only partly
+landed has to be visible at the moment it lands, or the reviewer reads "applied" as "all of it
+applied" and finds the gap later, in the questionnaire.
+
+**Cost and shape.** Steers run concurrently (`STEER_CONCURRENCY = 4`) before the ordered apply loop,
+not inside it: a rewrite depends only on the change and the questionnaire as the reviewer saw it,
+not on what the other findings wrote, and eight sequential model calls would time the batch out. A
+run where nobody typed an instruction makes **no** model call and does not even read the structure
+an extra time — the deterministic path is exactly as cheap as it was. Every attempt is recorded as
+an `AppAiRun` of kind `evaluation_steer`, failures included, because this is the one place in the
+evaluation flow where a model's own words reach the questionnaire.
 
 ### "Open in editor" — the refine path
 
@@ -577,32 +779,96 @@ question prompt (the subject under review), names the judges that flagged it, an
 since under a question heading the missing fact is _which judge said this_.
 
 **Every group starts collapsed.** The page opens as a scannable index — which questions have
-problems, how many judges agree, and how severe — and the reviewer drills into the ones they choose
-to work on. That is why the card header has to carry its weight on its own: context chip, the
-prompt, its answer type, the judge-consensus row, and the severity tally are all visible closed. Groups open
-independently and stay open across a re-sort (the card is keyed on the target, not its sorted
-slot), so re-ordering never folds away work in progress.
+problems, how severe, and whether the panel agreed — and the reviewer drills into the ones they
+choose to work on. Closed, a card carries its context line, the prompt, its answer type, the
+severity tally and the disagreement marker; the verdict and the judges are both a click away. Groups
+stay open across a re-sort (the card is keyed on the target, not its sorted slot), so re-ordering
+never folds away work in progress.
 
-**Every block of prose is labelled, and the questionnaire is separated from the advice.** A finding
-card stacks three or four paragraphs — the question under review, the judge's suggestion, its
-rationale, sometimes a quote — and with only font weight between them a reader landing mid-card
-cannot tell whether a sentence is _the questionnaire_ or _the AI's opinion of it_, which is the one
-distinction the page exists to communicate. So the card is two bands: a tinted, ruled-off **header**
-carrying the badges and (under a judge heading) the question itself, and a **body** in which every
-block is introduced by a small uppercase eyebrow — `Suggestion`, `Rationale`, `Evidence`, `Edit`,
-`Suggested new question · <type>`. Below the rule, everything is the judge talking.
+**Two verbs, and they are opposites.** There used to be four — accept, dismiss, edit, apply — split
+by _position_ alone (decision-recording left, questionnaire-changing right) with the detail in
+tooltips. That failed for the obvious reason: a reviewer deciding whether to click is not going to
+hover four buttons to find out which one writes to the questionnaire. `accept` is the one that went,
+because it was the one carrying no consequence: applying already records agreement, and the
+batch-agree-then-apply habit it existed to support is not needed, because the **fork-lineage rule is
+enforced server-side** — `evaluation-apply.ts` looks up the draft this run is already editing and
+converges repeated applies on it, rather than re-forking the launched original per click. The review
+route still accepts `action: 'accept'`, so the capability is intact and API-accessible; it is simply
+no longer a button. Existing `accepted` rows still render, and the status filter still offers them.
 
-The eyebrow is `FieldLabel` / `LabelledField` from
-`components/admin/questionnaires/evaluation-field.tsx`, shared rather than re-declared per file: the
-value is in the labels being visibly the same kind of thing everywhere, and the moment two surfaces
-drift in size or weight the eyebrow stops reading as structure and starts reading as decoration. The
-by-question group header uses the same `FieldLabel` for its context chip.
+**The footer says what a click will do, in words.** Two labelled sections, each stating its
+consequence above its button: "Change the questionnaire now", naming the actual edit, over Apply and
+Edit first; and, ruled off below and quieter, "Or dismiss it" over Dismiss. `effectOf` supplies the
+naming sentence and is deliberately declarative — its predecessor returned imperatives ("Rewrite the
+question prompt"), which above two buttons reads as an instruction _to the reader_ rather than a
+description of what Apply does.
+
+**Four type steps, two faces, one badge.** A finding card stacks three or four paragraphs — the
+question under review, the judge's suggestion, its rationale, sometimes a quote — and a reader
+landing mid-card must be able to tell whether a sentence is _the questionnaire_ or _the AI's opinion
+of it_, which is the one distinction the page exists to communicate.
+
+The first attempt at that distinction announced every block: two families plus a mono chip, five
+sizes (11/12/13/14/16px), three weights, italics, four badge variants, and five uppercase eyebrows
+stacked down the left edge of a single card. Everything was shouting, so nothing read as more
+important than anything else — the failure mode the labels were introduced to prevent, arrived at
+from the other direction. The scale is now fixed at four steps and enforced by the shared module
+(`components/admin/questionnaires/evaluation-field.tsx`), which carries the table:
+
+| Role                                    | Treatment                      |
+| --------------------------------------- | ------------------------------ |
+| The subject of a group                  | serif, `text-lg`, regular      |
+| Questionnaire wording inside a card     | serif, `text-base`, regular    |
+| Prose — suggestion, rationale, evidence | sans, `text-sm`, regular       |
+| Meta, labels, counts, decisions         | sans, `text-xs`, medium, muted |
+
+The rules that hold it there:
+
+- **Two families, one job each.** `QUESTION_FACE` is the questionnaire's voice and nothing else's;
+  sans is everything the system says _about_ it. There is no third family — a raw target key set in
+  mono was a developer's debug string wearing a badge, and it now renders as plain text and only
+  when the target failed to resolve, where it is the sole handle the reviewer has.
+- **The suggestion and the rationale carry no eyebrow.** The first paragraph says what to do, the
+  muted one under it says why: headline then deck, which needs no label to be understood. Dropping
+  those two is what lets the eyebrows that remain mean something — the target block, the drafted
+  question, and a cited `Evidence` quote, all blocks that would genuinely be misread as the prose
+  around them. `FieldLabel` / `LabelledField` stay the shared implementation, and the by-question
+  group header uses the same `FieldLabel` for its context chip.
+- **One badge, not four.** Severity is the only fact a reviewer triages on, so it is the only one
+  that keeps colour; the judge, the raw key and the recorded decision run as one dot-separated
+  `MetaRow` line. `stale` keeps its badge because it warns about the whole card rather than
+  describing it, and a `pending` status prints nothing at all — it is the default state of every
+  card on the page, so saying it on all of them says nothing.
+- **The same card, three times over.** `policy-finding-review-card.tsx` and
+  `scope-finding-review-card.tsx` are this card wearing different data. They track it exactly; they
+  only stay legible while they stay identical.
 
 The header's named-target block renders **only for `question` and `section` targets**, whose label is
-real content. `goal` / `audience` / `unknown` labels merely restate the kind, which the badge-row
-context chip already carries — a block would print the same word twice under an eyebrow saying it a
+real content. `goal` / `audience` / `unknown` labels merely restate the kind, which the meta row's
+context already carries — a block would print the same word twice under an eyebrow saying it a
 third time. When the block does render, its eyebrow carries the _full_ context ("Question 4 ·
-Business Execution") and the badge-row chip is dropped, so the target is named once, not twice.
+Business Execution") and the meta row's context is dropped, so the target is named once, not twice.
+The answer type and any "removed since this run" note sit _below_ the prompt in their own meta row
+rather than trailing it inside the paragraph, where they were being set in the questionnaire's own
+serif — the one thing that face must never say.
+
+**A drafted question is never printed twice.** A Coverage judge writes its suggestion as `Add a
+question on sales outcomes: “<the whole question>”`, and the card then previews that same drafted
+prompt below in its own block. Unstripped, the reviewer meets the same sentence twice within four
+lines, in two different treatments, and has to compare them word by word to discover they are
+identical — the worst redundancy on the surface, and the one that made two faces collide inside a
+single paragraph. `stripRestatedQuotes` removes a quoted span that restates wording the card already
+prints in full (`add_question`'s prompt, `split_question`'s two halves), closes the dangling lead-in
+punctuation, and returns `''` when only a fragment survives so the caller drops the paragraph
+entirely. It matches after normalisation, so the curly-quote and trailing-punctuation drift between
+the two copies does not defeat it. A quote reaching outside the drafted wording survives untouched.
+For the same reason the "Adds a new Likert question" caption is suppressed whenever a drafted
+question renders above it, under a heading that already says `Suggested new question · Likert`.
+
+**A single judge is named once.** The verdict band already says "Proposed by Coverage" in words, so
+`JudgeChips` renders nothing below one dimension — on a gap card the word "Coverage" was otherwise
+appearing three times inside four lines, in three different treatments. With two or more judges the
+chip row carries something the sentence cannot: the cross-judge consensus, at a glance.
 
 **A quote that only restates the prompt is dropped.** Judges routinely cite the question's own
 wording as their `sourceQuote`, which is useful in the raw payload and noise on screen: the prompt

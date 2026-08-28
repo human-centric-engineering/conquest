@@ -45,6 +45,7 @@ function finding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingVi
     status: 'pending',
     proposedEdit: { op: 'delete_question' },
     editedOverride: null,
+    applyInstruction: null,
     decidedByUserId: null,
     decidedAt: null,
     appliedAt: null,
@@ -164,10 +165,14 @@ afterEach(() => {
 });
 
 describe('EvaluationRunDetail review queue', () => {
-  it('renders the finding with its proposed change and op summary', async () => {
+  it('renders the finding with its proposed change, and what accepting would queue up', async () => {
+    // Future tense on purpose: nothing happens on click now, so a sentence promising that it does
+    // would be the same lie the old per-finding Apply told, moved one step earlier.
     await renderQueue([finding()]);
     expect(screen.getByText('Remove the duplicate question.')).toBeInTheDocument();
-    expect(screen.getByText('Delete this question')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Applying the run then removes this question from the questionnaire/)
+    ).toBeInTheDocument();
   });
 
   it('names the question a judgement is about, with its section and position', async () => {
@@ -189,8 +194,10 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.getByText('Question 2 · Background')).toBeInTheDocument();
   });
 
-  it('names every block of prose, so advice is never mistaken for the questionnaire', async () => {
+  it('keeps the questionnaire, the advice and the reasoning separable without an eyebrow on each', async () => {
     // Three near-identical paragraphs otherwise: the question, the suggestion, the reasoning.
+    // The question is separated by face, the reasoning by colour, and only the block that would
+    // genuinely be misread as prose — a quote the judge is citing — still carries a label.
     await renderQueue([
       finding({
         sourceQuote: 'Guidelines: skip if the respondent is a contractor.',
@@ -207,10 +214,18 @@ describe('EvaluationRunDetail review queue', () => {
       }),
     ]);
     expect(screen.getByText('Question 2 · Background')).toBeInTheDocument();
-    expect(screen.getByText('Suggestion')).toBeInTheDocument();
-    expect(screen.getByText('Rationale')).toBeInTheDocument();
+    // The questionnaire's own words, in the questionnaire's own face.
+    expect(screen.getByText('“What is your role?”').className).toContain(QUESTION_FACE);
+    expect(screen.getByText('Remove the duplicate question.')).toBeInTheDocument();
+    expect(screen.getByText('Same as q_role.')).toBeInTheDocument();
     expect(screen.getByText('Evidence')).toBeInTheDocument();
-    expect(screen.getByText('Edit')).toBeInTheDocument();
+    // What applying would do, as a caption on the buttons rather than a labelled section.
+    expect(
+      screen.getByText(/Applying the run then removes this question from the questionnaire/)
+    ).toBeInTheDocument();
+    // The eyebrows the card used to stack down its left edge are gone.
+    expect(screen.queryByText('Suggestion')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rationale')).not.toBeInTheDocument();
   });
 
   it('labels a section target as a section rather than a question', async () => {
@@ -249,7 +264,7 @@ describe('EvaluationRunDetail review queue', () => {
         },
       }),
     ]);
-    expect(screen.getByText('· Multi-Choice (One Answer)')).toBeInTheDocument();
+    expect(screen.getByText('Multi-Choice (One Answer)')).toBeInTheDocument();
   });
 
   it('drops a source quote that only restates the question already shown above it', async () => {
@@ -310,7 +325,7 @@ describe('EvaluationRunDetail review queue', () => {
         },
       }),
     ]);
-    expect(screen.getByText('· removed since this run')).toBeInTheDocument();
+    expect(screen.getByText('removed since this run')).toBeInTheDocument();
   });
 
   it('falls back to the raw key chip when the target could not be resolved', async () => {
@@ -341,91 +356,121 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.queryByText('“Questionnaire goal”')).not.toBeInTheDocument();
   });
 
-  it('accept calls the PATCH review endpoint with { action: "accept" } and updates the card', async () => {
+  it('dismiss calls the PATCH review endpoint and updates the card', async () => {
     await renderQueue([finding()]);
-    mockFetchOnce(finding({ status: 'accepted' }));
+    mockFetchOnce(finding({ status: 'declined' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ action: 'accept' }),
+        body: JSON.stringify({ action: 'decline' }),
       })
     );
-    await waitFor(() => expect(inFindings().getByText('Accepted')).toBeInTheDocument());
+    await waitFor(() => expect(inFindings().getByText('Declined')).toBeInTheDocument());
   });
 
-  it('apply calls the apply endpoint and shows a fork banner when the response forks', async () => {
+  it('keeps the instruction box behind a link until the reviewer wants it', async () => {
+    // Most findings are accepted as proposed. A textarea on every card in a queue of forty is
+    // noise that makes the two decisions harder to reach, not an invitation.
     await renderQueue([finding()]);
-    mockFetchOnce(
-      { finding: finding({ status: 'applied', appliedToVersionId: 'v2' }) },
-      {
-        forked: true,
-        versionId: 'v2',
-        versionNumber: 2,
-      }
-    );
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add an instruction for how to make this change' })
+    );
+    expect(
+      screen.getByLabelText('Anything to add about how this change should be made?')
+    ).toBeInTheDocument();
+  });
+
+  it('opens the box already showing an instruction saved earlier', async () => {
+    // Hidden behind a link, a steer written in a previous session would be invisible — and the
+    // reviewer would have no way to know this finding is going to be treated differently.
+    await renderQueue([finding({ applyInstruction: 'Keep it under 15 words.' })]);
+    expect(screen.getByRole('textbox')).toHaveValue('Keep it under 15 words.');
+  });
+
+  it('saves the instruction on blur, without touching the decision', async () => {
+    // set_instruction deliberately leaves `status` alone: a reviewer may write down what they want
+    // before deciding whether they want it.
+    await renderQueue([finding()]);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add an instruction for how to make this change' })
+    );
+    await userEvent.type(screen.getByRole('textbox'), 'Be terse.');
+    mockFetchOnce(finding({ applyInstruction: 'Be terse.' }));
+    await userEvent.tab();
+
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ action: 'set_instruction', instruction: 'Be terse.' }),
+        })
+      )
+    );
+  });
+
+  it('never loses a steer typed immediately before Accept', async () => {
+    // Clicking the button blurs the field, so the real sequence is save-then-accept rather than
+    // one request carrying both. What matters is only that the words reach the server: the card
+    // also sends them with `accept` when the blur has not happened, which is the belt to that
+    // braces. Asserted on what the server was told, not on which call told it.
+    await renderQueue([finding()]);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add an instruction for how to make this change' })
+    );
+    await userEvent.type(screen.getByRole('textbox'), 'Keep it short.');
+    mockFetchOnce(finding({ applyInstruction: 'Keep it short.' }));
+    mockFetchOnce(finding({ status: 'accepted', applyInstruction: 'Keep it short.' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+
+    await waitFor(() => {
+      const bodies = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) =>
+        String((c[1] as { body?: unknown }).body)
+      );
+      expect(bodies.some((b) => b.includes('Keep it short.'))).toBe(true);
+      expect(bodies.some((b) => b.includes('"action":"accept"'))).toBe(true);
+    });
+  });
+
+  it('omits the instruction from Accept when nothing was typed', async () => {
+    // Sending null would clear a steer saved earlier; omitting the key is what leaves it alone.
+    await renderQueue([finding({ applyInstruction: 'Written last week.' })]);
+    mockFetchOnce(finding({ status: 'accepted', applyInstruction: 'Written last week.' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
 
     expect(global.fetch).toHaveBeenCalledWith(
-      '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1/apply',
-      expect.objectContaining({ method: 'POST' })
-    );
-    await waitFor(() => expect(screen.getByText(/new draft/i)).toBeInTheDocument());
-  });
-
-  it('disables Apply when the finding is stale', async () => {
-    await renderQueue([finding({ stale: true })]);
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
-  });
-
-  it('disables Apply when apply is off (canApply=false)', async () => {
-    await renderQueue([finding()], false);
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
-  });
-
-  it('offers one-click "Add to questionnaire" + a seeded "Open in editor" link for an add_question', async () => {
-    await renderQueue([
-      finding({
-        applicable: 'deep-link',
-        proposedEdit: { op: 'add_question', prompt: 'How big is your team?', type: 'free_text' },
-      }),
-    ]);
-    // Not the generic "Apply" — a question-specific primary action, plus the drafted prompt preview.
-    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeInTheDocument();
-    expect(screen.getByText('How big is your team?')).toBeInTheDocument();
-    // The editor link carries the finding ref so the editor can pre-fill the composer.
-    const link = screen.getByRole('link', { name: /open in editor/i });
-    expect(link.getAttribute('href')).toContain('seedFinding=run1%3Af1');
-  });
-
-  it('"Add to questionnaire" calls the apply endpoint and updates the card on success', async () => {
-    await renderQueue([
-      finding({
-        applicable: 'deep-link',
-        proposedEdit: { op: 'add_question', prompt: 'New?', type: 'free_text' },
-      }),
-    ]);
-    mockFetchOnce({ finding: finding({ status: 'applied', appliedToVersionId: 'v1' }) });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
-
-    expect(global.fetch).toHaveBeenCalledWith(
-      '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1/apply',
-      expect.objectContaining({ method: 'POST' })
+      expect.stringContaining('/findings/f1'),
+      expect.objectContaining({ body: JSON.stringify({ action: 'accept' }) })
     );
   });
 
-  it('omits Accept for an add_question (the work-actions imply it) but keeps Dismiss', async () => {
+  it('still shows the instruction on a finding that has been decided', async () => {
+    // Otherwise a reviewer cannot tell which of forty findings they said something about.
+    await renderQueue([
+      finding({ status: 'declined', applyInstruction: 'Merge it with Q2 instead.' }),
+    ]);
+    expect(screen.getByText('Your instruction')).toBeInTheDocument();
+    expect(screen.getByText('Merge it with Q2 instead.')).toBeInTheDocument();
+  });
+
+  it('offers exactly two decisions per finding, and no way to write from the card', async () => {
+    // The card cannot reach the questionnaire at all now: triage here, execute the accepted set
+    // once from the run-level bar. Four verbs on one card were two too many, and two of them were
+    // English near-synonyms doing opposite things.
     await renderQueue([addQuestionFinding()]);
-    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
-    // Other op types still offer Accept (batch agree-then-apply).
-    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add to questionnaire' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply this change' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit first' })).not.toBeInTheDocument();
   });
 
   it('captions the drafted prompt so it cannot be read as an existing question', async () => {
@@ -434,64 +479,6 @@ describe('EvaluationRunDetail review queue', () => {
     await renderQueue([addQuestionFinding()]);
     expect(screen.getByText(/Suggested new question · Free text/)).toBeInTheDocument();
     expect(screen.getByText('How big is your team?')).toBeInTheDocument();
-  });
-
-  it('names the new question as the subject of the data-slot checkbox', async () => {
-    // Under a coverage-gap heading, a bare "add to a data slot" reads as slotting the *heading*.
-    await renderQueue([addQuestionFinding()], true, true);
-    expect(screen.getByLabelText(/Also add the new question to a data slot/i)).toBeInTheDocument();
-  });
-
-  it('disables "Add to questionnaire" when the add_question finding is stale', async () => {
-    await renderQueue([
-      finding({
-        applicable: 'deep-link',
-        stale: true,
-        proposedEdit: { op: 'add_question', prompt: 'New?', type: 'free_text' },
-      }),
-    ]);
-    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeDisabled();
-  });
-
-  it('shows the data-slot checkbox for an add_question only when the version has data slots', async () => {
-    const { unmount } = await renderQueue([addQuestionFinding()], true, false);
-    expect(screen.queryByLabelText(/to a data slot/i)).not.toBeInTheDocument();
-    unmount();
-    await renderQueue([addQuestionFinding()], true, true);
-    expect(screen.getByLabelText(/to a data slot/i)).toBeChecked();
-  });
-
-  it('assigns the new question to a data slot after a one-click add when the checkbox is on', async () => {
-    await renderQueue([addQuestionFinding()], true, true);
-    // Apply response (the finding, now applied to v1) then the follow-up assign call.
-    mockFetchOnce({ finding: addQuestionFinding({ status: 'applied', appliedToVersionId: 'v1' }) });
-    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, data: { slots: [], assigned: 1, created: 0 } }),
-    });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
-
-    await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/v1/app/questionnaires/qn1/versions/v1/data-slots/assign',
-        expect.objectContaining({ method: 'POST' })
-      )
-    );
-  });
-
-  it('does not assign after a one-click add when the data-slot checkbox is unticked', async () => {
-    await renderQueue([addQuestionFinding()], true, true);
-    await userEvent.click(screen.getByLabelText(/to a data slot/i)); // untick
-    mockFetchOnce({ finding: addQuestionFinding({ status: 'applied', appliedToVersionId: 'v1' }) });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
-
-    await waitFor(() => expect(screen.getByText(/Applied to/)).toBeInTheDocument());
-    const calledAssign = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(
-      (c) => typeof c[0] === 'string' && c[0].includes('/data-slots/assign')
-    );
-    expect(calledAssign).toBe(false);
   });
 
   it('filters findings by status', async () => {
@@ -537,34 +524,40 @@ describe('EvaluationRunDetail review queue', () => {
       />
     );
 
-    // Unfiltered: the deletion leads, the rewording is printed beside it as dissent.
-    expect(screen.getByText('Delete this question')).toBeInTheDocument();
-    expect(screen.getByText('1 of 2 judges')).toBeInTheDocument();
-    expect(screen.getByText('· 1 judge says reword it instead')).toBeInTheDocument();
+    await expandGroup(/q_dupe/);
+
+    // Unfiltered: both proposed actions have a block, each naming its own backing.
+    expect(screen.getByText('A deletion, as proposed by 1 of 2 judges')).toBeInTheDocument();
+    expect(screen.getByText('A reword, as proposed by 1 of 2 judges')).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Severity'), 'major');
 
-    // The clarity finding is filtered out of the list below, but the verdict is unchanged.
-    await waitFor(() => expect(screen.getByText('1 of 2 judges')).toBeInTheDocument());
-    expect(screen.getByText('Delete this question')).toBeInTheDocument();
-    expect(screen.getByText('· 1 judge says reword it instead')).toBeInTheDocument();
+    // The clarity finding is filtered out of the tabs below, but the verdict is unchanged — the
+    // rewording proposal must not vanish just because the reviewer narrowed what they are reading.
+    await waitFor(() =>
+      expect(screen.getByText('A reword, as proposed by 1 of 2 judges')).toBeInTheDocument()
+    );
+    expect(screen.getByText('A deletion, as proposed by 1 of 2 judges')).toBeInTheDocument();
   });
 
-  it('separates the record-only actions from Apply with a group label', async () => {
+  it('says in the heading that a decision changes nothing yet', async () => {
+    // A button label alone cannot answer "what happens if I click this", and a tooltip only
+    // answers it for someone already hovering. The heading says it in visible copy, and the
+    // sentence under it names the edit that accepting would queue.
     await renderQueue([finding()]);
-    // "Apply" and "Accept" read as near-synonyms on their own; the label is what says the second
-    // group only records a decision.
-    expect(screen.getByText('Record a decision:')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
+    expect(screen.getByText('Record a decision — nothing changes yet')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Applying the run then removes this question from the questionnaire/)
+    ).toBeInTheDocument();
   });
 
-  it('Accept records a decision without touching the questionnaire', async () => {
+  it('Dismiss records a decision without touching the questionnaire', async () => {
     await renderQueue([finding()]);
-    mockFetchOnce(finding({ status: 'accepted' }));
+    mockFetchOnce(finding({ status: 'declined' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
 
-    // The distinction that matters: Accept hits the review route, never the apply route.
+    // The distinction that matters: Dismiss hits the review route, never the apply route.
     const urls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(urls).toContain(
       '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1'
@@ -591,50 +584,20 @@ describe('EvaluationRunDetail review queue', () => {
         error: { message: 'Boom', details: { reason: 'stale' } },
       }),
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     await waitFor(() => expect(screen.getByText(/Boom \(stale\)/)).toBeInTheDocument());
-  });
-
-  it('edit opens a typed form and saves an override via PATCH edit', async () => {
-    await renderQueue([finding({ proposedEdit: { op: 'replace_prompt', prompt: 'Old prompt' } })]);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const textarea = screen.getByRole('textbox');
-    await userEvent.clear(textarea);
-    await userEvent.type(textarea, 'New prompt');
-
-    mockFetchOnce(finding({ editedOverride: { op: 'replace_prompt', prompt: 'New prompt' } }));
-    await userEvent.click(screen.getByRole('button', { name: 'Save edit' }));
-
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/findings/f1'),
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({
-          action: 'edit',
-          editedOverride: { op: 'replace_prompt', prompt: 'New prompt' },
-        }),
-      })
-    );
-  });
-
-  it('renders a change_type op summary and a type select in its edit form', async () => {
-    await renderQueue([finding({ proposedEdit: { op: 'change_type', type: 'single_choice' } })]);
-    // The filter row carries its own selects, so scope to the finding card: the combobox under
-    // test is the edit form's type picker, not "Status" or "Severity".
-    expect(screen.getByText(/Change answer type/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(inFindings().getByRole('combobox')).toBeInTheDocument();
   });
 
   it('dims a terminal (applied) finding and offers no actions', async () => {
     await renderQueue([finding({ status: 'applied', appliedToVersionId: 'v2' })]);
-    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply this change' })).not.toBeInTheDocument();
     expect(screen.getByText(/Applied to/)).toBeInTheDocument();
   });
 
   it('renders a manual finding with an editor link and no Apply', async () => {
     await renderQueue([finding({ applicable: 'manual', proposedEdit: null })]);
-    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply this change' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /open in editor/i })).toBeInTheDocument();
   });
 
@@ -666,38 +629,42 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.getByText(/Stale — re-run/)).toBeInTheDocument();
   });
 
-  it('marks an op as edited when an override is present', async () => {
+  it('describes the override, not the judge’s op, when one is stored', async () => {
     await renderQueue([
       finding({
         proposedEdit: { op: 'replace_prompt', prompt: 'a' },
         editedOverride: { op: 'delete_question' },
       }),
     ]);
-    expect(screen.getByText(/· edited/)).toBeInTheDocument();
+    // The override still wins at apply, and the effect sentence describes it rather than the
+    // judge's original op.
+    expect(
+      screen.getByText(/Applying the run then removes this question from the questionnaire/)
+    ).toBeInTheDocument();
     // The effective op is the override (delete).
-    expect(screen.getByText('Delete this question')).toBeInTheDocument();
+    expect(screen.getByText(/removes this question from the questionnaire/)).toBeInTheDocument();
   });
 
   it('describes edit_guidelines (set vs clear)', async () => {
     const { unmount } = await renderQueue([
       finding({ proposedEdit: { op: 'edit_guidelines', guidelines: 'Be concrete.' } }),
     ]);
-    expect(screen.getByText('Set the author guidelines')).toBeInTheDocument();
+    expect(screen.getByText(/sets the author guidelines/)).toBeInTheDocument();
     unmount();
     await renderQueue([finding({ proposedEdit: { op: 'edit_guidelines', guidelines: null } })]);
-    expect(screen.getByText('Clear the author guidelines')).toBeInTheDocument();
+    expect(screen.getByText(/clears the author guidelines/)).toBeInTheDocument();
   });
 
   it('describes reorder with and without a target section', async () => {
     const { unmount } = await renderQueue([
       finding({ proposedEdit: { op: 'reorder', ordinal: 2 } }),
     ]);
-    expect(screen.getByText('Move to position 3')).toBeInTheDocument();
+    expect(screen.getByText(/moves this question to position 3/)).toBeInTheDocument();
     unmount();
     await renderQueue([
       finding({ proposedEdit: { op: 'reorder', ordinal: 0, targetSectionKey: 'Intro' } }),
     ]);
-    expect(screen.getByText(/Move to .*Intro.*position 1/)).toBeInTheDocument();
+    expect(screen.getByText(/moves this question into .*Intro.*at position 1/)).toBeInTheDocument();
   });
 
   it('describes edit_audience and offers no inline Edit (not an inline-editable op)', async () => {
@@ -707,55 +674,8 @@ describe('EvaluationRunDetail review queue', () => {
         proposedEdit: { op: 'edit_audience', audience: { role: 'x' } },
       }),
     ]);
-    expect(screen.getByText(/Adjust audience \(role\)/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-  });
-
-  it('saves an edited goal via the reorder/goal text form', async () => {
-    await renderQueue([
-      finding({ targetKey: 'goal', proposedEdit: { op: 'edit_goal', goal: 'Old goal' } }),
-    ]);
-    expect(screen.getByText('Replace the questionnaire goal')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const textarea = screen.getByRole('textbox');
-    await userEvent.clear(textarea);
-    await userEvent.type(textarea, 'Sharper goal');
-    mockFetchOnce(finding());
-    await userEvent.click(screen.getByRole('button', { name: 'Save edit' }));
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/findings/f1'),
-      expect.objectContaining({
-        body: JSON.stringify({
-          action: 'edit',
-          editedOverride: { op: 'edit_goal', goal: 'Sharper goal' },
-        }),
-      })
-    );
-  });
-
-  it('edits a reorder ordinal via the number input', async () => {
-    await renderQueue([finding({ proposedEdit: { op: 'reorder', ordinal: 1 } })]);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const numberInput = screen.getByRole('spinbutton');
-    await userEvent.clear(numberInput);
-    await userEvent.type(numberInput, '4');
-    mockFetchOnce(finding());
-    await userEvent.click(screen.getByRole('button', { name: 'Save edit' }));
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/findings/f1'),
-      expect.objectContaining({
-        body: JSON.stringify({ action: 'edit', editedOverride: { op: 'reorder', ordinal: 4 } }),
-      })
-    );
-  });
-
-  it('disables Save edit when the required text is emptied, and Cancel closes the form', async () => {
-    await renderQueue([finding({ proposedEdit: { op: 'replace_prompt', prompt: 'Some prompt' } })]);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    await userEvent.clear(screen.getByRole('textbox'));
-    expect(screen.getByRole('button', { name: 'Save edit' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('button', { name: 'Save edit' })).not.toBeInTheDocument();
+    expect(screen.getByText(/updates the audience description \(role\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit first' })).not.toBeInTheDocument();
   });
 });
 
@@ -919,34 +839,54 @@ describe('EvaluationRunDetail by-question view', () => {
     );
   });
 
-  it('starts every question group collapsed, showing the verdict rather than the findings', () => {
+  it('starts collapsed on the question alone — no verdict, no judgements', () => {
     renderCrossJudge();
-    // Both questions are listed, each with what the panel wants done about it...
+    // Both questions are listed, each with how bad it is...
     expect(screen.getByText('“What is your role and tenure?”')).toBeInTheDocument();
     expect(screen.getByText('“Would you recommend us?”')).toBeInTheDocument();
-    // …each carrying how much of the panel is behind the proposed action.
-    expect(screen.getAllByText(/\d+ of \d+ judges|all \d+ judges|1 judge/).length).toBeGreaterThan(
-      0
-    );
-    // ...but no individual judgement is rendered until one is opened. The verdict is the
-    // headline; the judges that produced it are the drill-down.
-    expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ask why, not just whether.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Flagged by')).not.toBeInTheDocument();
-  });
-
-  it('names the action the panel wants, not just that something is wrong', () => {
-    // The verb is the point: a reviewer scanning the index should learn "reword this one, delete
-    // that one" without opening a single card.
-    renderCrossJudge();
+    expect(screen.getByText('1 major')).toBeInTheDocument();
+    // ...and nothing else. The index is a list of questions to work through; what the panel
+    // concluded and why are both one click away rather than stacked into the same column.
     expect(
-      screen.getAllByText(/Reword it|Delete this question|Change the answer type|Review/).length
-    ).toBeGreaterThan(0);
+      screen.queryByText('The overall verdict from the evaluation judges:')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Flagged by the following judges:')).not.toBeInTheDocument();
   });
 
-  it('shows the reconciled wording on the collapsed card, above the judgements that produced it', () => {
-    // The whole reason the reconcile step exists: a reviewer should see the wording several judges
-    // can live with WITHOUT opening the card and reading four competing rewrites.
+  it('says on the closed card that the panel split, even though the verdict is hidden', async () => {
+    // The one thing a collapsed card must not be able to hide. A reviewer skimming the queue
+    // should never discover only after opening a card that a judge wanted the question deleted.
+    render(
+      <EvaluationRunDetail
+        run={run([
+          finding({ id: 'a1', dimension: 'clarity', proposedEdit: { op: 'delete_question' } }),
+          finding({
+            id: 'a2',
+            dimension: 'ordering',
+            proposedEdit: { op: 'replace_prompt', prompt: 'Sharper?' },
+          }),
+        ])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+      />
+    );
+    expect(screen.getByText('Judges disagree')).toBeInTheDocument();
+  });
+
+  it('names the actions on the table once the card is open', async () => {
+    // The verb is the point: the reviewer should learn "this one is a deletion, backed by both
+    // judges" from a heading, not by reading two suggestions and inferring it.
+    renderCrossJudge();
+    await expandGroup(Q_ROLE);
+    expect(screen.getByText('The overall verdict from the evaluation judges:')).toBeInTheDocument();
+    expect(screen.getByText('A deletion, as proposed by all 2 judges')).toBeInTheDocument();
+  });
+
+  it('shows the reconciled wording with the verdict, above the judgements that produced it', async () => {
+    // The whole reason the reconcile step exists: a reviewer should reach the wording several
+    // judges can live with without reading four competing rewrites to synthesise it themselves.
     render(
       <EvaluationRunDetail
         run={reconciledRun()}
@@ -957,13 +897,15 @@ describe('EvaluationRunDetail by-question view', () => {
       />
     );
 
+    // Closed, none of it is on screen.
+    expect(screen.queryByText('“What is your current role?”')).not.toBeInTheDocument();
+
+    await expandGroup(Q_ROLE);
     expect(screen.getByText('“What is your current role?”')).toBeInTheDocument();
     expect(screen.getByText(/Satisfies Clarity, Type-Fit/)).toBeInTheDocument();
-    // The individual judgements stay closed.
-    expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
   });
 
-  it('says which judge the rewrite cannot satisfy, rather than implying it satisfies all', () => {
+  it('says which judge the rewrite cannot satisfy, rather than implying it satisfies all', async () => {
     // A rewrite offered as the answer to an ordering complaint would be a lie about the panel.
     render(
       <EvaluationRunDetail
@@ -975,14 +917,20 @@ describe('EvaluationRunDetail by-question view', () => {
       />
     );
 
+    await expandGroup(Q_ROLE);
+    // Phrased as a fact about the wording, and printed inside the block holding that wording.
+    // Floating at the end of the verdict it read as a free-standing finding about a judge.
     expect(
-      screen.getByText('Ordering is not resolved by rewording — that needs a structural change.')
+      screen.getByText(
+        'No wording satisfies Ordering — that judge needs a structural change, not a rewrite.'
+      )
     ).toBeInTheDocument();
   });
 
-  it('holds the second wording back until the card is open', async () => {
-    // Two rewrites on a card the reviewer is still scanning recreates the choose-between-rewrites
-    // problem the reconciler exists to remove; the trade-off belongs in the drill-down.
+  it('shows every reconciled wording once the card is open', async () => {
+    // The verdict now only renders on the open card, so there is no scanning state left to
+    // protect from a second option — holding one back would just hide a trade-off the reviewer
+    // has already asked to see.
     render(
       <EvaluationRunDetail
         run={reconciledRun()}
@@ -993,15 +941,16 @@ describe('EvaluationRunDetail by-question view', () => {
       />
     );
     expect(screen.queryByText('“What do you do here?”')).not.toBeInTheDocument();
-    expect(screen.getByText(/1 alternative wording below/)).toBeInTheDocument();
 
     await expandGroup(Q_ROLE);
-    await waitFor(() => expect(screen.getByText('“What do you do here?”')).toBeInTheDocument());
+    expect(screen.getByText('“What is your current role?”')).toBeInTheDocument();
+    expect(screen.getByText('“What do you do here?”')).toBeInTheDocument();
   });
 
-  it('prints the dissent next to the headline verdict', async () => {
-    // Two judges want the question reworded and one wants it deleted. Showing "Reword it" alone
-    // would hide a proposed deletion behind a gentler verb until the reviewer opened the card.
+  it('gives every proposed action its own block, so a deletion is never a footnote', async () => {
+    // Two judges want the question reworded and one wants it deleted. Appended to the winner as a
+    // trailing clause ("· 1 judge says delete this question instead"), the deletion read as an
+    // aside about the reword rather than as the other thing on the table.
     const target = {
       kind: 'question' as const,
       key: 'q_role',
@@ -1046,9 +995,11 @@ describe('EvaluationRunDetail by-question view', () => {
       />
     );
 
-    expect(screen.getByText('Reword it')).toBeInTheDocument();
-    expect(screen.getByText('2 of 3 judges')).toBeInTheDocument();
-    expect(screen.getByText('· 1 judge says delete this question instead')).toBeInTheDocument();
+    expect(screen.getByText('Judges disagree')).toBeInTheDocument();
+
+    await expandGroup(Q_ROLE);
+    expect(screen.getByText('A reword, as proposed by 2 of 3 judges')).toBeInTheDocument();
+    expect(screen.getByText('A deletion, as proposed by 1 of 3 judges')).toBeInTheDocument();
   });
 
   it('shows each question’s answer type on the collapsed index', async () => {
@@ -1074,25 +1025,35 @@ describe('EvaluationRunDetail by-question view', () => {
     expect(screen.getByText(/Nothing here changes an existing question/)).toBeInTheDocument();
   });
 
-  it('gathers every judge’s findings about one question under a single card', async () => {
+  it('puts each judge behind its own tab, one judge’s reasoning at a time', async () => {
+    // Stacked in one column, a question flagged by four judges was four near-identical cards each
+    // with its own apply controls, and the reviewer scrolled past three to reach the fourth.
     renderCrossJudge();
     await expandGroup(Q_ROLE);
+
     // One heading for the question, even though two different judges flagged it.
     expect(screen.getAllByText('“What is your role and tenure?”')).toHaveLength(1);
-    // Both judges' proposed changes sit inside it.
+    // Both judges are offered...
+    expect(screen.getByText('Flagged by the following judges:')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Clarity' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Type-Fit' })).toHaveAttribute('aria-selected', 'false');
+    // ...but only the selected one's judgement is on screen.
     expect(screen.getByText('Split the double-barrelled question.')).toBeInTheDocument();
-    expect(screen.getByText('Free text suits this better.')).toBeInTheDocument();
-    // ...and only that group opened — the other stays folded.
-    expect(screen.queryByText('Ask why, not just whether.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Free text suits this better.')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Type-Fit' }));
+    await waitFor(() => {
+      expect(screen.getByText('Free text suits this better.')).toBeInTheDocument();
+      expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
+    });
   });
 
-  it('leads each card with the judge, since the group heading already names the question', async () => {
+  it('names the judge on the open card, since the group heading already names the question', async () => {
     renderCrossJudge();
     await expandGroup(Q_ROLE);
-    // The open question's findings each name their own judge...
+    // The visible judgement names its own judge...
     expect(screen.getByText('Clarity Judge')).toBeInTheDocument();
-    expect(screen.getByText('Type-Fit Judge')).toBeInTheDocument();
-    // ...and do not repeat the question, which the group heading already carries.
+    // ...and does not repeat the question, which the group heading already carries.
     expect(screen.getAllByText('“What is your role and tenure?”')).toHaveLength(1);
   });
 
@@ -1105,9 +1066,11 @@ describe('EvaluationRunDetail by-question view', () => {
 
     await expandGroup(Q_NPS);
     await waitFor(() => {
-      expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
+      expect(screen.getByText(prose('Define "recommend".'))).toBeInTheDocument();
       expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
     });
+    // Exactly one verdict on screen is the accordion's whole guarantee.
+    expect(screen.getAllByText('The overall verdict from the evaluation judges:')).toHaveLength(1);
   });
 
   it('closes the open question when its own header is clicked again', async () => {
@@ -1129,19 +1092,34 @@ describe('EvaluationRunDetail by-question view', () => {
     const heading = screen.getByRole('heading', { name: '“Would you recommend us?”' });
     expect(heading.className).toContain(QUESTION_FACE);
 
-    // The disclosure that owns it is the group's one filled surface — that is what makes it read
-    // as a header rather than as the first of several similar-looking blocks.
+    // The disclosure sits inside the group's one filled surface — the header AREA, which also
+    // carries the panel's verdict once open. That is what makes it read as a header rather than
+    // as the first of several similar-looking blocks.
     const header = screen.getByRole('button', { name: Q_NPS });
-    expect(header.className).toMatch(/bg-muted/);
+    const headerArea = header.parentElement as HTMLElement;
+    expect(headerArea.className).toMatch(/bg-muted/);
 
     // ...and the group itself is not a box around it. Nesting a tinted header inside a bordered
     // card inside the page flattens the very hierarchy the tint is expressing.
-    const group = header.parentElement as HTMLElement;
+    const group = headerArea.parentElement as HTMLElement;
     expect(group.tagName).toBe('SECTION');
     expect(group.className).not.toMatch(/\bborder\b|\brounded-xl\b|\bbg-card\b/);
+  });
 
-    // Everything belonging to that question sits indented beneath it instead.
-    expect(group.querySelector('div[class*="pl-"]')).not.toBeNull();
+  it('keeps the verdict flush with the question and indents only the individual judges', async () => {
+    // The verdict is a property of the question above it, not a detail underneath it. Sharing the
+    // indent with the judges made it read as the first of them rather than the summary of all.
+    renderCrossJudge();
+    await expandGroup(Q_NPS);
+
+    const header = screen.getByRole('button', { name: Q_NPS });
+    const headerArea = header.parentElement as HTMLElement;
+    expect(headerArea.textContent).toContain('The overall verdict from the evaluation judges:');
+
+    const group = headerArea.parentElement as HTMLElement;
+    const judges = group.querySelector('div[class*="pl-"]') as HTMLElement;
+    expect(judges).not.toBeNull();
+    expect(judges.textContent).toContain('Flagged by the following judges:');
   });
 
   it('shows the severity tally per question', () => {
@@ -1192,9 +1170,11 @@ describe('EvaluationRunDetail by-question view', () => {
     await userEvent.selectOptions(screen.getByLabelText('Severity'), 'major');
 
     await waitFor(() => {
-      // The open question keeps only its major finding...
-      expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
+      // The open question drops the info-severity judge entirely — tabs and all — and falls back
+      // to the first judge still standing.
+      expect(screen.getByText('Move this after the context questions.')).toBeInTheDocument();
       expect(screen.queryByText(prose('Define "recommend".'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Clarity' })).not.toBeInTheDocument();
     });
 
     // ...and the filter reached the closed question too, which still shows a major tally.
@@ -1228,24 +1208,38 @@ describe('EvaluationRunDetail by-question view', () => {
     await expandGroup(Q_ROLE);
     (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ success: true, data: finding({ id: 'f1', status: 'accepted' }) }),
+      json: async () => ({ success: true, data: finding({ id: 'f1', status: 'declined' }) }),
     });
 
-    // The first Accept belongs to f1 (the clarity finding on q_role).
-    await userEvent.click(screen.getAllByRole('button', { name: 'Accept' })[0]);
+    // The open tab is Clarity, whose finding on q_role is f1.
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1',
-      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ action: 'accept' }) })
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ action: 'decline' }) })
     );
   });
 
-  it('reports severity totals and review progress in the headline', () => {
+  it('reports severity totals and the two decisions separately in the headline', () => {
+    // Accepted and dismissed are counted apart rather than rolled into one "reviewed" figure: a
+    // combined number answers neither "how much is queued to apply" nor "how much did I throw
+    // away", which are the two things a reviewer is actually tracking.
     renderCrossJudge();
-    // 3 majors across 2 flagged questions, and nothing reviewed yet.
     expect(screen.getByText('across 2 flagged items')).toBeInTheDocument();
-    expect(screen.getByText('0 / 5')).toBeInTheDocument();
-    expect(screen.getByText('5 still pending')).toBeInTheDocument();
+    // Asserted on the hints, not the labels: "Accepted" is also a status-filter option, and an
+    // unscoped query for it would pass on the filter row while the tile was missing.
+    expect(screen.getByText('Dismissed')).toBeInTheDocument();
+    expect(screen.getByText('nothing queued')).toBeInTheDocument();
+    expect(screen.getByText('5 not yet decided')).toBeInTheDocument();
+  });
+
+  it('warns in the headline that accepted changes have not taken effect', async () => {
+    // The same warning the batch bar makes unmissable, in the place a reviewer reads totals — a
+    // count of accepted suggestions is exactly where someone would assume the work is done.
+    const r = crossJudgeRun();
+    r.findings = r.findings.map((f, i) => (i === 0 ? { ...f, status: 'accepted' as const } : f));
+    render(<EvaluationRunDetail run={r} questionnaireId="qn1" versionId="v1" canApply />);
+    expect(screen.getByText('queued — not applied yet')).toBeInTheDocument();
   });
 
   it('gives each judge a severity split in the headline strip', () => {
@@ -1278,19 +1272,19 @@ describe('EvaluationRunDetail by-question view', () => {
     expect(screen.getByText('“Would you recommend us?”')).toBeInTheDocument();
     // ...and opens on click like any other group.
     await expandGroup(Q_NPS);
-    await waitFor(() => expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(prose('Define "recommend".'))).toBeInTheDocument());
   });
 
   it('opens groups independently — expanding one leaves the others folded', async () => {
     renderCrossJudge();
     await expandGroup(Q_NPS);
-    expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
+    expect(screen.getByText(prose('Define "recommend".'))).toBeInTheDocument();
     expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
 
     // And a group closes again on a second click.
     await expandGroup(Q_NPS);
     await waitFor(() =>
-      expect(screen.queryByText('Ask why, not just whether.')).not.toBeInTheDocument()
+      expect(screen.queryByText(prose('Define "recommend".'))).not.toBeInTheDocument()
     );
   });
 
@@ -1303,6 +1297,198 @@ describe('EvaluationRunDetail by-question view', () => {
     // The failure names itself rather than leaving a bare code, and offers its way out.
     expect(screen.getByText(/errored before it returned/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry judge' })).toBeInTheDocument();
+  });
+});
+
+describe('EvaluationRunDetail batch apply', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  /** A run of three findings whose statuses the test sets. */
+  function triaged(statuses: EvaluationFindingView['status'][]) {
+    return run(
+      statuses.map((status, i) =>
+        finding({ id: `f${i + 1}`, status, targetKey: `q_${i + 1}`, target: null })
+      )
+    );
+  }
+
+  function renderRun(r: ReturnType<typeof run>, canApply = true) {
+    return render(
+      <EvaluationRunDetail run={r} questionnaireId="qn1" versionId="v1" canApply={canApply} />
+    );
+  }
+
+  /** The batch route's response body. */
+  function batchResponse(over: Record<string, unknown> = {}) {
+    return {
+      versionId: 'v2',
+      versionNumber: 2,
+      forked: true,
+      applied: [{ findingId: 'f1', targetKey: 'q_1', op: 'delete_question' }],
+      skipped: [],
+      findings: [finding({ id: 'f1', status: 'applied', appliedToVersionId: 'v2' })],
+      ...over,
+    };
+  }
+
+  it('states that accepted changes have not taken effect, and how many are queued', () => {
+    // The standing answer to "have my decisions done anything?". A permanent band rather than a
+    // toast on each Accept: told twenty times through a dialog, a reviewer learns to dismiss it
+    // without reading.
+    renderRun(triaged(['accepted', 'accepted', 'pending']));
+    expect(screen.getByText('2 accepted changes, not applied yet')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing has changed in the questionnaire/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply 2 accepted changes' })).toBeInTheDocument();
+  });
+
+  it('says the same thing on the card that was just accepted', async () => {
+    // The bar says it in aggregate; the card says it about the thing they actually clicked.
+    renderRun(triaged(['accepted', 'pending', 'pending']));
+    await expandGroup(/q_1/);
+    expect(
+      screen.getByText(/Nothing changes in the questionnaire until you apply this run/)
+    ).toBeInTheDocument();
+  });
+
+  it('cannot be pressed with nothing accepted', () => {
+    renderRun(triaged(['pending', 'pending', 'pending']));
+    expect(screen.getByText('Nothing accepted yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Apply 0/ })).toBeDisabled();
+  });
+
+  it('is disabled when design evaluation is switched off', () => {
+    renderRun(triaged(['accepted', 'accepted', 'accepted']), false);
+    expect(screen.getByRole('button', { name: 'Apply 3 accepted changes' })).toBeDisabled();
+  });
+
+  it('applies straight away once every suggestion has a decision', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/apply',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('warns before applying a half-triaged run, and lets it through anyway', async () => {
+    // Not an error — "do the ones I have looked at" is legitimate — so it states what will and
+    // will not happen rather than blocking on a rule the reviewer never agreed to.
+    renderRun(triaged(['accepted', 'pending', 'pending']));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    expect(screen.getByText("You haven't finished reviewing this evaluation")).toBeInTheDocument();
+    expect(screen.getByText(/2 suggestions still have no decision/)).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    mockFetchOnce(batchResponse());
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 anyway' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+  });
+
+  it('backs out of the warning without applying anything', async () => {
+    renderRun(triaged(['accepted', 'pending', 'pending']));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('points at the new version in Build once the batch lands', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.getByText(/copied to a new draft/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open v2 in Build/ })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn1/v/v2/structure'
+    );
+  });
+
+  it('reports what the AI did with the reviewer’s own instruction, and what it could not do', async () => {
+    // A steer that only partly landed has to be visible at the moment it lands. Without this line
+    // the reviewer reads "applied" as "all of it applied" and finds the gap later, in the
+    // questionnaire itself.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'q_1',
+            op: 'replace_prompt',
+            steer: {
+              note: 'Shortened it to twelve words.',
+              unhonoured: 'Making it a 1–5 scale is not something wording can do.',
+            },
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('1 change written to your instruction')).toBeInTheDocument()
+    );
+    expect(screen.getByText(/Shortened it to twelve words/)).toBeInTheDocument();
+    expect(screen.getByText(/Making it a 1–5 scale/)).toBeInTheDocument();
+  });
+
+  it('says nothing about instructions on a batch nobody steered', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/written to your instruction/)).not.toBeInTheDocument();
+  });
+
+  it('names every change that did not land, and why, in the reviewer’s terms', async () => {
+    // The only place a dropped change is ever mentioned. A batch that quietly loses three of
+    // eleven is worse than no batch, and `stale` means nothing to someone who just pressed a
+    // button.
+    renderRun(triaged(['accepted', 'accepted', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [],
+        skipped: [
+          { findingId: 'f1', targetKey: 'q_1', reason: 'stale' },
+          { findingId: 'f2', targetKey: 'q_2', reason: 'needs_ai' },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 2 accepted changes' }));
+
+    await waitFor(() => expect(screen.getByText('Nothing could be applied')).toBeInTheDocument());
+    expect(screen.getByText('2 not applied')).toBeInTheDocument();
+    expect(screen.getByText(/the question changed since this evaluation ran/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the AI could not rewrite it to follow your instruction/)
+    ).toBeInTheDocument();
+    // Their decision stands, so fixing the cause and applying again picks them up.
+    expect(screen.getAllByText(/still accepted/).length).toBe(2);
+  });
+
+  it('surfaces a failed batch without claiming anything was applied', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ success: false, error: { message: 'Boom' } }),
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('Boom')).toBeInTheDocument());
+    expect(screen.queryByText(/applied to v/)).not.toBeInTheDocument();
   });
 });
 

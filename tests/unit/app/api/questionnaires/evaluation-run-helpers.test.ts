@@ -100,6 +100,7 @@ function findingRow(over?: Partial<FindingRow>): FindingRow {
     sourceQuote: null,
     proposedEdit: { op: 'replace_prompt', prompt: 'What is your job title?' },
     editedOverride: null,
+    applyInstruction: null,
     status: 'pending',
     decidedByUserId: null,
     decidedAt: null,

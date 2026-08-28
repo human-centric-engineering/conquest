@@ -48,6 +48,7 @@ function finding(
     status: 'pending',
     proposedEdit,
     editedOverride: null,
+    applyInstruction: null,
     decidedByUserId: null,
     decidedAt: null,
     appliedAt: null,

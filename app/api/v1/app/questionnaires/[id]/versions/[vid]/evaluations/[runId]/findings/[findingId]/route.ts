@@ -2,7 +2,9 @@
  * Review one design-evaluation finding (F5.3).
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid/evaluations/:runId/findings/:findingId
- *   body: { action: 'accept' | 'decline' }
+ *   body: { action: 'accept', instruction?: string | null }
+ *       | { action: 'decline' }
+ *       | { action: 'set_instruction', instruction: string | null }
  *       | { action: 'edit', editedOverride: ProposedEdit }
  *       | { action: 'mark_applied', appliedToVersionId: string }
  *
@@ -52,7 +54,19 @@ const handleReview = withAdminAuth<Params>(async (request, session, { params }) 
 
   let data: Prisma.AppQuestionnaireEvaluationFindingUncheckedUpdateInput;
   if (body.action === 'accept') {
-    data = { status: 'accepted', decidedByUserId: session.user.id, decidedAt: new Date() };
+    data = {
+      status: 'accepted',
+      decidedByUserId: session.user.id,
+      decidedAt: new Date(),
+      // Only written when the caller said something about it. Omitting the key leaves a steer
+      // typed earlier intact, so accepting is not a way to silently discard your own note.
+      ...(body.instruction !== undefined ? { applyInstruction: body.instruction } : {}),
+    };
+  } else if (body.action === 'set_instruction') {
+    // Deliberately does not touch `status`: a reviewer may write down what they want before
+    // deciding whether they want it, and losing that on the way to a decision is the kind of
+    // small betrayal that stops people using the box at all.
+    data = { applyInstruction: body.instruction };
   } else if (body.action === 'decline') {
     data = { status: 'declined', decidedByUserId: session.user.id, decidedAt: new Date() };
   } else if (body.action === 'edit') {
