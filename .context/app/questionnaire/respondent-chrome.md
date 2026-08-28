@@ -41,8 +41,15 @@ visibly wrong today: the conversation jumped wider the instant the page loaded.
 
 ## The three modes
 
-- **`full`** — the ConQuest site header and footer, exactly as every respondent page has always had
-  them. The default, so no existing questionnaire changes appearance.
+- **`full`** — the ConQuest site header, and ConQuest's own respondent footer beneath. The default.
+  The footer is `RespondentFooter` (`components/app/questionnaire/chrome/`), **not** the platform's
+  `PublicFooter`: one quiet line of legal links and the Cookie Preferences control, and nothing
+  else. `PublicFooter` is a marketing footer — it restates the header's nav (Home / Capabilities /
+  Pricing / Contact) and adds an attribution line, which on a questionnaire means the same four
+  links printed twice on one screen, three more routes away mid-answer, and a copyright claim made
+  to somebody answering a _client's_ questions. Swapping the frame rather than editing the platform
+  component is the documented move for a surface that needs a different one (CUSTOMIZATION.md §4);
+  the obligation that comes with it — Cookie Preferences has to appear somewhere — is met.
 - **`co_branded`** — a slim ConQuest wordmark above the questionnaire's own brand band, and nothing
   below. Deliberately **not a link**: a respondent mid-questionnaire offered a route to our pricing
   page is a respondent who might take it, and this mode was chosen precisely to keep them here.
@@ -168,8 +175,11 @@ our name on the page itself, which is where branding belongs.
 
 ## One thing to confirm with whoever owns the privacy notice
 
-`white_label` (and `co_branded`) drop `PublicFooter`, and with it the **Privacy and Terms links**
-that a respondent on `/q` or `/x` would otherwise have had at the foot of the page.
+`white_label` (and `co_branded`) render no footer at all, and with it lose the **Privacy and Terms
+links** that a respondent on `/q` or `/x` would otherwise have had at the foot of the page. (`full`
+keeps them: dropping the marketing nav from the respondent footer did not touch the legal cluster,
+which is still read from the `footerLegalItems` seam so the two footers cannot disagree about where
+Privacy lives.)
 
 The cookie-consent banner is unaffected — it is mounted in the ROOT layout (`app/layout.tsx`), not
 the public one, so it renders under every chrome mode. Nothing about consent capture changes.
