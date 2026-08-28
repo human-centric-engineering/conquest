@@ -48,12 +48,13 @@
 // `shell: true` on Windows and quotes only the command, so a caller whose argv
 // is filenames hands `cmd.exe` whatever `&` or `^` a path contains — its own
 // docblock names this as the reason `lint-staged` calls eslint directly. This
-// script's argv IS filenames, so it spawns eslint with `shell: false` and sets
-// the heap cap in the child's environment itself.
+// script's argv IS filenames, so it spawns with `shell: false` and applies the
+// heap cap itself (`withHeapCap`), which is the one thing the wrapper would
+// otherwise have done for it.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve, relative } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { ESLint } from 'eslint';
 
@@ -63,8 +64,13 @@ const IS_WINDOWS = process.platform === 'win32';
 /** Extensions the flat config has `files` blocks for. */
 export const LINTABLE = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
 
-/** Chunks when nothing asks for a number. Measured: 4 -> 3.50GB, 8 -> 3.02GB. */
+/** Chunks when nothing asks for a number. Measured on a runner at cap 6144:
+ * 1 chunk OOMs, 2 -> 5.75GB, 4 -> 5.20GB, 6 -> 4.98GB. */
 export const DEFAULT_CHUNKS = 4;
+
+/** Cap applied when the environment carries none. Matches `run-capped.mjs`'s
+ * value, and comfortably clears the measured 2.64GB floor. */
+export const DEFAULT_HEAP_MB = 6144;
 
 /**
  * Parse `LINT_CHUNKS`. A garbage value falls back rather than failing the run:
@@ -217,6 +223,9 @@ export async function lintTargets(deps = {}) {
         maxBuffer: 64 * 1024 * 1024,
       }),
     eslint = new ESLint({ cwd: ROOT }),
+    // Injected for the same reason `listFiles` is: the enumeration logic has to
+    // be testable without a real tree on disk.
+    exists = existsSync,
   } = deps;
 
   const candidates = listFiles()
@@ -226,15 +235,67 @@ export async function lintTargets(deps = {}) {
 
   const kept = [];
   for (const file of candidates) {
-    if (!(await eslint.isPathIgnored(join(ROOT, file)))) kept.push(file);
+    const absolute = join(ROOT, file);
+    // `git ls-files` reads the INDEX, so a file deleted from the working tree
+    // but not yet staged is still listed. Handing that path to eslint exits 2
+    // ("No files matching the pattern were found") and fails the whole chunk
+    // for a reason that has nothing to do with lint — which is exactly the
+    // state a developer is in while reproducing a CI failure locally.
+    if (!exists(absolute)) continue;
+    if (!(await eslint.isPathIgnored(absolute))) kept.push(file);
   }
   return kept.sort();
 }
 
-/** Locate the eslint bin the way `run-capped.mjs` does. */
-export function resolveEslintBin() {
-  const local = join(ROOT, 'node_modules', '.bin', IS_WINDOWS ? 'eslint.cmd' : 'eslint');
-  return existsSync(local) ? local : 'eslint';
+/**
+ * How to invoke eslint: `[command, ...leadingArgs]`.
+ *
+ * Runs eslint's JS entry point under `process.execPath` rather than the
+ * `.bin` shim. The shim is a `.cmd` on Windows, and since the CVE-2024-27980
+ * fix (Node >= 18.20.2 / 20.12.2 — this repo requires 24) `spawn` REFUSES a
+ * `.bat`/`.cmd` target unless `shell: true`. We cannot pass `shell: true`,
+ * because the argv is filenames and a shell would interpret whatever `&` or
+ * `^` a path contains. So the Windows branch of a `.bin`-based resolver is
+ * unreachable by construction: every chunk would fail with `spawn EINVAL`.
+ *
+ * Going through `execPath` sidesteps that, and keeps one code path on every
+ * platform rather than one that is only ever exercised on two of them.
+ *
+ * @returns {[string, ...string[]]}
+ */
+export function resolveEslintCommand() {
+  const entry = join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js');
+  if (existsSync(entry)) return [process.execPath, entry];
+  // Fallback for a global install; still never a shell.
+  return [join(ROOT, 'node_modules', '.bin', IS_WINDOWS ? 'eslint.cmd' : 'eslint')];
+}
+
+/**
+ * The child's environment, with an old-space cap appended when nothing has set
+ * one.
+ *
+ * NOT COSMETIC, and this file's header used to CLAIM this behaviour before the
+ * code did — a review caught the discrepancy. Without it `lint:ci` inherits
+ * Node's default heap, which is derived from machine RAM and is roughly 2GB on
+ * an 8GB box: BELOW this script's own measured 2.64GB floor, so every chunk
+ * would abort with exit 134 — the exact failure it exists to prevent. In CI the
+ * workflow's `NODE_OPTIONS` supplies a cap and this stands down; anywhere else
+ * (a developer reproducing a CI lint failure, a fork on a different runner)
+ * there is nothing else to supply one.
+ *
+ * Matches `run-capped.mjs`: append to `NODE_OPTIONS` rather than passing
+ * `--max-old-space-size` on the command line, and only when no cap is already
+ * present, so an explicit value always wins.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {Record<string, string | undefined>}
+ */
+export function withHeapCap(env) {
+  if (/(^|\s)--max[-_]old[-_]space[-_]size(\s|=|$)/.test(env.NODE_OPTIONS ?? '')) {
+    return { ...env };
+  }
+  const existing = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : '';
+  return { ...env, NODE_OPTIONS: `${existing}--max-old-space-size=${DEFAULT_HEAP_MB}` };
 }
 
 /**
@@ -249,11 +310,12 @@ export function resolveEslintBin() {
  * @returns {Promise<number>}
  */
 export function runChunk(files, passthrough, deps = {}) {
-  const { spawnFn = spawn, env = process.env, bin = resolveEslintBin() } = deps;
+  const { spawnFn = spawn, env = process.env, command = resolveEslintCommand() } = deps;
+  const [bin, ...leading] = command;
   return new Promise((resolveCode) => {
-    const child = spawnFn(bin, [...files, ...passthrough], {
+    const child = spawnFn(bin, [...leading, ...files, ...passthrough], {
       cwd: ROOT,
-      env,
+      env: withHeapCap(env),
       stdio: 'inherit',
       // `false` even on Windows: the argv is filenames. See the header.
       shell: false,
@@ -301,4 +363,4 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   process.exit(await main());
 }
 
-export { ROOT, relative };
+export { ROOT };

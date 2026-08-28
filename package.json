@@ -1,7 +1,7 @@
 {
   "name": "conquest",
   "version": "0.0.0",
-  "description": "Conquest (CONversational QUESTionnaire) \u2014 a conversational questionnaire platform built on the Sunrise application platform.",
+  "description": "Conquest (CONversational QUESTionnaire) — a conversational questionnaire platform built on the Sunrise application platform.",
   "private": true,
   "engines": {
     "node": ">=24",
@@ -172,7 +172,7 @@
     "valibot": "^1.2.0"
   },
   "overrideReasons": {
-    "hono": "Added 2026-02-13 for a Dependabot alert on @prisma/dev's transitive hono. Nothing in the tree has declared hono since v0.8.0, so this entry currently forces nothing \u2014 kept as a floor in case it returns. Verify against the lockfile before removing.",
+    "hono": "Added 2026-02-13 for a Dependabot alert on @prisma/dev's transitive hono. Nothing in the tree has declared hono since v0.8.0, so this entry currently forces nothing — kept as a floor in case it returns. Verify against the lockfile before removing.",
     "valibot": "Added 2026-02-13 for a Dependabot alert on @prisma/dev's transitive valibot. @prisma/dev pins 1.4.2 today, which already satisfies this range, so the entry is a floor rather than a live force."
   },
   "devDependencies": {

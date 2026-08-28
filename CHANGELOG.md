@@ -18,6 +18,17 @@ release process.
 
 ### Added
 
+- **`CI_LINT_CHUNKS` — a repo variable that lowers what lint needs, once raising
+  `CI_NODE_HEAP_MB` has run out of room.** A whole-tree type-aware `eslint .`
+  peaked at 6.36GB and OOM'd at a 6144 cap on a runner, which is the ceiling an
+  8GB private runner allows. `npm run lint:ci` lints the identical file set as N
+  sequential eslint processes, so the job's peak is the largest chunk rather than
+  the whole tree: 4 chunks completes at 5.20GB. Sequential chunks in one job
+  rather than a job matrix, because Actions bills per job rounded up to the
+  minute and a fan-out pays N checkouts and N `npm ci`s for setup it throws away.
+  Defaults to 4; `npm run lint` is unchanged for local use. See
+  [`.context/architecture/ci.md`](./.context/architecture/ci.md) Knob 4.
+
 - **`AppCohortMember` and `AppWaitlistSignup` are now subject-access sources**
   (`APP_SUBJECT_DATA_SOURCES`). Both hold a name and an email address and were
   reachable by neither an account id nor an export — a roster entry is not a

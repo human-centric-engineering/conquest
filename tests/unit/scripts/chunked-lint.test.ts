@@ -31,7 +31,8 @@ import {
   runChunk,
   adaptiveGroups,
   groupKey,
-  resolveEslintBin,
+  resolveEslintCommand,
+  withHeapCap,
   main,
   DEFAULT_CHUNKS,
   LINTABLE,
@@ -147,7 +148,7 @@ describe('lintTargets', () => {
     const listFiles = () =>
       ['a.ts', 'b.tsx', 'c.js', 'd.mjs', 'e.cjs', 'f.jsx', 'g.md', 'h.json', 'i.css'].join('\n');
 
-    const out = await lintTargets({ listFiles, eslint: eslintStub() });
+    const out = await lintTargets({ listFiles, eslint: eslintStub(), exists: () => true });
 
     expect(out).toEqual(['a.ts', 'b.tsx', 'c.js', 'd.mjs', 'e.cjs', 'f.jsx'].sort());
     expect(LINTABLE).toContain('.tsx');
@@ -162,6 +163,7 @@ describe('lintTargets', () => {
     const out = await lintTargets({
       listFiles,
       eslint: eslintStub(['coverage/skip.js']),
+      exists: () => true,
     });
 
     expect(out).toEqual(['keep.ts']);
@@ -169,13 +171,28 @@ describe('lintTargets', () => {
 
   it('is deterministic, so the same commit chunks the same way on every runner', async () => {
     const listFiles = () => ['z.ts', 'a.ts', 'm.ts'].join('\n');
-    const out = await lintTargets({ listFiles, eslint: eslintStub() });
+    const out = await lintTargets({ listFiles, eslint: eslintStub(), exists: () => true });
     expect(out).toEqual(['a.ts', 'm.ts', 'z.ts']);
+  });
+
+  it('drops a file deleted from the working tree but still in the index', async () => {
+    // `git ls-files` reads the INDEX. Handing eslint a path that no longer
+    // exists exits 2 ("No files matching the pattern") and fails the whole
+    // chunk for a reason unrelated to lint — the state a developer is in while
+    // reproducing a CI failure locally.
+    const listFiles = () => ['kept.ts', 'deleted.ts'].join('\n');
+    const out = await lintTargets({
+      listFiles,
+      eslint: eslintStub(),
+      exists: (p: string) => !p.endsWith('deleted.ts'),
+    });
+
+    expect(out).toEqual(['kept.ts']);
   });
 
   it('ignores blank lines from git output', async () => {
     const listFiles = () => 'a.ts\n\n  \nb.ts\n';
-    const out = await lintTargets({ listFiles, eslint: eslintStub() });
+    const out = await lintTargets({ listFiles, eslint: eslintStub(), exists: () => true });
     expect(out).toEqual(['a.ts', 'b.ts']);
   });
 });
@@ -189,20 +206,20 @@ describe('runChunk', () => {
 
   it('resolves the exit code rather than throwing', async () => {
     const spawnFn = vi.fn(() => fakeChild((h) => h.exit?.(1 as never)));
-    await expect(runChunk(['a.ts'], [], { spawnFn, bin: 'eslint' })).resolves.toBe(1);
+    await expect(runChunk(['a.ts'], [], { spawnFn, command: ['eslint'] })).resolves.toBe(1);
   });
 
   it('reports a spawn failure as a failure, not a pass', async () => {
     // `resolve(0)` here would turn "eslint is missing" into a green run.
     const spawnFn = vi.fn(() => fakeChild((h) => h.error?.(new Error('ENOENT') as never)));
-    await expect(runChunk(['a.ts'], [], { spawnFn, bin: 'eslint' })).resolves.toBe(1);
+    await expect(runChunk(['a.ts'], [], { spawnFn, command: ['eslint'] })).resolves.toBe(1);
   });
 
   it('treats a signal-killed child as a failure', async () => {
     // A chunk OOM-killed by the runner exits with a null code. Coercing that to
     // 0 would report success for the exact failure this script exists to avoid.
     const spawnFn = vi.fn(() => fakeChild((h) => h.exit?.(null as never)));
-    await expect(runChunk(['a.ts'], [], { spawnFn, bin: 'eslint' })).resolves.toBe(1);
+    await expect(runChunk(['a.ts'], [], { spawnFn, command: ['eslint'] })).resolves.toBe(1);
   });
 
   it('never spawns through a shell — the argv is filenames', async () => {
@@ -210,7 +227,7 @@ describe('runChunk', () => {
     // args are joined into one cmd.exe string, so a path containing `&` or `^`
     // is interpreted. Filenames must never take that path.
     const spawnFn = vi.fn(() => fakeChild((h) => h.exit?.(0 as never)));
-    await runChunk(['a.ts'], ['--cache'], { spawnFn, bin: 'eslint' });
+    await runChunk(['a.ts'], ['--cache'], { spawnFn, command: ['eslint'] });
 
     expect(spawnFn).toHaveBeenCalledWith(
       'eslint',
@@ -220,11 +237,40 @@ describe('runChunk', () => {
   });
 });
 
-describe('resolveEslintBin', () => {
-  it('prefers the locally installed binary', () => {
-    // A bare `eslint` would resolve against PATH, which on a runner is whatever
-    // happens to be installed globally rather than the version in the lockfile.
-    expect(resolveEslintBin()).toMatch(/node_modules[/\\]\.bin[/\\]eslint/);
+describe('resolveEslintCommand', () => {
+  it("runs eslint's JS entry under this node, not the .bin shim", () => {
+    // The shim is a `.cmd` on Windows, and since the CVE-2024-27980 fix `spawn`
+    // REFUSES a `.cmd` target without `shell: true` — which this script cannot
+    // use, because its argv is filenames. Going through `execPath` keeps one
+    // code path on every platform instead of one that fails on Windows.
+    const [bin, entry] = resolveEslintCommand() as string[];
+    expect(bin).toBe(process.execPath);
+    expect(entry).toMatch(/node_modules[/\\]eslint[/\\]bin[/\\]eslint\.js/);
+  });
+});
+
+describe('withHeapCap', () => {
+  it('applies a cap when the environment carries none', () => {
+    // Without this, `lint:ci` outside CI inherits Node's default heap (~2GB on
+    // an 8GB box), which is BELOW the 2.64GB floor one chunk needs — so every
+    // chunk aborts with exit 134, the failure this script exists to prevent.
+    expect((withHeapCap({}) as { NODE_OPTIONS: string }).NODE_OPTIONS).toBe(
+      '--max-old-space-size=6144'
+    );
+  });
+
+  it("defers to a cap already set, so CI's value always wins", () => {
+    const out = withHeapCap({ NODE_OPTIONS: '--max-old-space-size=5120' }) as {
+      NODE_OPTIONS: string;
+    };
+    expect(out.NODE_OPTIONS).toBe('--max-old-space-size=5120');
+  });
+
+  it('appends rather than replacing other NODE_OPTIONS', () => {
+    const out = withHeapCap({ NODE_OPTIONS: '--enable-source-maps' }) as {
+      NODE_OPTIONS: string;
+    };
+    expect(out.NODE_OPTIONS).toBe('--enable-source-maps --max-old-space-size=6144');
   });
 });
 
