@@ -433,6 +433,13 @@ export function SessionWorkspace({
   // does. Read here rather than styled in the layout because a layout places nodes it did not build
   // — it cannot reach inside the composer and tell the textarea to grow.
   const composerFills = placements.composer.kind === 'region' && placements.composer.fills === true;
+  // And does that region want the composer PRESENT in the room it was given, or tucked into a
+  // corner of it? Broadsheet's bare margin and Horizon's one-question stage both say present, and
+  // get the bordered box at prose height with its controls inside; Classic and Focus say tucked,
+  // because there a scrolling transcript is competing for the same viewport. Read here for the same
+  // reason as `fills`: a layout places a node it did not build and cannot reach inside it.
+  const composerProminent =
+    placements.composer.kind === 'region' && placements.composer.prominent === true;
 
   const showReviewTrigger =
     showChat &&
@@ -694,6 +701,7 @@ export function SessionWorkspace({
         voiceInputEnabled={voiceInputEnabled}
         attachmentInputEnabled={attachmentInputEnabled}
         fillHeight={composerFills}
+        prominent={composerProminent}
       />
     ),
 

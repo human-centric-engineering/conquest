@@ -177,6 +177,11 @@ export const LAYOUT_REGISTRY = {
         // box takes the rest of it. A document-shaped layout is for questionnaires whose answers are
         // long; a three-line box in a tall empty rail would say the opposite.
         fills: true,
+        // Bare rail: nothing is drawn around the composer here, so it draws itself — a brand-tinted
+        // box with its controls inside along the bottom edge. Classic and Focus leave this unset
+        // and get the field-and-a-row form, because there a scrolling transcript is competing for
+        // the same viewport and an empty four-line box would be taking it from the conversation.
+        prominent: true,
       },
       formView: { kind: 'region', region: 'carousel page' },
       // Not a copy of Focus's reasoning: there is exactly one margin here and the composer is in it.
@@ -241,7 +246,17 @@ export const LAYOUT_REGISTRY = {
       // Welded to the foot of the stage in one card, as in Classic. Broadsheet's move — the box held
       // still in a margin — solves a problem this layout does not have: there is never enough on
       // screen here for the composer to scroll away from the respondent.
-      composer: { kind: 'region', region: 'foot of the conversation card, beneath the stage' },
+      composer: {
+        kind: 'region',
+        region: 'foot of the conversation card, beneath the stage',
+        // The one place Horizon and Classic must NOT look alike. Everything else is folded away
+        // here, so the answer box is the only other thing on screen and there is open space above
+        // it: it gets the surface, the controls inside along its bottom edge, and a prose-height
+        // opening, because the layout's whole argument is *this question, and your answer to it*.
+        // Not `fills` — Broadsheet's margin is a column with nothing else in it and the box may as
+        // well be the column; the stage above this one still needs its room.
+        prominent: true,
+      },
       formView: { kind: 'region', region: 'carousel page' },
       // Same outcome as Focus and Broadsheet, third distinct reason: a panel listing every answer
       // captured so far is precisely the wall of accumulated conversation this layout exists to put
