@@ -415,11 +415,21 @@ a typed-confirmation guard and an anonymous-mode refusal. See
 - **A soft contrast warning per mode**, on the canvas/ink pairs — the only pairs on this form
   that can be independently valid and jointly unreadable. Both light and dark are checked, because
   a respondent can be reading either and the derived dark pair can fail too. Each measures the
-  RESOLVED pair (so an admin who set only a canvas is checked against the ink we will actually
-  derive), names which mode is the problem, and warns below `MIN_CONTRAST_RATIO` without blocking
-  the save: a brand may genuinely be low-contrast, and refusing would be us overruling the
-  client's designer. A mid-grey canvas trips it whatever ink is chosen, which is precisely when
-  the admin should hear about it.
+  pair that will ACTUALLY RENDER, names which mode is the problem, and warns below
+  `MIN_CONTRAST_RATIO` without blocking the save: a brand may genuinely be low-contrast, and
+  refusing would be us overruling the client's designer. A mid-grey canvas trips it whatever ink
+  is chosen, which is precisely when the admin should hear about it.
+
+  "Actually render" is load-bearing and was got wrong first time. The check originally measured
+  only when BOTH halves were authored, which meant the single most likely way to ship an
+  unreadable questionnaire went unchecked: a guideline reads "ink: #FFFFFF on dark", the admin
+  fills in **Ink colour**, leaves **Canvas colour** blank, and the stylesheet pairs that white ink
+  with the DEFAULT white ground. Nothing said a word. Each side now falls back to
+  `NEUTRAL_RESPONDENT_GROUND` — a TypeScript mirror of the `var()` fallbacks in
+  `app/brand-theme.css`, kept in step by a test, because TS cannot read inside a chain the browser
+  has not resolved. When the ground is the default one, the warning says so, since an admin who
+  never set a canvas cannot otherwise tell what they are being warned about.
+
 - **Brand preview (`<DemoClientThemePreview>`).** Surfaces the configured brand back
   to the admin — the gap that a client could set theme fields and see nothing. Reuses
   `resolveTheme()` and the same escaped `url()` sink (`cssUrl`) as `BrandThemeProvider`

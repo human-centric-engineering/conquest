@@ -41,10 +41,14 @@ import { ThemeProvider } from '@/hooks/use-theme';
 // The real provider, not a stub: the theme switch these modes now carry reads `useTheme`, which
 // throws outside one. In the product it comes from the root layout, so wrapping here reproduces
 // the tree rather than papering over it — and it lets the switch actually flip below.
-function renderChrome(mode: 'full' | 'co_branded' | 'white_label', shell?: boolean) {
+function renderChrome(
+  mode: 'full' | 'co_branded' | 'white_label',
+  shell?: boolean,
+  canvasStyle?: React.CSSProperties
+) {
   return render(
     <ThemeProvider>
-      <RespondentChrome mode={mode} shell={shell}>
+      <RespondentChrome mode={mode} shell={shell} canvasStyle={canvasStyle}>
         <div data-testid="surface" />
       </RespondentChrome>
     </ThemeProvider>
@@ -167,5 +171,52 @@ describe('the theme switch', () => {
     // that way if anyone ever reaches for the platform's bordered, wordmarked header control.
     const { container } = renderChrome('white_label');
     expect(container.textContent).not.toContain('ConQuest');
+  });
+});
+
+describe('the backdrop behind and around the surface', () => {
+  /**
+   * The client's ground has to reach the shell, not just the surface root. The surface root sits
+   * inside `<main>`, inside the shell's `container` — so the theme-switch row above it and the
+   * gutters either side of it on a wide viewport are ANCESTORS of the brand and cannot inherit it.
+   * They fell back to the ConQuest consumer background: a cream (or deep-navy) strip directly
+   * above a client's canvas, on the mode that exists to keep our colours off the page.
+   *
+   * The painting itself is CSS (`brand-theme.css`), which does not run here. What these pin is the
+   * wiring: the variables reach the shell, and the row asks for the backdrop rather than
+   * inheriting.
+   */
+  it('puts the client ground on the shell, where the rules can read it', () => {
+    const { container } = renderChrome('white_label', true, {
+      '--app-canvas-light': '#fffdf7',
+      '--app-canvas-dark': '#121016',
+    } as React.CSSProperties);
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.style.getPropertyValue('--app-canvas-light')).toBe('#fffdf7');
+    expect(shell.style.getPropertyValue('--app-canvas-dark')).toBe('#121016');
+  });
+
+  it('paints the white-label switch row with the backdrop, not the consumer background', () => {
+    const { container } = renderChrome('white_label');
+    const row = container.querySelector('.cq-respondent-backdrop');
+    expect(row).not.toBeNull();
+    // It is the row that carries the switch — not some other element that happens to match.
+    expect(row?.querySelector('button')).not.toBeNull();
+  });
+
+  it('leaves the co-branded and full rows on the ConQuest background', () => {
+    // Only white-label regresses without the class: `co_branded` deliberately shows a ConQuest
+    // line, and `full` a whole header — repainting those would be the opposite mistake.
+    for (const mode of ['co_branded', 'full'] as const) {
+      const { container, unmount } = renderChrome(mode);
+      expect(container.querySelector('.cq-respondent-backdrop')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('adds no ground variables for an unbranded questionnaire', () => {
+    const { container } = renderChrome('white_label');
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.style.getPropertyValue('--app-canvas-light')).toBe('');
   });
 });

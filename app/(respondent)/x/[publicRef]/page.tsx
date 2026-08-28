@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
+import { canvasBackdropVars } from '@/lib/app/questionnaire/theming';
 import { RunSessionBoot } from '@/components/app/questionnaire/experiences/run-session-boot';
 import {
   resolveGlossaryAppendixForVersion,
@@ -144,7 +145,10 @@ export default async function ExperienceRunPage({
   // the chrome too — this page used to guess `100vh-8rem`, one rem off the guess `/q` was making
   // about the same header and footer.
   return (
-    <RespondentChrome mode={respondentChrome}>
+    // The client's ground travels to the shell as well as to the surface: the theme-switch
+    // row and the gutters either side of the column sit OUTSIDE the surface root and cannot
+    // inherit its brand — see `canvasBackdropVars`.
+    <RespondentChrome mode={respondentChrome} canvasStyle={canvasBackdropVars(theme)}>
       <div className="h-full min-h-0 px-4">
         <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
           <RunSessionBoot

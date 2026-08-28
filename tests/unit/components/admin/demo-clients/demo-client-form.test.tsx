@@ -336,6 +336,26 @@ describe('DemoClientForm', () => {
       expect(screen.queryByRole('status')).toBeNull();
     });
 
+    it('warns on an ink set against no canvas at all — the pair that ships unreadable', () => {
+      // The failure this was blind to. "Ink: #FFFFFF on dark" is how a brand guideline reads, so
+      // filling in Ink and leaving Canvas blank is the obvious thing to do — and the stylesheet
+      // then pairs that white ink with the DEFAULT white ground. Measuring only when both halves
+      // were authored meant the one combination guaranteed to be unreadable was the one
+      // combination nothing checked.
+      render(<DemoClientForm client={{ ...CLIENT, canvasColor: null, inkColor: '#ffffff' }} />);
+      const warning = screen.getByRole('status');
+      expect(warning).toHaveTextContent(/Ink on canvas in light mode is 1\.0:1/);
+      // And it names the ground, because this admin cannot find a "canvas" on the form to fix.
+      expect(warning).toHaveTextContent(/against the default light canvas/);
+    });
+
+    it('does not warn when the default pair is all there is', () => {
+      // Every unbranded questionnaire would otherwise carry a warning, which trains admins to
+      // ignore the one that matters.
+      render(<DemoClientForm client={{ ...CLIENT, canvasColor: null, inkColor: null }} />);
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
     it('warns when the resolved light pair falls under the AA floor', async () => {
       // Both values are legal hexes and nothing else on the form notices: mid-grey ink on a
       // mid-grey ground is independently valid and jointly unreadable.

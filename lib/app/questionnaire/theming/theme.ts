@@ -418,6 +418,48 @@ export function contrastRatio(a: string, b: string): number | null {
 export const MIN_CONTRAST_RATIO = 4.5;
 
 /**
+ * The ground and ink a respondent surface falls back to when the client has set neither.
+ *
+ * These are NOT a second source of truth — they mirror the fallbacks inside `app/brand-theme.css`
+ * (`--app-canvas-color: var(--app-canvas-light, var(--cq-respondent-canvas))` and
+ * `--app-on-canvas: var(--app-ink-light, …)`, plus their `.dark` counterparts). They exist because
+ * TypeScript has to be able to READ the pair that will actually render, and it cannot see inside a
+ * `var()` chain the browser has not resolved.
+ *
+ * That reading is what makes the contrast check honest. A client may set an ink and no canvas —
+ * "ink: #FFFFFF" straight off a brand guideline is the obvious way to do it — and the stylesheet
+ * will then pair their ink with the DEFAULT ground. Measuring only when both halves are authored
+ * meant the one combination guaranteed to be unreadable was the one combination nothing checked.
+ *
+ * A test asserts these against the stylesheet, because a divergence here is silent: the warning
+ * would simply measure a pair nobody sees.
+ */
+export const NEUTRAL_RESPONDENT_GROUND = {
+  light: { canvas: '#ffffff', ink: '#18181b' },
+  dark: { canvas: '#0a0a0a', ink: '#fafafa' },
+} as const;
+
+/**
+ * The two canvas variables ALONE, for the chrome that surrounds a respondent surface.
+ *
+ * `themeToCssVariables` emits the client's whole brand onto the surface root — which sits inside
+ * `<main>`, inside the shell's `container`. Everything outside that box (the white-label theme-switch
+ * row, and the gutters either side of the column on a wide viewport) is therefore an ANCESTOR of the
+ * brand and cannot inherit it, so it fell back to the ConQuest consumer background: a cream strip
+ * above a client's canvas, on the one chrome mode that exists to keep our colours off the page.
+ *
+ * Hoisting the full brand to the chrome would repaint the ConQuest header and footer with it. So
+ * only the ground travels, and only far enough for the backdrop rules in `brand-theme.css` to read
+ * it. Empty for a client with no canvas of their own — the rules' `var()` fallback then holds.
+ */
+export function canvasBackdropVars(theme: ResolvedTheme): Record<string, string> {
+  const vars: Record<string, string> = {};
+  if (theme.canvasColor) vars['--app-canvas-light'] = theme.canvasColor;
+  if (theme.canvasColorDark) vars['--app-canvas-dark'] = theme.canvasColorDark;
+  return vars;
+}
+
+/**
  * Project a resolved theme into CSS custom properties for the F7.1 user UI to spread
  * onto a container's `style`. The logo variable is emitted only when a logo is set
  * (an absent `--app-logo-url` lets the UI fall back rather than render `url(null)`).

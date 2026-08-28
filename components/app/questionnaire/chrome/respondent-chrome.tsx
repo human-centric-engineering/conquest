@@ -37,7 +37,7 @@
  * @see .context/app/questionnaire/respondent-chrome.md
  */
 
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { AppHeader } from '@/components/layouts/app-header';
 import { PublicNav, PublicNavMenu } from '@/components/layouts/public-nav';
@@ -63,6 +63,16 @@ export interface RespondentChromeProps {
   children: ReactNode;
   /** Extra classes for the surface row, not the shell around it. */
   className?: string;
+  /**
+   * The client's ground, as the two canvas variables and nothing else
+   * (`canvasBackdropVars`). Applied to the shell so the backdrop rules in `brand-theme.css` can
+   * read it — the brand proper lives on the surface root INSIDE `<main>`, which the theme-switch
+   * row and the gutters either side of the column are ancestors of and so cannot inherit from.
+   *
+   * Only the ground travels. Hoisting the whole brand here would repaint the ConQuest header and
+   * footer with it, and `full` chrome is the mode that explicitly keeps them ours.
+   */
+  canvasStyle?: CSSProperties;
 }
 
 export function RespondentChrome({
@@ -70,12 +80,13 @@ export function RespondentChrome({
   shell = true,
   children,
   className,
+  canvasStyle,
 }: RespondentChromeProps) {
   return (
     // Exactly viewport height, not `min-h`: the surface inside scrolls its own conversation, so a
     // page that grew past the viewport would give the respondent two nested scrollbars and a
     // composer they have to scroll the PAGE to reach.
-    <div className="bg-background flex h-dvh flex-col">
+    <div className="bg-background flex h-dvh flex-col" style={canvasStyle}>
       {mode === 'full' && (
         <AppHeader logoHref="/" navigation={<PublicNav />} mobileMenu={<PublicNavMenu />} />
       )}
@@ -104,7 +115,11 @@ export function RespondentChrome({
           exists to keep ConQuest's identity off the page, not to strip the respondent of a
           viewing preference every other surface in the product offers. */}
       {mode === 'white_label' && (
-        <div className="flex shrink-0 justify-end px-4 pt-2">
+        // `cq-respondent-backdrop`, not the inherited `bg-background`: this page has no chrome of
+        // ours, but the shell it sits in is still classified a CONSUMER surface, so the row was
+        // painting ConQuest cream (or deep navy) in a ~40px strip directly above the client's
+        // canvas — on the one mode whose entire purpose is that our colours do not appear.
+        <div className="cq-respondent-backdrop flex shrink-0 justify-end px-4 pt-2">
           <RespondentThemeToggle />
         </div>
       )}

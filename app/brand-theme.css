@@ -302,9 +302,26 @@
  * cards), so the surrounding <main> — an ANCESTOR of the pin — still shows the
  * ConQuest cream by inheritance and can't be reset that way. Paint <main> neutral
  * when it HOSTS a respondent surface (`:has`), so the white-label area reads as one
- * clean zone distinct from the ConQuest header / footer. Shares `--cq-respondent-canvas`
- * with the respondent token above; the header/footer sit outside <main> and stay
- * ConQuest. */
-main:has([data-surface='respondent']) {
-  background-color: var(--cq-respondent-canvas);
+ * clean zone distinct from the ConQuest header / footer. The header/footer sit
+ * outside <main> and stay ConQuest.
+ *
+ * It follows the CLIENT's ground where there is one. `:has()` selects an ancestor but
+ * cannot read a descendant's custom property, so the ground could not come from the
+ * surface root inside; `RespondentChrome` therefore puts `--app-canvas-light` /
+ * `--app-canvas-dark` on the shell (`canvasBackdropVars`) and these rules inherit them.
+ * Without it a branded questionnaire above ~1536px — where the shell's container stops
+ * widening — rendered as a coloured column flanked by neutral gutters, which was
+ * invisible only while both were the same neutral.
+ *
+ * `--cq-respondent-canvas` stays the fallback, so an unbranded questionnaire is
+ * byte-identical to before. `NEUTRAL_RESPONDENT_GROUND` in theming/theme.ts mirrors
+ * these two values so the admin form's contrast check can measure what will actually
+ * render; a test holds the two in step. */
+main:has([data-surface='respondent']),
+.cq-respondent-backdrop {
+  background-color: var(--app-canvas-light, var(--cq-respondent-canvas));
+}
+.dark main:has([data-surface='respondent']),
+.dark .cq-respondent-backdrop {
+  background-color: var(--app-canvas-dark, var(--cq-respondent-canvas));
 }

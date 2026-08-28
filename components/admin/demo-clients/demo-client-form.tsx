@@ -42,6 +42,7 @@ import {
   FONT_PAIRING_COPY,
   HEX_COLOR_PATTERN,
   MIN_CONTRAST_RATIO,
+  NEUTRAL_RESPONDENT_GROUND,
   WELCOME_COPY_MAX,
   contrastRatio,
   isBrandImageSrc,
@@ -257,12 +258,25 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
   const resolvedPreview = resolveTheme(livePreviewTheme);
   const contrastWarnings = (
     [
-      ['light', resolvedPreview.canvasColor, resolvedPreview.onCanvas],
-      ['dark', resolvedPreview.canvasColorDark, resolvedPreview.onCanvasDark],
+      ['light', resolvedPreview.canvasColor, resolvedPreview.onCanvas, 'light'],
+      ['dark', resolvedPreview.canvasColorDark, resolvedPreview.onCanvasDark, 'dark'],
     ] as const
-  ).flatMap(([mode, ground, ink]) => {
-    const ratio = ground && ink ? contrastRatio(ground, ink) : null;
-    return ratio !== null && ratio < MIN_CONTRAST_RATIO ? [{ mode, ratio }] : [];
+  ).flatMap(([mode, authoredGround, authoredInk, key]) => {
+    // Measured against the pair that will ACTUALLY render, defaults included — not only against
+    // the pair the admin typed. Requiring both halves to be authored left the worst case
+    // unchecked: an admin who fills in Ink from a guideline that reads "ink: #FFFFFF on dark"
+    // and leaves Canvas blank gets their white ink on the DEFAULT white ground, and nothing
+    // anywhere said so. The ground is only ever null when the client has none, in which case the
+    // stylesheet uses these same neutrals.
+    const ground = authoredGround ?? NEUTRAL_RESPONDENT_GROUND[key].canvas;
+    const ink = authoredInk ?? NEUTRAL_RESPONDENT_GROUND[key].ink;
+    // `contrastRatio` returns null for a colour it cannot read, which cannot happen here — both
+    // arguments are either a hex the form has already validated or one of our own neutrals — but
+    // "unreadable" must not silently become "unreadable CONTRAST" and raise a false warning.
+    const ratio = contrastRatio(ground, ink);
+    return ratio !== null && ratio < MIN_CONTRAST_RATIO
+      ? [{ mode, ratio, onDefaultGround: authoredGround === null }]
+      : [];
   });
 
   const onSubmit = async (values: FormValues) => {
@@ -645,7 +659,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
 
           {/* A soft warning per mode, never a save blocker: a brand may genuinely be
               low-contrast, and refusing the save would be us overruling the client's designer. */}
-          {contrastWarnings.map(({ mode, ratio }) => (
+          {contrastWarnings.map(({ mode, ratio, onDefaultGround }) => (
             <p
               key={mode}
               className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
@@ -653,7 +667,17 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
             >
               Ink on canvas in <strong>{mode} mode</strong> is {ratio.toFixed(1)}:1, below the WCAG
               AA threshold of {MIN_CONTRAST_RATIO}:1. Respondents may struggle to read the
-              conversation. Save anyway if this matches the brand.
+              conversation.{' '}
+              {onDefaultGround ? (
+                // Naming the ground matters here: this admin never set a canvas, so "ink on canvas"
+                // alone reads as being about a colour they cannot find on the form.
+                <>
+                  This is your ink against the default {mode} canvas — set a canvas colour, or
+                  adjust the ink.
+                </>
+              ) : (
+                <>Save anyway if this matches the brand.</>
+              )}
             </p>
           ))}
 

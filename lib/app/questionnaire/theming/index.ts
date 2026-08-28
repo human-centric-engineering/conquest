@@ -11,6 +11,8 @@ export {
   type ResolvedTheme,
   CONQUEST_THEME_DEFAULTS,
   MIN_CONTRAST_RATIO,
+  NEUTRAL_RESPONDENT_GROUND,
+  canvasBackdropVars,
   contrastRatio,
   cssUrl,
   readableTextColor,

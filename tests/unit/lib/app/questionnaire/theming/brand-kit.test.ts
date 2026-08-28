@@ -23,6 +23,8 @@ import {
   FONT_PAIRINGS,
   FONT_PAIRING_STACKS,
   MIN_CONTRAST_RATIO,
+  NEUTRAL_RESPONDENT_GROUND,
+  canvasBackdropVars,
   contrastRatio,
   readableTextColor,
   resolveFontPairing,
@@ -492,3 +494,74 @@ describe('every emitted variable has a stylesheet default', () => {
     expect(declared || consumedWithFallback).toBe(true);
   });
 });
+
+describe('the neutral ground TypeScript measures against', () => {
+  const BRAND_THEME_CSS = readFileSync(join(process.cwd(), 'app/brand-theme.css'), 'utf8');
+
+  /**
+   * `NEUTRAL_RESPONDENT_GROUND` is a hand-copy of the fallbacks inside the `var()` chains in
+   * `app/brand-theme.css`, and it exists because TypeScript cannot read inside a chain the
+   * browser has not resolved. The admin form's contrast check measures against it, so a
+   * divergence is silent in the worst way: the warning goes on firing, correctly formatted,
+   * about a pair no respondent ever sees.
+   */
+  it.each([
+    ['light canvas', NEUTRAL_RESPONDENT_GROUND.light.canvas],
+    ['light ink', NEUTRAL_RESPONDENT_GROUND.light.ink],
+    ['dark canvas', NEUTRAL_RESPONDENT_GROUND.dark.canvas],
+    ['dark ink', NEUTRAL_RESPONDENT_GROUND.dark.ink],
+  ])('%s still matches app/brand-theme.css', (_label, value) => {
+    expect(BRAND_THEME_CSS).toContain(value);
+  });
+
+  it('is readable in both modes — the default pair must never be what warns', () => {
+    // If this ever fails, every unbranded questionnaire starts showing a contrast warning on the
+    // demo-client form, which would train admins to ignore the one that matters.
+    for (const mode of ['light', 'dark'] as const) {
+      const { canvas, ink } = NEUTRAL_RESPONDENT_GROUND[mode];
+      expect(contrastRatio(canvas, ink)).toBeGreaterThanOrEqual(MIN_CONTRAST_RATIO);
+    }
+  });
+});
+
+describe('canvasBackdropVars — the ground the chrome inherits', () => {
+  it('carries only the ground, never the rest of the brand', () => {
+    // The whole point of the narrower projection: hoisting `themeToCssVariables` to the shell
+    // would repaint the ConQuest header and footer in the client's colours.
+    const vars = canvasBackdropVars(
+      resolveTheme(base({ canvasColor: '#fffdf7', ctaColor: '#0a1a3a', accentColor: '#2f6bff' }))
+    );
+    expect(Object.keys(vars).sort()).toEqual(['--app-canvas-dark', '--app-canvas-light']);
+  });
+
+  it('carries the derived dark ground, not just the authored light one', () => {
+    // `resolveTheme` derives the dark canvas from the light one, and the gutters have to follow
+    // the respondent into dark mode or the branded column gets neutral surroundings there.
+    const vars = canvasBackdropVars(resolveTheme(base({ canvasColor: '#fffdf7' })));
+    expect(vars['--app-canvas-light']).toBe('#fffdf7');
+    expect(vars['--app-canvas-dark']).toBeDefined();
+    expect(vars['--app-canvas-dark']).not.toBe('#fffdf7');
+  });
+
+  it('is empty for a client with no ground of their own', () => {
+    // Empty rather than neutral-valued: the backdrop rules already fall back to
+    // `--cq-respondent-canvas`, and emitting it here would make an unbranded page differ from
+    // the one it rendered as before.
+    expect(canvasBackdropVars(resolveTheme(base()))).toEqual({});
+  });
+
+  it('leaves the backdrop rules reading the same variables it emits', () => {
+    // The two halves are wired by string alone — nothing type-checks a CSS custom property — so
+    // a rename on either side would silently stop the gutters following the brand.
+    for (const variable of ['--app-canvas-light', '--app-canvas-dark']) {
+      expect(BRAND_THEME_CSS_FOR_BACKDROP).toContain(
+        `var(${variable}, var(--cq-respondent-canvas))`
+      );
+    }
+  });
+});
+
+const BRAND_THEME_CSS_FOR_BACKDROP = readFileSync(
+  join(process.cwd(), 'app/brand-theme.css'),
+  'utf8'
+);

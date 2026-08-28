@@ -90,6 +90,12 @@ feature and wrong for a viewing preference that has nothing to do with the quest
 | `co_branded`  | Opposite the wordmark in the slim bar                                    |
 | `white_label` | A bar of its own, carrying nothing else, right-aligned above the surface |
 
+That bar carries `cq-respondent-backdrop`, and it has to. The shell around it is still classified
+a **consumer** surface (`lib/app/surface.ts`), so inheriting `bg-background` painted a ~40px strip
+of ConQuest cream — deep navy in dark mode — directly above the client's canvas, on the one mode
+whose entire purpose is that our colours do not appear. Only `white_label` had that problem:
+`co_branded` shows a ConQuest line there deliberately, and `full` a whole header.
+
 Two decisions inside that:
 
 - **A row, not a floating control.** The shell is a flex column whose surface takes exactly what

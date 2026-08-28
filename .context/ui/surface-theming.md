@@ -173,6 +173,18 @@ main:has([data-surface='canvas']) {
 }
 ```
 
+**`:has()` selects an ancestor; it cannot READ one's descendants.** A custom property set on the
+pinned subtree is invisible to the rule that matched on it, so a backdrop cannot follow a colour
+that arrives inline on the pin. If the ancestor has to track a per-instance value, that value must
+be put on an element at or above the ancestor and the rule must read it from there.
+
+ConQuest does exactly this for a demo client's canvas: `RespondentChrome` puts
+`--app-canvas-light` / `--app-canvas-dark` on the shell (`canvasBackdropVars` — only the ground,
+never the rest of the brand, or the ConQuest header and footer would be repainted too), and the
+backdrop rule reads `var(--app-canvas-light, var(--cq-respondent-canvas))`. Without it a branded
+questionnaire above ~1536px — where the shell's `container` stops widening — rendered as a
+coloured column flanked by neutral gutters. Invisible for as long as both were the same neutral.
+
 ### 6. Token overrides must be UNLAYERED
 
 Tailwind 4 emits its `@theme` tokens at `:root` **inside a layer**. The fork
