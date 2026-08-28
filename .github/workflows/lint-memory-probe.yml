@@ -11,21 +11,32 @@
 # A/B was therefore unfalsifiable. A runner is isolated, single-tenant, and is
 # the environment that actually has to hold.
 #
-# TEMPORARY. Delete this file once `CI_LINT_CHUNKS` is settled — it exists to
-# answer one question, not to run forever. It is `workflow_dispatch` only so it
-# never runs on a PR and never gates anything.
+# KEPT, not deleted. It was written to settle one question — it did: at a 6144
+# cap, unchunked OOMs at 6.36GB while 4 chunks completes at 5.20GB. But the
+# question RECURS. This tree grew 34k lines in a single sync, the margin at 4
+# chunks is ~950MB, and the only honest way to re-tune `CI_LINT_CHUNKS` is to
+# measure again on a runner. Re-run it rather than reasoning about it: a
+# developer laptop cannot answer this (three runs of one command spanned
+# 1.31GB there), and peak RSS is partly a function of the cap you set, so a
+# measurement taken under the wrong ceiling misleads.
+#
+# Results, 28 Aug 2026, 4-core runner, 4,527 files, cold (`--no-cache`):
+#
+#     cap 6144   1 chunk  6.36GB  OOM      <- reproduces #273
+#                2        5.75GB  ok  304s
+#                4        5.20GB  ok  339s  <- the default
+#                6        4.98GB  ok  391s
+#     cap 5120   8        4.35GB  ok  436s
+#               16        3.95GB  ok  621s
+#               24        3.91GB  ok  821s
 #
 # Reads `Maximum resident set size` from GNU `/usr/bin/time -v` (the runner is
 # Linux; the `-l` form used locally is BSD/macOS). That field is in KILOBYTES.
 name: Lint memory probe
 
 on:
-  # A `workflow_dispatch`-only workflow cannot be dispatched until it exists on
-  # the DEFAULT branch, which this one deliberately never reaches. So it also
-  # triggers on pushes to its own branch — scoped to that one branch, so it
-  # cannot fire on a PR or gate anything.
-  push:
-    branches: [fix/chunked-lint]
+  # Dispatch only. It gates nothing, runs on no PR, and costs nothing until
+  # someone asks a question with it.
   workflow_dispatch:
     inputs:
       chunks:
