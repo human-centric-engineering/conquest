@@ -19,6 +19,12 @@
 name: Lint memory probe
 
 on:
+  # A `workflow_dispatch`-only workflow cannot be dispatched until it exists on
+  # the DEFAULT branch, which this one deliberately never reaches. So it also
+  # triggers on pushes to its own branch — scoped to that one branch, so it
+  # cannot fire on a PR or gate anything.
+  push:
+    branches: [fix/chunked-lint]
   workflow_dispatch:
     inputs:
       chunks:
@@ -64,7 +70,9 @@ jobs:
           # `--no-cache` everywhere: a warm cache would measure a cache hit, and
           # the run we have to survive is the COLD one — #273 bumped
           # typescript-eslint, which invalidates every entry.
-          IFS=',' read -ra ARMS <<< "${{ inputs.chunks }}"
+          # `inputs.chunks` is empty on a push event — fall back to the default set.
+          ARMS_RAW="${{ inputs.chunks }}"
+          IFS=',' read -ra ARMS <<< "${ARMS_RAW:-1,4,8}"
           printf '%-8s %-12s %s\n' "chunks" "peak" "seconds" | tee -a "$GITHUB_STEP_SUMMARY"
           for n in "${ARMS[@]}"; do
             start=$(date +%s)
