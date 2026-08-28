@@ -11,9 +11,24 @@ Follow these steps precisely, in order:
 
 ### Step 1: Run automated checks
 
-Run `npm run validate` (CHANGELOG structure + type-check + lint + format (Prettier + Prisma)). Capture and report any failures.
+Run `npm run validate:changed` (CHANGELOG structure + Node version + client-env + type-check + lint + format (Prettier + Prisma)). Capture and report any failures.
 
-`validate` runs the CHANGELOG check **first** and short-circuits on failure, so a structural problem in `CHANGELOG.md` will report as a failure with nothing after it — that is the check working, not the type-check being skipped. Fix it and re-run rather than working around it; the rules and their reasoning are in `scripts/ci/changelog-structure.ts`. Note the history rule needs `origin/main`, so run `git fetch origin main` first if the local ref is stale.
+**`validate:changed` narrows two of `validate`'s seven steps; it does not drop
+any.** ESLint and Prettier scale with the size of the repository rather than the
+size of the change, so they run over only what the branch touched — the diff
+against the `origin/main` merge base **plus everything uncommitted**, since a
+gate run mid-fix must see the fixes sitting in the working tree. Everything else
+runs exactly as `validate` runs it, `tsc --noEmit` included: type-checking is
+whole-program, and handing it a file list would stop it looking at the
+_consumers_ of what changed, which are precisely the errors a change-scoped
+check exists to catch. The scoping is in `scripts/ci/validate-changed.ts`, which
+prints how many files it took.
+
+Use plain `npm run validate` when the question is about the whole tree rather
+than this branch — after a merge from `main`, before a release cut, or when
+chasing a lint rule that only fires on files the branch never touched.
+
+`validate:changed` runs the CHANGELOG check **first** and short-circuits on failure, so a structural problem in `CHANGELOG.md` will report as a failure with nothing after it — that is the check working, not the type-check being skipped. Fix it and re-run rather than working around it; the rules and their reasoning are in `scripts/ci/changelog-structure.ts`. Note the history rule needs `origin/main`, so run `git fetch origin main` first if the local ref is stale — and the scoping needs it too: with no merge base, `validate:changed` exits non-zero saying so rather than quietly checking nothing.
 
 Then run `npm run test:changed:coverage`. Capture and report any test failures.
 
