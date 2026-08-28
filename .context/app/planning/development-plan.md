@@ -154,17 +154,18 @@ entry 2026-06-28). The phases since are listed here so a reader asking "is X pla
 answer, but each one's **detail lives in its trackers**, one `fX.Y.md` per feature written after the
 code, plus the domain doc named alongside.
 
-| Phase   | Title                                   | Status | Where it is written down                                                                                              |
-| ------- | --------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
-| **P10** | Reporting                               | done   | 8 trackers, `f10.1`–`f10.8` · [`respondent-report.md`](../questionnaire/respondent-report.md)                         |
-| **P11** | Cohorts & Rounds                        | done   | `f11.1` · [`cohorts.md`](../questionnaire/cohorts.md)                                                                 |
-| **P12** | Respondent onboarding                   | done   | `f12.1`, `f12.2`                                                                                                      |
-| **P13** | Cohort-round context & learning         | done   | `f13.1`–`f13.3`                                                                                                       |
-| **P14** | Cohort Report, then hardening & cleanup | done   | 15 trackers, `f14.1`–`f14.15` — the phase splits in two: the cohort report, then a quality sweep                      |
-| **P15** | Experiences                             | done   | 9 trackers · [`f15-followups.md`](./features/f15-followups.md) — **the record of what is still open**                 |
-| **P16** | Definitions & Glossary                  | done   | [`definitions-glossary.md`](../questionnaire/definitions-glossary.md) — no trackers; the domain doc is the record     |
-| **P17** | Conditional Topics                      | done   | 19 trackers · [`f17-followups.md`](./features/f17-followups.md) — **the record of what is still open**                |
-| **P18** | Per-questionnaire interviewer policy    | done   | `f18.1`–`f18.7` — house rules, question fidelity, the funnel arc, and the ring of follow-ups closing around all three |
+| Phase   | Title                                   | Status | Where it is written down                                                                                                                   |
+| ------- | --------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **P10** | Reporting                               | done   | 8 trackers, `f10.1`–`f10.8` · [`respondent-report.md`](../questionnaire/respondent-report.md)                                              |
+| **P11** | Cohorts & Rounds                        | done   | `f11.1` · [`cohorts.md`](../questionnaire/cohorts.md)                                                                                      |
+| **P12** | Respondent onboarding                   | done   | `f12.1`, `f12.2`                                                                                                                           |
+| **P13** | Cohort-round context & learning         | done   | `f13.1`–`f13.3`                                                                                                                            |
+| **P14** | Cohort Report, then hardening & cleanup | done   | 15 trackers, `f14.1`–`f14.15` — the phase splits in two: the cohort report, then a quality sweep                                           |
+| **P15** | Experiences                             | done   | 9 trackers · [`f15-followups.md`](./features/f15-followups.md) — **the record of what is still open**                                      |
+| **P16** | Definitions & Glossary                  | done   | [`definitions-glossary.md`](../questionnaire/definitions-glossary.md) — no trackers; the domain doc is the record                          |
+| **P17** | Conditional Topics                      | done   | 19 trackers · [`f17-followups.md`](./features/f17-followups.md) — **the record of what is still open**                                     |
+| **P18** | Per-questionnaire interviewer policy    | done   | `f18.1`–`f18.7` — house rules, question fidelity, the funnel arc, and the ring of follow-ups closing around all three                      |
+| **P19** | Brand kit                               | done   | `f19.2`, `f19.3` · [`demo-clients.md`](../questionnaire/demo-clients.md) — `f19.1` (the ground) is reserved, to be written retrospectively |
 
 Two caveats a reader should carry:
 
@@ -175,7 +176,7 @@ Two caveats a reader should carry:
   of what was deliberately left open, and they are the first thing to read before planning more work
   in those areas.
 
-Writing P10–P18 up as full narrative sections in the style of P0–P9 remains real, unscheduled work.
+Writing P10–P19 up as full narrative sections in the style of P0–P9 remains real, unscheduled work.
 Recorded here rather than left for the next reader to discover, per this plan's own rule that it is
 allowed to be wrong as long as the reframe is written down.
 

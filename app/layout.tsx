@@ -116,9 +116,10 @@ const monospaceDisplayFont = JetBrains_Mono({
   display: 'swap',
   preload: false,
 });
-// IBM Plex Mono is the one brand face with no variable axis on Google Fonts, so the weights it
-// serves have to be named. Three: body copy, the emphasis Markdown produces inside an answer,
-// and the semibold the strip and buttons reach for.
+// IBM Plex Mono has no variable axis on Google Fonts, so the weights it serves have to be named.
+// Three: body copy, the emphasis Markdown produces inside an answer, and the semibold the strip
+// and buttons reach for. (Instrument Serif above is static too, but ships a single weight, so it
+// names that one and has no range to choose from.)
 const monospaceBodyFont = IBM_Plex_Mono({
   subsets: ['latin'],
   weight: ['400', '500', '600'],
