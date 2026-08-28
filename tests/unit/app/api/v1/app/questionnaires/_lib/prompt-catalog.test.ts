@@ -19,6 +19,7 @@ import {
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   RECONCILER_AGENT_SLUG,
+  QUESTIONNAIRE_STEER_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
@@ -34,19 +35,23 @@ describe('buildPromptCatalog', () => {
     expect(stages).toEqual(new Set(['authoring', 'live', 'evaluation']));
   });
 
-  it('includes one judge entry per design + scope evaluation dimension, alongside the two non-judges', () => {
+  it('includes one judge entry per design + scope evaluation dimension, alongside the three non-judges', () => {
     const evaluationStage = catalog.filter((e) => e.stage === 'evaluation');
-    // Two evaluation-stage agents are NOT per-dimension judges and must not be counted as one: the
-    // turn evaluator (a live-conversation critic) and the suggestion reconciler (which runs after
+    // Three evaluation-stage agents are NOT per-dimension judges and must not be counted as one:
+    // the turn evaluator (a live-conversation critic), the suggestion reconciler (which runs after
     // the design-evaluation panel and scores nothing — the scope-evaluation panel has no
-    // reconciler). Identify the judges by their registry slugs rather than by "everything else in
-    // the stage", so a future non-judge cannot quietly pass as one.
+    // reconciler), and the suggestion steer (which runs at apply, after a human has accepted a
+    // suggestion, and rewrites it rather than judging anything). Identify the judges by their
+    // registry slugs rather than by "everything else in the stage", so a future non-judge cannot
+    // quietly pass as one.
     const judgeSlugs = new Set([...EVALUATION_JUDGE_SLUGS, ...SCOPE_EVALUATION_JUDGE_SLUGS]);
     const judges = evaluationStage.filter((e) => judgeSlugs.has(e.slug));
     expect(judges).toHaveLength(EVALUATION_DIMENSIONS.length + SCOPE_EVALUATION_DIMENSIONS.length);
 
     const nonJudges = evaluationStage.filter((e) => !judgeSlugs.has(e.slug)).map((e) => e.slug);
-    expect(nonJudges.sort()).toEqual([RECONCILER_AGENT_SLUG, TURN_EVALUATOR_AGENT_SLUG].sort());
+    expect(nonJudges.sort()).toEqual(
+      [RECONCILER_AGENT_SLUG, QUESTIONNAIRE_STEER_AGENT_SLUG, TURN_EVALUATOR_AGENT_SLUG].sort()
+    );
   });
 
   it('uses unique, non-empty agent slugs', () => {

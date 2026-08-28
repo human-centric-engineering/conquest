@@ -336,6 +336,9 @@ const ALLOWED_CALL_SITES: readonly string[] = [
   'lib/app/questionnaire/agent-advisory/explain.ts | agentId=advisor.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/data-slots/generate-stream.ts | agentId=spread((meta.agentId ? { agentId: meta.agentId } : {})) | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/edit-agent/translate.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
+  // `agent` is a `prisma.aiAgent.findUnique` row the caller already bailed on when absent, so
+  // `agent.id` is always a real AiAgent — the batch never reaches here on a synthetic id.
+  'lib/app/questionnaire/evaluation/steer-edit.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/experiences/carryover/build.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/experiences/meeting/synthesise.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/experiences/routing/select.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',

@@ -13,12 +13,24 @@
  *   triages the whole run first and then executes it in one reviewable decision. The per-finding
  *   `…/findings/:findingId/apply` POST still exists for API callers who want one at a time.
  *
+ *   Findings carrying the reviewer's `applyInstruction` take the AI leg first: one structured
+ *   completion each, run concurrently before any write, rewriting that change's wording to follow
+ *   the instruction. `applied[].steer` reports what the AI did with the reviewer's words, including
+ *   the part of them it could not honour.
+ *
+ *   **The rate limit is not a spend limit.** `evaluationApplyLimiter` was sized (60/min) for fork
+ *   churn on an apply that made no model calls, and it still is; one steered batch can now issue a
+ *   completion per accepted finding, so the cap bounds requests and not provider calls. The steer
+ *   agent's `monthlyBudgetUsd` is recorded against it by `logCost` but is not checked before a call.
+ *   An admin steering an entire large run is therefore bounded by nothing tighter than the run's own
+ *   finding count — worth a per-batch steer cap if that turns out to matter in practice.
+ *
  *   **Always 200 when the run resolves**, even when nothing applied. "Every accepted change was
  *   already stale" is an answer, not a failure, and the reviewer needs the per-finding reasons to
  *   act on it — an error envelope would throw those away. The response carries:
  *
  *     data.versionId / versionNumber / forked  — where the writes landed
- *     data.applied[]                           — { findingId, targetKey, op }
+ *     data.applied[]                           — { findingId, targetKey, op, steer? }
  *     data.skipped[]                           — { findingId, targetKey, reason, detail? }
  *     data.findings[]                          — every finding, re-derived, so the queue updates
  *                                                in place without a second round trip
@@ -80,8 +92,13 @@ const handleBatchApply = withAdminAuth<Params>(async (request, session, { params
     audit: { userId: adminId, clientIp },
   });
 
-  // Re-derive the whole run so the queue re-renders from one response: applied findings are now
-  // terminal, and the ones that were skipped as stale need their fresh `stale` flag to say why.
+  // Re-derive the whole run so the queue re-renders from one response, with applied findings now
+  // terminal.
+  //
+  // Note what this canNOT refresh: staleness is derived against `vid`, and when the batch forked,
+  // the writes landed on a new draft that `vid` knows nothing about. So a finding the batch skipped
+  // as stale still reads `stale: false` here. The free-text skip list is what explains those, which
+  // is the reason it is rendered rather than being a debug detail.
   const detail = await getEvaluationRunDetail(vid, runId);
 
   log.info('Questionnaire design-evaluation run batch-applied', {
@@ -91,6 +108,7 @@ const handleBatchApply = withAdminAuth<Params>(async (request, session, { params
     forked: result.forked,
     applied: result.applied.length,
     skipped: result.skipped.length,
+    steered: result.applied.filter((a) => a.steer).length,
   });
 
   return successResponse(
@@ -111,3 +129,17 @@ const handleBatchApply = withAdminAuth<Params>(async (request, session, { params
 });
 
 export const POST = handleBatchApply;
+
+/**
+ * Serverless ceiling, in seconds. Present because F5.4's AI leg turned this into an LLM route.
+ *
+ * A steered batch runs one structured completion per steered finding, four at a time, and
+ * `runStructuredCompletion` gives its retry a *fresh* `STEER_TIMEOUT_MS` — so a dozen steers can
+ * legitimately take minutes before the write loop starts. On the platform default this route gets
+ * killed mid-loop, and that failure is worse than a slow one: some findings are already stamped
+ * `applied` in their own transactions, while the per-finding report — the only place a change that
+ * did NOT land is ever named — never reaches the reviewer at all.
+ *
+ * 300 matches every other LLM-calling questionnaire route (the evaluation panel, preview, report).
+ */
+export const maxDuration = 300;

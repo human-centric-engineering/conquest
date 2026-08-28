@@ -1411,6 +1411,46 @@ describe('EvaluationRunDetail batch apply', () => {
     );
   });
 
+  it('reports what the AI did with the reviewer’s own instruction, and what it could not do', async () => {
+    // A steer that only partly landed has to be visible at the moment it lands. Without this line
+    // the reviewer reads "applied" as "all of it applied" and finds the gap later, in the
+    // questionnaire itself.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'q_1',
+            op: 'replace_prompt',
+            steer: {
+              note: 'Shortened it to twelve words.',
+              unhonoured: 'Making it a 1–5 scale is not something wording can do.',
+            },
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('1 change written to your instruction')).toBeInTheDocument()
+    );
+    expect(screen.getByText(/Shortened it to twelve words/)).toBeInTheDocument();
+    expect(screen.getByText(/Making it a 1–5 scale/)).toBeInTheDocument();
+  });
+
+  it('says nothing about instructions on a batch nobody steered', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/written to your instruction/)).not.toBeInTheDocument();
+  });
+
   it('names every change that did not land, and why, in the reviewer’s terms', async () => {
     // The only place a dropped change is ever mentioned. A batch that quietly loses three of
     // eleven is worse than no batch, and `stale` means nothing to someone who just pressed a
@@ -1431,7 +1471,9 @@ describe('EvaluationRunDetail batch apply', () => {
     await waitFor(() => expect(screen.getByText('Nothing could be applied')).toBeInTheDocument());
     expect(screen.getByText('2 not applied')).toBeInTheDocument();
     expect(screen.getByText(/the question changed since this evaluation ran/)).toBeInTheDocument();
-    expect(screen.getByText(/need the AI rewrite step/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the AI could not rewrite it to follow your instruction/)
+    ).toBeInTheDocument();
     // Their decision stands, so fixing the cause and applying again picks them up.
     expect(screen.getAllByText(/still accepted/).length).toBe(2);
   });

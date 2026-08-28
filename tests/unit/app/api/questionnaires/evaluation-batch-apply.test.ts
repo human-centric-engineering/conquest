@@ -2,15 +2,19 @@
  * Unit test: the design-evaluation batch apply engine (F5.4).
  *
  * The engine is a loop around `applyFinding`, so the writing itself is covered by
- * `evaluation-apply.test.ts` and mocked out here. What this file pins is the three things
+ * `evaluation-apply.test.ts` and mocked out here. What this file pins is the four things
  * batching adds and the single-apply path could not have: the execution order, the live re-read
- * between findings, and the honest per-finding report.
+ * between findings, the honest per-finding report, and the AI leg that turns a reviewer's
+ * free-text steer into the change they actually accepted.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
-  appQuestionnaireEvaluationFinding: { findMany: vi.fn() },
+  // `findFirst` + the version lookup back the REAL `findRunReviewDraft`, which the batch calls
+  // before its first write to learn which version it is actually editing.
+  appQuestionnaireEvaluationFinding: { findMany: vi.fn(), findFirst: vi.fn() },
+  appQuestionnaireVersion: { findFirst: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
@@ -25,6 +29,11 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-apply', async (importOr
 const structureMock = vi.hoisted(() => ({ buildEvaluationStructure: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-structure', () => structureMock);
 
+// The AI leg's single model call. Stubbed here for the same reason `applyFinding` is: this file is
+// about what the batch does with a steer's outcome, not about the completion that produced it.
+const steerMock = vi.hoisted(() => ({ steerProposedEdit: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/evaluation/steer-edit', () => steerMock);
+
 import {
   applyAcceptedFindings,
   orderForApply,
@@ -35,6 +44,7 @@ import {
   type ApplyOutcome,
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-apply';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
+import { steerProposedEdit } from '@/lib/app/questionnaire/evaluation/steer-edit';
 import type { ProposedEdit, VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -43,7 +53,18 @@ const scoped = { id: 'v1', questionnaireId: 'qn-1', versionNumber: 1, status: 'd
 const audit = { userId: 'admin-1', clientIp: null };
 
 function structure(): VersionStructureInput {
-  return { goal: 'Goal', audience: null, sections: [] };
+  return {
+    goal: 'Goal',
+    audience: null,
+    sections: [
+      {
+        title: 'About you',
+        questions: [
+          { key: 'q_role', prompt: 'What is your role?', type: 'free_text', required: true },
+        ],
+      },
+    ],
+  };
 }
 
 function row(
@@ -56,6 +77,8 @@ function row(
     applyInstruction: null,
     dimension: 'clarity',
     ordinal: 0,
+    proposedChange: 'Reword it.',
+    rationale: 'It is ambiguous.',
     ...over,
   };
 }
@@ -64,6 +87,7 @@ function row(
  *  shapes below are type-checked and an async implementation is the expected type rather than
  *  something smuggled past a void-returning `Mock`. */
 const applyFindingMock = vi.mocked(applyFinding);
+const steerMockFn = vi.mocked(steerProposedEdit);
 
 /** Every applyFinding call resolves as a plain in-place apply on `v1`. */
 function applyLands() {
@@ -78,7 +102,21 @@ function applyLands() {
 beforeEach(() => {
   vi.clearAllMocks();
   (buildEvaluationStructure as unknown as Mock).mockResolvedValue(structure());
+  // No prior apply from this run → no existing draft, so the batch starts at the run's version.
+  prismaMock.appQuestionnaireEvaluationFinding.findFirst.mockResolvedValue(null);
+  prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(null);
 });
+
+/** Model a run that a previous batch already forked to `versionId`. */
+function runAlreadyEditingDraft(versionId: string, versionNumber: number) {
+  prismaMock.appQuestionnaireEvaluationFinding.findFirst.mockResolvedValue({
+    appliedToVersionId: versionId,
+  });
+  prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+    id: versionId,
+    versionNumber,
+  });
+}
 
 describe('orderForApply', () => {
   it('runs a delete after a reword of the same question', () => {
@@ -225,10 +263,136 @@ describe('applyAcceptedFindings', () => {
     expect(result.skipped).toHaveLength(2);
   });
 
-  it('defers a finding carrying the reviewer’s instruction rather than applying it without one', async () => {
-    // Applying the judge's op and discarding the steer is the one outcome that must not happen:
-    // the reviewer wrote "keep it under 15 words" and would be told it succeeded.
+  it('makes no model call at all when nobody wrote an instruction', async () => {
+    // The deterministic path has to stay exactly as cheap as it was: a run triaged without a single
+    // steer must not read the structure an extra time, and must not reach a provider.
     applyLands();
+    await applyAcceptedFindings({
+      findings: [row({ proposedEdit: { op: 'replace_prompt', prompt: 'One' } })],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+    expect(steerProposedEdit).not.toHaveBeenCalled();
+    expect(buildEvaluationStructure).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('applyAcceptedFindings — the reviewer’s steer', () => {
+  it('applies the AI’s rewrite, not the judge’s wording, and says what it did', async () => {
+    applyLands();
+    steerMockFn.mockResolvedValue({
+      ok: true,
+      edit: { op: 'replace_prompt', prompt: 'Reviewer wording' },
+      note: 'Shortened it to twelve words.',
+      unhonoured: null,
+    });
+
+    const result = await applyAcceptedFindings({
+      findings: [
+        row({
+          id: 'steered',
+          proposedEdit: { op: 'replace_prompt', prompt: 'Judge wording' },
+          applyInstruction: 'Keep it under 15 words.',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    // The rewrite rides in as an override, so it goes through the same validation an admin's typed
+    // override does — the AI leg is a rewriter in front of apply, not a way past it.
+    expect(applyFindingMock.mock.calls[0][0].finding.editedOverride).toEqual({
+      op: 'replace_prompt',
+      prompt: 'Reviewer wording',
+    });
+    expect(result.applied).toEqual([
+      {
+        findingId: 'steered',
+        targetKey: 'q_role',
+        op: 'replace_prompt',
+        steer: { note: 'Shortened it to twelve words.', unhonoured: null },
+      },
+    ]);
+  });
+
+  it('hands the steer the question as it stands, not just the judge’s op', async () => {
+    // A rewrite that cannot see the current wording is guessing at what it is changing.
+    applyLands();
+    steerMockFn.mockResolvedValue({
+      ok: true,
+      edit: { op: 'replace_prompt', prompt: 'Reviewer wording' },
+      note: 'Done.',
+      unhonoured: null,
+    });
+
+    await applyAcceptedFindings({
+      findings: [
+        row({
+          proposedEdit: { op: 'replace_prompt', prompt: 'Judge wording' },
+          applyInstruction: 'Plainer, please.',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect(steerMockFn.mock.calls[0][0]).toMatchObject({
+      instruction: 'Plainer, please.',
+      question: { key: 'q_role', prompt: 'What is your role?' },
+      goal: 'Goal',
+    });
+    expect(steerMockFn.mock.calls[0][1]).toMatchObject({ runId: 'run1', versionId: 'v1' });
+  });
+
+  it('carries an unhonoured part of the instruction through to the report', async () => {
+    // A steer that only partly landed has to be visible at the moment it lands, or the reviewer
+    // reads "applied" as "all of it applied".
+    applyLands();
+    steerMockFn.mockResolvedValue({
+      ok: true,
+      edit: { op: 'replace_prompt', prompt: 'Reviewer wording' },
+      note: 'Shortened it.',
+      unhonoured: 'Changing it to a 1–5 scale is not something wording can do.',
+    });
+
+    const result = await applyAcceptedFindings({
+      findings: [
+        row({
+          proposedEdit: { op: 'replace_prompt', prompt: 'Judge wording' },
+          applyInstruction: 'Shorter, and make it a 1–5 scale.',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect(result.applied[0].steer?.unhonoured).toBe(
+      'Changing it to a 1–5 scale is not something wording can do.'
+    );
+  });
+
+  it('applies nothing for that finding when the rewrite fails — never the judge’s op instead', async () => {
+    // The substitution this whole leg exists to avoid: the reviewer asked for their version of the
+    // change, and quietly giving them a different one under the same button is worse than a skip.
+    applyLands();
+    steerMockFn.mockResolvedValue({
+      ok: false,
+      code: 'steer_failed',
+      message: 'The AI could not rewrite this change.',
+    });
+
     const result = await applyAcceptedFindings({
       findings: [
         row({
@@ -246,7 +410,75 @@ describe('applyAcceptedFindings', () => {
 
     expect(applyFinding).not.toHaveBeenCalled();
     expect(result.applied).toEqual([]);
-    expect(result.skipped[0]).toMatchObject({ findingId: 'steered', reason: 'needs_ai' });
+    expect(result.skipped[0]).toMatchObject({
+      findingId: 'steered',
+      reason: 'needs_ai',
+      detail: 'The AI could not rewrite this change.',
+    });
+  });
+
+  it('reports an instruction attached to a change with no wording, without paying for a call', async () => {
+    // `delete_question` has no prose for an instruction to shape. Applying it and dropping the
+    // sentence would read as honoured; asking a model to reword a deletion is nonsense.
+    applyLands();
+
+    const result = await applyAcceptedFindings({
+      findings: [
+        row({
+          id: 'gone',
+          proposedEdit: { op: 'delete_question' },
+          applyInstruction: 'Only if it is really needed.',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect(steerProposedEdit).not.toHaveBeenCalled();
+    expect(applyFinding).not.toHaveBeenCalled();
+    expect(result.skipped[0]).toMatchObject({ findingId: 'gone', reason: 'steer_unsupported' });
+  });
+
+  it('lets one failed steer through without taking the rest of the batch with it', async () => {
+    applyLands();
+    steerMockFn.mockImplementation((input) =>
+      Promise.resolve(
+        input.instruction === 'bad'
+          ? { ok: false as const, code: 'steer_failed', message: 'No.' }
+          : {
+              ok: true as const,
+              edit: { op: 'replace_prompt' as const, prompt: 'Reviewer wording' },
+              note: 'Done.',
+              unhonoured: null,
+            }
+      )
+    );
+
+    const result = await applyAcceptedFindings({
+      findings: [
+        row({
+          id: 'bad',
+          proposedEdit: { op: 'replace_prompt', prompt: 'A' },
+          applyInstruction: 'bad',
+        }),
+        row({
+          id: 'good',
+          proposedEdit: { op: 'replace_prompt', prompt: 'B' },
+          applyInstruction: 'good',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect(result.applied.map((a) => a.findingId)).toEqual(['good']);
+    expect(result.skipped.map((sk) => sk.findingId)).toEqual(['bad']);
   });
 
   it('returns a result rather than an error when nothing could be applied', async () => {
@@ -267,6 +499,59 @@ describe('applyAcceptedFindings', () => {
     expect(result.applied).toEqual([]);
     expect(result.skipped).toHaveLength(1);
     expect(result.versionId).toBe('v1');
+  });
+
+  it('judges the first finding against the draft this run already made, not the original', async () => {
+    // The bug: `applyFinding` resolves its write target from the run's existing draft, so a batch
+    // that started staleness-checking at the run's own version compared its first finding against a
+    // questionnaire it was not editing. Press Apply, press it again — which the half-triaged
+    // confirmation explicitly invites — and the second batch's first finding reads as not-stale
+    // against the untouched original, then silently overwrites what the first batch wrote.
+    // Nothing applies, so the reported version is the one the batch OPENED on rather than one an
+    // outcome overwrote — which is the value under test.
+    applyFindingMock.mockResolvedValue({ status: 'unapplicable', reason: 'stale' });
+    runAlreadyEditingDraft('v3', 3);
+
+    const result = await applyAcceptedFindings({
+      findings: [row({ proposedEdit: { op: 'replace_prompt', prompt: 'One' } })],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect((buildEvaluationStructure as unknown as Mock).mock.calls[0]).toEqual(['qn-1', 'v3']);
+    expect(result).toMatchObject({ versionId: 'v3', versionNumber: 3 });
+  });
+
+  it('words a steer against the draft the change will actually land on', async () => {
+    // Same root cause, and the same wrong answer in a different place: a rewrite reasoned about
+    // the launched original would be steering wording that no longer exists on the draft.
+    applyLands();
+    runAlreadyEditingDraft('v3', 3);
+    steerMockFn.mockResolvedValue({
+      ok: true,
+      edit: { op: 'replace_prompt', prompt: 'Reviewer wording' },
+      note: 'Done.',
+      unhonoured: null,
+    });
+
+    await applyAcceptedFindings({
+      findings: [
+        row({
+          proposedEdit: { op: 'replace_prompt', prompt: 'One' },
+          applyInstruction: 'Plainer, please.',
+        }),
+      ],
+      runId: 'run1',
+      questionnaireId: 'qn-1',
+      scoped,
+      snapshot: structure(),
+      audit,
+    });
+
+    expect(steerMockFn.mock.calls[0][1]).toMatchObject({ versionId: 'v3' });
   });
 
   it('skips a finding whose structure could not be read, and carries on with the rest', async () => {

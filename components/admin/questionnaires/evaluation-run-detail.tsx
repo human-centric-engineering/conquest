@@ -63,7 +63,10 @@ import type {
 } from '@/lib/app/questionnaire/views';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
 import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
-import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-finding-review';
+import {
+  FindingReviewCard,
+  whenSteersSettled,
+} from '@/components/admin/questionnaires/evaluation-finding-review';
 import { EvaluationRunHeadline } from '@/components/admin/questionnaires/evaluation-run-headline';
 import { EvaluationByQuestion } from '@/components/admin/questionnaires/evaluation-by-question';
 import {
@@ -95,7 +98,13 @@ interface BatchApplyResponse {
   versionId: string;
   versionNumber: number;
   forked: boolean;
-  applied: { findingId: string; targetKey: string; op: string }[];
+  applied: {
+    findingId: string;
+    targetKey: string;
+    op: string;
+    /** Present only where the reviewer's instruction shaped the change the AI wrote. */
+    steer?: { note: string; unhonoured: string | null };
+  }[];
   skipped: BatchSkipped[];
   findings: EvaluationFindingView[];
 }
@@ -112,7 +121,9 @@ const SKIP_REASONS: Record<string, string> = {
   target_gone: 'the question it was about no longer exists',
   op_invalid: 'the suggested edit does not fit the question as it now stands',
   needs_authoring: 'there is no automatic edit for it — make this one in the editor',
-  needs_ai: 'your instructions need the AI rewrite step, which is not enabled yet',
+  needs_ai: 'the AI could not rewrite it to follow your instruction — try applying again',
+  steer_unsupported:
+    'your instruction needs wording to change, and this one moves, retypes or removes the question — clear the instruction, or make this change in the editor',
 };
 
 function skipReason(skip: BatchSkipped): string {
@@ -216,6 +227,9 @@ export function EvaluationRunDetail({
   const [applyError, setApplyError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<BatchApplyResponse | null>(null);
 
+  /** The applied changes the reviewer's own instruction shaped — reported apart from the rest. */
+  const steered = outcome?.applied.filter((a) => a.steer) ?? [];
+
   function handleUpdate(
     next: EvaluationFindingView,
     meta?: { forked: boolean; versionId: string; versionNumber: number }
@@ -235,6 +249,13 @@ export function EvaluationRunDetail({
     setApplying(true);
     setApplyError(null);
     try {
+      // Pressing this button blurs whichever instruction box was open, which STARTS that steer's
+      // save — it does not finish it. Firing the batch in the same tick let the server read the
+      // finding before the PATCH committed and apply the judge's wording with the reviewer's
+      // sentence discarded: the exact silent substitution the AI leg exists to prevent, and
+      // invisible afterwards, since the result panel would report no steer at all.
+      await whenSteersSettled();
+
       const res = await fetch(
         API.APP.QUESTIONNAIRES.versionEvaluationApply(questionnaireId, versionId, run.id),
         { method: 'POST', credentials: 'same-origin' }
@@ -507,6 +528,32 @@ export function EvaluationRunDetail({
                 Open v{outcome.versionNumber} in Build →
               </Link>
             </p>
+          )}
+
+          {/* What the AI did with the reviewer's own words. `unhonoured` is the load-bearing half:
+              a steer that only partly landed has to be visible at the moment it lands, or
+              "applied" reads as "all of it applied" and the gap is found later in the
+              questionnaire. */}
+          {steered.length > 0 && (
+            <div className="mt-3">
+              <FieldLabel>
+                {steered.length === 1
+                  ? '1 change written to your instruction'
+                  : `${steered.length} changes written to your instructions`}
+              </FieldLabel>
+              <ul className="mt-1.5 space-y-1">
+                {steered.map((item) => (
+                  <li key={item.findingId} className="text-muted-foreground max-w-[68ch] text-sm">
+                    <span className="text-foreground">{item.targetKey}</span> — {item.steer?.note}
+                    {item.steer?.unhonoured && (
+                      <span className="text-foreground block text-xs">
+                        Not done: {item.steer.unhonoured}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {outcome.skipped.length > 0 && (

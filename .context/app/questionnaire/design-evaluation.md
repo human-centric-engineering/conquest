@@ -526,7 +526,8 @@ A nullable column on the finding, and the only new state the feature adds. It is
 words about how to make the change ("keep it under 15 words, don't mention tenure") — never parsed
 into an op here, just carried. `null` means "apply the structured op exactly as the judge proposed
 it", so **the AI leg is opt-in per finding, by the admin typing something**; a run where nobody
-types anything applies exactly as deterministically as it did before.
+types anything applies exactly as deterministically as it did before, and reaches no provider at
+all.
 
 It replaced the typed `editedOverride` form on the card, which asked the reviewer to pick an exact
 op when what they actually wanted to express was a preference. The `edit` action stays in
@@ -567,7 +568,8 @@ re-read follows it — judging the batch's own work against a version it is no l
 find no drift at all.
 
 **A per-finding outcome.** Nothing is swallowed: every accepted finding comes back applied, or
-skipped with a reason (`stale`, `target_gone`, `op_invalid`, `needs_authoring`, `needs_ai`). A batch
+skipped with a reason (`stale`, `target_gone`, `op_invalid`, `needs_authoring`, `needs_ai`,
+`steer_unsupported`). A batch
 that quietly drops three of eleven changes is worse than no batch, so the route **always returns
 200** when the run resolves — "every accepted change was already stale" is an answer the reviewer
 needs the detail of, and an error envelope would throw that detail away. The response also carries
@@ -621,15 +623,60 @@ written in place; and a second batch from the same run converges on the draft th
 (`findRunReviewDraft`). So repeated batches do not pile up versions, and the draft is the one thing
 the reviewer opens in Build afterwards.
 
-### The AI leg is opt-in and, until Phase 3, openly deferred
+### The AI leg — the reviewer's steer, executed
 
-A finding carrying an `applyInstruction` cannot be executed by its structured op alone — the steer
-has to reach the wording — so the deterministic leg reports it as `needs_ai` and leaves it
-`accepted`. It is not applied with the instruction discarded: an instruction silently ignored is a
-worse outcome than one openly deferred, because the reviewer believes it was honoured. Phase 3
-routes those findings through the **Structure Edit Agent** (`lib/app/questionnaire/edit-agent/`),
-which already turns a plain-English instruction into a validated `EditPlan` executed
-deterministically by `resolve.ts` — the model never touches the data.
+A finding carrying an `applyInstruction` cannot be executed by its structured op alone: the steer
+has to reach the wording. So before a single write happens, every steered finding goes through the
+**Suggestion Steer** agent (`app-questionnaire-suggestion-steer`,
+`lib/app/questionnaire/evaluation/steer-edit.ts`) — one structured completion each, rewriting that
+change's text to follow the reviewer's sentence.
+
+It is deliberately **not** routed through the Structure Edit Agent, which the F5.4 notes originally
+proposed. That agent's op vocabulary (`set_required`, `transform_prompt`, `move_question`…) is
+whole-document and mechanical; it cannot express `split_question`, `change_type`, `edit_guidelines`
+or `add_question` at all, and its persona is explicitly "never rewrite wording unless told to". Two
+opposite mandates on one binding would have meant a parallel op vocabulary anyway, so the steer got
+its own agent and its own prompt.
+
+**The model never touches the data.** Three things enforce that, and they are structural rather than
+prompt-shaped:
+
+- **It can only return text.** `steeredEditSchema` has one member per steerable op carrying only
+  that op's free-text fields. There is no field for a slot key, an answer type, a section, an
+  ordinal or a `typeConfig` — a model that decides the question should really be moved has no way to
+  say so.
+- **The op kind cannot change.** `mergeSteeredEdit` refuses a revision whose `op` differs from the
+  judge's and rebuilds the op from the original for every field the model was not offered. The
+  reviewer accepted "split this question"; they get a split, worded their way, keeping the judge's
+  `secondKey`. This is the one outright refusal in the leg — an op switch is the model overruling
+  the reviewer's own decision.
+- **It re-enters the ordinary apply path.** The rewritten op rides in as `editedOverride`, so
+  `applyFinding` validates it exactly as it validates an admin's typed override: same slot check,
+  same staleness re-check, same fork rule. The AI leg is a rewriter sitting in front of apply, not a
+  second way in.
+
+**Three ops carry no wording** (`delete_question`, `reorder`, `change_type`), so an instruction on
+one has nothing to act on. Those are reported as `steer_unsupported` without a model call, because
+asking a model to reword a deletion is nonsense and applying it with the reviewer's sentence
+dropped is the silent-substitution failure this leg exists to prevent. For the same reason a steer
+that _fails_ (no provider, a failed call, an op switch) is reported as `needs_ai` and the judge's
+own op is **not** applied as a consolation: the reviewer asked for their version of the change, and
+quietly giving them a different one under the same button is worse than a skip. The finding stays
+`accepted` either way.
+
+**Honesty about what did not land.** The result carries `note` (what the instruction changed, in one
+line) and `unhonoured` (the part of it wording alone could not satisfy — an answer type, a scale, an
+ordering), and the result panel shows both next to the applied change. A steer that only partly
+landed has to be visible at the moment it lands, or the reviewer reads "applied" as "all of it
+applied" and finds the gap later, in the questionnaire.
+
+**Cost and shape.** Steers run concurrently (`STEER_CONCURRENCY = 4`) before the ordered apply loop,
+not inside it: a rewrite depends only on the change and the questionnaire as the reviewer saw it,
+not on what the other findings wrote, and eight sequential model calls would time the batch out. A
+run where nobody typed an instruction makes **no** model call and does not even read the structure
+an extra time — the deterministic path is exactly as cheap as it was. Every attempt is recorded as
+an `AppAiRun` of kind `evaluation_steer`, failures included, because this is the one place in the
+evaluation flow where a model's own words reach the questionnaire.
 
 ### "Open in editor" — the refine path
 

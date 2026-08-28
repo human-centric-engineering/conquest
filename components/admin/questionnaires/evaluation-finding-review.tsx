@@ -49,7 +49,7 @@
  * enforced server-side; this card only renders the affordances.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 
 import { cn } from '@/lib/utils';
@@ -226,6 +226,33 @@ async function sendJson(
   }
 }
 
+/**
+ * The steer saves currently in flight, across every card on the page.
+ *
+ * Module-scoped rather than React state, and deliberately: the coordination is between a leaf card
+ * and the batch bar several components above it, and threading a pending-save signal through two
+ * intermediate list components would be prop drilling for something that is not render state at
+ * all — it is ephemeral in-flight I/O that nothing draws.
+ *
+ * It exists because of a race that loses exactly what this feature is for. Clicking "Apply N
+ * accepted changes" blurs the open instruction box, which STARTS the `set_instruction` PATCH, and
+ * fires the batch POST in the same tick. Nothing sequenced them, so the server could read the
+ * finding before the PATCH committed and apply the judge's wording with the reviewer's sentence
+ * discarded — the silent substitution the whole AI leg exists to prevent, and invisible afterwards
+ * because the result panel would show no steer at all.
+ */
+const inFlightSteerSaves = new Set<Promise<unknown>>();
+
+/**
+ * Resolve once every open instruction box has finished saving.
+ *
+ * Awaited by the batch bar before it applies. Rejections are swallowed — a steer that failed to
+ * save is the card's error to show, and it must not stop the reviewer applying the rest.
+ */
+export function whenSteersSettled(): Promise<void> {
+  return Promise.allSettled([...inFlightSteerSaves]).then(() => undefined);
+}
+
 export function FindingReviewCard({
   finding,
   questionnaireId,
@@ -240,6 +267,8 @@ export function FindingReviewCard({
   // button in the instant between the blur and the click landing on it, silently swallowing the
   // click that caused the save in the first place.
   const [savingSteer, setSavingSteer] = useState(false);
+  /** The blur-started save a decision on this card must land after. See {@link decide}. */
+  const inFlightSteerSave = useRef<Promise<unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The steer, held locally so typing is not a round trip per keystroke. `finding.applyInstruction`
   // is the server's copy; this is the draft of it.
@@ -289,18 +318,31 @@ export function FindingReviewCard({
 
   const dirty = instruction.trim() !== (finding.applyInstruction ?? '');
 
-  /** Persist the steer on its own, without touching the decision. */
+  /**
+   * Persist the steer on its own, without touching the decision.
+   *
+   * Registered in {@link inFlightSteerSaves} for its whole life, so the batch bar can wait for it,
+   * and held in a ref so a decision on this card can sequence behind it rather than racing it.
+   */
   async function saveInstruction() {
     if (!dirty || savingSteer) return;
     setSavingSteer(true);
     setError(null);
-    const res = await sendJson(findingPath, 'PATCH', {
+    const save = sendJson(findingPath, 'PATCH', {
       action: 'set_instruction',
       instruction,
     });
-    setSavingSteer(false);
-    if (!res.ok) return setError(res.message);
-    onUpdate(res.data as EvaluationFindingView);
+    inFlightSteerSave.current = save;
+    inFlightSteerSaves.add(save);
+    try {
+      const res = await save;
+      setSavingSteer(false);
+      if (!res.ok) return setError(res.message);
+      onUpdate(res.data as EvaluationFindingView);
+    } finally {
+      inFlightSteerSaves.delete(save);
+      if (inFlightSteerSave.current === save) inFlightSteerSave.current = null;
+    }
   }
 
   /**
@@ -313,6 +355,12 @@ export function FindingReviewCard({
   async function decide(action: 'accept' | 'decline') {
     setBusy(action);
     setError(null);
+    // Clicking a decision blurs the instruction box, which starts a `set_instruction` PATCH against
+    // this same row. That call deliberately does not touch `status`, so if its response landed
+    // second it would overwrite the card with the pre-decision view — the reviewer's Accept looking
+    // like it never registered, and the run tally under-counting it. Sequencing behind it makes the
+    // decision's response the last word.
+    await inFlightSteerSave.current;
     // `instruction` only rides along when there is something unsaved to send. Omitting the key
     // (rather than sending null) is what stops an accept from clearing a steer saved earlier.
     const body: { action: string; instruction?: string } =
@@ -486,12 +534,13 @@ export function FindingReviewCard({
                 onBlur={() => void saveInstruction()}
                 maxLength={MAX_APPLY_INSTRUCTION}
                 rows={2}
-                placeholder="e.g. keep it under 15 words, and don't mention tenure"
+                placeholder="e.g. keep it short, and avoid jargon"
                 className="text-sm"
               />
               <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-xs')}>
-                Optional. Written in your words and handed to the AI when this run&apos;s accepted
-                changes are applied, alongside the suggestion above.
+                Optional. Written in your words. When this run&apos;s accepted changes are applied,
+                the AI rewrites this one to follow it — and tells you about anything it could not
+                do.
                 {savingSteer && ' Saving…'}
               </p>
             </div>

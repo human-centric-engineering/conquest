@@ -128,6 +128,18 @@ export const APP_AI_RUN_KINDS = [
    * proposes nothing, too: that is a real answer about the questionnaire, not an absence of one.
    */
   'opening_examples_suggest',
+  /**
+   * Evaluation steer — the AI leg of batch apply: one accepted suggestion reworded to follow the
+   * instruction the reviewer attached to it.
+   *
+   * Recorded because this is the one place in the evaluation flow where a model's own words reach
+   * the questionnaire. A judge only proposes and an admin adjudicates; here the admin adjudicated a
+   * suggestion and then a model rewrote it, so "who wrote this question" has an answer that is
+   * neither the judge nor the reviewer. Kept on failure too — a reviewer who sees "not applied"
+   * will ask why later, and "the model returned a different kind of change and we refused it" is a
+   * better answer than an absence.
+   */
+  'evaluation_steer',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

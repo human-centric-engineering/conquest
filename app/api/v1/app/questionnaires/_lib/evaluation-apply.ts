@@ -63,8 +63,13 @@ export interface ApplyFindingRow {
  * is what makes repeated applies from one run converge on a SINGLE draft instead of re-forking
  * the launched original each time (the F5.3 fork-lineage rule). Returns `null` when no prior
  * apply has a live draft target — the first apply then forks (launched) or edits in place (draft).
+ *
+ * Exported because the batch has to ask the same question BEFORE its first write. `applyFinding`
+ * resolves the write target from here, so a batch that judged staleness against the run's own
+ * version while the write landed on an existing draft would compare a finding against a
+ * questionnaire it was not editing — and silently overwrite what an earlier batch wrote there.
  */
-async function findRunReviewDraft(
+export async function findRunReviewDraft(
   runId: string,
   questionnaireId: string
 ): Promise<{ id: string; versionNumber: number } | null> {

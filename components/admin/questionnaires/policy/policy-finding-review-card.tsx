@@ -312,9 +312,13 @@ export function PolicyFindingReviewCard({
                 ) : (
                   <>
                     <FieldLabel>Make this change by hand</FieldLabel>
+                    {/* Not "record your decision below": Accept left this card when the two verbs
+                        were cut to one, and for a finding with no one-click edit that leaves
+                        Dismiss as the only verb there is. Promising a decision the card cannot
+                        record sends the reviewer looking for a button that is not on screen. */}
                     <p className={`${PROSE_MEASURE} text-muted-foreground mt-1 text-sm`}>
                       There is no one-click edit for this one — make the change on the Topics tab,
-                      then record your decision below.
+                      then dismiss this suggestion to clear it from the queue.
                     </p>
                   </>
                 )}
