@@ -590,7 +590,16 @@ export const API = {
       /** Re-run one failed judge into an existing run (POST — merges into the same run). */
       versionEvaluationRetryJudge: (id: string, versionId: string, runId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/retry`,
-      /** Review one finding (PATCH accept/decline/edit — F5.3). */
+      /**
+       * Apply every accepted finding of a run, as one batch (POST — F5.4).
+       *
+       * The only route the review UI writes structure through: findings are triaged first
+       * (`versionEvaluationFinding` PATCH, which writes nothing structural), then executed
+       * together here.
+       */
+      versionEvaluationApply: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/apply`,
+      /** Review one finding (PATCH accept/decline/set_instruction/edit — F5.3, F5.4). */
       versionEvaluationFinding: (
         id: string,
         versionId: string,

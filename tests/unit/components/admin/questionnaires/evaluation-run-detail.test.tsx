@@ -45,6 +45,7 @@ function finding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingVi
     status: 'pending',
     proposedEdit: { op: 'delete_question' },
     editedOverride: null,
+    applyInstruction: null,
     decidedByUserId: null,
     decidedAt: null,
     appliedAt: null,

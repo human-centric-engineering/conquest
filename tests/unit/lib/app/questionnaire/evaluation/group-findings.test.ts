@@ -50,6 +50,7 @@ function finding(
     status: 'pending',
     proposedEdit: null,
     editedOverride: null,
+    applyInstruction: null,
     decidedByUserId: null,
     decidedAt: null,
     appliedAt: null,

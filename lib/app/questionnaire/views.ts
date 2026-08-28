@@ -257,6 +257,14 @@ export interface EvaluationFindingView {
   proposedEdit: ProposedEdit | null;
   /** The admin's edited op, which takes precedence over `proposedEdit` at apply (F5.3); `null` if unedited. */
   editedOverride: ProposedEdit | null;
+  /**
+   * The reviewer's free-text steer for how to make this change, replayed at batch apply (F5.4).
+   *
+   * `null` means "apply the structured op exactly as the judge proposed it". Anything else opts
+   * this one finding into the AI-assisted leg of the batch, where the instruction is handed to the
+   * Structure Edit Agent alongside the judge's suggestion.
+   */
+  applyInstruction: string | null;
   /** Admin who decided (accept/decline/edit); `null` while `pending`. */
   decidedByUserId: string | null;
   /** ISO timestamps — cross the HTTP boundary. */

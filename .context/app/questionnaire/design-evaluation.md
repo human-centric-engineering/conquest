@@ -506,6 +506,89 @@ a slugified sentence.
 An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-run),
 `target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`.
 
+## F5.4 — triage the run, then apply it as a batch
+
+Per-finding apply was the only path, and it made the reviewer decide the **order** of a dozen
+structural edits by the order they happened to click, one confirmation at a time, with no way to
+change their mind about the fifth after seeing the ninth. It also put four verbs on every card —
+accept, dismiss, edit, apply — two of which are English near-synonyms that do very different things.
+
+The flow is now triage-then-execute. Reviewing writes nothing structural: an admin works the whole
+run marking suggestions **Accept** or **Dismiss**, optionally attaching a free-text steer to any of
+them, and then presses one button that executes every accepted suggestion together. A queue of
+irreversible clicks becomes one reviewable decision.
+
+### The reviewer's steer — `applyInstruction`
+
+A nullable column on the finding, and the only new state the feature adds. It is the reviewer's own
+words about how to make the change ("keep it under 15 words, don't mention tenure") — never parsed
+into an op here, just carried. `null` means "apply the structured op exactly as the judge proposed
+it", so **the AI leg is opt-in per finding, by the admin typing something**; a run where nobody
+types anything applies exactly as deterministically as it did before.
+
+It replaced the typed `editedOverride` form on the card, which asked the reviewer to pick an exact
+op when what they actually wanted to express was a preference. The `edit` action stays in
+`reviewFindingSchema` and apply still honours stored overrides — the capability is API-accessible,
+it is just no longer a control. `set_instruction` writes the steer **without touching `status`**: a
+reviewer may note what they want before deciding whether they want it, and losing that on the way to
+a decision is the kind of small betrayal that stops people using the box at all. Bounded at
+`MAX_APPLY_INSTRUCTION` (2 000) because it is replayed verbatim into an LLM prompt; an emptied box
+normalises to `null` so "cleared it" and "never typed anything" are one state.
+
+### The batch — a loop with an order and an honest report
+
+`POST …/evaluations/:runId/apply` → `_lib/evaluation-batch-apply.ts`. The writing is still
+`applyFinding`, unchanged: same re-validation, same fork-lineage rule, same 409 reasons. Reusing it
+is the point — a batch must not be a second apply path with its own validation, or the two drift and
+one of them is the one with the hole. Three things the loop adds:
+
+**An execution order that does not sabotage itself** (`APPLY_RANK`). The reviewer accepted a _set_,
+not a sequence, so the batch has to choose one, and the naive choice (the order the judges emitted
+them) loses work for nothing. Two cases decide the ranking:
+
+- **A delete runs last.** Accept "reword Q4" and "delete Q4" — a real outcome, since two judges can
+  disagree and a reviewer can agree with both in the moment. Deleting first makes the reword
+  `target_gone`; rewording first makes the delete a clean no-loss. Same end state; only one order
+  reports it without an error.
+- **A move runs after content edits.** `reorder` carries an absolute ordinal computed against the
+  structure the judge saw. Content edits do not shift ordinals but another move does, so moves
+  cluster at the end where they shift a stable base.
+
+Ties fall back to `(dimension, ordinal, id)` — a total order, so the same accepted set always
+executes the same way rather than shuffling between presses.
+
+**A live re-read between findings.** `applyFinding` takes the current structure to re-check
+staleness against, and in a batch that structure is a moving target: the third finding must be
+judged against what the first two just wrote. Without it, two judges rewording the same question
+would both "succeed" and the second would silently overwrite the first. Once a fork has happened the
+re-read follows it — judging the batch's own work against a version it is no longer editing would
+find no drift at all.
+
+**A per-finding outcome.** Nothing is swallowed: every accepted finding comes back applied, or
+skipped with a reason (`stale`, `target_gone`, `op_invalid`, `needs_authoring`, `needs_ai`). A batch
+that quietly drops three of eleven changes is worse than no batch, so the route **always returns
+200** when the run resolves — "every accepted change was already stale" is an answer the reviewer
+needs the detail of, and an error envelope would throw that detail away. The response also carries
+every finding re-derived, so the queue re-renders from one round trip.
+
+### Versioning — fork only when needed
+
+Unchanged, and deliberately so: the batch inherits it from `applyFinding` rather than reimplementing
+it. A launched version is deep-copied to a fresh draft before the first write; an editable draft is
+written in place; and a second batch from the same run converges on the draft the first one made
+(`findRunReviewDraft`). So repeated batches do not pile up versions, and the draft is the one thing
+the reviewer opens in Build afterwards.
+
+### The AI leg is opt-in and, until Phase 3, openly deferred
+
+A finding carrying an `applyInstruction` cannot be executed by its structured op alone — the steer
+has to reach the wording — so the deterministic leg reports it as `needs_ai` and leaves it
+`accepted`. It is not applied with the instruction discarded: an instruction silently ignored is a
+worse outcome than one openly deferred, because the reviewer believes it was honoured. Phase 3
+routes those findings through the **Structure Edit Agent** (`lib/app/questionnaire/edit-agent/`),
+which already turns a plain-English instruction into a validated `EditPlan` executed
+deterministically by `resolve.ts` — the model never touches the data.
+
 ### "Open in editor" — the refine path
 
 The one-click apply lands the drafted question as-is; when the wording (or a choice list) needs work
