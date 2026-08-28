@@ -46,6 +46,7 @@ export {
   FONT_PAIRINGS,
   FONT_PAIRING_COPY,
   FONT_PAIRING_STACKS,
+  MONO_FONT_STACK,
   NEUTRAL_FONT_STACK,
   resolveFontPairing,
   type FontPairing,

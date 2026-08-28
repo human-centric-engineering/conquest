@@ -64,7 +64,7 @@ export interface DemoClientView {
   logoMarkUrl: string | null;
   /** Light-on-dark lockup src, or null. */
   logoDarkUrl: string | null;
-  /** `'editorial' | 'contemporary' | 'neutral'`; null = the system stack. */
+  /** One of `FONT_PAIRINGS` (theming/fonts.ts); null = the system stack. */
   fontPairing: string | null;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;

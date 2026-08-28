@@ -66,7 +66,7 @@ const welcomeCopyField = z
   .nullable();
 
 /**
- * Empty string → null; otherwise one of the three pairings.
+ * Empty string → null; otherwise one of the pairings in `FONT_PAIRINGS`.
  *
  * Strict here and forgiving in `resolveFontPairing`, deliberately: an admin typing into a
  * form should be told their value is wrong, while a value already IN the column (from a

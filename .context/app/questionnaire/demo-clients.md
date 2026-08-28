@@ -60,7 +60,7 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 | `accentColorEnd`        | String?  | **kit** hex second accent (surfaces, not the CTA); null → the accent alone                        |
 | `logoMarkUrl`           | String?  | **kit** square mark (https or `/uploads/...`); null → none                                        |
 | `logoDarkUrl`           | String?  | **kit** light-on-dark lockup; null → the standard lockup everywhere                               |
-| `fontPairing`           | String?  | **kit** `editorial` \| `contemporary` \| `neutral`; null → `neutral` (the system stack)           |
+| `fontPairing`           | String?  | **kit** one of the six pairings in `theming/fonts.ts`; null → `neutral` (the system stack)        |
 | timestamps              | DateTime |                                                                                                   |
 
 `AppQuestionnaire.demoClientId String?` — nullable FK, `onDelete: SetNull`, indexed.
@@ -212,15 +212,25 @@ near-black, so a client who supplied a dark lockup gets it there even with no su
 email and the export PDFs render onto paper-white and must not follow the band's choice.
 
 **The type.** `fontPairing` is one choice covering two faces, not two font-family boxes: a
-typed family name is a worse form and a worse failure (a typo silently falls back). The three
-pairings live in `theming/fonts.ts` with their stacks and their admin copy;
-`app/layout.tsx` loads the four brand faces via `next/font` with **`preload: false`**, so a
-marketing page does not fetch typefaces only a demo client uses. `themeToCssVariables` emits
+typed family name is a worse form and a worse failure (a typo silently falls back). The six
+pairings live in `theming/fonts.ts` with their stacks and their admin copy — `neutral` (the
+system stack), `humanist` (Outfit / Source Sans 3), `editorial` (Instrument Serif / Newsreader),
+`classical` (Playfair Display / Lora), `contemporary` (Bricolage Grotesque / Space Grotesk) and
+`monospace` (JetBrains Mono / IBM Plex Mono). `app/layout.tsx` loads the ten brand faces via
+`next/font` with **`preload: false`**, so a marketing page does not fetch typefaces only a demo
+client uses — that opt-out is what makes the list cheap to grow, and the parity test derives its
+expected count from `FONT_PAIRINGS` so a seventh pairing that preloads fails rather than taxing
+every page. `themeToCssVariables` emits
 `--app-font-display` / `--app-font-body` only for a non-neutral pairing — `neutral` IS the
 stylesheet default, and an inline style would beat it on portalled roots. The link between the
 stack strings and the `next/font` variable names is nothing but a string, so
 `tests/unit/lib/app/questionnaire/theming/fonts.test.ts` reads `app/layout.tsx` and checks
 them against each other; a rename on either side fails there rather than rendering in Georgia.
+The same file pins two invariants a seventh pairing could quietly break: **no two pairings share
+a face** (a duplicate would cost a download to look identical on screen), and **`monospace` tails
+`MONO_FONT_STACK`, not `NEUTRAL_FONT_STACK`**. That second one is the only place the generic
+matters — a mono stack falling back to the neutral sans renders proportional and then reflows to
+fixed-width the moment the webfont lands, mid-read.
 
 **Reading is forgiving, writing is strict.** `resolveFontPairing` resolves null and anything
 unrecognised to `neutral` (the column is plain TEXT, so a rollback or a seed can put anything
@@ -388,8 +398,10 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   (valid inputs only — a half-typed hex shows the default, not a broken swatch).
 - Beneath it, **"The page itself"** carries the brand kit: canvas colour, ink colour, their two
   dark-mode counterparts (both placeholdered _"Leave blank to derive it"_, which is the path
-  almost every client takes), second accent, a **Typeface** select (the three pairings, with the chosen one's description under
-  it), and the **light-on-dark logo** + **square mark** image fields. Ink is placeholdered
+  almost every client takes), second accent, a **Typeface** select (the six pairings, with the
+  chosen one's description under it — the picker is a plain `<select>` because the description
+  line, not the option label, is what tells an admin what they are choosing), and the
+  **light-on-dark logo** + **square mark** image fields. Ink is placeholdered
   _"Leave blank to derive it"_ because deriving is the path almost every client takes.
 - **Colours are pickers now, not text boxes.** `<BrandColorField>` pairs a native
   `<input type="color">` (OS picker, eyedropper on macOS/Chrome) with the hex box, which stays

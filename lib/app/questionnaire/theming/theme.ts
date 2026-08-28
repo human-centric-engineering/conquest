@@ -93,7 +93,7 @@ export interface DemoClientTheme {
    * brand's ink disappears on its own dark canvas, and no amount of backdrop fixes that.
    */
   logoDarkUrl?: string | null;
-  /** `'editorial' | 'contemporary' | 'neutral'`; null/absent/unknown → the system stack. */
+  /** One of `FONT_PAIRINGS` (theming/fonts.ts); null/absent/unknown → the system stack. */
   fontPairing?: string | null;
   /**
    * The same ground in DARK mode. Null/absent → derived from {@link canvasColor} (the brand's

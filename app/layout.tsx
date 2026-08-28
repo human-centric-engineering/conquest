@@ -7,8 +7,14 @@ import {
   Bricolage_Grotesque,
   Fraunces,
   Hanken_Grotesk,
+  IBM_Plex_Mono,
   Instrument_Serif,
+  JetBrains_Mono,
+  Lora,
   Newsreader,
+  Outfit,
+  Playfair_Display,
+  Source_Sans_3,
   Space_Grotesk,
 } from 'next/font/google';
 import { ThemeProvider } from '@/hooks/use-theme';
@@ -44,10 +50,13 @@ const bodyFont = Hanken_Grotesk({
 // through — but APPLIED only where a client has chosen a pairing, via the `--app-font-*`
 // variables the theming module emits onto that questionnaire's surface.
 //
-// `preload: false` on all four, deliberately: preloading would have every page in the
-// product fetch four typefaces it almost certainly does not use, to serve the minority of
+// `preload: false` on every one of them, deliberately: preloading would have every page in
+// the product fetch ten typefaces it almost certainly does not use, to serve the minority of
 // questionnaires that pick one. They load on demand instead, and `display: 'swap'` means
-// the surface renders immediately in the fallback while they do.
+// the surface renders immediately in the fallback while they do. That opt-out is what makes
+// the pairing list cheap to GROW — a seventh pairing costs two declarations here and nothing
+// at all to a page that never uses it — so the parity test asserts it, and an added pairing
+// cannot quietly put its faces on the critical path of every marketing page.
 //
 // The `variable` names here are the contract FONT_PAIRING_STACKS references by name; a
 // rename on either side degrades silently to the fallback stack, so a parity test asserts
@@ -77,6 +86,46 @@ const contemporaryBodyFont = Space_Grotesk({
   display: 'swap',
   preload: false,
 });
+const humanistDisplayFont = Outfit({
+  subsets: ['latin'],
+  variable: '--font-brand-humanist-display',
+  display: 'swap',
+  preload: false,
+});
+const humanistBodyFont = Source_Sans_3({
+  subsets: ['latin'],
+  variable: '--font-brand-humanist-body',
+  display: 'swap',
+  preload: false,
+});
+const classicalDisplayFont = Playfair_Display({
+  subsets: ['latin'],
+  variable: '--font-brand-classical-display',
+  display: 'swap',
+  preload: false,
+});
+const classicalBodyFont = Lora({
+  subsets: ['latin'],
+  variable: '--font-brand-classical-body',
+  display: 'swap',
+  preload: false,
+});
+const monospaceDisplayFont = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-brand-monospace-display',
+  display: 'swap',
+  preload: false,
+});
+// IBM Plex Mono is the one brand face with no variable axis on Google Fonts, so the weights it
+// serves have to be named. Three: body copy, the emphasis Markdown produces inside an answer,
+// and the semibold the strip and buttons reach for.
+const monospaceBodyFont = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-brand-monospace-body',
+  display: 'swap',
+  preload: false,
+});
 
 /** Every font variable this layout declares, in one place for the <html> className. */
 const FONT_VARIABLES = [
@@ -86,6 +135,12 @@ const FONT_VARIABLES = [
   editorialBodyFont.variable,
   contemporaryDisplayFont.variable,
   contemporaryBodyFont.variable,
+  humanistDisplayFont.variable,
+  humanistBodyFont.variable,
+  classicalDisplayFont.variable,
+  classicalBodyFont.variable,
+  monospaceDisplayFont.variable,
+  monospaceBodyFont.variable,
 ].join(' ');
 
 // Root metadata, driven entirely by the BRAND seam (#519). The `template`

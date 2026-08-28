@@ -681,10 +681,14 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
                 <FieldHelp title="Typeface pairing">
                   The type the questionnaire is set in — one choice, two faces (headings and body).{' '}
                   <strong>Neutral</strong> is the system typeface and what every questionnaire uses
-                  today; <strong>Editorial</strong> is a printed-matter serif that suits Broadsheet;{' '}
-                  <strong>Contemporary</strong> is a grotesque drawn for Horizon. Unlike the
+                  today. <strong>Humanist</strong> is a warm, open sans and the safest step away
+                  from it; <strong>Editorial</strong> is a printed-matter serif that suits
+                  Broadsheet; <strong>Classical</strong> is a formal, high-contrast serif;{' '}
+                  <strong>Contemporary</strong> is a grotesque drawn for Horizon; and{' '}
+                  <strong>Monospace</strong> sets the whole conversation fixed-width — striking for
+                  an engineering brand, but slower to read once answers run long. Unlike the
                   colours, this on its own does not make a questionnaire white-label — it is a
-                  design choice, not an identity.
+                  design choice, not an identity. The one-line summary below updates as you choose.
                 </FieldHelp>
               </Label>
               <select
