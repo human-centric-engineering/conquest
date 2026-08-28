@@ -40,7 +40,7 @@ const files = (n: number): string[] => Array.from({ length: n }, (_, i) => `f${i
 describe('chunk', () => {
   it('partitions exactly — every item once, none lost', () => {
     const input = files(101);
-    const flat = (chunk(input, 4)).flat();
+    const flat = chunk(input, 4).flat();
 
     expect(flat).toHaveLength(input.length);
     expect(new Set(flat).size).toBe(input.length);
@@ -49,7 +49,7 @@ describe('chunk', () => {
 
   it.each([1, 2, 3, 7, 64])('partitions exactly at %i chunks', (n) => {
     const input = files(50);
-    const flat = (chunk(input, n)).flat();
+    const flat = chunk(input, n).flat();
     expect([...flat].sort()).toEqual([...input].sort());
   });
 
@@ -145,7 +145,7 @@ describe('lintTargets', () => {
     const listFiles = () =>
       ['a.ts', 'b.tsx', 'c.js', 'd.mjs', 'e.cjs', 'f.jsx', 'g.md', 'h.json', 'i.css'].join('\n');
 
-    const out = (await lintTargets({ listFiles, eslint: eslintStub() }));
+    const out = await lintTargets({ listFiles, eslint: eslintStub() });
 
     expect(out).toEqual(['a.ts', 'b.tsx', 'c.js', 'd.mjs', 'e.cjs', 'f.jsx'].sort());
     expect(LINTABLE).toContain('.tsx');
@@ -157,23 +157,23 @@ describe('lintTargets', () => {
     // equivalent silently drifts from the real config.
     const listFiles = () => ['keep.ts', 'coverage/skip.js'].join('\n');
 
-    const out = (await lintTargets({
+    const out = await lintTargets({
       listFiles,
       eslint: eslintStub(['coverage/skip.js']),
-    }));
+    });
 
     expect(out).toEqual(['keep.ts']);
   });
 
   it('is deterministic, so the same commit chunks the same way on every runner', async () => {
     const listFiles = () => ['z.ts', 'a.ts', 'm.ts'].join('\n');
-    const out = (await lintTargets({ listFiles, eslint: eslintStub() }));
+    const out = await lintTargets({ listFiles, eslint: eslintStub() });
     expect(out).toEqual(['a.ts', 'm.ts', 'z.ts']);
   });
 
   it('ignores blank lines from git output', async () => {
     const listFiles = () => 'a.ts\n\n  \nb.ts\n';
-    const out = (await lintTargets({ listFiles, eslint: eslintStub() }));
+    const out = await lintTargets({ listFiles, eslint: eslintStub() });
     expect(out).toEqual(['a.ts', 'b.ts']);
   });
 });
