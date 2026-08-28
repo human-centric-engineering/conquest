@@ -31,6 +31,10 @@ on:
         description: 'Comma-separated LINT_CHUNKS values to measure (1 = control, no chunking)'
         required: false
         default: '1,4,8'
+      heap:
+        description: 'V8 old-space cap in MB. 8192 measures the peak; 5120 tests survival at the private-runner ceiling.'
+        required: false
+        default: '8192'
 
 permissions:
   contents: read
@@ -47,7 +51,7 @@ jobs:
       # not be killed at it — capping here would report "OOM" for every arm and
       # tell us nothing about which is smallest. The verdict comes from
       # comparing the numbers against 5120 afterwards, not from surviving it.
-      NODE_OPTIONS: '--max-old-space-size=8192'
+      HEAP_MB: ${{ inputs.heap || '5120' }}
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
     steps:
       - uses: actions/checkout@v7
@@ -72,20 +76,29 @@ jobs:
           # typescript-eslint, which invalidates every entry.
           # `inputs.chunks` is empty on a push event — fall back to the default set.
           ARMS_RAW="${{ inputs.chunks }}"
-          IFS=',' read -ra ARMS <<< "${ARMS_RAW:-1,4,8}"
-          printf '%-8s %-12s %s\n' "chunks" "peak" "seconds" | tee -a "$GITHUB_STEP_SUMMARY"
+          IFS=',' read -ra ARMS <<< "${ARMS_RAW:-8,16,24}"
+          echo "heap cap: ${HEAP_MB} MB" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '%-8s %-12s %-7s %s\n' "chunks" "peak" "result" "seconds" | tee -a "$GITHUB_STEP_SUMMARY"
           for n in "${ARMS[@]}"; do
             start=$(date +%s)
             # `|| true` — a lint ERROR is not a probe failure. We are measuring
             # memory, and stopping on a rule violation would abandon the
             # remaining arms and produce a partial table.
-            LINT_CHUNKS="$n" /usr/bin/time -v \
+            LINT_CHUNKS="$n" NODE_OPTIONS="--max-old-space-size=${HEAP_MB}" /usr/bin/time -v \
               node scripts/ci/chunked-lint.mjs --no-cache \
               > "/tmp/lint-$n.log" 2> "/tmp/time-$n.log" || true
             kb=$(grep "Maximum resident set size" "/tmp/time-$n.log" | grep -oE '[0-9]+$')
-            printf '%-8s %-12s %s\n' \
+            # SURVIVAL is the real verdict at a realistic cap: a V8 abort prints
+            # this and exits 134, which `|| true` would otherwise hide.
+            if grep -qE "JavaScript heap out of memory|Allocation failed" "/tmp/time-$n.log" "/tmp/lint-$n.log"; then
+              verdict="OOM"
+            else
+              verdict="ok"
+            fi
+            printf '%-8s %-12s %-7s %s\n' \
               "$n" \
               "$(awk -v k="${kb:-0}" 'BEGIN{printf "%.2f GB", k/1048576}')" \
+              "$verdict" \
               "$(( $(date +%s) - start ))" | tee -a "$GITHUB_STEP_SUMMARY"
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
