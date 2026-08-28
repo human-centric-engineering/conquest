@@ -87,6 +87,19 @@ colour drives the whole band. With no surface the band sits on the neutral respo
 Status dots use fixed semantic hues (emerald / amber / sky) that read on both light and dark
 surfaces; the closed dot is muted `currentColor`.
 
+**The logo follows the same reasoning as the text.** A lockup drawn in the brand's ink is as
+invisible on a dark band as near-black type would be, and no backdrop chip fixes that. So
+`resolveTheme` resolves **`bandLogoUrl`** — the lockup chosen for the ground the band actually
+paints (its logo backdrop if enabled, else `surfaceColor`, else the client's `canvasColor`) —
+and `--app-logo-url` is emitted from that rather than from `logoUrl`. The band renders one
+variable and needs no branch, and `logoUrl` keeps meaning "the light-ground lockup" for the
+invitation email and the export PDFs, which render onto paper-white. See
+[demo-clients.md](./demo-clients.md) § "The brand kit".
+
+`hasLogo` in `BrandThemeProvider` therefore reads `bandLogoUrl`, not `logoUrl`: a client who
+supplies ONLY a dark lockup still gets a band carrying their mark rather than the ConQuest
+wordmark standing in for it.
+
 ## Three band modes
 
 The band has three mutually exclusive forms, decided in `BrandThemeProvider`:
@@ -128,6 +141,11 @@ would still depend on the legibility of an image we have never seen.
 miniature of this band with an illustrative title + date pill, reading the same `--app-on-surface`
 var. Update it alongside any band layout change so the admin "branding" preview stays honest.
 
+It also paints the client's **canvas and ink** and sets its sample question in the chosen
+**display face**. That is not decoration: the preview renders in the admin surface, outside any
+`[data-surface='respondent']` scope, so the stylesheet's canvas tokens do not reach it — without
+painting the ground itself, the one screen where an admin chooses a canvas would not show one.
+
 ## Tests
 
 - `tests/unit/lib/app/questionnaire/header/schedule.test.ts` — every status/date branch.
@@ -137,6 +155,11 @@ var. Update it alongside any band layout change so the admin "branding" preview 
   `--app-on-surface`, `hasBrandIdentity`, and the no-colour-vars-when-unbranded rule.
 - `tests/unit/lib/app/questionnaire/theming/brand-image.test.ts` — the logo/banner dimension
   specs and the `/uploads/` src predicate.
+- `tests/unit/lib/app/questionnaire/theming/brand-kit.test.ts` — the ground (derived ink,
+  `canvasIsDark`), which lockup the band draws on each ground, what counts as brand identity,
+  and that every emitted variable has a stylesheet default.
+- `tests/unit/lib/app/questionnaire/theming/fonts.test.ts` — the pairing ↔ `next/font` variable
+  parity check, which is the only thing standing between a rename and a silent fallback.
 - `tests/unit/components/app/questionnaire/chat/brand-theme-provider.test.tsx` — all three band
   modes (including that a banner suppresses both the logo and the wordmark), plus title/
   eyebrow/schedule/no-band/surface-contrast rendering.

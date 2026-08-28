@@ -10,7 +10,7 @@ import {
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
-import { themeToCssVariables } from '@/lib/app/questionnaire/theming';
+import { canvasBackdropVars, themeToCssVariables } from '@/lib/app/questionnaire/theming';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
@@ -19,6 +19,7 @@ import {
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
   resolveRespondentChromeForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveRespondentLayoutForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -103,6 +104,7 @@ export default async function PublicQuestionnairePage({
     anonymous,
     presentationMode,
     respondentLayout,
+    chatTextScaleIndex,
     respondentChrome,
     answerPanelScope,
     voiceConfigured,
@@ -121,6 +123,7 @@ export default async function PublicQuestionnairePage({
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveRespondentLayoutForVersion(versionId),
+    resolveChatTextScaleIndexForVersion(versionId),
     resolveRespondentChromeForVersion(versionId),
     resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
@@ -148,7 +151,10 @@ export default async function PublicQuestionnairePage({
     // its display font and the padding that lines the conversation up with the chrome's own
     // container. Before, it carried `h-[calc(100dvh-9rem)]` — a guess at the height of a header and
     // footer it could not see, and simply wrong the moment either becomes a setting.
-    <RespondentChrome mode={respondentChrome}>
+    // The client's ground travels to the shell as well as to the surface: the theme-switch
+    // row and the gutters either side of the column sit OUTSIDE the surface root and cannot
+    // inherit its brand — see `canvasBackdropVars`.
+    <RespondentChrome mode={respondentChrome} canvasStyle={canvasBackdropVars(theme)}>
       <div className={`${display.variable} flex h-full min-h-0 flex-col px-4 py-6`}>
         {/* Admin "Preview as respondent" chrome — the ConQuest signature (mirroring the admin
           surface) plus a slim meta strip above the brand surface. It's admin meta, not the
@@ -188,6 +194,7 @@ export default async function PublicQuestionnairePage({
               anonymous={anonymous}
               presentationMode={presentationMode}
               respondentLayout={respondentLayout}
+              chatTextScaleIndex={chatTextScaleIndex}
               answerPanelScope={answerPanelScope}
               reasoningPlacement={reasoningPlacement}
               reasoningDwellMs={reasoningDwell.dwellMs}

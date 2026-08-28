@@ -48,6 +48,7 @@ single JSON column for the profile fields:
 | Answer panel scope                    | `answerSlotPanelScope`      | String (enum)          | `'full_progress'`   |
 | Presentation mode                     | `presentationMode`          | String (enum)          | `'both'`            |
 | Respondent layout                     | `respondentLayout`          | String (enum)          | `'classic'`         |
+| Opening chat text size                | `chatTextSize`              | String (enum)          | `'standard'`        |
 | Inline answer correction              | `inlineCorrectionEnabled`   | Boolean                | `true`              |
 | Session resume                        | `sessionResumeEnabled`      | Boolean                | `true`              |
 | Show percent-completed text           | `showProgressPercentText`   | Boolean                | `true`              |
@@ -99,6 +100,16 @@ Whichever is chosen, every feature stays reachable — the layout registry enfor
 compile time. Both the read path and the component resolver fall back to `classic` for an
 absent or unrecognised value, so no existing questionnaire changes appearance and a rollback
 cannot blank a live surface. See `.context/app/questionnaire/respondent-layouts.md`.
+
+`chatTextSize` (`small` | `standard` | `large` | `largest`) chooses the size the conversation
+OPENS at. An explicitly authored rung — anything but `standard`, which is the column default
+and reads as "never set" — is adopted on arrival even by a respondent who has stepped before,
+once per authored value: step away from it and your size stands until the author moves the
+setting again. Deliberately a starting point and not a cap. There is no switch that removes
+the in-session stepper, and no authored value that can pin it — an accessibility affordance
+an author could permanently override would not be one. Absent or unrecognised resolves to
+`standard`, the size every questionnaire had before the setting existed. See
+`.context/app/questionnaire/chat-text-size.md`.
 
 `respondentChrome` (F-chrome) chooses how much of ConQuest shows AROUND the respondent
 surface: `full` (the default — the site header and footer every respondent page has always

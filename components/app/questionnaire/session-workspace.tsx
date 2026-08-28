@@ -141,6 +141,15 @@ export interface SessionWorkspaceProps {
    */
   respondentLayout?: RespondentLayout;
   /**
+   * The rung the conversation OPENS at (`config.chatTextSize`, already resolved to a ladder index
+   * by the server). An explicitly authored rung — anything but the standard one — is adopted on
+   * arrival even by a respondent who has stepped before, once per authored value; after that their
+   * own rung stands until the author moves the setting again. See the adoption effect in
+   * `useSessionWorkspace` for the full rule. Omitted (a client-booted surface with no config yet)
+   * → the standard rung, which is what every session opened at before the setting existed.
+   */
+  chatTextScaleIndex?: number;
+  /**
    * How much of the live answer panel the respondent sees (F7.2): `full_progress`, `answered_only`,
    * or `hidden` — the chat-only surface, where no panel rides beside the conversation, the mobile
    * "Review answers" sheet is gone, and the transcript takes the full shell width. Defaults to
@@ -229,6 +238,7 @@ export function SessionWorkspace({
   autoStart = false,
   presentationMode = 'both',
   respondentLayout,
+  chatTextScaleIndex,
   answerPanelScope = 'full_progress',
   initialFormView,
   reasoningPlacement,
@@ -269,6 +279,7 @@ export function SessionWorkspace({
     personas,
     capture,
     panelReturnsAtLg: panelInline,
+    chatTextScaleIndex,
   });
 
   const {

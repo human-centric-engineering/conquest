@@ -57,6 +57,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAttachmentsEnabledForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
   resolveShowProgressPercentTextForVersion: vi.fn(),
+  resolveChatTextScaleIndexForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveReasoningDwellForVersion: vi.fn(),
   resolveReasoningPlacementForVersion: vi.fn(),
@@ -133,6 +134,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
   resolveShowProgressPercentTextForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -196,6 +198,7 @@ beforeEach(() => {
   });
   vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
   vi.mocked(resolveShowProgressPercentTextForVersion).mockResolvedValue(false);
+  vi.mocked(resolveChatTextScaleIndexForVersion).mockResolvedValue(1);
 });
 
 describe('SessionViewerPage', () => {

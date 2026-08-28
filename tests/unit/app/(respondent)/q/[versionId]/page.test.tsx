@@ -46,6 +46,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveInlineCorrectionForVersion: vi.fn(),
   resolveSessionResumeEnabledForVersion: vi.fn(),
   resolveShowProgressPercentTextForVersion: vi.fn(),
+  resolveChatTextScaleIndexForVersion: vi.fn(),
 }));
 
 // The chrome is rendered by the page now, not inherited from a layout. Stubbed to a pass-through
@@ -122,6 +123,7 @@ import {
   resolveInlineCorrectionForVersion,
   resolveSessionResumeEnabledForVersion,
   resolveShowProgressPercentTextForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -144,6 +146,17 @@ const MOCK_THEME: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: false,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 function makeParams(versionId: string = VERSION_ID) {
@@ -173,6 +186,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
     vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveShowProgressPercentTextForVersion).mockResolvedValue(true);
+    vi.mocked(resolveChatTextScaleIndexForVersion).mockResolvedValue(1);
     // Per-questionnaire opt-ins default ON here; the page reads the config opt-in for each
     // affordance, and dedicated tests below exercise the config-off path.
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);

@@ -175,6 +175,37 @@ function switchNear(labelText: string | RegExp): HTMLElement {
   throw new Error(`No switch found near label: ${String(labelText)}`);
 }
 
+/**
+ * The number input inside the same field block as a label. These inputs carry no id, and their
+ * values collide across the form (several sit at 1, 3 or 4 by default), so finding one by its
+ * displayed value picks an arbitrary field and asserts nothing reliable.
+ */
+function numberNear(labelText: string | RegExp): HTMLInputElement {
+  const label = screen.getByText(labelText);
+  let node: HTMLElement | null = label;
+  while (node) {
+    const input = node.querySelector('input[type="number"]');
+    if (input) return input as HTMLInputElement;
+    node = node.parentElement;
+  }
+  throw new Error(`config-editor test: no number input near ${String(labelText)}`);
+}
+
+/** Find the one native <select> whose option values are exactly `values`. */
+function selectWithOptions(values: string[]): HTMLSelectElement {
+  const match = screen
+    .getAllByRole('combobox')
+    .map((el) => el as HTMLSelectElement)
+    .find(
+      (el) =>
+        Array.from(el.options)
+          .map((o) => o.value)
+          .join('|') === values.join('|')
+    );
+  if (!match) throw new Error(`config-editor test: no select with options ${values.join(', ')}`);
+  return match;
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ConfigEditor', () => {
@@ -251,32 +282,24 @@ describe('ConfigEditor', () => {
 
   it('PATCHes minQuestionsAnswered as an integer on save', () => {
     const { specs } = setup({ minQuestionsAnswered: 0, coverageThreshold: 0.9 });
-    const inputs = screen.getAllByRole('spinbutton');
-    // minQuestionsAnswered has min=0; find it by current value "0"
-    const minInput = inputs.find((el) => (el as HTMLInputElement).value === '0') as HTMLElement;
-    fireEvent.change(minInput, { target: { value: '5' } });
+    // Located by label, not by displayed value: `earlyFinishMinQuestions` also defaults to 0, so
+    // a value match picks whichever comes first in the DOM rather than the field named here.
+    fireEvent.change(numberNear(/^Min questions answered/), { target: { value: '5' } });
     clickSave();
     expect(bodyOf(specs).minQuestionsAnswered).toBe(5);
   });
 
   it('sends the entered minQuestionsAnswered value on save', () => {
     const { specs } = setup({ minQuestionsAnswered: 0 });
-    // Find the min-questions input by its current value
-    const inputs = screen.getAllByRole('spinbutton');
-    // minQuestionsAnswered is the first numeric input (value "0")
-    const minInput = inputs.find((el) => (el as HTMLInputElement).value === '0') as HTMLElement;
-    fireEvent.change(minInput, { target: { value: '4' } });
+    fireEvent.change(numberNear(/^Min questions answered/), { target: { value: '4' } });
     clickSave();
     expect(bodyOf(specs).minQuestionsAnswered).toBe(4);
   });
 
   it('sends coverageThreshold clamped to [0,1]', () => {
     const { specs } = setup({ coverageThreshold: 1 });
-    const inputs = screen.getAllByRole('spinbutton');
-    const coverageInput = inputs.find(
-      (el) => (el as HTMLInputElement).value === '1'
-    ) as HTMLElement;
-    fireEvent.change(coverageInput, { target: { value: '0.8' } });
+    // `maxDataSlotAttempts` also defaults to 1 — same collision as above.
+    fireEvent.change(numberNear(/^Coverage threshold/), { target: { value: '0.8' } });
     clickSave();
     expect(bodyOf(specs).coverageThreshold).toBe(0.8);
   });
@@ -354,6 +377,27 @@ describe('ConfigEditor', () => {
     fireEvent.click(milestoneToggle());
     clickSave();
     expect(bodyOf(specs).milestoneBannerEnabled).toBe(false);
+  });
+
+  it('closes the threshold list at the cap and says why', () => {
+    // The cap is enforced by disabling the controls, not by rejecting the press: the guard inside
+    // `addMilestoneThreshold` is unreachable from the UI, so the observable contract is the
+    // disabled input, the disabled button, and the line telling the admin to remove one first.
+    setup({
+      milestoneBannerEnabled: true,
+      milestoneBannerThresholds: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60],
+    });
+    expect(screen.getByPlaceholderText('e.g. 60')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^add$/i })).toBeDisabled();
+    expect(
+      screen.getByText(/At most 12 thresholds — remove one to add another\./)
+    ).toBeInTheDocument();
+  });
+
+  it('leaves the threshold controls live below the cap', () => {
+    setup({ milestoneBannerEnabled: true, milestoneBannerThresholds: [25, 75] });
+    expect(screen.getByPlaceholderText('e.g. 60')).toBeEnabled();
+    expect(screen.queryByText(/At most 12 thresholds/)).not.toBeInTheDocument();
   });
 
   it('adds a new threshold and PATCHes the sorted list on save', () => {
@@ -1709,5 +1753,105 @@ describe('ConfigEditor — interviewer strategy', () => {
     clickSave();
     const saved = bodyOf(specs).interviewerStrategy as { openingExamples: string[] };
     expect(saved.openingExamples).toEqual(['Tell me about your week.', 'What made you say yes?']);
+  });
+
+  // ── Controls whose only assertion is what they save ──────────────────────────
+  //
+  // A long tail of settings-tab fields that had no coverage at all: each is a small handler
+  // between a control and the save body, and the failure mode for every one of them is the same
+  // and silent — an admin sets it, the payload does not carry it, and the questionnaire runs on
+  // the old value with the editor showing the new one.
+
+  describe('the respondent-experience controls', () => {
+    it('saves the chosen opening text size', async () => {
+      // The rung the conversation opens at. It reached the respondent surface but was dropped on
+      // the way there once already, so the payload half is worth pinning on its own.
+      const { specs } = setup({ chatTextSize: 'standard' });
+      const user = userEvent.setup();
+      await user.selectOptions(
+        selectWithOptions(['small', 'standard', 'large', 'largest']),
+        'largest'
+      );
+      clickSave();
+      expect(bodyOf(specs).chatTextSize).toBe('largest');
+    });
+
+    it('reflects a stored text size rather than always opening on the default', () => {
+      setup({ chatTextSize: 'large' });
+      expect(selectWithOptions(['small', 'standard', 'large', 'largest']).value).toBe('large');
+    });
+
+    it('carries an untouched text size through an unrelated save', () => {
+      // The regression that matters more than the edit path: a field that quietly resets to the
+      // default on somebody else's save.
+      const { specs } = setup({ chatTextSize: 'largest' });
+      clickSave();
+      expect(bodyOf(specs).chatTextSize).toBe('largest');
+    });
+  });
+
+  describe('the answer-quality numbers', () => {
+    it('saves an edited answer-confidence floor as a number', () => {
+      const { specs } = setup({ answerConfidenceFloor: 0.5 });
+      fireEvent.change(numberNear(/^Answer confidence floor/), { target: { value: '0.65' } });
+      clickSave();
+      expect(bodyOf(specs).answerConfidenceFloor).toBe(0.65);
+    });
+
+    it('saves an edited data-slot attempt cap as a number', () => {
+      const { specs } = setup({ maxDataSlotAttempts: 1 });
+      fireEvent.change(numberNear(/^Data-slot attempts/), { target: { value: '3' } });
+      clickSave();
+      expect(bodyOf(specs).maxDataSlotAttempts).toBe(3);
+    });
+
+    it('saves the chosen answer-fit mode', async () => {
+      const { specs } = setup({ answerFitMode: 'fallback' });
+      const user = userEvent.setup();
+      await user.selectOptions(selectWithOptions(['off', 'fallback', 'always']), 'always');
+      clickSave();
+      expect(bodyOf(specs).answerFitMode).toBe('always');
+    });
+  });
+
+  describe('the contradiction sweep', () => {
+    it('saves both sweep numbers once the sweep is on', () => {
+      // Both inputs only exist while the mode is something other than `off`, which is why the
+      // fixture turns it on rather than asserting against the default.
+      const { specs } = setup({
+        contradictionMode: 'flag',
+        contradictionWindowN: 4,
+        contradictionEveryNTurns: 3,
+      });
+      fireEvent.change(numberNear(/^Look-back window/), { target: { value: '6' } });
+      fireEvent.change(numberNear(/^Detection cadence/), { target: { value: '2' } });
+      clickSave();
+      expect(bodyOf(specs)).toMatchObject({
+        contradictionWindowN: 6,
+        contradictionEveryNTurns: 2,
+      });
+    });
+  });
+
+  describe('the early-finish question bar', () => {
+    it('saves the entered question count', () => {
+      const { specs } = setup({ allowEarlyFinish: true, earlyFinishMinQuestions: 0 });
+      // Uniquely identifiable: it is the only input on the form that placeholders with "Off".
+      const input = screen.getByPlaceholderText('Off');
+      fireEvent.change(input, { target: { value: '8' } });
+      clickSave();
+      expect(bodyOf(specs).earlyFinishMinQuestions).toBe(8);
+    });
+  });
+
+  describe('the progress milestones', () => {
+    it('adds a typed threshold to the saved list', async () => {
+      const { specs } = setup({ milestoneBannerThresholds: [50] });
+      const user = userEvent.setup();
+      await user.type(screen.getByPlaceholderText('e.g. 60'), '75');
+      await user.click(screen.getByRole('button', { name: /^Add$/i }));
+      clickSave();
+      expect(bodyOf(specs).milestoneBannerThresholds).toEqual([50, 75]);
+    });
   });
 });

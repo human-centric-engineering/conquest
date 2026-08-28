@@ -16,7 +16,18 @@
  * used a different width from the page it stands in for. Four numbers describing one thing, none of
  * them checkable, and all of them wrong the moment the chrome above them becomes a setting.
  *
- * So the shell measures itself: a flex column of exactly viewport height, with the chrome sizing to
+ * ## And it carries the theme switch
+ *
+ * Every other surface in the product has one, via `HeaderActions`. These three pages shed that
+ * header when they left the `(public)` group and lost the switch with it — in the one place where
+ * somebody reads continuous prose for twenty minutes, possibly at night. `full` chrome still gets
+ * it from `AppHeader`; `co_branded` and `white_label` render `RespondentThemeToggle` here. Putting
+ * it in the chrome rather than in the layouts means all four layouts have it and none of them had
+ * to be told.
+ *
+ * ## So the shell measures itself
+ *
+ * A flex column of exactly viewport height, with the chrome sizing to
  * its content and the surface taking the rest. Flex rather than the grid the plan called for,
  * because a three-row grid puts a lone child in row ONE — so a white-label page (no header, no
  * footer) would have had its conversation land in the header's row and size to content. Flex has no
@@ -26,12 +37,13 @@
  * @see .context/app/questionnaire/respondent-chrome.md
  */
 
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { AppHeader } from '@/components/layouts/app-header';
 import { PublicNav, PublicNavMenu } from '@/components/layouts/public-nav';
 import { PublicFooter } from '@/components/layouts/public-footer';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
+import { RespondentThemeToggle } from '@/components/app/questionnaire/chrome/respondent-theme-toggle';
 import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
 import { cn } from '@/lib/utils';
 import type { RespondentChrome as RespondentChromeMode } from '@/lib/app/questionnaire/types';
@@ -51,6 +63,16 @@ export interface RespondentChromeProps {
   children: ReactNode;
   /** Extra classes for the surface row, not the shell around it. */
   className?: string;
+  /**
+   * The client's ground, as the two canvas variables and nothing else
+   * (`canvasBackdropVars`). Applied to the shell so the backdrop rules in `brand-theme.css` can
+   * read it — the brand proper lives on the surface root INSIDE `<main>`, which the theme-switch
+   * row and the gutters either side of the column are ancestors of and so cannot inherit from.
+   *
+   * Only the ground travels. Hoisting the whole brand here would repaint the ConQuest header and
+   * footer with it, and `full` chrome is the mode that explicitly keeps them ours.
+   */
+  canvasStyle?: CSSProperties;
 }
 
 export function RespondentChrome({
@@ -58,24 +80,47 @@ export function RespondentChrome({
   shell = true,
   children,
   className,
+  canvasStyle,
 }: RespondentChromeProps) {
   return (
     // Exactly viewport height, not `min-h`: the surface inside scrolls its own conversation, so a
     // page that grew past the viewport would give the respondent two nested scrollbars and a
     // composer they have to scroll the PAGE to reach.
-    <div className="bg-background flex h-dvh flex-col">
+    <div className="bg-background flex h-dvh flex-col" style={canvasStyle}>
       {mode === 'full' && (
         <AppHeader logoHref="/" navigation={<PublicNav />} mobileMenu={<PublicNavMenu />} />
       )}
 
       {/* Co-branded: says who built it, and nothing more. No nav and no link — a respondent
           half-way through a questionnaire offered a route to our pricing page is a respondent who
-          might take it, and the client chose this mode precisely to keep them here. */}
+          might take it, and the client chose this mode precisely to keep them here. The theme
+          switch is the one exception, and it is not a route anywhere: it changes how THIS page
+          looks. */}
       {mode === 'co_branded' && (
         <div className="shrink-0 border-b">
-          <div className="container mx-auto px-4 py-2.5">
+          <div className="container mx-auto flex items-center justify-between gap-4 px-4 py-2.5">
             <ConquestWordmark size="nav" />
+            <RespondentThemeToggle />
           </div>
+        </div>
+      )}
+
+      {/* White-label: a bar carrying nothing but the switch.
+          Deliberately a ROW in the shell rather than a floating control over the surface. The
+          shell is a flex column whose surface takes exactly the space the chrome leaves, and a
+          floating button would sit over a layout that has no idea it is there — Horizon is
+          full-bleed, and the answers-drawer trigger already owns a corner. A row cannot overlap
+          anything, and the surface shrinks to fit it by construction.
+          It is not a white-label violation: a sun and a moon are not our branding, and the mode
+          exists to keep ConQuest's identity off the page, not to strip the respondent of a
+          viewing preference every other surface in the product offers. */}
+      {mode === 'white_label' && (
+        // `cq-respondent-backdrop`, not the inherited `bg-background`: this page has no chrome of
+        // ours, but the shell it sits in is still classified a CONSUMER surface, so the row was
+        // painting ConQuest cream (or deep navy) in a ~40px strip directly above the client's
+        // canvas — on the one mode whose entire purpose is that our colours do not appear.
+        <div className="cq-respondent-backdrop flex shrink-0 justify-end px-4 pt-2">
+          <RespondentThemeToggle />
         </div>
       )}
 

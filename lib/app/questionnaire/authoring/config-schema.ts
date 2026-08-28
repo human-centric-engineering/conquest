@@ -65,6 +65,7 @@ import {
   TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
+import { CHAT_TEXT_SIZES } from '@/lib/app/questionnaire/chat/text-scale';
 import { resolveIntroVideo } from '@/lib/app/questionnaire/intro/video';
 import { BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
 
@@ -481,6 +482,9 @@ export const updateConfigSchema = z
     // Defaults to classic, which is what every questionnaire has always looked like.
     respondentLayout: z.enum(RESPONDENT_LAYOUTS).optional(),
     respondentChrome: z.enum(RESPONDENT_CHROMES).optional(),
+    // Where the respondent's text-size ladder starts. Only the opening rung — the in-session
+    // stepper is the respondent's and this cannot cap it. Defaults to standard (today's size).
+    chatTextSize: z.enum(CHAT_TEXT_SIZES).optional(),
     // Inline answer correction (Variant B): let respondents fix a just-captured answer inline
     // (in the chat + on the answer panel) instead of sending a fresh turn. On by default.
     inlineCorrectionEnabled: z.boolean().optional(),

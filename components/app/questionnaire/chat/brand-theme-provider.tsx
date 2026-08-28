@@ -4,8 +4,15 @@
  *
  * Spreads the theming module's CSS custom properties (`--app-cta-color`, `--app-accent-color`,
  * `--app-cta-gradient`, and — when set — `--app-surface-color`, `--app-on-surface`,
- * `--app-logo-bg`, `--app-logo-url`) onto a wrapper so the chat component's accent/CTA colours
- * pick up the brand with no prop drilling.
+ * `--app-logo-bg`, `--app-logo-url`, plus the brand kit's `--app-canvas-color`,
+ * `--app-on-canvas`, `--app-accent-end`, `--app-accent-aura`, `--app-logo-mark-url` and the
+ * `--app-font-*` pairing) onto a wrapper so the chat component's accent/CTA colours, ground
+ * and type pick up the brand with no prop drilling.
+ *
+ * Two data attributes ride alongside them, because CSS cannot branch on whether a variable
+ * was set: `data-brand='conquest'` for a client with no identity at all, and
+ * `data-canvas='custom'` for one who chose their own ground — which re-derives the whole
+ * neutral palette from that colour (see app/brand-theme.css).
  *
  * The band is a two-anchor header — the logo and the title anchor opposite ends, so the band reads
  * as deliberate whether or not there's schedule metadata:
@@ -120,11 +127,22 @@ export function BrandThemeProvider({
   const style = themeToCssVariables(theme) as CSSProperties;
   const hasSurface = Boolean(theme.surfaceColor);
   const hasBackdrop = Boolean(theme.logoBackgroundColor);
-  const hasLogo = Boolean(theme.logoUrl);
+  // The lockup the BAND draws, which is not always `logoUrl`: on a dark brand ground the
+  // resolver hands back the light-on-dark artwork instead. Reading the resolved field rather
+  // than the raw one also means a client who supplies ONLY a dark lockup still gets a band
+  // with their mark in it, rather than the ConQuest wordmark standing in.
+  const hasLogo = Boolean(theme.bandLogoUrl);
   const hasBanner = Boolean(theme.bannerUrl);
   // No client identity at all → ConQuest owns the surface. Drives BOTH the wordmark in
   // the band and (via `data-brand`) the mode-aware ConQuest palette in brand-theme.css.
   const isConquest = !theme.hasBrandIdentity;
+  // A client ground of their own. Drives `data-canvas`, which re-derives the whole neutral
+  // palette from that colour — without it a dark canvas gets light ink and white cards.
+  //
+  // EITHER ground counts. A client may set only the dark canvas (nothing forbids it on the
+  // form), and reading `canvasColor` alone left that case emitting `--app-canvas-dark` while
+  // the re-derivation never fired — brand ground, neutral cards and borders on top of it.
+  const hasCanvas = Boolean(theme.canvasColor || theme.canvasColorDark);
   // Either mark anchors the left of the band, so the title anchors opposite it.
   const hasMark = hasLogo || isConquest;
   // The band paints a background of its own (the client's surface, or the ConQuest band tone)
@@ -148,6 +166,7 @@ export function BrandThemeProvider({
   const surfaceAttrs: RespondentSurfaceAttrs = {
     'data-surface': 'respondent',
     ...(isConquest ? { 'data-brand': 'conquest' as const } : {}),
+    ...(hasCanvas ? { 'data-canvas': 'custom' as const } : {}),
     style,
   };
 
@@ -161,8 +180,13 @@ export function BrandThemeProvider({
     <div
       data-surface="respondent"
       data-brand={isConquest ? 'conquest' : undefined}
+      data-canvas={hasCanvas ? 'custom' : undefined}
       style={style}
-      className={cn('flex h-full flex-col', className)}
+      // `bg-background` — which now resolves to the client's canvas — rather than the
+      // transparent box this used to be. Transparent worked only because the ancestor it
+      // showed through was painted the same neutral canvas; a client ground cannot reach
+      // that ancestor (it arrives inline, on THIS element), so the surface has to paint it.
+      className={cn('bg-background flex h-full flex-col', className)}
     >
       {/* A custom banner REPLACES the band entirely — it is the client's own composition,
           so we neither overlay the title on it (legibility depends on an image we've never

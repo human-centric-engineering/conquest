@@ -15,7 +15,11 @@ import {
   FRICTIONLESS_INVITE_PARAM,
   respondentPublicPath,
 } from '@/lib/app/questionnaire/respondent-url';
-import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
+import {
+  resolveTheme,
+  type ResolvedTheme,
+  DEMO_CLIENT_THEME_SELECT,
+} from '@/lib/app/questionnaire/theming';
 
 /**
  * Public path of the respondent acceptance page (built in F3.2 PR2). The opaque
@@ -86,16 +90,7 @@ export async function resolveDemoClientTheme(demoClientId: string | null): Promi
   if (!demoClientId) return resolveTheme(null);
   const client = await prisma.appDemoClient.findUnique({
     where: { id: demoClientId },
-    select: {
-      ctaColor: true,
-      accentColor: true,
-      logoUrl: true,
-      welcomeCopy: true,
-      surfaceColor: true,
-      ctaColorEnd: true,
-      logoBackgroundColor: true,
-      logoBackgroundEnabled: true,
-    },
+    select: DEMO_CLIENT_THEME_SELECT,
   });
   return resolveTheme(client);
 }

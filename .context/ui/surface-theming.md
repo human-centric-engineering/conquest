@@ -116,6 +116,37 @@ overriding the inherited one for its subtree:
 Treat "URL classification" and "explicit subtree pin" as first-class — don't
 assume the URL is always the source of truth.
 
+### 3b. A per-tenant VALUE needs a data attribute beside it, not just a variable
+
+The pin above gives a subtree its own palette. What it does not give you is a way for the
+stylesheet to react to a value that arrives at RUNTIME, per tenant, as an inline custom
+property — and CSS cannot branch on whether a variable was set.
+
+ConQuest hit this the moment a demo client could choose its own page ground. The respondent
+surface reads `--color-background: var(--app-canvas-color)`, so a client canvas lands
+correctly; but the rest of the neutral palette is literal (`--color-card: #ffffff`), so a
+midnight canvas produced light ink with white cards on top of it. There is no `@if var()` to
+re-derive the rest with.
+
+The fix is a second marker carrying the SHAPE of the value rather than the value itself —
+`data-canvas='custom'`, set by the same component that spreads the variables — and a rule
+keyed on it that re-derives the remaining tokens with `color-mix`:
+
+```css
+[data-surface='respondent'][data-canvas='custom'] {
+  --color-card: color-mix(in srgb, var(--app-on-canvas) 4%, var(--app-canvas-color));
+  --color-border: color-mix(in srgb, var(--app-on-canvas) 14%, transparent);
+  /* …popover, secondary, accent, muted, input, ring */
+}
+```
+
+Mixing rather than listing a second palette is what lets one rule serve both a bone-white
+paper stock and a near-black field: each step moves toward the ink, so its direction follows
+the ground automatically. `data-brand='conquest'` (the "no tenant identity at all" marker) is
+the same pattern one step earlier, and both attributes must be carried to portalled roots
+alongside the style, or an overlay lands wearing the wrong palette (see constraint 5's
+sibling problem in `respondent-surface-context.tsx`).
+
 ### 4. Dark-mode selectors are DOM-position-dependent
 
 `.dark` is toggled on `<html>` (the same element that carries `data-surface`). So:
@@ -141,6 +172,18 @@ main:has([data-surface='canvas']) {
   background-color: #ffffff;
 }
 ```
+
+**`:has()` selects an ancestor; it cannot READ one's descendants.** A custom property set on the
+pinned subtree is invisible to the rule that matched on it, so a backdrop cannot follow a colour
+that arrives inline on the pin. If the ancestor has to track a per-instance value, that value must
+be put on an element at or above the ancestor and the rule must read it from there.
+
+ConQuest does exactly this for a demo client's canvas: `RespondentChrome` puts
+`--app-canvas-light` / `--app-canvas-dark` on the shell (`canvasBackdropVars` — only the ground,
+never the rest of the brand, or the ConQuest header and footer would be repainted too), and the
+backdrop rule reads `var(--app-canvas-light, var(--cq-respondent-canvas))`. Without it a branded
+questionnaire above ~1536px — where the shell's `container` stops widening — rendered as a
+coloured column flanked by neutral gutters. Invisible for as long as both were the same neutral.
 
 ### 6. Token overrides must be UNLAYERED
 

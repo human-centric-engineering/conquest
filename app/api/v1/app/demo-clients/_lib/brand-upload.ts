@@ -1,8 +1,9 @@
 /**
  * DEMO-ONLY (F7.2): shared upload/remove handlers for a demo client's brand images.
  *
- * The logo and banner routes differ only in which spec they enforce and which column they
- * write, so both are built from `brandImageHandlers(kind)` rather than duplicated. The
+ * The four routes (logo, dark logo, square mark, banner) differ only in which spec they
+ * enforce and which column they write, so all are built from `brandImageHandlers(kind)`
+ * rather than duplicated. The
  * shape follows the platform's avatar endpoint (`app/api/v1/users/me/avatar/route.ts`):
  * rate limit → storage-enabled gate → multipart parse → size → magic bytes → process →
  * upload → persist. Two things are new here:
@@ -12,7 +13,8 @@
  *     of the wrong shape is rejected with its measured size in the message, not silently
  *     squashed into the band.
  *  2. FIT. `processImage` centre-crops to a square by default, which would destroy a
- *     wordmark. Both kinds use `fit: 'inside'` so aspect ratio survives.
+ *     wordmark. Every kind uses `fit: 'inside'` so aspect ratio survives — including the
+ *     square mark, whose 1:1 shape is enforced on the way IN rather than imposed here.
  *
  * Keys are FIXED per client and kind (`demo-clients/<id>/logo.png`), so re-uploading
  * overwrites rather than accumulating orphans; the stored URL carries a `?v=` cache-bust
@@ -37,24 +39,34 @@ import {
 } from '@/lib/storage/image';
 import { deleteByPrefix } from '@/lib/storage/upload';
 import {
-  BRAND_BANNER_SPEC,
-  BRAND_LOGO_SPEC,
+  BRAND_IMAGE_SPECS,
   validateImageDimensions,
-  type BrandImageSpec,
+  type BrandImageKind,
 } from '@/lib/app/questionnaire/theming';
 
-export type BrandImageKind = 'logo' | 'banner';
-
-const SPECS: Record<BrandImageKind, BrandImageSpec> = {
-  logo: BRAND_LOGO_SPEC,
-  banner: BRAND_BANNER_SPEC,
-};
-
 /** Which column each kind writes. Keeps the Prisma update key off a template string. */
-const COLUMN: Record<BrandImageKind, 'logoUrl' | 'bannerUrl'> = {
+const COLUMN: Record<BrandImageKind, BrandImageColumn> = {
   logo: 'logoUrl',
   banner: 'bannerUrl',
+  mark: 'logoMarkUrl',
+  'logo-dark': 'logoDarkUrl',
 };
+
+/** The columns a brand-image upload may write. */
+type BrandImageColumn = 'logoUrl' | 'bannerUrl' | 'logoMarkUrl' | 'logoDarkUrl';
+
+/**
+ * Every image column, selected on both handlers so the audit entry can record the value an
+ * upload REPLACES. All four rather than just the one being written: `client[column]` is
+ * indexed by the kind, so a partial selection would be a type error on the day a kind is
+ * added — which is exactly how this stayed correct when two were.
+ */
+const IMAGE_COLUMNS = {
+  logoUrl: true,
+  bannerUrl: true,
+  logoMarkUrl: true,
+  logoDarkUrl: true,
+} as const;
 
 /** The two route handlers a brand-image kind exports. */
 type BrandImageRoute = {
@@ -68,7 +80,7 @@ type BrandImageRoute = {
  * Returns both handlers so a route module is a two-line re-export.
  */
 export function brandImageHandlers(kind: BrandImageKind): BrandImageRoute {
-  const spec = SPECS[kind];
+  const spec = BRAND_IMAGE_SPECS[kind];
   const column = COLUMN[kind];
   const contentType = spec.format === 'png' ? 'image/png' : 'image/jpeg';
   const extension = spec.format === 'png' ? 'png' : 'jpg';
@@ -95,12 +107,11 @@ export function brandImageHandlers(kind: BrandImageKind): BrandImageRoute {
       );
     }
 
-    // Both image columns are selected so the audit entry can record the value this upload
-    // REPLACES. Re-uploading over an existing logo is the common case; an audit trail that
-    // always says `from: null` would hide every overwrite.
+    // Re-uploading over an existing image is the common case; an audit trail that always
+    // said `from: null` would hide every overwrite (see IMAGE_COLUMNS).
     const client = await prisma.appDemoClient.findUnique({
       where: { id },
-      select: { id: true, name: true, logoUrl: true, bannerUrl: true },
+      select: { id: true, name: true, ...IMAGE_COLUMNS },
     });
     if (!client) {
       throw new NotFoundError('Demo client not found');
@@ -221,7 +232,7 @@ export function brandImageHandlers(kind: BrandImageKind): BrandImageRoute {
 
     const client = await prisma.appDemoClient.findUnique({
       where: { id },
-      select: { id: true, name: true, logoUrl: true, bannerUrl: true },
+      select: { id: true, name: true, ...IMAGE_COLUMNS },
     });
     if (!client) {
       throw new NotFoundError('Demo client not found');

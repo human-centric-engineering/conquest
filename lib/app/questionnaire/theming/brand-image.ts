@@ -91,6 +91,46 @@ export const BRAND_BANNER_SPEC: BrandImageSpec = {
   format: 'jpeg',
 };
 
+/**
+ * Mark: square. Where the logo is letterboxed into a wide slot and may be any shape, a mark
+ * is drawn INTO a square — a favicon-shaped device a layout can set on a corner, a stage, or
+ * a masthead rule without reserving a lockup's width for it. So unlike the logo, shape is
+ * enforced: a wordmark uploaded here would be scaled to illegibility in the slots that use
+ * it. The +/-6% window is tighter than the banner's because 1:1 is a shape designers export
+ * exactly, not approximately.
+ *
+ * PNG, and for the same reason as the logo: marks need transparency.
+ */
+export const BRAND_MARK_SPEC: BrandImageSpec = {
+  label: 'Mark',
+  minWidth: 128,
+  minHeight: 128,
+  maxWidth: 512,
+  maxHeight: 512,
+  aspectRatio: 1,
+  aspectTolerance: 0.06,
+  format: 'png',
+};
+
+/**
+ * The brand images a client can upload, and the spec each answers to.
+ *
+ * The union lives HERE rather than beside the upload route because both ends need it: the
+ * route builds its handlers from it, and the admin field picks its endpoint from it. Keeping
+ * it in the pure module means the `'use client'` form can name a kind without importing
+ * anything from a route's `_lib`.
+ */
+export type BrandImageKind = 'logo' | 'banner' | 'mark' | 'logo-dark';
+
+export const BRAND_IMAGE_SPECS: Record<BrandImageKind, BrandImageSpec> = {
+  logo: BRAND_LOGO_SPEC,
+  banner: BRAND_BANNER_SPEC,
+  mark: BRAND_MARK_SPEC,
+  // The dark lockup is the SAME artwork in different ink, so it answers to the same spec:
+  // any shape, letterboxed into the same slot. Only the ground it is drawn for differs.
+  'logo-dark': BRAND_LOGO_SPEC,
+};
+
 /** The recommended dimensions to show in the admin UI, derived from the spec. */
 export function recommendedSize(spec: BrandImageSpec): string {
   return `${spec.maxWidth}x${spec.maxHeight}`;

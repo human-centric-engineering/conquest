@@ -84,6 +84,7 @@ function renderField(overrides: Partial<Parameters<typeof BrandImageField>[0]> =
     id: 'bannerUrl',
     label: 'Banner',
     spec: BRAND_BANNER_SPEC,
+    kind: 'banner' as const,
     demoClientId: 'client_1',
     uploadEnabled: true,
     value: '',
@@ -131,7 +132,7 @@ describe('BrandImageField — when upload is offered', () => {
   });
 
   it('states only a size range for a logo, which accepts any shape', () => {
-    renderField({ spec: BRAND_LOGO_SPEC, label: 'Logo', id: 'logoUrl' });
+    renderField({ spec: BRAND_LOGO_SPEC, kind: 'logo', label: 'Logo', id: 'logoUrl' });
     expect(screen.getByText(/up to 1200x1200px, min 80x40/i)).toBeInTheDocument();
   });
 
@@ -222,7 +223,7 @@ describe('BrandImageField — upload', () => {
   it('routes a logo to the logo endpoint, not the banner one', async () => {
     nextImageSize = { width: 600, height: 200 };
     mockFetch.mockResolvedValue(jsonResponse({ success: true, data: { url: '/uploads/l.png' } }));
-    renderField({ spec: BRAND_LOGO_SPEC, label: 'Logo', id: 'logoUrl' });
+    renderField({ spec: BRAND_LOGO_SPEC, kind: 'logo', label: 'Logo', id: 'logoUrl' });
 
     await pickFile(imageFile('logo.png'));
 
@@ -284,6 +285,7 @@ describe('BrandImageField — remove', () => {
       <BrandImageField
         id="bannerUrl"
         label="Banner"
+        kind="banner"
         spec={BRAND_BANNER_SPEC}
         demoClientId="client_1"
         uploadEnabled

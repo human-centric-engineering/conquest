@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 // Stubbed so the test does not drag the session/auth tree in behind the header, and so "is the
 // ConQuest chrome present" is a single unambiguous query rather than a hunt for marketing copy.
@@ -36,12 +36,22 @@ vi.mock('@/components/layouts/public-footer', () => ({
 }));
 
 import { RespondentChrome } from '@/components/app/questionnaire/chrome/respondent-chrome';
+import { ThemeProvider } from '@/hooks/use-theme';
 
-function renderChrome(mode: 'full' | 'co_branded' | 'white_label', shell?: boolean) {
+// The real provider, not a stub: the theme switch these modes now carry reads `useTheme`, which
+// throws outside one. In the product it comes from the root layout, so wrapping here reproduces
+// the tree rather than papering over it — and it lets the switch actually flip below.
+function renderChrome(
+  mode: 'full' | 'co_branded' | 'white_label',
+  shell?: boolean,
+  canvasStyle?: React.CSSProperties
+) {
   return render(
-    <RespondentChrome mode={mode} shell={shell}>
-      <div data-testid="surface" />
-    </RespondentChrome>
+    <ThemeProvider>
+      <RespondentChrome mode={mode} shell={shell} canvasStyle={canvasStyle}>
+        <div data-testid="surface" />
+      </RespondentChrome>
+    </ThemeProvider>
   );
 }
 
@@ -115,5 +125,98 @@ describe('the shell that replaced the arithmetic', () => {
     // measure is meaningless there.
     const main = renderChrome('full', false).container.querySelector('main');
     expect(main?.className).not.toContain('cq-respondent-shell');
+  });
+});
+
+describe('the theme switch', () => {
+  // These three pages left the `(public)` group to shed the marketing header, and lost the
+  // light/dark switch with it — in the one place in the product where somebody reads continuous
+  // prose for twenty minutes, possibly at night. It lives in the chrome rather than in a layout
+  // so that all four layouts get it and none of them has to remember.
+
+  it('is offered in co_branded and white_label', () => {
+    for (const mode of ['co_branded', 'white_label'] as const) {
+      const { unmount } = renderChrome(mode);
+      expect(
+        screen.getByRole('button', { name: /switch to (light|dark) mode/i }),
+        mode
+      ).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('is NOT duplicated in full, where the site header already carries one', () => {
+    // Two toggles in one viewport is worse than none: they would disagree about which is current.
+    renderChrome('full');
+    expect(screen.queryByRole('button', { name: /switch to (light|dark) mode/i })).toBeNull();
+  });
+
+  it('names the mode it switches TO, not the one in force', () => {
+    // "Dark mode" alone leaves a screen-reader user guessing whether it describes the button or
+    // the page. The document starts light in this environment, so the button offers dark.
+    renderChrome('white_label');
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+  });
+
+  it('actually flips the document, which is what the CSS keys off', () => {
+    // Every canvas, ink and lockup variable is chosen by a `.dark` rule on <html>. If the switch
+    // does not move that class, a client's dark canvas is unreachable however well it resolves.
+    renderChrome('white_label');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('does not put ConQuest branding back on a white-label page', () => {
+    // The switch is a sun and a moon; it is not our identity. This is the assertion that keeps it
+    // that way if anyone ever reaches for the platform's bordered, wordmarked header control.
+    const { container } = renderChrome('white_label');
+    expect(container.textContent).not.toContain('ConQuest');
+  });
+});
+
+describe('the backdrop behind and around the surface', () => {
+  /**
+   * The client's ground has to reach the shell, not just the surface root. The surface root sits
+   * inside `<main>`, inside the shell's `container` — so the theme-switch row above it and the
+   * gutters either side of it on a wide viewport are ANCESTORS of the brand and cannot inherit it.
+   * They fell back to the ConQuest consumer background: a cream (or deep-navy) strip directly
+   * above a client's canvas, on the mode that exists to keep our colours off the page.
+   *
+   * The painting itself is CSS (`brand-theme.css`), which does not run here. What these pin is the
+   * wiring: the variables reach the shell, and the row asks for the backdrop rather than
+   * inheriting.
+   */
+  it('puts the client ground on the shell, where the rules can read it', () => {
+    const { container } = renderChrome('white_label', true, {
+      '--app-canvas-light': '#fffdf7',
+      '--app-canvas-dark': '#121016',
+    } as React.CSSProperties);
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.style.getPropertyValue('--app-canvas-light')).toBe('#fffdf7');
+    expect(shell.style.getPropertyValue('--app-canvas-dark')).toBe('#121016');
+  });
+
+  it('paints the white-label switch row with the backdrop, not the consumer background', () => {
+    const { container } = renderChrome('white_label');
+    const row = container.querySelector('.cq-respondent-backdrop');
+    expect(row).not.toBeNull();
+    // It is the row that carries the switch — not some other element that happens to match.
+    expect(row?.querySelector('button')).not.toBeNull();
+  });
+
+  it('leaves the co-branded and full rows on the ConQuest background', () => {
+    // Only white-label regresses without the class: `co_branded` deliberately shows a ConQuest
+    // line, and `full` a whole header — repainting those would be the opposite mistake.
+    for (const mode of ['co_branded', 'full'] as const) {
+      const { container, unmount } = renderChrome(mode);
+      expect(container.querySelector('.cq-respondent-backdrop')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('adds no ground variables for an unbranded questionnaire', () => {
+    const { container } = renderChrome('white_label');
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.style.getPropertyValue('--app-canvas-light')).toBe('');
   });
 });

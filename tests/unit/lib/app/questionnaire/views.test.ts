@@ -196,6 +196,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     presentationMode: 'chat',
     respondentLayout: 'classic',
     respondentChrome: 'full',
+    chatTextSize: 'standard' as const,
     captureMode: 'form',
     inlineCorrectionEnabled: true,
     sessionResumeEnabled: true,

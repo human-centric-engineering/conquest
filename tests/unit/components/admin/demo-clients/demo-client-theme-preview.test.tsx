@@ -107,3 +107,54 @@ describe('DemoClientThemePreview — full (detail / live preview)', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('the preview declares itself a respondent surface', () => {
+  // Not decoration. Three things the preview shows are produced by app/brand-theme.css rules
+  // scoped to `[data-surface='respondent']`: the client's ground per mode, the DERIVED dark
+  // canvas (which an admin would otherwise never see, since the resolver cannot know the mode),
+  // and the ConQuest fallback palette for an unbranded client. Without the markers the preview
+  // has to fake all three, which is how it ended up with a hand-written `var(a, var(b, var(c)))`
+  // chain on the send button.
+
+  function previewRoot(container: HTMLElement): HTMLElement {
+    const node = container.querySelector('[aria-label="Session preview"]');
+    expect(node).not.toBeNull();
+    return node as HTMLElement;
+  }
+
+  it('marks the miniature as a respondent surface', () => {
+    const { container } = render(<DemoClientThemePreview theme={{ ...UNCONFIGURED }} />);
+    expect(previewRoot(container).dataset.surface).toBe('respondent');
+  });
+
+  it('claims the ConQuest brand only when the client has no identity of their own', () => {
+    const { container: unbranded } = render(<DemoClientThemePreview theme={{ ...UNCONFIGURED }} />);
+    expect(previewRoot(unbranded).dataset.brand).toBe('conquest');
+
+    const { container: branded } = render(
+      <DemoClientThemePreview theme={{ ...UNCONFIGURED, ctaColor: '#ff0000' }} />
+    );
+    expect(previewRoot(branded).dataset.brand).toBeUndefined();
+  });
+
+  it("flags a client canvas so the palette is re-derived from the client's ground", () => {
+    const { container: plain } = render(<DemoClientThemePreview theme={{ ...UNCONFIGURED }} />);
+    expect(previewRoot(plain).dataset.canvas).toBeUndefined();
+
+    const { container: grounded } = render(
+      <DemoClientThemePreview theme={{ ...UNCONFIGURED, canvasColor: '#0b1f3a' }} />
+    );
+    expect(previewRoot(grounded).dataset.canvas).toBe('custom');
+  });
+
+  it('carries both ground variables, so the mode in force decides which applies', () => {
+    const { container } = render(
+      <DemoClientThemePreview theme={{ ...UNCONFIGURED, canvasColor: '#f5f9ff' }} />
+    );
+    const root = previewRoot(container);
+    expect(root.style.getPropertyValue('--app-canvas-light')).toBe('#f5f9ff');
+    // Derived — the admin never typed this, and it is the whole reason the preview follows
+    // dark mode rather than showing the light canvas in it.
+    expect(root.style.getPropertyValue('--app-canvas-dark')).not.toBe('');
+  });
+});

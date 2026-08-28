@@ -91,6 +91,11 @@ import { HouseRulesPanel } from '@/components/admin/questionnaires/house-rules-p
 import { InterviewerStrategyPanel } from '@/components/admin/questionnaires/interviewer-strategy-panel';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 import { personaToneClause } from '@/lib/app/questionnaire/chat/tone';
+import {
+  CHAT_TEXT_SIZES,
+  CHAT_TEXT_SIZE_LABELS,
+  type ChatTextSize,
+} from '@/lib/app/questionnaire/chat/text-scale';
 import { API } from '@/lib/api/endpoints';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import {
@@ -636,6 +641,7 @@ export function ConfigEditor({
   const [showProgressPercentText, setShowProgressPercentText] = useState(
     config.showProgressPercentText
   );
+  const [chatTextSize, setChatTextSize] = useState<ChatTextSize>(config.chatTextSize);
   const [milestoneBannerEnabled, setMilestoneBannerEnabled] = useState(
     config.milestoneBannerEnabled
   );
@@ -749,6 +755,7 @@ export function ConfigEditor({
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setSessionResumeEnabled(config.sessionResumeEnabled);
     setShowProgressPercentText(config.showProgressPercentText);
+    setChatTextSize(config.chatTextSize);
     setMilestoneBannerEnabled(config.milestoneBannerEnabled);
     setMilestoneBannerThresholds(config.milestoneBannerThresholds);
     setGlossaryPromptInjection(config.glossaryPromptInjection);
@@ -1015,6 +1022,7 @@ export function ConfigEditor({
         sessionResumeEnabled,
         // The "N% completed" text beside the progress bar (the bar itself always renders).
         showProgressPercentText,
+        chatTextSize,
         // Completeness milestone banners: inline "you're N% through" chat notice on crossing a
         // configured threshold.
         milestoneBannerEnabled,
@@ -1570,6 +1578,50 @@ export function ConfigEditor({
                   client in the room. */}
               <p className="text-muted-foreground text-xs leading-relaxed">
                 {RESPONDENT_CHROME_META[respondentChrome].description}
+              </p>
+            </div>
+            <div className="mb-4 space-y-1.5">
+              <Label className="text-sm font-medium">
+                Text size{' '}
+                <FieldHelp title="Text size">
+                  How large the conversation text is. Standard is the size every questionnaire has
+                  used until now. Choose Large or Largest for a questionnaire you will run on a
+                  projector or a boardroom screen, Small for a dense instrument read on a laptop.
+                  <br />
+                  <br />
+                  Anything other than Standard is applied when a respondent arrives, including to
+                  someone who has resized a questionnaire before — so you will see your own choice
+                  when you preview it. Change it here and they pick up the new size on their next
+                  visit.
+                  <br />
+                  <br />
+                  It is a starting size, not a lock. Respondents can always resize the conversation
+                  from the controls beside it, and once they do, their size stands until you move
+                  this setting again. You cannot take the control away from them.
+                </FieldHelp>
+              </Label>
+              <Select
+                value={chatTextSize}
+                onValueChange={(v) => setChatTextSize(v as ChatTextSize)}
+                disabled={busy}
+              >
+                <SelectTrigger className="w-full sm:w-1/2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHAT_TEXT_SIZES.map((size) => (
+                    <SelectItem key={size} value={size}>
+                      {CHAT_TEXT_SIZE_LABELS[size]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* Stated under the control, not only in the popover. An admin who reads this as a
+                  lock would author around it — the size is where the conversation opens, and the
+                  respondent keeps the last word on it. */}
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                The size the conversation opens at — respondents can still resize it, and their own
+                size then stands until you change this setting again.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

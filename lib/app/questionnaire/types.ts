@@ -5,6 +5,7 @@
  * needs alongside the models and capabilities it introduces.
  */
 
+import { DEFAULT_CHAT_TEXT_SIZE, type ChatTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type ConditionalTopicsSettings,
@@ -1523,6 +1524,18 @@ export type QuestionnaireConfigShape = {
    */
   respondentChrome: RespondentChrome;
   /**
+   * Where the respondent's text-size ladder STARTS — the rung someone who has never touched the
+   * in-session stepper opens on. A demo shown on a boardroom screen wants `largest`; a dense
+   * instrument read on a laptop wants `small`.
+   *
+   * Deliberately a starting point and not a cap. The stepper is an accessibility affordance, so
+   * there is no switch that removes it and no authored value that can pin it: this is handed to
+   * the respondent's stored preference as its `initial`, which means anyone who has ever stepped
+   * keeps their own size and never consults this at all. Defaults to `standard`, which is the
+   * size every questionnaire had before the setting existed. See {@link CHAT_TEXT_SIZES}.
+   */
+  chatTextSize: ChatTextSize;
+  /**
    * Inline answer correction (Variant B): when on, the respondent can "fix" an answer the latest
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
@@ -1707,6 +1720,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   presentationMode: 'both',
   respondentLayout: DEFAULT_RESPONDENT_LAYOUT,
   respondentChrome: DEFAULT_RESPONDENT_CHROME,
+  chatTextSize: DEFAULT_CHAT_TEXT_SIZE,
   inlineCorrectionEnabled: false,
   sessionResumeEnabled: true,
   showProgressPercentText: true,

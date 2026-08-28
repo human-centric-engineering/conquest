@@ -101,6 +101,8 @@ interface AnonymousSessionBootProps {
   presentationMode?: PresentationMode;
   /** How the surface is ARRANGED (F-layouts); defaults to Classic downstream. */
   respondentLayout?: RespondentLayout;
+  /** Ladder rung the text-size stepper opens on (`config.chatTextSize`, resolved to an index). */
+  chatTextScaleIndex?: number;
   /**
    * Answer-panel scope (F7.2) — `hidden` is the chat-only surface (no panel beside the
    * conversation, no mobile review sheet). Resolved server-side and forwarded to the workspace so
@@ -253,6 +255,7 @@ export function AnonymousSessionBoot({
   inviteToken,
   presentationMode = 'both',
   respondentLayout,
+  chatTextScaleIndex,
   answerPanelScope,
   reasoningPlacement,
   reasoningDwellMs,
@@ -515,6 +518,7 @@ export function AnonymousSessionBoot({
       autoStart={state.autoStart}
       presentationMode={presentationMode}
       respondentLayout={respondentLayout}
+      chatTextScaleIndex={chatTextScaleIndex}
       answerPanelScope={answerPanelScope}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}

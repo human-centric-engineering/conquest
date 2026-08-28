@@ -42,6 +42,16 @@ const DEMO_CLIENT = {
   ctaColorEnd: '#22d3ee', // cyan gradient end (distinct from the accent)
   logoBackgroundColor: '#0b1f3a', // logo sits on the navy backdrop
   logoBackgroundEnabled: true,
+  // Brand kit: the ground the conversation is drawn ON, and the type it is set in. A pale
+  // arctic paper stock rather than white — enough for the seeded demo to prove the canvas
+  // reaches the surface (cards, borders and muted text are all re-derived from it) without
+  // making the sample questionnaire hard to read. Ink is left NULL on purpose: it exercises
+  // the derivation, which is the path almost every real client will take.
+  canvasColor: '#f5f9ff', // arctic paper (light mode)
+  // Dark mode is left to DERIVE (canvasColorDark/inkColorDark stay null) — the path almost every
+  // real client takes, so the seed exercises it rather than the override.
+  accentColorEnd: '#0ea5e9', // second accent — the layouts' aura/rule, distinct from ctaColorEnd
+  fontPairing: 'contemporary', // Bricolage Grotesque / Space Grotesk — a logistics brand's voice
 } as const;
 
 // DEMO-ONLY: stable idempotency marker. The seed finds-and-replaces the questionnaire
@@ -211,6 +221,9 @@ const unit: SeedUnit = {
           ctaColorEnd: DEMO_CLIENT.ctaColorEnd,
           logoBackgroundColor: DEMO_CLIENT.logoBackgroundColor,
           logoBackgroundEnabled: DEMO_CLIENT.logoBackgroundEnabled,
+          canvasColor: DEMO_CLIENT.canvasColor,
+          accentColorEnd: DEMO_CLIENT.accentColorEnd,
+          fontPairing: DEMO_CLIENT.fontPairing,
         },
         create: { ...DEMO_CLIENT },
         select: { id: true },

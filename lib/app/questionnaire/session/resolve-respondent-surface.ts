@@ -19,12 +19,13 @@
 
 import { prisma } from '@/lib/db/client';
 import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
+import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import {
   resolveGlossaryAppendixForVersion,
   resolveGlossaryForHints,
 } from '@/lib/app/questionnaire/glossary/resolve';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -58,17 +59,7 @@ export async function resolveRespondentSurfaceConfig(
     demoClientId
       ? prisma.appDemoClient.findUnique({
           where: { id: demoClientId },
-          select: {
-            ctaColor: true,
-            accentColor: true,
-            logoUrl: true,
-            bannerUrl: true,
-            welcomeCopy: true,
-            surfaceColor: true,
-            ctaColorEnd: true,
-            logoBackgroundColor: true,
-            logoBackgroundEnabled: true,
-          },
+          select: DEMO_CLIENT_THEME_SELECT,
         })
       : Promise.resolve(null),
     // `roundId` is a plain String (no Prisma relation — UG-1 identity-firewall posture), so the
@@ -124,6 +115,10 @@ export async function resolveRespondentSurfaceConfig(
       ANSWER_SLOT_PANEL_SCOPES,
       DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
     ),
+    // Resolved to the ladder index here rather than passed on as a name, so a client-booted
+    // surface gets the same number `resolveChatTextScaleIndexForVersion` hands the page-rendered
+    // ones. `indexForTextSize` absorbs an absent config row and an unknown rung alike.
+    chatTextScaleIndex: indexForTextSize(config?.chatTextSize),
     // The asymmetry is deliberate and matches `resolveReasoningPlacementForVersion`: only an
     // EXPLICIT `enabled: false` on an existing config row turns the stream off. A version with no
     // config row at all gets the default placement, not null.

@@ -60,6 +60,7 @@ describe('loadVersionSurface', () => {
       accessMode: true,
       voiceEnabled: true,
       attachmentsEnabled: true,
+      chatTextSize: true,
       presentationMode: true,
       respondentLayout: true,
       respondentChrome: true,

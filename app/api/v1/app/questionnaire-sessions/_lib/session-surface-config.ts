@@ -23,6 +23,7 @@ export interface SessionSurfaceConfig {
     anonymousMode: boolean;
     presentationMode: string;
     respondentLayout: string;
+    chatTextSize: string;
     answerSlotPanelScope: string;
     inlineCorrectionEnabled: boolean;
     voiceEnabled: boolean;
@@ -52,6 +53,7 @@ export async function loadSessionSurfaceConfig(
               anonymousMode: true,
               presentationMode: true,
               respondentLayout: true,
+              chatTextSize: true,
               answerSlotPanelScope: true,
               inlineCorrectionEnabled: true,
               voiceEnabled: true,

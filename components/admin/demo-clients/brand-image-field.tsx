@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils';
 import {
   recommendedSize,
   validateImageDimensions,
+  type BrandImageKind,
   type BrandImageSpec,
 } from '@/lib/app/questionnaire/theming';
 
@@ -49,6 +50,8 @@ interface BrandImageFieldProps {
   id: string;
   label: string;
   spec: BrandImageSpec;
+  /** Which upload endpoint this field talks to. */
+  kind: BrandImageKind;
   /** The demo client id; absent on the create form (nothing to attach an upload to). */
   demoClientId?: string;
   /** False when the server has no storage provider configured. */
@@ -59,6 +62,22 @@ interface BrandImageFieldProps {
   error?: string;
   help: React.ReactNode;
 }
+
+/**
+ * Which upload endpoint each kind talks to.
+ *
+ * Previously derived as `spec.label === 'Banner' ? banner : logo` — which worked only while
+ * there were two kinds, and would have sent both brand-kit uploads to the LOGO route (same
+ * spec object for the dark lockup, so not even a wrong label to notice). The kind is now
+ * passed explicitly and the map is exhaustive, so a new kind is a type error rather than a
+ * silent overwrite of a column the admin was not editing.
+ */
+const ENDPOINTS: Record<BrandImageKind, (id: string) => string> = {
+  logo: API.APP.DEMO_CLIENTS.logo,
+  banner: API.APP.DEMO_CLIENTS.banner,
+  mark: API.APP.DEMO_CLIENTS.mark,
+  'logo-dark': API.APP.DEMO_CLIENTS.logoDark,
+};
 
 /** Read an image file's intrinsic size in the browser, mirroring the server check. */
 function measure(file: File): Promise<{ width: number; height: number } | null> {
@@ -81,6 +100,7 @@ export function BrandImageField({
   id,
   label,
   spec,
+  kind,
   demoClientId,
   uploadEnabled,
   value,
@@ -94,8 +114,7 @@ export function BrandImageField({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const canUpload = uploadEnabled && Boolean(demoClientId);
-  const endpoint =
-    spec.label === 'Banner' ? API.APP.DEMO_CLIENTS.banner : API.APP.DEMO_CLIENTS.logo;
+  const endpoint = ENDPOINTS[kind];
 
   const handleFile = async (file: File) => {
     setUploadError(null);

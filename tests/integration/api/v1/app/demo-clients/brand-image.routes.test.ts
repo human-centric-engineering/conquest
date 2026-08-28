@@ -73,6 +73,11 @@ import {
   POST as bannerPOST,
   DELETE as bannerDELETE,
 } from '@/app/api/v1/app/demo-clients/[id]/banner/route';
+import {
+  POST as markPOST,
+  DELETE as markDELETE,
+} from '@/app/api/v1/app/demo-clients/[id]/mark/route';
+import { POST as logoDarkPOST } from '@/app/api/v1/app/demo-clients/[id]/logo-dark/route';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { deleteByPrefix } from '@/lib/storage/upload';
@@ -336,5 +341,103 @@ describe('DELETE /api/v1/app/demo-clients/:id/banner', () => {
     setAuth(null);
     const res = await bannerDELETE(uploadReq(null), ctx());
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── The brand-kit kinds ──────────────────────────────────────────────────────
+//
+// Both ride the same pipeline as the logo and the banner, so the gates above are not
+// re-tested here. What IS specific to them — and what a shared pipeline makes easy to get
+// wrong — is that each writes its OWN column and enforces its own shape. Before the kind
+// was passed explicitly, the field derived its endpoint from the spec's label, and the dark
+// lockup (which shares the logo's spec object) would have overwritten `logoUrl`.
+
+describe('POST /api/v1/app/demo-clients/:id/mark', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setAuth(mockAdminUser());
+    storageMock.isStorageEnabled.mockReturnValue(true);
+    imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: 'image/png' });
+    imageMock.readImageDimensions.mockResolvedValue({ width: 512, height: 512 });
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      id: 'dc-1',
+      name: 'Acme',
+      logoUrl: null,
+      bannerUrl: null,
+      logoMarkUrl: null,
+      logoDarkUrl: null,
+    });
+    prismaMock.appDemoClient.update.mockResolvedValue({ id: 'dc-1' });
+  });
+
+  it('writes logoMarkUrl, not the logo column', async () => {
+    const res = await markPOST(uploadReq(fakeFile()), ctx());
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appDemoClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ logoMarkUrl: expect.any(String) }),
+      })
+    );
+    const data = prismaMock.appDemoClient.update.mock.calls[0]?.[0]?.data as Record<
+      string,
+      unknown
+    >;
+    expect(data).not.toHaveProperty('logoUrl');
+  });
+
+  it('rejects a wide wordmark — squareness is the point of this kind', async () => {
+    // A lockup uploaded here would be scaled to illegibility in the slots that use the mark,
+    // so the shape is enforced on the way in rather than imposed by the renderer.
+    imageMock.readImageDimensions.mockResolvedValue({ width: 900, height: 120 });
+
+    const res = await markPOST(uploadReq(fakeFile()), ctx());
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.appDemoClient.update).not.toHaveBeenCalled();
+  });
+
+  it('stores its own prefix, so removing a mark cannot take the logo with it', async () => {
+    await markDELETE(uploadReq(null), ctx());
+    expect(deleteByPrefix).toHaveBeenCalledWith('demo-clients/dc-1/mark/');
+  });
+});
+
+describe('POST /api/v1/app/demo-clients/:id/logo-dark', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setAuth(mockAdminUser());
+    storageMock.isStorageEnabled.mockReturnValue(true);
+    imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: 'image/png' });
+    imageMock.readImageDimensions.mockResolvedValue({ width: 900, height: 120 });
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      id: 'dc-1',
+      name: 'Acme',
+      logoUrl: 'https://acme.example/logo.png',
+      bannerUrl: null,
+      logoMarkUrl: null,
+      logoDarkUrl: null,
+    });
+    prismaMock.appDemoClient.update.mockResolvedValue({ id: 'dc-1' });
+  });
+
+  it('writes logoDarkUrl and leaves the standard lockup alone', async () => {
+    const res = await logoDarkPOST(uploadReq(fakeFile()), ctx());
+
+    expect(res.status).toBe(200);
+    const data = prismaMock.appDemoClient.update.mock.calls[0]?.[0]?.data as Record<
+      string,
+      unknown
+    >;
+    expect(data).toHaveProperty('logoDarkUrl');
+    expect(data).not.toHaveProperty('logoUrl');
+  });
+
+  it('accepts any shape, exactly as the standard logo does', async () => {
+    // Same artwork, different ink — so the same spec. A ratio rule here would reject the
+    // dark version of a lockup we already accepted.
+    imageMock.readImageDimensions.mockResolvedValue({ width: 1200, height: 90 });
+    const res = await logoDarkPOST(uploadReq(fakeFile()), ctx());
+    expect(res.status).toBe(200);
   });
 });

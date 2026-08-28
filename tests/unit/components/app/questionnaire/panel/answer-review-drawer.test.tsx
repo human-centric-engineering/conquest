@@ -36,6 +36,17 @@ const THEME: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: true,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 // Mark the panel and surface the props the drawer forwards, plus a revisit button to fire.

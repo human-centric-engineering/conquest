@@ -30,6 +30,17 @@ describe('resolveTheme', () => {
       logoBackgroundColor: null,
       // Nothing visual supplied → the renderer falls back to the ConQuest identity.
       hasBrandIdentity: false,
+      canvasColor: null,
+      onCanvas: null,
+      canvasIsDark: false,
+      canvasColorDark: null,
+      onCanvasDark: null,
+      accentColorEnd: null,
+      logoMarkUrl: null,
+      logoDarkUrl: null,
+      bandLogoUrl: null,
+      bandLogoDarkUrl: null,
+      fontPairing: 'neutral',
     });
   });
 
@@ -347,7 +358,7 @@ describe('readableTextColor', () => {
         welcomeCopy: null,
       })
     );
-    expect(vars['--app-logo-url']).toBe('url("https://acme.example/logo.png")');
+    expect(vars['--app-logo-src']).toBe('url("https://acme.example/logo.png")');
   });
 
   it('CSS-escapes a logo URL so it cannot break out of url() (defence in depth)', () => {
@@ -363,8 +374,19 @@ describe('readableTextColor', () => {
       ctaColorEnd: null,
       logoBackgroundColor: null,
       hasBrandIdentity: true,
+      canvasColor: null,
+      onCanvas: null,
+      canvasIsDark: false,
+      canvasColorDark: null,
+      onCanvasDark: null,
+      accentColorEnd: null,
+      logoMarkUrl: null,
+      logoDarkUrl: null,
+      bandLogoUrl: 'https://x/a.png");background:url("https://evil/x.png',
+      bandLogoDarkUrl: 'https://x/a.png");background:url("https://evil/x.png',
+      fontPairing: 'neutral',
     });
-    const v = vars['--app-logo-url'];
+    const v = vars['--app-logo-src'];
     // The injected closing-quote is escaped, so the value stays a single url("…") token.
     expect(v).toBe('url("https://x/a.png\\");background:url(\\"https://evil/x.png")');
     expect(v.startsWith('url("')).toBe(true);

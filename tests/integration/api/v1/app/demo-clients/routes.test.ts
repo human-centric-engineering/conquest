@@ -216,6 +216,45 @@ describe('POST /api/v1/app/demo-clients (create)', () => {
     );
   });
 
+  it('persists the brand-kit fields — the ground, the type and the extra marks', async () => {
+    prismaMock.appDemoClient.create.mockResolvedValue(ROW);
+    await createPOST(
+      jsonReq({
+        name: 'Acme Bank',
+        canvasColor: '#0b1f3a',
+        inkColor: '#f5f9ff',
+        canvasColorDark: '#050d1a',
+        inkColorDark: '#dbeafe',
+        accentColorEnd: '#0ea5e9',
+        logoMarkUrl: 'https://acme.example/mark.png',
+        logoDarkUrl: 'https://acme.example/logo-dark.png',
+        fontPairing: 'editorial',
+      })
+    );
+    expect(prismaMock.appDemoClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          canvasColor: '#0b1f3a',
+          inkColor: '#f5f9ff',
+          canvasColorDark: '#050d1a',
+          inkColorDark: '#dbeafe',
+          accentColorEnd: '#0ea5e9',
+          logoMarkUrl: 'https://acme.example/mark.png',
+          logoDarkUrl: 'https://acme.example/logo-dark.png',
+          fontPairing: 'editorial',
+        }),
+      })
+    );
+  });
+
+  it('rejects a font pairing this build does not know', async () => {
+    // Strict on the WRITE boundary even though the read path resolves an unknown value to
+    // neutral: a typo should be told to the admin rather than stored and silently ignored.
+    const res = await createPOST(jsonReq({ name: 'Acme Bank', fontPairing: 'gothic' }));
+    expect(res.status).toBe(400);
+    expect(prismaMock.appDemoClient.create).not.toHaveBeenCalled();
+  });
+
   it('accepts an uploaded /uploads/ path, not just an https URL', async () => {
     // The local storage provider serves from public/uploads/, so an https-only rule would
     // reject every logo uploaded in development.
@@ -299,6 +338,39 @@ describe('PATCH /api/v1/app/demo-clients/:id (update)', () => {
         data: expect.objectContaining({ ctaColor: '#000000', welcomeCopy: null }),
       })
     );
+  });
+});
+
+describe('PATCH /api/v1/app/demo-clients/:id (brand kit)', () => {
+  it('clears a canvas back to null, so a client can drop their ground entirely', async () => {
+    // The path an admin takes to undo an experiment. `null` must reach the column — an
+    // omitted key means "leave it alone", which would strand the questionnaire on a ground
+    // the admin has already deleted from the form.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    const res = await updatePATCH(
+      jsonReq({ canvasColor: null, fontPairing: null }),
+      ctx({ id: 'dc-1' })
+    );
+    expect(res.status).toBe(200);
+    expect(prismaMock.appDemoClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ canvasColor: null, fontPairing: null }),
+      })
+    );
+  });
+
+  it('leaves brand-kit columns untouched when the patch omits them', async () => {
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    await updatePATCH(jsonReq({ name: 'Renamed' }), ctx({ id: 'dc-1' }));
+    const data = prismaMock.appDemoClient.update.mock.calls[0]?.[0]?.data as Record<
+      string,
+      unknown
+    >;
+    for (const col of ['canvasColor', 'inkColor', 'accentColorEnd', 'fontPairing']) {
+      expect(data).not.toHaveProperty(col);
+    }
   });
 });
 

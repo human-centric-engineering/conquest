@@ -19,7 +19,7 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 import {
   buildCohortDataset,
   getCohortReportRevisionContent,
@@ -53,18 +53,7 @@ const handleExportPdf = withAdminAuth<Params>(
           name: true,
           cohort: {
             select: {
-              demoClient: {
-                select: {
-                  accentColor: true,
-                  ctaColor: true,
-                  ctaColorEnd: true,
-                  surfaceColor: true,
-                  logoUrl: true,
-                  logoBackgroundColor: true,
-                  logoBackgroundEnabled: true,
-                  welcomeCopy: true,
-                },
-              },
+              demoClient: { select: DEMO_CLIENT_THEME_SELECT },
             },
           },
         },

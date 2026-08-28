@@ -48,6 +48,24 @@ export interface DemoClientView {
   logoBackgroundColor: string | null;
   /** Whether to paint the logo-background colour behind the logo. */
   logoBackgroundEnabled: boolean;
+  // Brand kit: the ground the questionnaire is drawn on, the type it is set in, and the
+  // marks that ride on both. All nullable; each null keeps today's look.
+  /** Page ground (hex) — Broadsheet's paper stock, Horizon's field; null = neutral canvas. */
+  canvasColor: string | null;
+  /** Text on that ground (hex); null derives it for contrast from the canvas. */
+  inkColor: string | null;
+  /** The ground in dark mode (hex); null derives it from the light canvas. */
+  canvasColorDark: string | null;
+  /** Text on the dark ground (hex); null derives it for contrast. */
+  inkColorDark: string | null;
+  /** Second accent (hex) for surfaces away from the CTA; null = accent only. */
+  accentColorEnd: string | null;
+  /** Square brand mark src, or null. */
+  logoMarkUrl: string | null;
+  /** Light-on-dark lockup src, or null. */
+  logoDarkUrl: string | null;
+  /** One of `FONT_PAIRINGS` (theming/fonts.ts); null = the system stack. */
+  fontPairing: string | null;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;
   createdAt: string;

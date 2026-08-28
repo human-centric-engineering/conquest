@@ -50,6 +50,7 @@ import {
 import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 import { fetchLogoDataUri } from '@/app/api/v1/app/questionnaire-sessions/_lib/fetch-logo-data-uri';
+import { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
 
 /** Raw demo-client theme columns (or null when the questionnaire is unattributed). */
 interface RawTheme {
@@ -153,7 +154,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
             select: {
               title: true,
               demoClient: {
-                select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+                select: DEMO_CLIENT_THEME_SELECT,
               },
             },
           },

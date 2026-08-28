@@ -67,6 +67,7 @@ import type {
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
 import { TAG_COLORS, type TagColor } from '@/lib/app/questionnaire/types';
+import { indexForTextSize, textSizeForIndex } from '@/lib/app/questionnaire/chat/text-scale';
 
 /** Cast a stored Json column back to our own AudienceShape (we wrote it). */
 function asAudience(value: Prisma.JsonValue): AudienceShape | null {
@@ -134,6 +135,7 @@ export const CONFIG_SELECT = {
   presentationMode: true,
   respondentLayout: true,
   respondentChrome: true,
+  chatTextSize: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
   showProgressPercentText: true,
@@ -191,6 +193,7 @@ type ConfigRow = {
   presentationMode: string;
   respondentLayout: string;
   respondentChrome: string;
+  chatTextSize: string;
   inlineCorrectionEnabled: boolean;
   sessionResumeEnabled: boolean;
   showProgressPercentText: boolean;
@@ -363,6 +366,10 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
     respondentLayout: asRespondentLayout(row.respondentLayout),
+    // `indexForTextSize` round-trips through the ladder index rather than narrowing the string
+    // directly, so the projection and the respondent surface resolve an unknown rung the same way
+    // by construction — there is only one place that decides what an unrecognised name means.
+    chatTextSize: textSizeForIndex(indexForTextSize(row.chatTextSize)),
     respondentChrome: asRespondentChrome(row.respondentChrome),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     sessionResumeEnabled: row.sessionResumeEnabled,

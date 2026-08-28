@@ -36,6 +36,12 @@ export interface RespondentSurfaceAttrs {
   'data-surface': 'respondent';
   /** Present only for an unbranded questionnaire, where ConQuest owns the surface. */
   'data-brand'?: 'conquest';
+  /**
+   * Present only when the client set a canvas colour of their own. Switches the whole
+   * neutral palette — cards, borders, muted text — to tones derived from that ground, so a
+   * portalled panel over a midnight canvas is not a white card (see app/brand-theme.css).
+   */
+  'data-canvas'?: 'custom';
   /** The client's `--app-*` brand variables. */
   style: CSSProperties;
 }

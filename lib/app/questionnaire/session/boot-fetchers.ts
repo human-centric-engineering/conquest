@@ -37,7 +37,12 @@ import {
   PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
+import {
+  CHAT_TEXT_SCALES,
+  DEFAULT_CHAT_TEXT_SCALE_INDEX,
+} from '@/lib/app/questionnaire/chat/text-scale';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
+import { DEFAULT_FONT_PAIRING, FONT_PAIRINGS } from '@/lib/app/questionnaire/theming';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 
 function authHeaders(accessToken: string): Record<string, string> {
@@ -274,6 +279,24 @@ const resolvedThemeSchema = z.object({
   ctaColorEnd: z.string().nullable(),
   logoBackgroundColor: z.string().nullable(),
   hasBrandIdentity: z.boolean(),
+  // The brand kit. Every field here is a hand-written mirror of `ResolvedTheme`, and every one
+  // carries `.catch()` so a MISSING or unrecognised value degrades that ONE affordance instead
+  // of failing the parse. `.nullable()` alone did not do that: an absent key still fails the
+  // field, which fails `resolvedThemeSchema`, which fails `surfaceConfigSchema`, which makes
+  // `fetchSurfaceConfig` return null — so during a rolling deploy (new bundle, old server) a
+  // client-booted surface would lose voice input, layout, answer-panel scope, reasoning,
+  // glossary and text size all at once, over one theme field the resolver had not learnt yet.
+  canvasColor: z.string().nullable().catch(null),
+  onCanvas: z.string().nullable().catch(null),
+  canvasColorDark: z.string().nullable().catch(null),
+  onCanvasDark: z.string().nullable().catch(null),
+  canvasIsDark: z.boolean().catch(false),
+  accentColorEnd: z.string().nullable().catch(null),
+  logoMarkUrl: z.string().nullable().catch(null),
+  logoDarkUrl: z.string().nullable().catch(null),
+  bandLogoUrl: z.string().nullable().catch(null),
+  bandLogoDarkUrl: z.string().nullable().catch(null),
+  fontPairing: z.enum(FONT_PAIRINGS).catch(DEFAULT_FONT_PAIRING),
 });
 
 /**
@@ -292,6 +315,16 @@ const surfaceConfigSchema = z.object({
   answerPanelScope: z
     .enum(ANSWER_SLOT_PANEL_SCOPES)
     .catch(DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope),
+  // Already an index on the wire (the server resolved the name), so this validates the range
+  // rather than an enum. `.catch` for the same reason every field here has one, and the fallback
+  // is the standard rung: a payload from a build with a longer ladder must open the conversation
+  // at a readable size rather than fail the parse and drop every other affordance with it.
+  chatTextScaleIndex: z
+    .number()
+    .int()
+    .min(0)
+    .max(CHAT_TEXT_SCALES.length - 1)
+    .catch(DEFAULT_CHAT_TEXT_SCALE_INDEX),
   reasoningPlacement: z.enum(REASONING_PLACEMENTS).nullable().catch(null),
   reasoningDwellMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs),
   reasoningPerItemMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs),

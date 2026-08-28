@@ -70,6 +70,12 @@ export interface RespondentSurfaceConfig {
   respondentLayout: RespondentLayout;
   /** How much of the live answer panel shows; `hidden` is the chat-only surface. */
   answerPanelScope: AnswerSlotPanelScope;
+  /**
+   * The ladder INDEX the text-size stepper opens on (`config.chatTextSize`, already resolved to a
+   * number). The opening rung only — a respondent who has ever stepped keeps their stored size and
+   * never consults this.
+   */
+  chatTextScaleIndex: number;
   /** Resolved "watch it think" placement, or null when the version has the feature off. */
   reasoningPlacement: ReasoningPlacement | null;
   /** Base dwell (ms) the reasoning summary stays open for up to two steps. */

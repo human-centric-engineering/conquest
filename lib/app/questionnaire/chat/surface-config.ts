@@ -38,6 +38,7 @@ export const SURFACE_CONFIG_SELECT = {
   presentationMode: true,
   respondentLayout: true,
   respondentChrome: true,
+  chatTextSize: true,
   answerSlotPanelScope: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
@@ -63,6 +64,7 @@ export interface VersionSurface {
     presentationMode: string;
     respondentLayout: string;
     respondentChrome: string;
+    chatTextSize: string;
     answerSlotPanelScope: string;
     inlineCorrectionEnabled: boolean;
     sessionResumeEnabled: boolean;

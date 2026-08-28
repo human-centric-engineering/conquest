@@ -53,6 +53,14 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 | `ctaColorEnd`           | String?  | **F7.1+** hex CTA gradient end; set → CTA renders `ctaColor → ctaColorEnd`; null → solid CTA      |
 | `logoBackgroundColor`   | String?  | **F7.1+** hex colour painted behind the logo (when enabled); null → falls back to `surfaceColor`  |
 | `logoBackgroundEnabled` | Boolean  | **F7.1+** "apply this colour as the logo background" toggle; default `false`                      |
+| `canvasColor`           | String?  | **kit** hex page ground in LIGHT mode — Broadsheet's paper stock, Horizon's field                 |
+| `inkColor`              | String?  | **kit** hex text on that ground; null → derived for contrast from `canvasColor`                   |
+| `canvasColorDark`       | String?  | **kit** the ground in DARK mode; null → derived from `canvasColor`                                |
+| `inkColorDark`          | String?  | **kit** text on the dark ground; null → derived for contrast from it                              |
+| `accentColorEnd`        | String?  | **kit** hex second accent (surfaces, not the CTA); null → the accent alone                        |
+| `logoMarkUrl`           | String?  | **kit** square mark (https or `/uploads/...`); null → none                                        |
+| `logoDarkUrl`           | String?  | **kit** light-on-dark lockup; null → the standard lockup everywhere                               |
+| `fontPairing`           | String?  | **kit** one of the six pairings in `theming/fonts.ts`; null → `neutral` (the system stack)        |
 | timestamps              | DateTime |                                                                                                   |
 
 `AppQuestionnaire.demoClientId String?` — nullable FK, `onDelete: SetNull`, indexed.
@@ -71,6 +79,19 @@ is copy, not identity. The **F7.1+ chrome set** (`surfaceColor`, `ctaColorEnd`,
 band, a gradient CTA, a backdrop for logos drawn to sit on one — without trying to clone the
 client's site. They are optional on the raw `DemoClientTheme` contract (absent === null), so
 older DB selects / forks / tests that pass only the F3.4 four still resolve cleanly.
+The **brand kit** (`canvasColor` / `inkColor` and their `…Dark` counterparts, `accentColorEnd`,
+`logoMarkUrl`, `logoDarkUrl`, `fontPairing`) is the other half of the same idea, one axis further in. The
+F7.1+ chrome set brands what SURROUNDS the conversation; the kit brands the conversation
+itself — the ground it is drawn on and the type it is set in. That distinction is what the
+respondent layouts need: a white-labelled Broadsheet with no paper stock, or a Horizon with
+no field colour, is Classic in a different shape. Like every column above they are nullable
+and optional on the raw contract, and every null resolves to today's look.
+
+`fontPairing` is the one visual column that does **not** flip the white-label switch. It is
+a design choice rather than an identity, like `welcomeCopy`: a client who picks the editorial
+serif and nothing else has given us no brand to protect, so the questionnaire keeps ConQuest
+colours and the wordmark — set in that serif.
+
 `reset-sessions` (F6.4) is now built ([demo-session-reset.md](./demo-session-reset.md));
 clone-for-client (P3+) is the remaining distributed P2.5 work. See the
 [development plan][plan] P2.5 distributed-work table.
@@ -85,9 +106,12 @@ columns into a usable brand:
   the renderer substitutes the ConQuest wordmark instead). `null` (generic demo) resolves
   to the all-defaults theme.
 - `hasBrandIdentity` — true when the client set any of `ctaColor`, `accentColor`,
-  `logoUrl`, `bannerUrl`, `surfaceColor`, `ctaColorEnd`, or a resolved logo backdrop. It
-  reads the RAW columns, never the resolved ones, so the defaults it applies can't make an
-  unbranded client look branded.
+  `logoUrl`, `bannerUrl`, `surfaceColor`, `ctaColorEnd`, a resolved logo backdrop, or any of
+  `canvasColor` / `inkColor` / `canvasColorDark` / `inkColorDark` / `accentColorEnd` /
+  `logoMarkUrl` / `logoDarkUrl`. It reads the
+  RAW columns, never the resolved ones, so the defaults it applies can't make an unbranded
+  client look branded. `welcomeCopy` and `fontPairing` are both excluded — copy and type are
+  not identity.
 - `themeToCssVariables(theme)` → when `hasBrandIdentity`, `--app-cta-color` /
   `--app-accent-color` / `--app-cta-gradient` (a `linear-gradient(...)` when `ctaColorEnd`
   is set, else the solid CTA colour), plus `--app-surface-color`, `--app-logo-bg`,
@@ -125,16 +149,140 @@ columns into a usable brand:
 from the invitation's denormalised `demoClientId` snapshot — see [invitations.md].
 The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 
+### The brand kit — the ground, the type, and the marks
+
+Six columns, and three derivations that make them usable without asking the admin for more
+than they know.
+
+**The ground.** `canvasColor` is the page the questionnaire is drawn on; `inkColor` is the
+text on it. Ink is optional because an admin who picks a midnight canvas should not also have
+to work out that they now need light text — `resolveTheme` derives it with the same
+`readableTextColor` the band already uses, and exposes the result as `onCanvas`. `canvasIsDark`
+is a second reading of that same number, never a separate threshold, so the ink and the
+lockup choice cannot disagree about a borderline mid-tone.
+
+**And the ground has two of everything, because the respondent has a switch.** Every layout now
+offers light/dark (see [respondent-chrome.md](./respondent-chrome.md)), so a canvas that only
+worked in one of them was never really a setting. `canvasColorDark` / `inkColorDark` exist for a
+brand with its own dark palette, but both are usually null: `darkenForDarkMode` derives the dark
+ground as the client's colour at 14% over near-black, and the ink is derived from that.
+
+Three choices in that derivation are worth stating, because each has an obvious-looking
+alternative that is wrong:
+
+- **A tint, not an inversion.** A cream paper stock has no honest inverse. What it has is a hue,
+  and keeping that hue over the near-black the surface already uses is what makes a dark-mode
+  Broadsheet still look like this client's rather than like everyone else's.
+- **An already-dark canvas is carried across unchanged.** Darkening a navy again gives a black
+  rectangle and loses the brand entirely — the opposite of the point.
+- **The mix happens in TypeScript, not as a CSS `color-mix()`.** The result is needed as a real
+  colour, because `readableTextColor` has to read it to derive the dark ink, and it cannot see
+  inside a `color-mix()` the browser has not computed yet.
+
+The resolver cannot pick BETWEEN the two grounds, though — the respondent flips the mode
+client-side, long after the server resolved the theme. So `themeToCssVariables` emits both
+(`--app-canvas-light` / `--app-canvas-dark`, `--app-ink-light` / `--app-ink-dark`) and the
+stylesheet publishes the winner as `--app-canvas-color` / `--app-on-canvas` from its light and
+`.dark` blocks. The `data-canvas='custom'` derivation below then reads only that published pair,
+so it is mode-agnostic by construction and needs no `.dark` variant of its own. The band's
+lockup is split the same way: `--app-logo-src` and `--app-logo-src-dark` in, `--app-logo-url`
+out.
+
+A canvas has to reach further than a variable. `--app-canvas-color` and `--app-on-canvas`
+drive `--color-background` / `--color-foreground` on the respondent surface, but the rest of
+the neutral palette is literal (`--color-card: #ffffff`), so a midnight canvas would have got
+light ink and white cards on top — worse than not offering the setting. `BrandThemeProvider`
+therefore also sets **`data-canvas='custom'`** when the client has a ground of their own, and
+`app/brand-theme.css` re-derives cards, popovers, borders, inputs, rings and muted text from
+it with `color-mix`. Mixing rather than listing a second palette is what lets one rule serve
+both a bone-white paper stock and a near-black field: every step moves toward the ink, and its
+direction follows the canvas automatically — including when the ground is the DERIVED dark one,
+since the rule reads the published pair rather than the client's columns. The attribute is
+carried to portalled roots alongside the variables (see
+`respondent-surface-context.tsx`), or the answer drawer would come out a white card over a
+dark questionnaire.
+
+**Which lockup the band draws.** `logoDarkUrl` is the same artwork in light ink.
+`resolveTheme` picks between it and `logoUrl` per the ground the band ACTUALLY paints —
+the logo backdrop if there is one, else the surface colour, else the canvas — and does it
+**once per mode**, since the canvas differs between them: `bandLogoUrl` and `bandLogoDarkUrl`.
+The renderer still reads one variable (`--app-logo-url`) and needs no branch; the stylesheet
+chooses which source fills it. With no band colour at all the dark-mode ground is the neutral
+near-black, so a client who supplied a dark lockup gets it there even with no surface set. `logoUrl` itself keeps its old meaning (the light-ground lockup) because the invitation
+email and the export PDFs render onto paper-white and must not follow the band's choice.
+
+**The type.** `fontPairing` is one choice covering two faces, not two font-family boxes: a
+typed family name is a worse form and a worse failure (a typo silently falls back). The six
+pairings live in `theming/fonts.ts` with their stacks and their admin copy — `neutral` (the
+system stack), `humanist` (Outfit / Source Sans 3), `editorial` (Instrument Serif / Newsreader),
+`classical` (Playfair Display / Lora), `contemporary` (Bricolage Grotesque / Space Grotesk) and
+`monospace` (JetBrains Mono / IBM Plex Mono). `app/layout.tsx` loads the ten brand faces via
+`next/font` with **`preload: false`**, so a marketing page does not fetch typefaces only a demo
+client uses — that opt-out is what makes the list cheap to grow, and the parity test derives its
+expected count from `FONT_PAIRINGS` so a seventh pairing that preloads fails rather than taxing
+every page. `themeToCssVariables` emits
+`--app-font-display` / `--app-font-body` only for a non-neutral pairing — `neutral` IS the
+stylesheet default, and an inline style would beat it on portalled roots. The link between the
+stack strings and the `next/font` variable names is nothing but a string, so
+`tests/unit/lib/app/questionnaire/theming/fonts.test.ts` reads `app/layout.tsx` and checks
+them against each other; a rename on either side fails there rather than rendering in Georgia.
+The same file pins two invariants a seventh pairing could quietly break: **no two pairings share
+a face** (a duplicate would cost a download to look identical on screen), and **`monospace` tails
+`MONO_FONT_STACK`, not `NEUTRAL_FONT_STACK`**. That second one is the only place the generic
+matters — a mono stack falling back to the neutral sans renders proportional and then reflows to
+fixed-width the moment the webfont lands, mid-read.
+
+**Reading is forgiving, writing is strict.** `resolveFontPairing` resolves null and anything
+unrecognised to `neutral` (the column is plain TEXT, so a rollback or a seed can put anything
+there), while the Zod field rejects an unknown pairing outright — an admin's typo should be
+told, a value already in the column must still render.
+
+**Every emitted variable has a default**, declared in `app/brand-theme.css` on the
+`[data-surface='respondent']` blocks rather than the `[data-brand='conquest']` one: they are
+the neutral ground any questionnaire falls back to, branded or not, and a client who sets only
+a logo still needs a canvas to draw it on. The exceptions are the variables whose consumers
+branch before painting (`--app-surface-color`, `--app-on-surface`, `--app-logo-bg` and the
+image URLs) — a default there would paint a brand band onto every unbranded questionnaire.
+A test enumerates what `themeToCssVariables` can emit and checks the stylesheet declares each
+one, with that exemption list stated in the test.
+
+### One select, not nine
+
+`DEMO_CLIENT_THEME_SELECT` (`theming/select.ts`) is the single Prisma `select` fragment every
+consumer of a client's brand uses. Before it there were nine hand-written column lists — the
+email, the respondent surface, the report notification, four export PDFs, the admin list — and
+nothing connected them. Missing a column produced no error at all, because `resolveTheme`
+treats an absent key exactly like an explicit null: the surface simply rendered unbranded,
+which is plausible enough that nobody notices.
+
+That was not hypothetical. Four of those selects still listed only the original F3.4 four, so
+`transcript-pdf-document.tsx` — which reads `surfaceColor` — had been rendering transcripts
+without the client's band since F7.1 shipped. Fixed here.
+
+The fragment is guarded at COMPILE time: `DEMO_CLIENT_THEME_SELECT satisfies Record<keyof
+Required<DemoClientTheme>, true>` means a new field on the resolver's contract without a
+matching key is a type error. Add a theme column in one place and the whole product picks it up.
+
 ### Brand images: upload or link (F7.2)
 
-Both the logo and the banner accept **either** a pasted `https://` URL **or** an uploaded
-file. Both paths write the same column, so `PATCH /api/v1/app/demo-clients/:id` is
-unchanged — upload simply returns a URL the form writes into the same field.
+Every brand image accepts **either** a pasted `https://` URL **or** an uploaded file. Both
+paths write the same column, so `PATCH /api/v1/app/demo-clients/:id` is unchanged — upload
+simply returns a URL the form writes into the same field.
 
-| Route                                     | Spec                                    | Stored as | Where it renders                        |
-| ----------------------------------------- | --------------------------------------- | --------- | --------------------------------------- |
-| `POST/DELETE .../demo-clients/:id/logo`   | any shape, min 80x40, max box 1200x1200 | PNG       | email header, session band, export PDFs |
-| `POST/DELETE .../demo-clients/:id/banner` | ~4:1 (±12%), min 800x200, box 1600x400  | JPEG      | respondent session header only          |
+| Route                                        | Spec                                    | Stored as | Where it renders                        |
+| -------------------------------------------- | --------------------------------------- | --------- | --------------------------------------- |
+| `POST/DELETE .../demo-clients/:id/logo`      | any shape, min 80x40, max box 1200x1200 | PNG       | email header, session band, export PDFs |
+| `POST/DELETE .../demo-clients/:id/banner`    | ~4:1 (±12%), min 800x200, box 1600x400  | JPEG      | respondent session header only          |
+| `POST/DELETE .../demo-clients/:id/logo-dark` | same spec as the logo                   | PNG       | any band whose ground resolves dark     |
+| `POST/DELETE .../demo-clients/:id/mark`      | 1:1 (±6%), min 128x128, box 512x512     | PNG       | layouts wanting a mark, not a lockup    |
+
+- All four are built from one `brandImageHandlers(kind)` factory. The **kind is passed
+  explicitly**, not derived from the spec: `logo-dark` shares the logo's spec object, so the
+  old `spec.label === 'Banner' ? … : logo` derivation in the admin field would have sent both
+  new kinds to the logo route and overwritten a column the admin was not editing.
+- **Squareness IS enforced for the mark**, unlike the logo. A wordmark uploaded there would
+  be scaled to illegibility in the slots that use it, so the shape is checked on the way in
+  rather than imposed by the renderer.
 
 - **PNG for the logo** because it needs transparency and is rendered by the invitation
   email and the export PDFs, where WebP support is patchy. **JPEG for the banner** because
@@ -195,6 +343,8 @@ All routes are `withAdminAuth` (401/403) and audited. Registry: `API.APP.DEMO_CL
 | `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                                                                   | `404`, `409 DEMO_CLIENT_IN_USE`                             |
 | `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)                                                         | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
 | `GET /api/v1/app/demo-clients/:id/knowledge`       | The client's private knowledge corpus (F10.1) — grounds its Respondent Reports     | `404`                                                       |
+| `POST/DELETE .../demo-clients/:id/logo-dark`       | Light-on-dark lockup upload / remove                                               | `404`, `400`, `503`, `429`                                  |
+| `POST/DELETE .../demo-clients/:id/mark`            | Square brand mark upload / remove                                                  | `404`, `400`, `503`, `429`                                  |
 | `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`); also renames with `{ title }` (not demo-only) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
 | `POST /api/v1/app/questionnaires/import`           | Import a definition file; optional `?demoClientId=` attributes the new draft       | `404 DEMO_CLIENT_NOT_FOUND`, `400 VALIDATION_ERROR`         |
 
@@ -246,12 +396,51 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   surface to the client. Colours apply to **both** the invitation email and the respondent question
   session (visible via "Preview as respondent"). The edit form shows a **live `<DemoClientThemePreview>`** under the fieldset
   (valid inputs only — a half-typed hex shows the default, not a broken swatch).
+- Beneath it, **"The page itself"** carries the brand kit: canvas colour, ink colour, their two
+  dark-mode counterparts (both placeholdered _"Leave blank to derive it"_, which is the path
+  almost every client takes), second accent, a **Typeface** select (the six pairings, with the
+  chosen one's description under it — the picker is a plain `<select>` because the description
+  line, not the option label, is what tells an admin what they are choosing), and the
+  **light-on-dark logo** + **square mark** image fields. Ink is placeholdered
+  _"Leave blank to derive it"_ because deriving is the path almost every client takes.
+- **Colours are pickers now, not text boxes.** `<BrandColorField>` pairs a native
+  `<input type="color">` (OS picker, eyedropper on macOS/Chrome) with the hex box, which stays
+  the source of truth and freely editable mid-type — `#28` is a legal thing to have typed.
+  **The unset state was the hard part**: a native colour input has no empty value and shows black,
+  so an untouched field read as "this colour is black" beside a placeholder saying otherwise. The
+  swatch is therefore a styled span with the input laid transparently over it — unset draws a
+  muted diagonal slash, and clicking still opens the OS picker, seeded from the placeholder hex so
+  the admin starts at the suggested colour. The control never writes on its own, so an untouched
+  field stores nothing and blank still means "use the default".
+- **A soft contrast warning per mode**, on the canvas/ink pairs — the only pairs on this form
+  that can be independently valid and jointly unreadable. Both light and dark are checked, because
+  a respondent can be reading either and the derived dark pair can fail too. Each measures the
+  pair that will ACTUALLY RENDER, names which mode is the problem, and warns below
+  `MIN_CONTRAST_RATIO` without blocking the save: a brand may genuinely be low-contrast, and
+  refusing would be us overruling the client's designer. A mid-grey canvas trips it whatever ink
+  is chosen, which is precisely when the admin should hear about it.
+
+  "Actually render" is load-bearing and was got wrong first time. The check originally measured
+  only when BOTH halves were authored, which meant the single most likely way to ship an
+  unreadable questionnaire went unchecked: a guideline reads "ink: #FFFFFF on dark", the admin
+  fills in **Ink colour**, leaves **Canvas colour** blank, and the stylesheet pairs that white ink
+  with the DEFAULT white ground. Nothing said a word. Each side now falls back to
+  `NEUTRAL_RESPONDENT_GROUND` — a TypeScript mirror of the `var()` fallbacks in
+  `app/brand-theme.css`, kept in step by a test, because TS cannot read inside a chain the browser
+  has not resolved. When the ground is the default one, the warning says so, since an admin who
+  never set a canvas cannot otherwise tell what they are being warned about.
+
 - **Brand preview (`<DemoClientThemePreview>`).** Surfaces the configured brand back
   to the admin — the gap that a client could set theme fields and see nothing. Reuses
   `resolveTheme()` and the same escaped `url()` sink (`cssUrl`) as `BrandThemeProvider`
   (never a raw `<img src>`), and renders a **miniature of the session chrome** (surface
   band + logo backdrop + gradient send button) so the admin recognises the brand before
-  opening "Preview as respondent". Two modes: **compact** on the list's
+  opening "Preview as respondent". The miniature paints the client's **canvas and ink** and
+  sets its sample question in the chosen **display face** — the preview is not inside a
+  respondent surface, so it applies the ground itself rather than inheriting it, and the type
+  pairing is otherwise just a word in a dropdown. The band draws `bandLogoUrl`, so an admin who
+  uploads a dark lockup sees the swap happen here; the full mode also shows that lockup on a
+  dark chip (the only way to tell it is really the light-ink artwork) plus the square mark. Two modes: **compact** on the list's
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
   none) and **full** on the detail page / live form preview (the resolved brand the
   respondent sees, defaults filled).

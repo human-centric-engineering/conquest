@@ -295,6 +295,16 @@ model AppQuestionnaireConfig {
   // (RESPONDENT_CHROMES — types.ts)
   respondentChrome String @default("full") // full | co_branded | white_label
 
+  // Where the respondent's text-size ladder STARTS. The stepper on the session strip stays the
+  // respondent's own (there is no switch to remove it, and this cannot cap it) — this only names
+  // the rung someone who has never touched it opens on. A demo on a boardroom screen wants
+  // largest; a dense instrument read on a laptop wants small. Anyone who has ever stepped keeps
+  // their own stored size and never sees this value. Stores the NAME, not the ladder index, so
+  // retuning the multipliers cannot silently change what an authored value means. Defaults to
+  // standard, and an unrecognised value resolves to standard too — the size every questionnaire
+  // had before this column existed. (CHAT_TEXT_SIZES — chat/text-scale.ts)
+  chatTextSize String @default("standard") // small | standard | large | largest
+
   // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
   // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer
   // panel row) rather than by sending a fresh chat turn. Corrections route through the form-edit path
@@ -666,6 +676,27 @@ model AppDemoClient {
   ctaColorEnd           String? // optional CTA gradient end colour (hex); set → CTA renders ctaColor→ctaColorEnd, null → solid ctaColor
   logoBackgroundColor   String? // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
   logoBackgroundEnabled Boolean @default(false) // "apply this colour as the logo background" — the admin toggle
+
+  // DEMO-ONLY (brand kit): the ground the questionnaire is drawn ON, the type it is set
+  // in, and the marks that ride on both. The F7.1+ block above brands the CHROME around
+  // the conversation; these brand the conversation itself, which is what a layout other
+  // than Classic actually paints with — a Broadsheet with no paper stock or a Horizon
+  // with no field colour is just Classic in a different shape.
+  //
+  // All nullable, and each null resolves to today's look (neutral canvas, system type,
+  // the single lockup). Resolved by resolveTheme(); see lib/app/questionnaire/theming.
+  canvasColor     String? // the page ground (hex) in LIGHT mode — Broadsheet's paper stock, Horizon's field
+  inkColor        String? // text laid on that ground (hex); null → derived for contrast from canvasColor
+  // The same ground in DARK mode. Both null → derived from the light pair (a brand's paper stock
+  // tinted down to a dark-mode ground), which is what almost every client will want; set them when
+  // the brand specifies its own dark palette and our derivation is not it. A respondent can switch
+  // modes on any layout, so a canvas that only worked in one of them was never an option.
+  canvasColorDark String? // the page ground (hex) in dark mode; null → derived from canvasColor
+  inkColorDark    String? // text on the dark ground (hex); null → derived for contrast from it
+  accentColorEnd  String? // second accent (hex) — Horizon's aura, Broadsheet's rule. NOT ctaColorEnd, which is the CTA gradient's partner
+  logoMarkUrl     String? // square mark (~1:1), for layouts that want a mark rather than a lockup
+  logoDarkUrl     String? // light-on-dark lockup — needed the moment a canvas or band can be dark
+  fontPairing     String? // one of FONT_PAIRINGS (theming/fonts.ts); null/unknown → 'neutral' (today's system stack)
 
   // Respondent Report: this client's dedicated KnowledgeTag id (KnowledgeTag is a platform model;
   // a plain String, no @relation — UG-1 and a deliberate seam, so the app never forks the platform

@@ -42,6 +42,7 @@ import {
 import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
 import type { CorrectionTarget } from '@/lib/app/questionnaire/panel/correction-targets';
 import {
+  CHAT_TEXT_AUTHORED_STORAGE_KEY,
   CHAT_TEXT_SCALE_STORAGE_KEY,
   DEFAULT_CHAT_TEXT_SCALE_INDEX,
   normalizeScaleIndex,
@@ -105,6 +106,14 @@ export interface UseSessionWorkspaceOptions {
    * review-sheet auto-close below depends on it here. Defaults to `true`, which is Classic.
    */
   panelReturnsAtLg?: boolean;
+  /**
+   * The ladder rung the conversation OPENS at (`config.chatTextSize`, resolved server-side to an
+   * index). An explicitly authored rung — anything other than the standard one — is adopted on
+   * arrival even by a respondent who has stepped before, once per authored value; see the storage
+   * note below for why that is not the same as overriding their preference. Defaults to the
+   * standard rung, which is what every session opened at before the setting existed.
+   */
+  chatTextScaleIndex?: number;
   inlineCorrectionEnabled?: boolean;
   readOnly?: boolean;
   intro?: ResolvedSessionIntro | null;
@@ -203,6 +212,7 @@ export function useSessionWorkspace({
   initialFormView,
   autoStart = false,
   panelReturnsAtLg = true,
+  chatTextScaleIndex = DEFAULT_CHAT_TEXT_SCALE_INDEX,
   presentationMode = 'both',
   answerPanelScope = 'full_progress',
   inlineCorrectionEnabled = false,
@@ -305,12 +315,53 @@ export function useSessionWorkspace({
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   // Respondent-owned chat text size, persisted globally rather than per session: someone who needs
   // larger text needs it in the next leg of an Experience too, and should not re-set it each time.
-  // `useLocalStorage` hydrates after mount (SSR-safe), so the first paint is the default size and
-  // settles to the stored one — a font-size change only, no layout shift beyond reflow.
+  // `useLocalStorage` hydrates after mount (SSR-safe), so the first paint is the authored opening
+  // size and settles to the stored one — a font-size change only, no layout shift beyond reflow.
   const [storedTextScaleIndex, setTextScaleIndex] = useLocalStorage<number>(
     CHAT_TEXT_SCALE_STORAGE_KEY,
-    DEFAULT_CHAT_TEXT_SCALE_INDEX
+    normalizeScaleIndex(chatTextScaleIndex)
   );
+  // Adopt the questionnaire's authored rung.
+  //
+  // Passing it as `useLocalStorage`'s `initial` is NOT enough on its own: `initial` applies only
+  // while nothing is stored, so the setting was inert for anyone who had ever touched the stepper
+  // — including the author previewing their own choice, who is the person most likely to have
+  // touched it. A setting whose author cannot see it working is not a setting.
+  //
+  // So an EXPLICIT authored rung (anything but the standard one — the column's default, which is
+  // indistinguishable from "never set") is adopted here, once per authored value. The marker key
+  // records what was last adopted: it differs → move to the authored rung and record it; it
+  // matches → leave the respondent's rung alone, which is what makes a step away from the authored
+  // size survive a reload. An author can therefore say how the conversation opens and change their
+  // mind, but cannot pin, cap, or repeatedly reset anyone's size, and the stepper never goes away.
+  //
+  // Runs after `useLocalStorage`'s own mount hydration (declared above, so its effect is queued
+  // first) — otherwise the stored rung would land last and win. Guarded by a ref rather than
+  // effect deps because it must fire once per mount, not once per render that changes the prop.
+  const authoredAdoptedRef = useRef(false);
+  useEffect(() => {
+    if (authoredAdoptedRef.current) return;
+    authoredAdoptedRef.current = true;
+    const authored = normalizeScaleIndex(chatTextScaleIndex);
+    if (authored === DEFAULT_CHAT_TEXT_SCALE_INDEX) return;
+    let alreadyAdopted: unknown = null;
+    try {
+      const raw = window.localStorage.getItem(CHAT_TEXT_AUTHORED_STORAGE_KEY);
+      alreadyAdopted = raw === null ? null : JSON.parse(raw);
+    } catch {
+      // Unreadable or malformed marker reads as "nothing adopted yet" — re-adopting the authored
+      // rung is the recoverable outcome; refusing to would strand the setting.
+      alreadyAdopted = null;
+    }
+    if (alreadyAdopted === authored) return;
+    try {
+      window.localStorage.setItem(CHAT_TEXT_AUTHORED_STORAGE_KEY, JSON.stringify(authored));
+    } catch {
+      // Private-mode / quota: adopt the rung for this visit anyway. The cost of not writing the
+      // marker is that the next visit adopts again, not that the respondent loses their size now.
+    }
+    setTextScaleIndex(authored);
+  }, [chatTextScaleIndex, setTextScaleIndex]);
   // Storage is untrusted (stale ladder, another tab, hand-edited); normalise before it can reach a
   // `calc()`, where a NaN would silently drop the transcript's font-size entirely.
   const textScaleIndex = normalizeScaleIndex(storedTextScaleIndex);

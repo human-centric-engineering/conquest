@@ -19,6 +19,12 @@
  * keeps branding without the demo marker renames it to a plain theme provider.
  */
 
+import {
+  FONT_PAIRING_STACKS,
+  resolveFontPairing,
+  type FontPairing,
+} from '@/lib/app/questionnaire/theming/fonts';
+
 /**
  * The raw theme columns as stored on a demo client — every field nullable, where
  * null means "fall back to the ConQuest default". Matches the `AppDemoClient` theme
@@ -59,6 +65,47 @@ export interface DemoClientTheme {
   logoBackgroundColor?: string | null;
   /** The admin's "apply this colour as the logo background" toggle. */
   logoBackgroundEnabled?: boolean | null;
+  // The brand-kit columns are likewise OPTIONAL on the raw contract, and for the same
+  // reason: they landed after the chrome set, and every read of them here is defensive.
+  // Where the chrome columns above brand what surrounds the conversation, these brand the
+  // conversation itself — the ground it is drawn on and the type it is set in.
+  /**
+   * The page ground (hex) the questionnaire is drawn on — Broadsheet's paper stock,
+   * Horizon's field. Null/absent = the neutral respondent canvas, i.e. today's look.
+   */
+  canvasColor?: string | null;
+  /**
+   * Text laid on that ground (hex). Null/absent and a canvas is set → derived for contrast
+   * from {@link canvasColor}, so an admin who picks a dark canvas never has to work out
+   * that they also need light ink.
+   */
+  inkColor?: string | null;
+  /**
+   * A SECOND accent (hex) — Horizon's aura, Broadsheet's rule. Deliberately not
+   * {@link ctaColorEnd}: that one is the CTA gradient's partner and is consumed only by the
+   * button, while this one tints surfaces away from the CTA entirely.
+   */
+  accentColorEnd?: string | null;
+  /** Square mark (~1:1), for a layout that wants a mark rather than the full lockup. */
+  logoMarkUrl?: string | null;
+  /**
+   * The light-on-dark lockup. Needed the moment a ground can be dark: a lockup drawn in the
+   * brand's ink disappears on its own dark canvas, and no amount of backdrop fixes that.
+   */
+  logoDarkUrl?: string | null;
+  /** One of `FONT_PAIRINGS` (theming/fonts.ts); null/absent/unknown → the system stack. */
+  fontPairing?: string | null;
+  /**
+   * The same ground in DARK mode. Null/absent → derived from {@link canvasColor} (the brand's
+   * colour tinted down over near-black), which is what almost every client wants; set it when
+   * the brand specifies its own dark palette.
+   *
+   * This exists because the respondent can switch modes from any layout, so a canvas that
+   * only worked in one of them was never really a setting.
+   */
+  canvasColorDark?: string | null;
+  /** Text on the dark ground (hex). Null/absent → derived for contrast from it. */
+  inkColorDark?: string | null;
 }
 
 /**
@@ -95,6 +142,50 @@ export interface ResolvedTheme {
    * a client that customises only its invitation line still gets ConQuest chrome.
    */
   hasBrandIdentity: boolean;
+  /** The client's page ground in LIGHT mode, or null for the neutral respondent canvas. */
+  canvasColor: string | null;
+  /**
+   * The colour to lay text in ON that ground — already resolved: the explicit `inkColor`,
+   * else derived for contrast against `canvasColor`, else null (the surface keeps its own
+   * foreground token). Renderers paint this directly and never re-derive it.
+   */
+  onCanvas: string | null;
+  /**
+   * The ground in DARK mode: the explicit `canvasColorDark`, else derived from the light one,
+   * else null. A light canvas is tinted down over near-black so the brand's hue survives the
+   * switch; a canvas that is ALREADY dark is carried across unchanged rather than darkened
+   * twice into a black rectangle.
+   */
+  canvasColorDark: string | null;
+  /** Ink for the dark ground — explicit, else derived for contrast against it, else null. */
+  onCanvasDark: string | null;
+  /** True when the resolved LIGHT canvas is itself a dark colour (a brand with a dark ground). */
+  canvasIsDark: boolean;
+  /** The second accent, or null. Surfaces tint with it; the CTA never does. */
+  accentColorEnd: string | null;
+  /** Square brand mark, or null. */
+  logoMarkUrl: string | null;
+  /** Light-on-dark lockup, or null. */
+  logoDarkUrl: string | null;
+  /**
+   * The lockup to draw in the header band, already chosen for the ground the band actually
+   * paints (its logo backdrop, else the surface colour, else the canvas). A dark ground with
+   * a dark lockup available takes it; everything else takes `logoUrl`. Null when there is no
+   * logo at all.
+   *
+   * `logoUrl` above deliberately keeps its old meaning — the default, light-ground lockup —
+   * because the invitation email and the export PDFs render onto paper-white and must not
+   * follow the band's choice.
+   */
+  bandLogoUrl: string | null;
+  /**
+   * The same choice made against the DARK-mode ground. Emitted as its own variable and switched
+   * in the stylesheet rather than picked here, because which one applies depends on a mode the
+   * server does not know: the respondent can flip it after the page has rendered.
+   */
+  bandLogoDarkUrl: string | null;
+  /** The resolved type pairing; always a real pairing, `'neutral'` when unset or unknown. */
+  fontPairing: FontPairing;
 }
 
 /**
@@ -128,10 +219,49 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
   const logoBackgroundColor = theme?.logoBackgroundEnabled
     ? (theme.logoBackgroundColor ?? surfaceColor)
     : null;
+  const canvasColor = theme?.canvasColor ?? null;
+  const logoUrl = theme?.logoUrl ?? null;
+  const logoDarkUrl = theme?.logoDarkUrl ?? null;
+  // Ink on the ground: the admin's explicit choice wins, otherwise it is derived for
+  // contrast — an admin who picks a midnight canvas should not also have to work out that
+  // they now need light ink. Null when there is no canvas AND no ink: the surface keeps its
+  // own foreground token, exactly as it does today.
+  const onCanvas = theme?.inkColor ?? (canvasColor ? readableTextColor(canvasColor) : null);
+  // "Dark" means the canvas is one that wants light text on it — the same judgement
+  // readableTextColor already makes, reused rather than re-thresholded so the two can never
+  // disagree about a borderline mid-tone.
+  const canvasIsDark = canvasColor ? isDarkColor(canvasColor) : false;
+  // The dark-mode ground. Derived by default because a client should not have to supply a
+  // second palette to be allowed a first one — and because the respondent can switch modes
+  // whenever they like, so a light-only canvas would simply vanish half the time.
+  //
+  // A canvas that is already dark is carried across UNCHANGED: darkening a navy again gives a
+  // black rectangle and loses the brand entirely, which is the opposite of the point.
+  const canvasColorDark =
+    theme?.canvasColorDark ??
+    (canvasColor ? (canvasIsDark ? canvasColor : darkenForDarkMode(canvasColor)) : null);
+  const onCanvasDark =
+    theme?.inkColorDark ?? (canvasColorDark ? readableTextColor(canvasColorDark) : null);
+  // Which lockup the BAND draws, chosen for the ground the band actually paints: its own
+  // logo backdrop if it has one, else the surface colour, else the canvas. Anything else
+  // (no ground at all) is the neutral canvas — light in light mode, near-black in dark, which
+  // is why the two modes are resolved separately below.
+  const lightGround = logoBackgroundColor ?? surfaceColor ?? canvasColor;
+  const bandLogoUrl = lightGround && isDarkColor(lightGround) ? (logoDarkUrl ?? logoUrl) : logoUrl;
+  // In dark mode the fallback ground is the neutral DARK canvas, so a client with no band
+  // colour of their own still gets their light-on-dark lockup if they supplied one.
+  const darkGround = logoBackgroundColor ?? surfaceColor ?? canvasColorDark;
+  const bandLogoDarkUrl =
+    !darkGround || isDarkColor(darkGround) ? (logoDarkUrl ?? logoUrl) : logoUrl;
   // Any one visual signal is enough to count as "branded" — a client that sets only a
   // logo, or only a CTA colour, still owns the surface. Note this reads the RAW columns,
   // not the resolved ones, so the defaults applied below can't make an unbranded client
   // look branded.
+  //
+  // `fontPairing` is EXCLUDED for the same reason as `welcomeCopy`: it is a design choice
+  // rather than an identity. A client who picks the editorial serif and nothing else has
+  // handed us no brand to protect, so the questionnaire stays in ConQuest colours — set in
+  // that serif.
   const hasBrandIdentity = Boolean(
     theme?.ctaColor ||
     theme?.accentColor ||
@@ -139,18 +269,36 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
     theme?.bannerUrl ||
     theme?.surfaceColor ||
     theme?.ctaColorEnd ||
-    logoBackgroundColor
+    logoBackgroundColor ||
+    canvasColor ||
+    theme?.canvasColorDark ||
+    theme?.inkColor ||
+    theme?.inkColorDark ||
+    theme?.accentColorEnd ||
+    theme?.logoMarkUrl ||
+    logoDarkUrl
   );
   return {
     ctaColor: theme?.ctaColor ?? CONQUEST_THEME_DEFAULTS.ctaColor,
     accentColor: theme?.accentColor ?? CONQUEST_THEME_DEFAULTS.accentColor,
-    logoUrl: theme?.logoUrl ?? null,
+    logoUrl,
     bannerUrl: theme?.bannerUrl ?? null,
     welcomeCopy: theme?.welcomeCopy ?? CONQUEST_THEME_DEFAULTS.welcomeCopy,
     surfaceColor,
     ctaColorEnd: theme?.ctaColorEnd ?? null,
     logoBackgroundColor,
     hasBrandIdentity,
+    canvasColor,
+    onCanvas,
+    canvasColorDark,
+    onCanvasDark,
+    canvasIsDark,
+    accentColorEnd: theme?.accentColorEnd ?? null,
+    logoMarkUrl: theme?.logoMarkUrl ?? null,
+    logoDarkUrl,
+    bandLogoUrl,
+    bandLogoDarkUrl,
+    fontPairing: resolveFontPairing(theme?.fontPairing),
   };
 }
 
@@ -165,18 +313,150 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
  * near-black and vanish on a dark brand band.
  */
 export function readableTextColor(hex: string): string | null {
+  const luminance = relativeLuminance(hex);
+  if (luminance === null) return null;
+  // Contrast of white vs near-black against this luminance; brighter background → dark text.
+  const contrastWhite = 1.05 / (luminance + 0.05);
+  const contrastBlack = (luminance + 0.05) / 0.05;
+  return contrastWhite >= contrastBlack ? '#ffffff' : '#1a1a1a';
+}
+
+/**
+ * True when a colour wants light text on it.
+ *
+ * Delegates to {@link readableTextColor} rather than thresholding luminance again, so the ink a
+ * surface renders and the judgement that picks its lockup can never disagree about a borderline
+ * mid-tone. Unparseable → false, i.e. treated as light, which is the safer default: the standard
+ * lockup on an unknown ground beats a light-on-dark one on white.
+ */
+function isDarkColor(hex: string): boolean {
+  return readableTextColor(hex) === '#ffffff';
+}
+
+/**
+ * A dark-mode counterpart for a light brand canvas: the client's colour at 14% over near-black.
+ *
+ * Dark mode is not "the same page, inverted" — it is a different ground, and a cream paper stock
+ * has no honest inversion. What it does have is a HUE, and keeping that hue as a tint over the
+ * near-black the respondent surface already uses is what makes a dark-mode Broadsheet still look
+ * like the client's rather than like everyone else's. 14% is enough to read as a tint at a glance
+ * and low enough that white text stays comfortably past AA on every hue.
+ *
+ * Returns the input unchanged when it cannot be parsed — the write boundary validates hex, and a
+ * value that arrived some other way is better rendered as-is than replaced with black.
+ */
+export function darkenForDarkMode(hex: string): string {
+  return mixToward(hex, DARK_MODE_GROUND, 0.14) ?? hex;
+}
+
+/** The near-black the respondent surface uses when no client canvas is set. */
+const DARK_MODE_GROUND = '#0a0a0a';
+
+/**
+ * Mix `hex` into `base` at `weight` (0–1 of the source colour), in sRGB, returning `#rrggbb`.
+ * Null when either colour can't be parsed.
+ *
+ * Done in TypeScript rather than as a CSS `color-mix()` because the RESULT is needed as a real
+ * colour: `readableTextColor` has to read it to derive the dark ink, and it cannot see inside a
+ * `color-mix()` the browser has not computed yet.
+ */
+function mixToward(hex: string, base: string, weight: number): string | null {
+  const a = channels(hex);
+  const b = channels(base);
+  if (!a || !b) return null;
+  const mixed = a.map((v, i) => Math.round(v * weight + b[i] * (1 - weight)));
+  return `#${mixed.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** `[r, g, b]` 0–255 from a `#rgb` / `#rrggbb` colour, or null. */
+function channels(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const c = m[1];
+  const full = c.length === 3 ? c.replace(/./g, (ch) => ch + ch) : c;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * WCAG relative luminance of a `#rgb` / `#rrggbb` colour, or null when it can't be parsed.
+ *
+ * Extracted so {@link readableTextColor} and {@link contrastRatio} cannot disagree about a
+ * borderline mid-tone — the picker warning an admin sees and the ink the surface actually
+ * renders are then two readings of one number, not two implementations of one formula.
+ */
+function relativeLuminance(hex: string): number | null {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return null;
   const c = m[1];
   const full = c.length === 3 ? c.replace(/./g, (ch) => ch + ch) : c;
   const channel = (i: number) => parseInt(full.slice(i, i + 2), 16) / 255;
   const linear = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  const luminance =
-    0.2126 * linear(channel(0)) + 0.7152 * linear(channel(2)) + 0.0722 * linear(channel(4));
-  // Contrast of white vs near-black against this luminance; brighter background → dark text.
-  const contrastWhite = 1.05 / (luminance + 0.05);
-  const contrastBlack = (luminance + 0.05) / 0.05;
-  return contrastWhite >= contrastBlack ? '#ffffff' : '#1a1a1a';
+  return 0.2126 * linear(channel(0)) + 0.7152 * linear(channel(2)) + 0.0722 * linear(channel(4));
+}
+
+/**
+ * WCAG contrast ratio between two hex colours (1–21), or null when either can't be parsed.
+ *
+ * The admin picks a canvas and an ink independently, and nothing stops the pair being
+ * unreadable — a mid-grey ink on a mid-grey paper stock passes every hex validator we have.
+ * The form uses this for a SOFT warning: a brand may genuinely be low-contrast, and refusing
+ * to save it would be us overruling the client's designer, so it says the number and lets the
+ * admin decide.
+ */
+export function contrastRatio(a: string, b: string): number | null {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  if (la === null || lb === null) return null;
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/** WCAG AA for body text. Below this the demo-client form warns (it never blocks). */
+export const MIN_CONTRAST_RATIO = 4.5;
+
+/**
+ * The ground and ink a respondent surface falls back to when the client has set neither.
+ *
+ * These are NOT a second source of truth — they mirror the fallbacks inside `app/brand-theme.css`
+ * (`--app-canvas-color: var(--app-canvas-light, var(--cq-respondent-canvas))` and
+ * `--app-on-canvas: var(--app-ink-light, …)`, plus their `.dark` counterparts). They exist because
+ * TypeScript has to be able to READ the pair that will actually render, and it cannot see inside a
+ * `var()` chain the browser has not resolved.
+ *
+ * That reading is what makes the contrast check honest. A client may set an ink and no canvas —
+ * "ink: #FFFFFF" straight off a brand guideline is the obvious way to do it — and the stylesheet
+ * will then pair their ink with the DEFAULT ground. Measuring only when both halves are authored
+ * meant the one combination guaranteed to be unreadable was the one combination nothing checked.
+ *
+ * A test asserts these against the stylesheet, because a divergence here is silent: the warning
+ * would simply measure a pair nobody sees.
+ */
+export const NEUTRAL_RESPONDENT_GROUND = {
+  light: { canvas: '#ffffff', ink: '#18181b' },
+  dark: { canvas: '#0a0a0a', ink: '#fafafa' },
+} as const;
+
+/**
+ * The two canvas variables ALONE, for the chrome that surrounds a respondent surface.
+ *
+ * `themeToCssVariables` emits the client's whole brand onto the surface root — which sits inside
+ * `<main>`, inside the shell's `container`. Everything outside that box (the white-label theme-switch
+ * row, and the gutters either side of the column on a wide viewport) is therefore an ANCESTOR of the
+ * brand and cannot inherit it, so it fell back to the ConQuest consumer background: a cream strip
+ * above a client's canvas, on the one chrome mode that exists to keep our colours off the page.
+ *
+ * Hoisting the full brand to the chrome would repaint the ConQuest header and footer with it. So
+ * only the ground travels, and only far enough for the backdrop rules in `brand-theme.css` to read
+ * it. Empty for a client with no canvas of their own — the rules' `var()` fallback then holds.
+ */
+export function canvasBackdropVars(theme: ResolvedTheme): Record<string, string> {
+  const vars: Record<string, string> = {};
+  if (theme.canvasColor) vars['--app-canvas-light'] = theme.canvasColor;
+  if (theme.canvasColorDark) vars['--app-canvas-dark'] = theme.canvasColorDark;
+  return vars;
 }
 
 /**
@@ -225,11 +505,57 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
   if (theme.logoBackgroundColor) {
     vars['--app-logo-bg'] = theme.logoBackgroundColor;
   }
-  if (theme.logoUrl) {
-    vars['--app-logo-url'] = cssUrl(theme.logoUrl);
+  // The BAND's lockup, already chosen for the ground the band paints (see `bandLogoUrl`) — but
+  // emitted once PER MODE, because which ground applies depends on a switch the respondent can
+  // flip after the page has rendered. `app/brand-theme.css` picks between these two and publishes
+  // the winner as `--app-logo-url`, so the band renderer still reads one variable and has no
+  // branch of its own.
+  if (theme.bandLogoUrl) {
+    vars['--app-logo-src'] = cssUrl(theme.bandLogoUrl);
+  }
+  if (theme.bandLogoDarkUrl) {
+    vars['--app-logo-src-dark'] = cssUrl(theme.bandLogoDarkUrl);
   }
   if (theme.bannerUrl) {
     vars['--app-banner-url'] = cssUrl(theme.bannerUrl);
+  }
+  if (theme.logoMarkUrl) {
+    vars['--app-logo-mark-url'] = cssUrl(theme.logoMarkUrl);
+  }
+  // The GROUND, in both modes. Emitted whenever either half is set — a client may want their ink
+  // on the neutral canvas, or a canvas with derived ink, and both are coherent.
+  //
+  // Four variables rather than two, and none of them called `--app-canvas-color`: the stylesheet
+  // publishes THAT one, choosing per mode from these. A single value could not work — the
+  // respondent switches modes client-side, long after the server resolved the theme, and CSS
+  // cannot pick between two values a custom property does not hold.
+  if (theme.canvasColor) {
+    vars['--app-canvas-light'] = theme.canvasColor;
+  }
+  if (theme.onCanvas) {
+    vars['--app-ink-light'] = theme.onCanvas;
+  }
+  if (theme.canvasColorDark) {
+    vars['--app-canvas-dark'] = theme.canvasColorDark;
+  }
+  if (theme.onCanvasDark) {
+    vars['--app-ink-dark'] = theme.onCanvasDark;
+  }
+  // The second accent, and the wash a layout tints large areas with. The aura is emitted as
+  // a `color-mix` rather than a pre-computed hex so it stays honest over whatever the accent
+  // sits on — the alpha is the point, and flattening it here would bake in a background.
+  if (theme.accentColorEnd) {
+    vars['--app-accent-end'] = theme.accentColorEnd;
+    vars['--app-accent-aura'] =
+      `linear-gradient(135deg, color-mix(in srgb, ${theme.accentColor} 22%, transparent), color-mix(in srgb, ${theme.accentColorEnd} 22%, transparent))`;
+  }
+  // Type. Emitted only for a non-neutral pairing: `neutral` IS the stylesheet's default, and
+  // an inline style always beats a stylesheet, so writing it here would pin the system stack
+  // onto portalled roots that might later want their own.
+  if (theme.fontPairing !== 'neutral') {
+    const stacks = FONT_PAIRING_STACKS[theme.fontPairing];
+    vars['--app-font-display'] = stacks.display;
+    vars['--app-font-body'] = stacks.body;
   }
   return vars;
 }

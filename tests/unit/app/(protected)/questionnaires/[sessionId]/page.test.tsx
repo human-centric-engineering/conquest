@@ -213,6 +213,17 @@ const MOCK_THEME: ResolvedTheme = {
   ctaColorEnd: null,
   logoBackgroundColor: null,
   hasBrandIdentity: false,
+  canvasColor: null,
+  onCanvas: null,
+  canvasIsDark: false,
+  canvasColorDark: null,
+  onCanvasDark: null,
+  accentColorEnd: null,
+  logoMarkUrl: null,
+  logoDarkUrl: null,
+  bandLogoUrl: null,
+  bandLogoDarkUrl: null,
+  fontPairing: 'neutral',
 };
 
 /** Build a minimal DB row for the session. Defaults to owned + active + no prior answers. */

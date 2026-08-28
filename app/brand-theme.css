@@ -123,12 +123,39 @@
   --color-border: #e4e4e7;
   --color-input: #e4e4e7;
   --color-ring: #a1a1aa;
-  --color-background: var(--cq-respondent-canvas);
-  --color-foreground: #18181b;
+  --color-background: var(--app-canvas-color);
+  --color-foreground: var(--app-on-canvas);
   --color-card: #ffffff;
   --color-card-foreground: #18181b;
   --color-popover: #ffffff;
   --color-popover-foreground: #18181b;
+
+  /* ---- Brand-kit defaults (light) ----
+   * A default for EVERY variable themeToCssVariables can emit, declared HERE rather than
+   * in the [data-brand='conquest'] block below, because these are not ConQuest's identity —
+   * they are the neutral ground any questionnaire falls back to, branded or not. A client
+   * who sets a logo and nothing else still needs a canvas to draw it on, and a variable
+   * with no default silently paints nothing.
+   *
+   * The ground and the band's lockup are PUBLISHED here rather than emitted inline, because
+   * each has two values and only the browser knows which applies: the respondent can switch
+   * modes at any point, so the client's light and dark values both arrive as inline variables
+   * (`--app-canvas-light` / `--app-canvas-dark`, `--app-logo-src` / `--app-logo-src-dark`) and
+   * these declarations — plus their `.dark` counterparts below — pick the one in force.
+   *
+   * The fallbacks are literal, not `var(--color-foreground)`: the two tokens above now read
+   * FROM these, and a variable that referred back would be a cycle — invalid at computed-value
+   * time, which browsers resolve by dropping the declaration entirely. The values match the
+   * neutral pair they replaced. */
+  --app-canvas-color: var(--app-canvas-light, var(--cq-respondent-canvas));
+  --app-on-canvas: var(--app-ink-light, #18181b);
+  --app-logo-url: var(--app-logo-src);
+  --app-accent-end: var(--app-accent-color);
+  --app-accent-aura: none;
+  /* The type a questionnaire is set in. `neutral` IS this declaration — the pairing emits no
+   * variables of its own, so an unset pairing lands here rather than on the browser default. */
+  --app-font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --app-font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 /* ==== Respondent (neutral white-label canvas) — dark (descendant of <html>.dark) ==== */
@@ -144,25 +171,76 @@
   --color-border: #27272a;
   --color-input: #27272a;
   --color-ring: #52525b;
-  --color-background: var(--cq-respondent-canvas);
-  --color-foreground: #fafafa;
+  --color-background: var(--app-canvas-color);
+  --color-foreground: var(--app-on-canvas);
   --color-card: #18181b;
   --color-card-foreground: #fafafa;
   --color-popover: #18181b;
   --color-popover-foreground: #fafafa;
+
+  /* Brand-kit defaults (dark). The ground pair and the lockup move with the mode; the accent
+   * and type defaults above do not, and are not repeated.
+   *
+   * `--app-canvas-dark` is derived from the client's light canvas when they did not set one
+   * (see `darkenForDarkMode`), so a branded questionnaire keeps the brand's hue in dark mode
+   * rather than dropping to the neutral near-black. The lockup falls back to the light-mode
+   * source, so a client who supplied only one piece of artwork still gets it here. */
+  --app-canvas-color: var(--app-canvas-dark, var(--cq-respondent-canvas));
+  --app-on-canvas: var(--app-ink-dark, #fafafa);
+  --app-logo-url: var(--app-logo-src-dark, var(--app-logo-src));
 }
 
-/* ==== Respondent typography reset ====
- * Neutralise the inherited consumer Hanken body + Fraunces headings so the central
- * area reads as a clean white-label canvas, not ConQuest's editorial type. */
-[data-surface='respondent'],
+/* ==== Respondent — a client's own ground ====
+ * When a demo client sets `canvasColor`, `--app-canvas-color` and `--app-on-canvas` arrive
+ * inline on the surface root and the two tokens above follow them. But the REST of the
+ * neutral palette does not: `--color-card` is a literal #ffffff, so a client who picks a
+ * midnight canvas gets light ink on their canvas and white cards sitting on top of it,
+ * unreadable, which is worse than not having offered the setting.
+ *
+ * So the moment there is a client canvas — signalled by `data-canvas='custom'`, set by
+ * BrandThemeProvider and carried to portalled roots along with the variables — every
+ * remaining surface token is re-derived FROM that ground with `color-mix`. Mixing rather
+ * than listing a second palette is what makes one rule serve both a bone-white paper stock
+ * and a near-black field: cards step a little toward the ink, borders and muted text are the
+ * ink at low alpha, and the direction of every step follows the canvas automatically.
+ *
+ * No `.dark` variant is needed here even though the ground itself has one: these rules read
+ * `--app-canvas-color` and `--app-on-canvas`, and the two blocks above have already resolved
+ * that pair for the mode in force. The derivation is therefore mode-agnostic by construction —
+ * it steps from whatever ground is current toward whatever ink is current. */
+[data-surface='respondent'][data-canvas='custom'] {
+  --color-card: color-mix(in srgb, var(--app-on-canvas) 4%, var(--app-canvas-color));
+  --color-card-foreground: var(--app-on-canvas);
+  --color-popover: color-mix(in srgb, var(--app-on-canvas) 4%, var(--app-canvas-color));
+  --color-popover-foreground: var(--app-on-canvas);
+  --color-secondary: color-mix(in srgb, var(--app-on-canvas) 8%, var(--app-canvas-color));
+  --color-secondary-foreground: var(--app-on-canvas);
+  --color-accent: color-mix(in srgb, var(--app-on-canvas) 8%, var(--app-canvas-color));
+  --color-accent-foreground: var(--app-on-canvas);
+  --color-muted: color-mix(in srgb, var(--app-on-canvas) 8%, var(--app-canvas-color));
+  /* Muted TEXT is the ink at reduced opacity rather than a mixed hex, so it stays correct on
+   * whatever it happens to sit on — a card, the canvas, or a tinted panel. */
+  --color-muted-foreground: color-mix(in srgb, var(--app-on-canvas) 62%, transparent);
+  --color-border: color-mix(in srgb, var(--app-on-canvas) 14%, transparent);
+  --color-input: color-mix(in srgb, var(--app-on-canvas) 14%, transparent);
+  --color-ring: color-mix(in srgb, var(--app-on-canvas) 40%, transparent);
+}
+
+/* ==== Respondent typography ====
+ * Neutralise the inherited consumer Hanken body + Fraunces headings so the central area
+ * reads as a clean white-label canvas, not ConQuest's editorial type — and then let the
+ * client set their own type in that space.
+ *
+ * Both declarations read a variable rather than naming a stack, so ONE rule serves the
+ * neutral default (declared above, and the value this reset used to hardcode) and the two
+ * brand pairings (emitted inline per questionnaire by themeToCssVariables). The headings
+ * rule is separate rather than a selector list because display and body are now different
+ * faces — the pairing is the point. */
+[data-surface='respondent'] {
+  font-family: var(--app-font-body);
+}
 [data-surface='respondent'] :is(h1, h2, h3, h4, h5, h6) {
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
+  font-family: var(--app-font-display);
 }
 
 /* ==== Respondent — ConQuest default brand ====
@@ -224,9 +302,26 @@
  * cards), so the surrounding <main> — an ANCESTOR of the pin — still shows the
  * ConQuest cream by inheritance and can't be reset that way. Paint <main> neutral
  * when it HOSTS a respondent surface (`:has`), so the white-label area reads as one
- * clean zone distinct from the ConQuest header / footer. Shares `--cq-respondent-canvas`
- * with the respondent token above; the header/footer sit outside <main> and stay
- * ConQuest. */
-main:has([data-surface='respondent']) {
-  background-color: var(--cq-respondent-canvas);
+ * clean zone distinct from the ConQuest header / footer. The header/footer sit
+ * outside <main> and stay ConQuest.
+ *
+ * It follows the CLIENT's ground where there is one. `:has()` selects an ancestor but
+ * cannot read a descendant's custom property, so the ground could not come from the
+ * surface root inside; `RespondentChrome` therefore puts `--app-canvas-light` /
+ * `--app-canvas-dark` on the shell (`canvasBackdropVars`) and these rules inherit them.
+ * Without it a branded questionnaire above ~1536px — where the shell's container stops
+ * widening — rendered as a coloured column flanked by neutral gutters, which was
+ * invisible only while both were the same neutral.
+ *
+ * `--cq-respondent-canvas` stays the fallback, so an unbranded questionnaire is
+ * byte-identical to before. `NEUTRAL_RESPONDENT_GROUND` in theming/theme.ts mirrors
+ * these two values so the admin form's contrast check can measure what will actually
+ * render; a test holds the two in step. */
+main:has([data-surface='respondent']),
+.cq-respondent-backdrop {
+  background-color: var(--app-canvas-light, var(--cq-respondent-canvas));
+}
+.dark main:has([data-surface='respondent']),
+.dark .cq-respondent-backdrop {
+  background-color: var(--app-canvas-dark, var(--cq-respondent-canvas));
 }

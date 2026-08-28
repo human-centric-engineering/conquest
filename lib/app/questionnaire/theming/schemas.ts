@@ -12,6 +12,7 @@
 import { z } from 'zod';
 
 import { isBrandImageSrc } from '@/lib/app/questionnaire/theming/brand-image';
+import { FONT_PAIRINGS } from '@/lib/app/questionnaire/theming/fonts';
 
 /** #rgb or #rrggbb. Case-insensitive; the only colour shape the email/CSS consume. */
 export const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -65,6 +66,22 @@ const welcomeCopyField = z
   .nullable();
 
 /**
+ * Empty string → null; otherwise one of the pairings in `FONT_PAIRINGS`.
+ *
+ * Strict here and forgiving in `resolveFontPairing`, deliberately: an admin typing into a
+ * form should be told their value is wrong, while a value already IN the column (from a
+ * seed, a rollback, or a newer deploy) must still render something rather than nothing.
+ */
+const fontPairingField = z
+  .string()
+  .trim()
+  .transform((v) => (v.length === 0 ? null : v))
+  .nullable()
+  .refine((v) => v === null || FONT_PAIRINGS.includes(v as (typeof FONT_PAIRINGS)[number]), {
+    message: `Must be one of: ${FONT_PAIRINGS.join(', ')}`,
+  });
+
+/**
  * The theme field bag, spread into both demo-client schemas. Each is `.optional()`
  * so an omitted field is left untouched (create defaults to null at the DB; update is
  * a partial patch) while a present-but-empty field clears to null.
@@ -83,6 +100,18 @@ export const themeFields = {
   ctaColorEnd: colorField.optional(),
   logoBackgroundColor: colorField.optional(),
   logoBackgroundEnabled: z.boolean().optional(),
+  // The brand-kit fields. Four more hex colours/images with the same empty-string → null
+  // coercion, plus the type pairing — an enum on the WRITE boundary (a typo must not reach
+  // the column) even though the read boundary stays forgiving, since a rollback or a seed
+  // can still put an unknown value there. `''` clears back to the system stack.
+  canvasColor: colorField.optional(),
+  inkColor: colorField.optional(),
+  canvasColorDark: colorField.optional(),
+  inkColorDark: colorField.optional(),
+  accentColorEnd: colorField.optional(),
+  logoMarkUrl: brandImageField.optional(),
+  logoDarkUrl: brandImageField.optional(),
+  fontPairing: fontPairingField.optional(),
 };
 
 /** Standalone object schema for the four theme fields (tests + reuse). */
