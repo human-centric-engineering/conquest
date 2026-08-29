@@ -136,6 +136,30 @@ describe('SessionComplete', () => {
     it.todo('no-ops a second click that races the disabled attribute (browser-only path)');
   });
 
+  describe('transcript download (form-mode gate)', () => {
+    it('offers the chat transcript by default', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} />);
+      expect(screen.getByRole('button', { name: /chat transcript/i })).toBeInTheDocument();
+    });
+
+    it('offers the chat transcript when hasConversation is true', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} hasConversation />);
+      expect(screen.getByRole('button', { name: /chat transcript/i })).toBeInTheDocument();
+    });
+
+    // A `form`-mode questionnaire never opens the chat surface, so it persists no turns. Offering
+    // the download there handed the respondent a branded PDF of a conversation that never happened.
+    it('withholds the chat transcript when hasConversation is false', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} hasConversation={false} />);
+      expect(screen.queryByRole('button', { name: /chat transcript/i })).not.toBeInTheDocument();
+    });
+
+    it('still offers the responses PDF when the transcript is withheld', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} hasConversation={false} />);
+      expect(screen.getByRole('button', { name: /download pdf/i })).toBeInTheDocument();
+    });
+  });
+
   describe('reopen (F-early-finish-reopen)', () => {
     it('renders "Continue answering" when canReopen is true and onReopen is provided', () => {
       render(

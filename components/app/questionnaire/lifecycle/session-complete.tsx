@@ -21,7 +21,11 @@
  * object-URL; a transient error line appears if the request fails, keeping the calm tone.
  *
  * F7.6: adds a {@link TranscriptDownload} (themed PDF / plain text) of the conversation
- * itself, always available once submitted — independent of the responses-report config.
+ * itself, independent of the responses-report config — but only where a conversation
+ * actually happened. A `form`-mode questionnaire never opens the chat surface, so it
+ * persists no turns; offering "Chat Transcript" there handed the respondent a branded PDF
+ * of a conversation that never took place. Hence `hasConversation`, decided by the caller
+ * (which owns `presentationMode`) rather than guessed at here.
  *
  * F-early-finish-reopen: when this session was completed via the early-finish escape
  * hatch (not a full natural completion), a server-gated "Continue answering" control
@@ -113,6 +117,12 @@ export interface SessionCompleteProps {
   onReopen?: () => Promise<void>;
   /** A lifecycle action (pause/resume/reopen/etc.) is in flight — disables the reopen button. */
   reopenBusy?: boolean;
+  /**
+   * Did this session have a chat surface at all? Drives whether the transcript download is
+   * offered. False only for a `form`-mode questionnaire, which persists no turns — see the
+   * F7.6 note above. Defaults to true: every other caller and every prior behaviour had one.
+   */
+  hasConversation?: boolean;
   className?: string;
 }
 
@@ -127,6 +137,7 @@ export function SessionComplete({
   canReopen,
   onReopen,
   reopenBusy,
+  hasConversation = true,
   className,
 }: SessionCompleteProps) {
   const [downloading, setDownloading] = useState(false);
@@ -348,9 +359,15 @@ export function SessionComplete({
                 {downloading ? 'Preparing…' : 'Download PDF'}
               </Button>
             )}
-            {/* The conversation record is always available once submitted — a completed session
-                always has a transcript, independent of the responses-report config above. */}
-            <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="outline" />
+            {/* The conversation record, independent of the responses-report config above — but
+                withheld in `form` mode, where there is no conversation to take away. */}
+            {hasConversation && (
+              <TranscriptDownload
+                sessionId={sessionId}
+                accessToken={accessToken}
+                variant="outline"
+              />
+            )}
             {/* The escape-hatch-of-the-escape-hatch: visually secondary (ghost, not outline) and
                 ordered last — download/transcript stay the primary actions. */}
             {canReopen && onReopen && (
