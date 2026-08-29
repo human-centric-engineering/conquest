@@ -1468,3 +1468,21 @@ export const QUESTIONNAIRE_HOUSE_RULES_AGENT_SLUG = 'app-questionnaire-house-rul
  */
 export const QUESTIONNAIRE_OPENING_EXAMPLES_AGENT_SLUG =
   'app-questionnaire-opening-examples-assistant';
+
+/* ── Brand import — colour role analyst ────────────────────────────────────── */
+
+/**
+ * Slug of the seeded brand-import analyst `AiAgent` (empty provider/model → dynamic resolution).
+ *
+ * The one model call in the brand import, and a deliberately small one: it is handed a palette we
+ * have already MEASURED from a website or a screenshot and asked only which column each colour
+ * belongs in — page ground, text, button, accent, header band. It never supplies a colour of its
+ * own; a hex in its reply that is not in the candidate list is discarded rather than trusted, so
+ * every value the admin sees came off a real pixel.
+ *
+ * Vision-capable when the resolved model is: with a screenshot the image is attached, because "the
+ * biggest area is the ground, the small saturated one is the button" is a judgement about layout
+ * that a bare list of colours cannot support. Without a vision model it still runs on the numbers
+ * alone, and the result is marked degraded rather than silently weaker.
+ */
+export const BRAND_IMPORT_AGENT_SLUG = 'app-brand-import-analyst';

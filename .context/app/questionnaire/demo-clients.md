@@ -263,6 +263,17 @@ The fragment is guarded at COMPILE time: `DEMO_CLIENT_THEME_SELECT satisfies Rec
 Required<DemoClientTheme>, true>` means a new field on the resolver's contract without a
 matching key is a type error. Add a theme column in one place and the whole product picks it up.
 
+### Filling the theme from a screenshot
+
+Every field in this section can also be **proposed** rather than typed. `Import from a screenshot`
+in the Brand theming fieldset uploads a picture of the client's website, measures the colours
+actually on the page, and asks an analyst which is the ground, the text, the button and the accent.
+The admin ticks what they want and the ordinary Save writes it — the import route itself persists
+nothing, and the model can only return colours that were measured.
+
+Full design, including the four-outcome failure contract and why a field we could not read is
+absent rather than defaulted: [brand-import.md](./brand-import.md).
+
 ### Brand images: upload or link (F7.2)
 
 Every brand image accepts **either** a pasted `https://` URL **or** an uploaded file. Both

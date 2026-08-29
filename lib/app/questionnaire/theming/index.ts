@@ -34,6 +34,7 @@ export {
   BRAND_IMAGE_SPECS,
   BRAND_LOGO_SPEC,
   BRAND_MARK_SPEC,
+  MAX_INPUT_PIXELS,
   type BrandImageKind,
   isBrandImageSrc,
   recommendedSize,

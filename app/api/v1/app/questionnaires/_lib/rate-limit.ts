@@ -490,3 +490,23 @@ export const policyEvaluationApplyLimiter = createRateLimiter({
   interval: POLICY_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
   maxRequests: POLICY_EVALUATION_APPLY_RATE_LIMIT_MAX,
 });
+
+/**
+ * Brand import sub-cap. One call measures an image (or, from phase 2, fetches a website and its
+ * subresources) and then runs a vision model over the result — an outbound fan-out plus an LLM
+ * call, so it is one of the more expensive admin actions in the app. 10/min per admin, matching
+ * `ingestLimiter`, which does comparable work.
+ *
+ * Lives here rather than beside the demo-client routes because this module is already the app's
+ * shared home for per-flow sub-caps — `experiences`, `rounds` and `questionnaire-sessions` routes
+ * all import from it. Defining a second limiter module would split that convention for one route.
+ */
+export const BRAND_IMPORT_RATE_LIMIT_MAX = 10;
+
+/** Sliding-window length for {@link brandImportLimiter}, in milliseconds. */
+export const BRAND_IMPORT_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const brandImportLimiter = createRateLimiter({
+  interval: BRAND_IMPORT_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: BRAND_IMPORT_RATE_LIMIT_MAX,
+});
