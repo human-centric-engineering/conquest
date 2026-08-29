@@ -28,6 +28,7 @@ import type {
   QuestionSlotView,
   EvaluationRunDetail,
   ScopeEvaluationRunDetail,
+  PolicyEvaluationRunDetail,
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
@@ -1251,19 +1252,96 @@ describe('buildPackModel', () => {
  * across ~15 groups and defaults ON, so nesting a judge's verdict there would attach a judgement to
  * twelve things it never read AND ship unreviewed AI critique into every default download.
  */
+/**
+ * A completed policy-evaluation run (F18.8) — two findings on ONE house rule, so the grouping is
+ * exercised rather than assumed, and one dimension that failed rather than scored.
+ */
+const POLICY_EVALUATION_RUN: PolicyEvaluationRunDetail = {
+  id: 'policy-run1',
+  versionId: 'v1',
+  questionnaireId: 'q1',
+  status: 'partial',
+  dimensionsRequested: 4,
+  dimensionsRun: 3,
+  dimensionsFailed: 1,
+  totalFindings: 2,
+  // Deliberately NOT one row per dimension: `cross_layer_conflict` is absent, which is how a run
+  // that never reached a judge looks, and the pack must still print a row for it.
+  dimensionSummary: [
+    { dimension: 'rule_coherence', score: 0.7, findingCount: 2, diagnostic: null },
+    { dimension: 'arc_fit', score: null, findingCount: 0, diagnostic: 'judge_error' },
+    { dimension: 'fidelity_calibration', score: 0.9, findingCount: 0, diagnostic: null },
+  ],
+  triggeredByUserId: 'admin-1',
+  error: null,
+  startedAt: '2026-08-11T00:00:00.000Z',
+  completedAt: '2026-08-11T00:00:05.000Z',
+  createdAt: '2026-08-11T00:00:00.000Z',
+  findings: [
+    {
+      id: 'pf1',
+      dimension: 'rule_coherence',
+      ordinal: 0,
+      targetKey: 'house_rule:r1',
+      target: { kind: 'house_rule', key: 'r1', label: 'Never use humour.', removed: false },
+      severity: 'major',
+      proposedChange: 'Narrow this rule so it does not contradict the always rule',
+      rationale: 'As written it forbids the warmth the tone settings ask for',
+      sourceQuote: null,
+      status: 'pending',
+      proposedEdit: {
+        op: 'edit_house_rule',
+        kind: 'never',
+        text: 'Avoid jokes about the company.',
+      },
+      editedOverride: null,
+      decidedByUserId: null,
+      decidedAt: null,
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'apply',
+    },
+    // A second, prose-only finding on the SAME rule — pins the grouping and the
+    // `proposedEditSummary: null` branch for a finding carrying no structured op.
+    {
+      id: 'pf2',
+      dimension: 'rule_coherence',
+      ordinal: 1,
+      targetKey: 'house_rule:r1',
+      target: { kind: 'house_rule', key: 'r1', label: 'Never use humour.', removed: false },
+      severity: 'minor',
+      proposedChange: 'Consider whether this rule is needed at all',
+      rationale: 'The tone settings already cover register',
+      sourceQuote: null,
+      status: 'declined',
+      proposedEdit: null,
+      editedOverride: null,
+      decidedByUserId: 'admin-1',
+      decidedAt: '2026-08-11T00:01:00.000Z',
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'manual',
+    },
+  ],
+};
+
 describe('interviewer policy appendix', () => {
   const call = (
     include: Partial<typeof DEFAULT_PACK_INCLUDE>,
-    configOverrides: Partial<typeof DEFAULT_QUESTIONNAIRE_CONFIG> = {}
+    configOverrides: Partial<typeof DEFAULT_QUESTIONNAIRE_CONFIG> = {},
+    policyRun: PolicyEvaluationRunDetail | null = null,
+    sections: SectionView[] = SECTIONS
   ) =>
     buildPackModel(
       'T',
-      graphOf(SECTIONS, configOverrides),
+      graphOf(sections, configOverrides),
       [],
       null,
       null,
       null,
-      null,
+      policyRun,
       { ...DEFAULT_PACK_INCLUDE, ...include },
       'now'
     );
@@ -1350,5 +1428,128 @@ describe('interviewer policy appendix', () => {
       scores: [],
       targets: [],
     });
+  });
+
+  it('names the tactics that are on, and only those', () => {
+    const model = call(
+      { interviewerPolicy: true },
+      {
+        interviewerStrategy: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+          enabled: true,
+          probeDepth: true,
+          reflect: false,
+          batchRelated: true,
+        },
+      }
+    );
+    // A tactic that is off is absent, not present-and-false — the pack is prose, and "Reflects
+    // answers back: no" would read as a promise the interviewer never made.
+    expect(model.interviewerPolicy?.tacticLabels).toEqual([
+      'Probes shallow answers',
+      'Invites related gaps together',
+    ]);
+  });
+
+  it('counts every question by level and lists the word-for-word ones once the gate is on', () => {
+    const model = call(
+      { interviewerPolicy: true },
+      {
+        questionFidelity: { ...DEFAULT_QUESTIONNAIRE_CONFIG.questionFidelity, enabled: true },
+      },
+      null,
+      [
+        {
+          id: 's1',
+          ordinal: 0,
+          title: 'Background',
+          description: null,
+          questions: [
+            question({ key: 'q1', type: 'free_text', fidelity: 1, prompt: 'Ask this verbatim' }),
+            question({ key: 'q2', type: 'free_text', fidelity: 1, prompt: 'And this one' }),
+            question({ key: 'q3', type: 'free_text', fidelity: 0.5 }),
+          ],
+        },
+      ]
+    );
+    const policy = model.interviewerPolicy;
+    expect(policy?.fidelityEnabled).toBe(true);
+    // Every level appears, including the ones nobody used — the renderers decide what to hide,
+    // the model states the whole distribution.
+    const counts = Object.fromEntries(
+      (policy?.fidelityDistribution ?? []).map((d) => [d.level, d.count])
+    );
+    expect(counts).toMatchObject({ must_ask: 2, balanced: 1, free: 0, loose: 0, close: 0 });
+    expect(policy?.mustAskQuestions).toEqual([
+      { key: 'q1', prompt: 'Ask this verbatim' },
+      { key: 'q2', prompt: 'And this one' },
+    ]);
+  });
+
+  it('scores every dimension of a completed run, including the ones that did not report', () => {
+    const model = call({ interviewerPolicy: true }, {}, POLICY_EVALUATION_RUN);
+    const ev = model.interviewerPolicy?.evaluation;
+    expect(ev?.hasRun).toBe(true);
+    // `completedAt` wins over `startedAt` — the reader wants when the verdict landed.
+    expect(ev?.runAt).toBe('2026-08-11T00:00:05.000Z');
+    expect(ev?.totalFindings).toBe(2);
+    // One row per dimension in POLICY_EVALUATION_DIMENSIONS order, not one row per dimension that
+    // happened to answer: a judge that failed is a fact about the run, not an absence.
+    expect(ev?.scores.map((s) => s.dimension)).toEqual([
+      'rule_coherence',
+      'arc_fit',
+      'fidelity_calibration',
+      'cross_layer_conflict',
+    ]);
+    expect(ev?.scores[0]).toMatchObject({
+      label: 'Rule-Coherence Judge',
+      score: 0.7,
+      diagnostic: null,
+      findingCount: 2,
+    });
+    expect(ev?.scores[1]).toMatchObject({
+      score: null,
+      diagnostic: 'judge_error',
+      findingCount: 0,
+    });
+    // A dimension with no summary row at all still gets a score row, scored null.
+    expect(ev?.scores[3]).toMatchObject({ score: null, diagnostic: null, findingCount: 0 });
+  });
+
+  it('groups findings by subject and renders the structured edit in plain English', () => {
+    const model = call({ interviewerPolicy: true }, {}, POLICY_EVALUATION_RUN);
+    const targets = model.interviewerPolicy?.evaluation.targets ?? [];
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      key: 'r1',
+      kind: 'house_rule',
+      removed: false,
+      counts: { major: 1, minor: 1, info: 0, total: 2 },
+    });
+    expect(targets[0].judges.map((j) => j.status)).toEqual(['pending', 'declined']);
+    // The first carries a structured op and gets a sentence; the second is prose-only and must
+    // stay null rather than inventing one.
+    expect(targets[0].judges[0].proposedEditSummary).not.toBeNull();
+    expect(targets[0].judges[1].proposedEditSummary).toBeNull();
+  });
+
+  it('prefers the reviewer’s edited override to the judge’s original proposal', () => {
+    // The admin console lets a reviewer rewrite a proposed edit before applying it. The pack must
+    // describe what would actually happen, which is the override — two ops whose sentences differ,
+    // so the assertion cannot pass on the wrong one.
+    const overridden: PolicyEvaluationRunDetail = {
+      ...POLICY_EVALUATION_RUN,
+      findings: [
+        {
+          ...POLICY_EVALUATION_RUN.findings[0],
+          proposedEdit: { op: 'set_house_rule_enabled', enabled: true },
+          editedOverride: { op: 'set_house_rule_enabled', enabled: false },
+        },
+      ],
+    };
+    const model = call({ interviewerPolicy: true }, {}, overridden);
+    const summary =
+      model.interviewerPolicy?.evaluation.targets[0]?.judges[0]?.proposedEditSummary ?? '';
+    expect(summary).toBe('Switch this rule off');
   });
 });

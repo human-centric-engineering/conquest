@@ -13,7 +13,9 @@ import { describe, it, expect } from 'vitest';
 
 import { buildPackCsv } from '@/lib/app/questionnaire/export/build-pack-csv';
 import type {
+  PackInterviewerPolicy,
   PackModel,
+  PackPolicyEvaluation,
   PackScopeEvaluation,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import type {
@@ -578,5 +580,182 @@ describe('buildPackCsv — question fidelity', () => {
       model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
     );
     expect(out).toMatch(/Must ask/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The interviewer policy blocks (F18.8)                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Four blocks the suite never rendered: the settings table, the house rules, the review scores
+ * and the review findings. The two that are *conditional* — house rules and findings — are the
+ * ones worth pinning, because "absent" and "present but empty" are different documents to a
+ * spreadsheet consumer.
+ */
+describe('buildPackCsv — the interviewer', () => {
+  const EMPTY_POLICY_EVALUATION: PackPolicyEvaluation = {
+    hasRun: false,
+    runAt: null,
+    totalFindings: 0,
+    scores: [],
+    targets: [],
+  };
+
+  function policy(over: Partial<PackInterviewerPolicy> = {}): PackInterviewerPolicy {
+    return {
+      conversational: true,
+      houseRulesEnabled: true,
+      houseRules: [
+        { kind: 'Never', text: 'Never use humour.', trigger: null },
+        { kind: 'If asked', text: 'Say who reads the answers.', trigger: 'privacy' },
+      ],
+      approachLabel: 'Funnel',
+      paceLabel: 'Brisk',
+      openingSource: 'Guided by the examples you wrote',
+      tacticLabels: ['Probes shallow answers', 'Reflects answers back'],
+      arcBands: [],
+      fidelityEnabled: true,
+      fidelityDistribution: [{ level: 'must_ask', label: 'Must ask', count: 2 }],
+      mustAskQuestions: [{ key: 'q1', prompt: 'Sample prompt' }],
+      evaluation: EMPTY_POLICY_EVALUATION,
+      ...over,
+    };
+  }
+
+  it('emits no interviewer block at all when the section is excluded', () => {
+    expect(buildPackCsv(model())).not.toContain('# Interviewer');
+  });
+
+  it('writes one settings row per interviewer field', () => {
+    const csv = buildPackCsv(model({ interviewerPolicy: policy() }));
+    expect(csv).toContain('# Interviewer');
+    expect(csv).toContain('conversational,yes');
+    expect(csv).toContain('questioning_approach,Funnel');
+    expect(csv).toContain('pace,Brisk');
+    expect(csv).toContain('opening_questions,Guided by the examples you wrote');
+    // Multi-valued cells are pipe-joined rather than comma-joined, so one tactic list cannot
+    // silently become several columns.
+    expect(csv).toContain('tactics,Probes shallow answers | Reflects answers back');
+    expect(csv).toContain('house_rules_in_force,2');
+    expect(csv).toContain('asked_as_written,on');
+    expect(csv).toContain('questions_word_for_word,1');
+  });
+
+  it('writes an empty pace cell rather than "null" when no funnel is running', () => {
+    const csv = buildPackCsv(
+      model({ interviewerPolicy: policy({ paceLabel: null, tacticLabels: [] }) })
+    );
+    expect(csv).toContain('pace,\r\n');
+    expect(csv).not.toContain('pace,null');
+  });
+
+  it('reports the gate as off, with no questions held word for word', () => {
+    const csv = buildPackCsv(
+      model({
+        interviewerPolicy: policy({
+          fidelityEnabled: false,
+          fidelityDistribution: [],
+          mustAskQuestions: [],
+        }),
+      })
+    );
+    expect(csv).toContain('asked_as_written,off');
+    expect(csv).toContain('questions_word_for_word,0');
+  });
+
+  it('gives the house rules their own block, and omits it entirely when there are none', () => {
+    const withRules = buildPackCsv(model({ interviewerPolicy: policy() }));
+    expect(withRules).toContain('# Interviewer house rules');
+    expect(withRules).toContain('Never,,Never use humour.');
+    expect(withRules).toContain('If asked,privacy,Say who reads the answers.');
+
+    const without = buildPackCsv(model({ interviewerPolicy: policy({ houseRules: [] }) }));
+    // A header row with no data rows reads as "we looked and found none"; omitting the block
+    // reads as "not applicable". The second is the true claim here.
+    expect(without).not.toContain('# Interviewer house rules');
+  });
+
+  it('states "(not reviewed)" in the scores block rather than leaving it headerless', () => {
+    const csv = buildPackCsv(model({ interviewerPolicy: policy() }));
+    expect(csv).toContain('# Interviewer review scores');
+    expect(csv).toContain('(not reviewed),,,0');
+  });
+
+  it('writes a score to two decimals, and an empty cell for a judge that could not score', () => {
+    const csv = buildPackCsv(
+      model({
+        interviewerPolicy: policy({
+          evaluation: {
+            hasRun: true,
+            runAt: '2026-08-11T00:00:00.000Z',
+            totalFindings: 1,
+            scores: [
+              {
+                dimension: 'rule_coherence',
+                label: 'Rule-Coherence Judge',
+                score: 0.8,
+                diagnostic: null,
+                findingCount: 1,
+              },
+              {
+                dimension: 'arc_fit',
+                label: 'Arc-Fit Judge',
+                score: null,
+                diagnostic: 'provider timed out',
+                findingCount: 0,
+              },
+            ],
+            targets: [],
+          },
+        }),
+      })
+    );
+    expect(csv).toContain('Rule-Coherence Judge,0.80,,1');
+    expect(csv).toContain('Arc-Fit Judge,,provider timed out,0');
+    // No targets means no findings block — not an empty one.
+    expect(csv).not.toContain('# Interviewer review findings');
+  });
+
+  it('flattens each finding to a row under its subject', () => {
+    const csv = buildPackCsv(
+      model({
+        interviewerPolicy: policy({
+          evaluation: {
+            hasRun: true,
+            runAt: '2026-08-11T00:00:00.000Z',
+            totalFindings: 1,
+            scores: [],
+            targets: [
+              {
+                key: 'r1',
+                kind: 'house_rule',
+                label: 'Never use humour.',
+                removed: false,
+                counts: { major: 1, minor: 0, info: 0, total: 1 },
+                judges: [
+                  {
+                    dimension: 'rule_coherence',
+                    label: 'Rule-Coherence Judge',
+                    severity: 'major',
+                    status: 'pending',
+                    proposedChange: 'Narrow this rule.',
+                    rationale: 'It contradicts the rule above it.',
+                    sourceQuote: null,
+                    proposedEditSummary: null,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      })
+    );
+    expect(csv).toContain('# Interviewer review findings');
+    // A prose-only finding writes an empty proposed_edit cell, never the string "null".
+    expect(csv).toContain(
+      'Never use humour.,Rule-Coherence Judge,major,pending,Narrow this rule.,It contradicts the rule above it.,'
+    );
+    expect(csv).not.toContain(',null');
   });
 });
