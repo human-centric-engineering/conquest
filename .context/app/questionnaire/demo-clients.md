@@ -462,10 +462,16 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   `resolveTheme()` and the same escaped `url()` sink (`cssUrl`) as `BrandThemeProvider`
   (never a raw `<img src>`), and renders a **miniature of the session chrome** (surface
   band + logo backdrop + gradient send button) so the admin recognises the brand before
-  opening "Preview as respondent". The miniature paints the client's **canvas and ink** and
-  sets its sample question in the chosen **display face** — the preview is not inside a
-  respondent surface, so it applies the ground itself rather than inheriting it, and the type
-  pairing is otherwise just a word in a dropdown. The band draws `bandLogoUrl`, so an admin who
+  opening "Preview as respondent". The miniature declares itself a **respondent surface**
+  (`data-surface='respondent'`, plus `data-brand` / `data-canvas`), so the client's ground, ink and
+  the ConQuest fallback palette all come from `app/brand-theme.css` rather than being re-faked here.
+  It sets its sample question in the chosen **display face** and its body line in the body face —
+  the two faces of a pairing are often different, and it is otherwise just a word in a dropdown.
+  Full mode renders it **twice, pinned to light and to dark** via `data-scheme`: a respondent can
+  switch mode from any layout, and the dark ground is usually _derived_ (`darkenForDarkMode`) rather
+  than typed, so an admin who never switches their own theme would otherwise never see what their
+  brand becomes there. See `.context/ui/surface-theming.md` §4b for why pinning needs its own
+  selectors. The band draws `bandLogoUrl`, so an admin who
   uploads a dark lockup sees the swap happen here; the full mode also shows that lockup on a
   dark chip (the only way to tell it is really the light-ink artwork) plus the square mark. Two modes: **compact** on the list's
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
