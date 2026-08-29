@@ -65,7 +65,7 @@ describe('resolveSessionPersonas', () => {
   });
 
   it('shows the picker only when built-in mode is on, switching is allowed, and there are ≥2 personas', async () => {
-    // Built-in mode on + switching on → the picker (8 built-ins).
+    // Built-in mode on + switching on, with the whole library offered → the picker.
     dbMock.findUnique.mockResolvedValue(
       row({
         personaSelection: {

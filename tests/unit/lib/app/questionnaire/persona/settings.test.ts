@@ -42,7 +42,13 @@ function markedTone(text: string): ToneSettings {
 }
 
 function persona(key: string, text = `voice-${key}`): PersonaOption {
-  return { key, label: `Label ${key}`, description: `Desc ${key}`, tone: markedTone(text) };
+  return {
+    key,
+    category: 'general',
+    label: `Label ${key}`,
+    description: `Desc ${key}`,
+    tone: markedTone(text),
+  };
 }
 
 describe('narrowPersonaSelection', () => {

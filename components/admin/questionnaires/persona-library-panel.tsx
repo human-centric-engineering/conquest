@@ -7,10 +7,17 @@
  * when the admin has picked "Built-in persona" mode (the outer mode toggle owns `personaSelection.enabled`;
  * this panel assumes it's on). The persona library is FIXED ({@link BUILT_IN_PERSONAS}) — a curated set
  * of named voices, not editable config. So this panel owns no persona editing: it lets the admin tick
- * WHICH of the built-in personas this questionnaire offers, pin which of those governs the interviewer,
- * optionally let respondents switch among the offered ones (and how), and previews the pinned persona
- * read-only (name + description + prose + tone dials). An admin who wants a bespoke voice picks
+ * WHICH of the built-in personas this questionnaire offers — grouped by the situation each was written
+ * for ({@link PersonaCategory}) — pin which of those governs the interviewer, and optionally let
+ * respondents switch among the offered ones (and how). An admin who wants a bespoke voice picks
  * "Custom voice" mode and uses the tone block instead.
+ *
+ * Every tick-box carries the persona's **respondent-facing description verbatim**, because the admin
+ * deciding who to offer should be reading what the respondent will read. The rest — the system-prompt
+ * prose that actually briefs the interviewer, and its tone dials — sits behind a per-persona
+ * "More about {name}" toggle ({@link PersonaDetail}), so a library of this size stays scannable.
+ * There is no separate preview of the pinned persona: the pinned one is a row like any other, marked
+ * "· default", and a second copy of its detail would just be the same panel twice.
  *
  * Two rules keep the offered set and the pinned default coherent, enforced here and re-enforced on the
  * read path (`narrowPersonaSelection`) so a hand-crafted PATCH can't break them:
@@ -19,15 +26,17 @@
  *   - the pinned default is always one of the offered ones — un-ticking it re-pins the first
  *     survivor, and offering exactly one persona makes THAT one the default automatically.
  *
- * Every box ticked is stored as an empty `availableKeys` (the "whole library" shape) rather than all
- * ten keys, so a questionnaire that offers everything keeps offering everything if the built-in
+ * Every box ticked is stored as an empty `availableKeys` (the "whole library" shape) rather than the
+ * full key list, so a questionnaire that offers everything keeps offering everything if the built-in
  * library ever grows.
  *
- * Owns no state of its own: the parent holds `personaSelection` and passes the setter, exactly like
- * the tone block, so the single "Save configuration" PATCH sends it. `personas` is passed in for the
- * dropdown + preview only and is never mutated here.
+ * Owns no CONFIG state: the parent holds `personaSelection` and passes the setter, exactly like the
+ * tone block, so the single "Save configuration" PATCH sends it. Its one piece of local state is
+ * which persona's detail is expanded, which is presentation only and never saved. `personas` is
+ * passed in for the tick-boxes, the dropdown and the detail panes, and is never mutated here.
  */
 
+import { useState } from 'react';
 import { Drama } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -43,8 +52,14 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { TONE_DIMENSION_META } from '@/components/admin/questionnaires/tone-dimensions';
-import { DEFAULT_PERSONA_KEY, toDisplayLevel } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_PERSONA_KEY,
+  PERSONA_CATEGORIES,
+  PERSONA_CATEGORY_LABELS,
+  toDisplayLevel,
+} from '@/lib/app/questionnaire/types';
 import type {
+  PersonaCategory,
   PersonaOption,
   PersonaSelectionSettings,
   PersonaSwitcher,
@@ -61,6 +76,52 @@ function activeToneDials(persona: PersonaOption): { label: string; display: numb
   }));
 }
 
+/**
+ * One persona's full detail, revealed under its tick-box on demand: the system-prompt prose that
+ * actually drives the interviewer, and the tone dials it applies. Read-only — the library is fixed.
+ * The respondent never sees any of this; the one-line description above it is what they read.
+ */
+function PersonaDetail({ persona }: { persona: PersonaOption }) {
+  const dials = activeToneDials(persona);
+  return (
+    <div className="border-border/70 bg-muted/20 text-muted-foreground ml-6 space-y-2 rounded-md border p-3 text-xs">
+      {persona.tone.persona.text.trim() && (
+        <div>
+          <p className="font-medium">How it is briefed</p>
+          <p className="whitespace-pre-line">{persona.tone.persona.text}</p>
+        </div>
+      )}
+      <div>
+        <p className="font-medium">
+          Tone{' '}
+          <FieldHelp title="Persona tone">
+            The tone dials this persona applies on top of its prompt — the same nine dimensions as
+            this version’s Interviewer tone &amp; persona, on the signed −2…+2 scale (0 = neutral).
+            These are fixed per persona; only the dimensions shown are active.
+          </FieldHelp>
+        </p>
+        {dials.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {dials.map((dial) => (
+              <span
+                key={dial.label}
+                className="border-border/70 bg-background text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+              >
+                {dial.label}
+                <span className="text-muted-foreground font-medium">
+                  {dial.display > 0 ? `+${dial.display}` : dial.display}
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p>Neutral — no tone dials applied.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PersonaLibraryPanel({
   personas,
   selection,
@@ -73,6 +134,10 @@ export function PersonaLibraryPanel({
   busy: boolean;
   onSelectionChange: (patch: Partial<PersonaSelectionSettings>) => void;
 }) {
+  // The one piece of state the panel owns, and it is presentation only: which persona's detail is
+  // expanded. An accordion rather than a set, so a long library can't be opened into a wall of text.
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
   // What this questionnaire offers: the admin's ticked subset, or the whole library for the empty
   // "all of them" shape. Kept in library order so the boxes and the dropdown always agree.
   const offered =
@@ -87,12 +152,18 @@ export function PersonaLibraryPanel({
   const selectedKey = offered.some((p) => p.key === selection.defaultPersonaKey)
     ? selection.defaultPersonaKey
     : (offered[0]?.key ?? personas[0]?.key ?? DEFAULT_PERSONA_KEY);
-  const selected = personas.find((p) => p.key === selectedKey) ?? personas[0] ?? null;
   // Show the current default first in the dropdown, then the rest in their canonical order.
   const orderedPersonas = [
     ...offered.filter((p) => p.key === selectedKey),
     ...offered.filter((p) => p.key !== selectedKey),
   ];
+
+  // The tick-boxes are grouped by the situation each voice was written for, so an admin running an
+  // HR review doesn't have to read twenty descriptions to find the two that fit. An empty category
+  // is skipped, and any persona whose category isn't in the roster still gets a group of its own.
+  const grouped: { category: PersonaCategory; members: PersonaOption[] }[] = PERSONA_CATEGORIES.map(
+    (category) => ({ category, members: personas.filter((p) => p.category === category) })
+  ).filter((group) => group.members.length > 0);
 
   /**
    * Save a new offered set, holding both invariants: an empty set is refused (something must always
@@ -145,37 +216,67 @@ export function PersonaLibraryPanel({
             </Button>
           </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {personas.map((p) => {
-            const ticked = offeredKeys.includes(p.key);
-            return (
-              <label
-                key={p.key}
-                htmlFor={`persona-available-${p.key}`}
-                className="text-foreground flex items-start gap-2 text-sm"
-              >
-                <Checkbox
-                  id={`persona-available-${p.key}`}
-                  checked={ticked}
-                  // The last remaining interviewer can't be un-ticked — a questionnaire with no
-                  // interviewer has no voice to run with.
-                  disabled={busy || (ticked && onlyOne)}
-                  onCheckedChange={(checked) =>
-                    setOffered(
-                      checked ? [...offeredKeys, p.key] : offeredKeys.filter((k) => k !== p.key)
-                    )
-                  }
-                  className="mt-0.5"
-                />
-                <span>
-                  {p.label.trim() || p.key}
-                  {p.key === selectedKey && (
-                    <span className="text-muted-foreground"> · default</span>
-                  )}
-                </span>
-              </label>
-            );
-          })}
+        <div className="space-y-4">
+          {grouped.map(({ category, members }) => (
+            <div key={category} className="space-y-2">
+              <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                {PERSONA_CATEGORY_LABELS[category]}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {members.map((p) => {
+                  const ticked = offeredKeys.includes(p.key);
+                  const name = p.label.trim() || p.key;
+                  const open = openKey === p.key;
+                  return (
+                    <div key={p.key} className="space-y-1">
+                      <label
+                        htmlFor={`persona-available-${p.key}`}
+                        className="text-foreground flex items-start gap-2 text-sm"
+                      >
+                        <Checkbox
+                          id={`persona-available-${p.key}`}
+                          checked={ticked}
+                          // The last remaining interviewer can't be un-ticked — a questionnaire
+                          // with no interviewer has no voice to run with.
+                          disabled={busy || (ticked && onlyOne)}
+                          onCheckedChange={(checked) =>
+                            setOffered(
+                              checked
+                                ? [...offeredKeys, p.key]
+                                : offeredKeys.filter((k) => k !== p.key)
+                            )
+                          }
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="font-medium">{name}</span>
+                          {p.key === selectedKey && (
+                            <span className="text-muted-foreground"> · default</span>
+                          )}
+                          {/* The respondent-facing one-liner, verbatim: an admin choosing who to
+                              offer should read what the respondent will read. */}
+                          {p.description.trim() && (
+                            <span className="text-muted-foreground block text-xs">
+                              {p.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        className="text-muted-foreground hover:text-foreground ml-6 text-xs underline underline-offset-2"
+                        onClick={() => setOpenKey(open ? null : p.key)}
+                      >
+                        {open ? `Hide ${name}` : `More about ${name}`}
+                      </button>
+                      {open && <PersonaDetail persona={p} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         <p className="text-muted-foreground text-xs">
           {onlyOne
@@ -263,63 +364,6 @@ export function PersonaLibraryPanel({
           </div>
         )}
       </div>
-
-      {selected && (
-        <div className="border-border/70 bg-muted/20 space-y-3 rounded-lg border p-4">
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">Name</p>
-            <p className="flex items-center gap-2 text-sm font-medium">
-              {selected.label.trim() || selected.key}
-              <span className="inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-400">
-                Selected
-              </span>
-            </p>
-          </div>
-          {selected.description.trim() && (
-            <div>
-              <p className="text-muted-foreground text-xs font-medium">
-                Description (shown to respondent)
-              </p>
-              <p className="text-sm">{selected.description}</p>
-            </div>
-          )}
-          {selected.tone.persona.text.trim() && (
-            <div>
-              <p className="text-muted-foreground text-xs font-medium">Persona prompt</p>
-              <p className="text-muted-foreground text-sm whitespace-pre-line">
-                {selected.tone.persona.text}
-              </p>
-            </div>
-          )}
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">
-              Tone{' '}
-              <FieldHelp title="Persona tone">
-                The tone dials this persona applies on top of its prompt — the same nine dimensions
-                as this version’s Interviewer tone &amp; persona, on the signed −2…+2 scale (0 =
-                neutral). These are fixed per persona; only the dimensions shown are active.
-              </FieldHelp>
-            </p>
-            {activeToneDials(selected).length > 0 ? (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {activeToneDials(selected).map((dial) => (
-                  <span
-                    key={dial.label}
-                    className="border-border/70 bg-background text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
-                  >
-                    {dial.label}
-                    <span className="text-muted-foreground font-medium">
-                      {dial.display > 0 ? `+${dial.display}` : dial.display}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-sm">Neutral — no tone dials applied.</p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

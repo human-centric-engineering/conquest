@@ -1,8 +1,8 @@
 # Built-in interviewer personas (F-persona)
 
-Hands the interviewer to a **built-in persona** — a cynical curmudgeon, a warm encourager, a casual
-confidant, a stand-up comedian, a reflective philosopher, a get-to-the-point director, a sceptical
-realist, or the neutral coach — and optionally lets the **respondent switch** between them. It builds
+Hands the interviewer to a **built-in persona** — a neutral coach, a non-leading field researcher, a
+structured consultant, a discreet HR partner, an unhurried counsellor, a deadpan curmudgeon, and a
+dozen more — and optionally lets the **respondent switch** between them. It builds
 directly on [interviewer-tone](./interviewer-tone.md): a persona _is_ a named `ToneSettings`, so a
 chosen persona flows through the exact same phraser pipeline (`buildToneInstructions`) with no new
 prompt machinery.
@@ -14,14 +14,20 @@ either the hand-tuned custom [interviewer-tone](./interviewer-tone.md) block **o
 ("Custom voice" vs "Built-in persona"); only the chosen mode's editor is shown, so an admin can't
 configure both at once.
 
-The persona set is **fixed** — the ten built-in personas, hard-coded in code, not editable config.
+The persona set is **fixed** — the built-in personas are hard-coded in code, not editable config.
 In built-in mode the admin ticks _which_ of them this questionnaire offers, pins _which_ of those
 governs, and says _whether_ respondents may switch between them. An admin who wants a bespoke voice
 picks "Custom voice" and tunes the [interviewer-tone](./interviewer-tone.md) block instead.
 
 > A respondent-experience feature, like [presentation-mode](./presentation-mode.md) and the
-> tone/strategy siblings. **Always on**; the remaining gate is the per-version `personaSelection.enabled`
-> config toggle, which is **off by default**, so an untouched questionnaire is unchanged.
+> tone/strategy siblings. **Always on** as a platform capability; which voice governs is the
+> per-version `personaSelection.enabled` toggle, and its default depends on where the value comes
+> from. A version with **no stored config row** takes `DEFAULT_PERSONA_SELECTION`, which is
+> **`enabled: true`** — built-in mode on, pinned to The Coach, switching off — so a never-configured
+> questionnaire is interviewed by The Coach, not by the bare baseline tone. A version that **has** a
+> config row whose `personaSelection` predates this feature reads as **off**
+> (`narrowPersonaSelection` requires a literal `enabled === true`), so it keeps its custom tone
+> untouched.
 
 ## The model
 
@@ -69,27 +75,61 @@ At turn time `resolveEffectiveTone` confines the choice to the offered set: a `s
 chosen before the admin un-ticked it is stale and falls back to the pinned default, exactly like any
 other unknown key.
 
+## The library, and what each voice is for
+
 The **library is fixed and hard-coded**: `BUILT_IN_PERSONAS`
-(`lib/app/questionnaire/persona/presets.ts`) — the `neutral-coach` default (a calm, objective
-coach/consultant grounded in human & organisational psychology) plus seven characters. Each is a
-`PersonaOption` (`{ key, label, description, tone: ToneSettings }`) whose `tone` block holds the whole
+(`lib/app/questionnaire/persona/presets.ts`), led by the `neutral-coach` default (a calm, objective
+coach/consultant grounded in human & organisational psychology). Each is a `PersonaOption`
+(`{ key, category, label, description, tone: ToneSettings }`) whose `tone` block holds the whole
 voice (prose in `tone.persona.text`, character in the dimension levels). The admin cannot edit or
-extend the set — every questionnaire uses the same ten.
+extend the set — every questionnaire draws on the same library.
+
+Every persona declares the **situation it was written for** (`PersonaCategory`), which groups the
+admin tick-boxes so somebody running an HR review doesn't have to read twenty descriptions to find
+the two that fit:
+
+| Category (`PersonaCategory`)                    | Personas                                                                                    | The job                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `general` — General purpose                     | The Coach (default), The Interviewer                                                        | Balanced, or entirely characterless when the instrument should be the star         |
+| `research` — Research and discovery             | The Realist, The Field Researcher, The Analyst                                              | Pressure-test a tidy story, avoid leading the witness, turn "often" into a number  |
+| `corporate` — Corporate and consulting          | The Director, The Consultant, The Facilitator                                               | Respect an exec's time, frame a problem top-down, stay neutral in a contested room |
+| `customer` — Customer experience                | The Concierge, The Advocate                                                                 | Never argue with an experience; capture a complaint well enough to act on          |
+| `hr` — HR and people                            | The People Partner, The Mentor                                                              | Behaviour over blame, no pressure to name a colleague; strengths and what's next   |
+| `advisory` — Advisory and professional services | The Advisor, The Auditor                                                                    | Establish the position before advising; leave no question half-answered            |
+| `wellbeing` — Wellbeing and sensitive topics    | The Encourager, The Counsellor                                                              | Make candour feel safe; move at the respondent's pace and never push               |
+| `character` — Character and engagement          | The Confidant, The Comedian, The Hipster, The Philosopher, The Psychologist, The Curmudgeon | Personality-led, for engagement rather than a professional setting                 |
+
+The category is an **admin browsing aid only**: it never reaches a respondent (the client menu is
+`key`/`label`/`description`) and never changes how a persona behaves. The library is stored in
+category order (default first) because both the tick-boxes and the respondent picker render in
+library order — a presets test asserts each category stays contiguous.
+
+**Copy rules.** A `description` is respondent-facing, so it stays free of em dashes and reads as one
+or two plain sentences (asserted in the presets test). A `tone.persona.text` prompt is system-only,
+written as instructions _to_ the interviewer, never as a claim of qualification — "you are a
+person-centred counsellor" describes a manner to adopt, and nothing downstream presents it as
+credentials to a respondent.
 
 ## How a choice takes effect
 
 The menu (which personas exist + the default) lives on the **version config**; the choice lives on the
 **session**. They meet at turn time:
 
+Each tick-box carries the persona's **respondent-facing description verbatim** — an admin choosing
+who to offer should be reading what the respondent will read. Everything else about a voice (the
+system-prompt prose that briefs the interviewer, and its tone dials) sits behind a per-persona
+**"More about {name}"** toggle that opens one detail at a time. There is no separate preview of the
+pinned persona: it is a row like any other, marked _· default_.
+
 1. **Admin** picks **"Built-in persona"** mode on the merged **Settings → Interviewer tone & persona**
    group (the mode toggle flips `personaSelection.enabled`), ticks which interviewers the
    questionnaire offers, pins the default among them, and — optionally — turns on **"Let respondents
    switch interviewer"** (`allowRespondentSwitch`) + a switcher style (`persona-library-panel.tsx`,
-   gated by the `personaSelection.enabled` config toggle). The panel is the availability tick-boxes
-   (with select/deselect all) + a default dropdown over the offered personas (the pinned one first,
-   tagged _Selected_) + a **read-only preview** — name (badged _Selected_), respondent-facing
-   description, persona prompt, and its active tone dials — no editing. Only `personaSelection` is
-   saved, through the same config PATCH as tone.
+   gated by the `personaSelection.enabled` config toggle). The panel is the availability tick-boxes,
+   grouped by category and each carrying its respondent-facing description (with select/deselect all
+   and a per-persona detail toggle), plus a default dropdown over the offered personas (the pinned
+   one first, tagged _Selected_). Nothing here is editable — the library is fixed. Only
+   `personaSelection` is saved, through the same config PATCH as tone.
 2. **Respondent** — only when `allowRespondentSwitch` and ≥2 offered personas — picks via the **switcher** the admin chose
    (`personaSelection.switcher`); see the next section. The pinned persona leads the picker grid,
    badged _Default_. The choice PATCHes `…/questionnaire-sessions/:id/persona` (fail-soft). With

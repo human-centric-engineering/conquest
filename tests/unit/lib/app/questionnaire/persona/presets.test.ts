@@ -13,6 +13,7 @@ import { BUILT_IN_PERSONAS, BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnair
 import { narrowPersonas } from '@/lib/app/questionnaire/persona/settings';
 import {
   DEFAULT_PERSONA_KEY,
+  PERSONA_CATEGORIES,
   PERSONA_DESCRIPTION_MAX_LENGTH,
   PERSONA_LABEL_MAX_LENGTH,
   TONE_DIMENSION_KEYS,
@@ -22,10 +23,34 @@ import {
 } from '@/lib/app/questionnaire/types';
 
 describe('BUILT_IN_PERSONAS', () => {
-  it('ships ten personas with unique keys', () => {
-    expect(BUILT_IN_PERSONAS).toHaveLength(10);
+  it('ships a library of unique keys', () => {
     const keys = BUILT_IN_PERSONAS.map((p) => p.key);
+    expect(keys.length).toBeGreaterThanOrEqual(10);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('files every persona under a known category, and fills every category', () => {
+    for (const p of BUILT_IN_PERSONAS) {
+      expect(PERSONA_CATEGORIES).toContain(p.category);
+    }
+    // The admin panel renders one group per category; an empty one would be a heading with nothing
+    // under it, which reads as a bug rather than a deliberately narrow library.
+    for (const category of PERSONA_CATEGORIES) {
+      expect(BUILT_IN_PERSONAS.some((p) => p.category === category)).toBe(true);
+    }
+  });
+
+  it('groups the library by category — every category contiguous, in roster order', () => {
+    // The picker and the admin tick-boxes both render in library order, so a persona filed away
+    // from its group would appear under the wrong heading.
+    const order = BUILT_IN_PERSONAS.map((p) => PERSONA_CATEGORIES.indexOf(p.category));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('keeps descriptions free of em dashes — they read as a single plain sentence', () => {
+    for (const p of BUILT_IN_PERSONAS) {
+      expect(p.description).not.toMatch(/[—–]/);
+    }
   });
 
   it('leads with the neutral default, seeded as an objective coach (prompt + dials)', () => {

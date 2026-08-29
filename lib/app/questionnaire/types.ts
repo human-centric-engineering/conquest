@@ -638,9 +638,44 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
  * respondent selection ({@link PersonaSelectionSettings}), the respondent picks one of these and it
  * REPLACES the version's `tone` for their session.
  */
+/**
+ * What a built-in persona is FOR — the situation it was written for, used to group the library so an
+ * admin running (say) an HR review can find the voices suited to it without reading all of them.
+ *
+ * Admin-facing organisation only: a category never reaches a respondent (the client menu is
+ * key/label/description) and never changes how a persona behaves. `character` is the odd one out —
+ * those personas lead with personality rather than a professional setting, and suit engagement-led
+ * questionnaires whatever the subject.
+ */
+export const PERSONA_CATEGORIES = [
+  'general',
+  'research',
+  'corporate',
+  'customer',
+  'hr',
+  'advisory',
+  'wellbeing',
+  'character',
+] as const;
+export type PersonaCategory = (typeof PERSONA_CATEGORIES)[number];
+
+/** Admin-facing group headings for {@link PERSONA_CATEGORIES}, in the same order. */
+export const PERSONA_CATEGORY_LABELS: Record<PersonaCategory, string> = {
+  general: 'General purpose',
+  research: 'Research and discovery',
+  corporate: 'Corporate and consulting',
+  customer: 'Customer experience',
+  hr: 'HR and people',
+  advisory: 'Advisory and professional services',
+  wellbeing: 'Wellbeing and sensitive topics',
+  character: 'Character and engagement',
+};
+
 export type PersonaOption = {
   /** Stable slug, unique within the library — persisted as the session's choice. */
   key: string;
+  /** The situation this voice was written for. Groups the admin library; never shown to respondents. */
+  category: PersonaCategory;
   /** Display name (admin + respondent facing), e.g. "The Straight-Talking Curmudgeon". */
   label: string;
   /** One-line respondent-facing description shown on the selection card. */
