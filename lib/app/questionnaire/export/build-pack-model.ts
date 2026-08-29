@@ -378,7 +378,12 @@ export interface PackConditionalTopics {
   rules: PackConditionalTopicsRule[];
   /** How many conditional topics one interview may cover at most. */
   maxConditionalTopics: number;
-  /** Whether one additional, unselected topic is sampled lightly to check for blind spots. */
+  /**
+   * Whether one area the respondent did not raise is sampled briefly — the admin-facing
+   * "blind-spot check". Pack copy describes the mechanism rather than using that label: the pack
+   * is a document an admin hands to a client, where "blind spot" reads as a claim about the
+   * respondent the planner never made.
+   */
   includeCheckTopic: boolean;
   /** Seconds; `0` means no time limit was set. */
   sessionBudgetSeconds: number;

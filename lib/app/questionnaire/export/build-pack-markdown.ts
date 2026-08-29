@@ -221,7 +221,7 @@ export function buildPackMarkdown(model: PackModel): string {
       const facts = [
         `Up to ${model.conditionalTopics.maxConditionalTopics} conditional topic(s) per interview`,
         model.conditionalTopics.includeCheckTopic
-          ? 'one additional, unselected topic is sampled lightly to check for blind spots'
+          ? 'one area the respondent did not raise is sampled briefly'
           : null,
         model.conditionalTopics.sessionBudgetSeconds > 0
           ? `interviews are budgeted to about ${Math.round(model.conditionalTopics.sessionBudgetSeconds / 60)} minute(s)`

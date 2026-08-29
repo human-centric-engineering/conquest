@@ -76,7 +76,7 @@ const DIMENSION_RUBRICS: Record<ScopeEvaluationDimension, ScopeDimensionRubric> 
   },
   coverage_and_burden: {
     focus:
-      'Judge two things: (1) whether any conditional topic has no realistic path to ever being selected — its criteria describes something the opening cannot plausibly surface, or no rule and no fallback ever reaches it (a blind spot the respondent will never see, however relevant it might be); and (2) whether the topic set as a whole — its count and depth relative to the budget and cap — risks overburdening a respondent, i.e. there are so many plausible-sounding conditional topics that the planner is likely to seat as many as the cap allows on most respondents, defeating the purpose of narrowing at all.',
+      'Judge two things: (1) whether any conditional topic has no realistic path to ever being selected — its criteria describes something the opening cannot plausibly surface, or no rule and no fallback ever reaches it (an unreachable topic the respondent will never see, however relevant it might be); and (2) whether the topic set as a whole — its count and depth relative to the budget and cap — risks overburdening a respondent, i.e. there are so many plausible-sounding conditional topics that the planner is likely to seat as many as the cap allows on most respondents, defeating the purpose of narrowing at all.',
     scale: `- 1.0 — Every conditional topic is reachable, and the overall set is well-scoped to the budget.
 - 0.7 — Mostly fine; one topic looks hard to reach or the set is a little heavy.
 - 0.5 — A topic or two looks unreachable, or the topic count/depth looks likely to overburden most respondents.

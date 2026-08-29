@@ -13,7 +13,9 @@ import { describe, it, expect } from 'vitest';
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
+  PackInterviewerPolicy,
   PackModel,
+  PackPolicyEvaluation,
   PackScopeEvaluation,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import type {
@@ -661,7 +663,7 @@ describe('buildPackMarkdown', () => {
       );
       // Up to N / minutes summary line and the check-topic fact.
       expect(md).toContain('Up to 3 conditional topic(s) per interview');
-      expect(md).toContain('one additional, unselected topic is sampled lightly');
+      expect(md).toContain('one area the respondent did not raise is sampled briefly');
       expect(md).toContain('interviews are budgeted to about 10 minute(s)');
     });
 
@@ -815,5 +817,281 @@ describe('buildPackMarkdown — question fidelity', () => {
       model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
     );
     expect(out).toMatch(/Must ask/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The interviewer policy appendix (F18.8)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The whole `interviewerPolicy` block was unrendered by any test, so every line of it — the
+ * form-only short circuit, the arc bands, the house rules, the fidelity distribution and the
+ * nested judge panel — could have been deleted without a suite failing.
+ *
+ * Each case below pins a *branch*, not just the happy path: the pairs (pace / no pace, rules /
+ * no rules, gate on / gate off, reviewed / not reviewed) are what the section's meaning turns on.
+ */
+describe('buildPackMarkdown — the interviewer', () => {
+  const EMPTY_POLICY_EVALUATION: PackPolicyEvaluation = {
+    hasRun: false,
+    runAt: null,
+    totalFindings: 0,
+    scores: [],
+    targets: [],
+  };
+
+  function policy(over: Partial<PackInterviewerPolicy> = {}): PackInterviewerPolicy {
+    return {
+      conversational: true,
+      houseRulesEnabled: true,
+      houseRules: [
+        { kind: 'Never', text: 'Never use humour.', trigger: null },
+        { kind: 'If asked', text: 'Say who reads the answers.', trigger: 'privacy' },
+      ],
+      approachLabel: 'Funnel',
+      paceLabel: 'Brisk',
+      openingSource: 'Guided by the examples you wrote',
+      tacticLabels: ['Probes shallow answers', 'Reflects answers back'],
+      arcBands: [
+        { label: 'Opening', detail: 'The first 1 question is broad and unhurried' },
+        { label: 'Broad', detail: 'While less than 25% of the questionnaire is covered' },
+      ],
+      fidelityEnabled: true,
+      fidelityDistribution: [
+        { level: 'must_ask', label: 'Must ask', count: 2 },
+        { level: 'balanced', label: 'Balanced', count: 0 },
+      ],
+      mustAskQuestions: [{ key: 'q1', prompt: 'Sample prompt' }],
+      evaluation: EMPTY_POLICY_EVALUATION,
+      ...over,
+    };
+  }
+
+  it('renders nothing at all when the section is excluded', () => {
+    expect(buildPackMarkdown(model())).not.toContain('## The interviewer');
+  });
+
+  it('renders the approach, pace, opening and tactics as a fact list', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+    expect(md).toContain('## The interviewer');
+    expect(md).toContain('**Questioning approach:** Funnel');
+    expect(md).toContain('**Pace:** Brisk');
+    expect(md).toContain('**Opening questions:** Guided by the examples you wrote');
+    expect(md).toContain('**Tactics:** Probes shallow answers, Reflects answers back');
+  });
+
+  it('omits the pace and tactics lines rather than printing empties', () => {
+    // Under Open or Targeted the runtime never reads a pace, so naming one would describe an arc
+    // that is not running — the model sends null and the renderer must stay silent.
+    const md = buildPackMarkdown(
+      model({ interviewerPolicy: policy({ paceLabel: null, tacticLabels: [], arcBands: [] }) })
+    );
+    expect(md).not.toContain('**Pace:**');
+    expect(md).not.toContain('**Tactics:**');
+    expect(md).not.toContain('### How the questioning narrows');
+  });
+
+  it('renders the arc bands under their own heading when a funnel is running', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+    expect(md).toContain('### How the questioning narrows');
+    expect(md).toContain('- **Opening** — The first 1 question is broad and unhurried');
+    expect(md).toContain('- **Broad** — While less than 25% of the questionnaire is covered');
+  });
+
+  it('says a form-only questionnaire has no interviewer, and prints none of the settings', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy({ conversational: false }) }));
+    expect(md).toContain('filled in as a form, so none of the interviewer settings apply');
+    // The short circuit must skip every setting below it, not merely the heading.
+    expect(md).not.toContain('**Questioning approach:**');
+    expect(md).not.toContain('### House rules');
+    // ...but the review verdict still renders: it is about the setup, not about a live interview.
+    expect(md).toContain('### Interviewer review');
+  });
+
+  it('prints an if-asked rule with its trigger and an always/never rule without one', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+    expect(md).toContain('- **Never**: Never use humour.');
+    expect(md).toContain(
+      '- **If asked** _(when asked about: privacy)_: Say who reads the answers.'
+    );
+  });
+
+  it('states that no house rules are in force rather than printing an empty list', () => {
+    // Two ways to get here — the block switched off, or switched on with nothing in force — and
+    // both must read the same to someone holding the document.
+    for (const p of [
+      policy({ houseRulesEnabled: false, houseRules: [] }),
+      policy({ houseRulesEnabled: true, houseRules: [] }),
+    ]) {
+      const md = buildPackMarkdown(model({ interviewerPolicy: p }));
+      expect(md).toContain('_No house rules are in force for this questionnaire._');
+    }
+  });
+
+  it('lists only the fidelity levels that actually have questions', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+    expect(md).toContain('- Must ask: 2');
+    // A level nobody used is noise in a client-facing document, not information.
+    expect(md).not.toContain('- Balanced: 0');
+    expect(md).toContain('Put to the respondent word for word:');
+    expect(md).toContain('- Sample prompt');
+  });
+
+  it('says every question is conversational while the fidelity gate is off', () => {
+    const md = buildPackMarkdown(
+      model({
+        interviewerPolicy: policy({
+          fidelityEnabled: false,
+          fidelityDistribution: [],
+          mustAskQuestions: [],
+        }),
+      })
+    );
+    expect(md).toContain('_Every question is asked conversationally._');
+    expect(md).not.toContain('Put to the respondent word for word:');
+  });
+
+  it('omits the word-for-word list when the gate is on but no question is held to it', () => {
+    const md = buildPackMarkdown(
+      model({
+        interviewerPolicy: policy({
+          fidelityDistribution: [{ level: 'balanced', label: 'Balanced', count: 3 }],
+          mustAskQuestions: [],
+        }),
+      })
+    );
+    expect(md).toContain('- Balanced: 3');
+    expect(md).not.toContain('Put to the respondent word for word:');
+  });
+
+  it('states that the panel has not run rather than omitting the review section', () => {
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+    expect(md).toContain('### Interviewer review');
+    expect(md).toContain('_This interviewer setup has not been reviewed._');
+  });
+
+  it('renders the review scores, falling back through diagnostic then "unavailable"', () => {
+    const md = buildPackMarkdown(
+      model({
+        interviewerPolicy: policy({
+          evaluation: {
+            hasRun: true,
+            runAt: '2026-08-11T00:00:00.000Z',
+            totalFindings: 2,
+            scores: [
+              {
+                dimension: 'rule_coherence',
+                label: 'Rule-Coherence Judge',
+                score: 0.82,
+                diagnostic: null,
+                findingCount: 1,
+              },
+              {
+                dimension: 'arc_fit',
+                label: 'Arc-Fit Judge',
+                score: null,
+                diagnostic: 'provider timed out',
+                findingCount: 0,
+              },
+              {
+                dimension: 'fidelity_calibration',
+                label: 'Fidelity-Calibration Judge',
+                score: null,
+                diagnostic: null,
+                findingCount: 0,
+              },
+            ],
+            targets: [],
+          },
+        }),
+      })
+    );
+    expect(md).toContain('Reviewed 2026-08-11T00:00:00.000Z · 2 finding(s).');
+    expect(md).toContain('| Rule-Coherence Judge | 82% | 1 |');
+    // A judge that could not score says why; one that has no reason to give says so plainly.
+    expect(md).toContain('| Arc-Fit Judge | provider timed out | 0 |');
+    expect(md).toContain('| Fidelity-Calibration Judge | unavailable | 0 |');
+  });
+
+  it('falls back to "recently" when a completed run carries no timestamp', () => {
+    const md = buildPackMarkdown(
+      model({
+        interviewerPolicy: policy({
+          evaluation: {
+            hasRun: true,
+            runAt: null,
+            totalFindings: 0,
+            scores: [],
+            targets: [],
+          },
+        }),
+      })
+    );
+    expect(md).toContain('Reviewed recently · 0 finding(s).');
+  });
+
+  it('groups findings under their subject, marking one the author has since deleted', () => {
+    const md = buildPackMarkdown(
+      model({
+        interviewerPolicy: policy({
+          evaluation: {
+            hasRun: true,
+            runAt: '2026-08-11T00:00:00.000Z',
+            totalFindings: 2,
+            scores: [],
+            targets: [
+              {
+                key: 'r1',
+                kind: 'house_rule',
+                label: 'Never use humour.',
+                removed: false,
+                counts: { major: 1, minor: 0, info: 0, total: 1 },
+                judges: [
+                  {
+                    dimension: 'rule_coherence',
+                    label: 'Rule-Coherence Judge',
+                    severity: 'major',
+                    status: 'pending',
+                    proposedChange: 'Narrow this rule.',
+                    rationale: 'It contradicts the always rule above it.',
+                    sourceQuote: null,
+                    proposedEditSummary: 'Set the rule text to "Avoid jokes about the company."',
+                  },
+                ],
+              },
+              {
+                key: 'r2',
+                kind: 'house_rule',
+                label: 'A rule that no longer exists',
+                removed: true,
+                counts: { major: 0, minor: 1, info: 0, total: 1 },
+                judges: [
+                  {
+                    dimension: 'cross_layer_conflict',
+                    label: 'Cross-Layer-Conflict Judge',
+                    severity: 'minor',
+                    status: 'declined',
+                    proposedChange: 'Drop it.',
+                    rationale: 'Already gone.',
+                    sourceQuote: null,
+                    proposedEditSummary: null,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      })
+    );
+    expect(md).toContain('**Never use humour.**');
+    // The reader must be able to tell a live subject from one the author has since deleted,
+    // or they will go looking for a rule that is not there.
+    expect(md).toContain('**A rule that no longer exists** _(since removed)_');
+    expect(md).toContain('- _Rule-Coherence Judge_ (major): Narrow this rule.');
+    expect(md).toContain('  - It contradicts the always rule above it.');
+    expect(md).toContain('  - Proposed: Set the rule text to "Avoid jokes about the company."');
+    // A prose-only finding has no structured edit, and must not render an empty "Proposed:" line.
+    expect(md).not.toContain('  - Proposed: null');
   });
 });
