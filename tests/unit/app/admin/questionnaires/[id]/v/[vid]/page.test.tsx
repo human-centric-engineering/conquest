@@ -269,9 +269,11 @@ describe('OverviewTab', () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
       workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
         topics: [
-          { key: 'a', phase: 'conditional' },
-          { key: 'b', phase: 'core' },
-          { key: 'c', phase: 'conditional' },
+          // `members` is read by the settings-conflict check that measures how much of the
+          // instrument is conditional (F17.33), so a topic fixture without it is not a topic.
+          { key: 'a', phase: 'conditional', members: { questionKeys: ['q1'], dataSlotKeys: [] } },
+          { key: 'b', phase: 'core', members: { questionKeys: ['q2'], dataSlotKeys: [] } },
+          { key: 'c', phase: 'conditional', members: { questionKeys: ['q3'], dataSlotKeys: [] } },
         ],
         settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
         issues: [{ severity: 'error' }, { severity: 'warning' }],

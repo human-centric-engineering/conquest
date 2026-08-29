@@ -328,6 +328,7 @@ const ALLOWED_CALL_SITES: readonly string[] = [
   'app/api/v1/app/questionnaire-sessions/_lib/offer-stream.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts | agentId=spread((extractor ? { agentId: extractor.id } : {})) | conversationId=— | workflowExecutionId=—',
+  'app/api/v1/app/questionnaire-sessions/_lib/widening-rescan.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'app/api/v1/app/questionnaires/_lib/selector-completion.ts | agentId=spread((agent ? { agentId: agent.id } : {})) | conversationId=— | workflowExecutionId=—',
 
   // Remaining app-tier callers. `advisor` is a resolved row; `meta.agentId` is

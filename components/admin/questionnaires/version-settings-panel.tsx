@@ -32,9 +32,20 @@ import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 export interface VersionSettingsPanelProps {
   questionnaireId: string;
   graph: VersionGraphView;
+  /**
+   * How many of the version's questions belong to a conditional topic (F17.33). Loaded by the page
+   * — topics are authored on their own tab — and read by the settings-conflict check that warns
+   * when an instrument's interviews vary enough in length for a progress percentage to mean
+   * different things to different respondents. `null` = not known here, which retires the check.
+   */
+  conditionalQuestionCount?: number | null;
 }
 
-export function VersionSettingsPanel({ questionnaireId, graph }: VersionSettingsPanelProps) {
+export function VersionSettingsPanel({
+  questionnaireId,
+  graph,
+  conditionalQuestionCount = null,
+}: VersionSettingsPanelProps) {
   const router = useRouter();
   const versionId = graph.id;
   const questionCount = graph.sections.reduce((n, s) => n + s.questions.length, 0);
@@ -105,6 +116,7 @@ export function VersionSettingsPanel({ questionnaireId, graph }: VersionSettings
           versionId={versionId}
           config={graph.config}
           questionCount={questionCount}
+          conditionalQuestionCount={conditionalQuestionCount}
           isVersionLaunched={graph.status === 'launched'}
           run={run}
           busy={busy}

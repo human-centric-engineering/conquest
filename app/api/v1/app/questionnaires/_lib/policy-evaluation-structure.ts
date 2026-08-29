@@ -24,6 +24,7 @@ import {
 import { paceProfile, usesGuidedOpening } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { questionSatisfactionFloor } from '@/lib/app/questionnaire/selection/context';
 import {
+  conditionalQuestionCountOf,
   configConflictInputFromConfig,
   detectConfigConflicts,
 } from '@/lib/app/questionnaire/authoring/config-conflicts';
@@ -165,7 +166,9 @@ export async function buildPolicyEvaluationStructure(
   });
 
   const conflicts = detectConfigConflicts(
-    configConflictInputFromConfig(config, allQuestions.length)
+    // The topics are already loaded above (empty when the feature is off, which is also the honest
+    // answer for check 21 — nothing is conditional when nothing chooses).
+    configConflictInputFromConfig(config, allQuestions.length, conditionalQuestionCountOf(topics))
   );
 
   return {

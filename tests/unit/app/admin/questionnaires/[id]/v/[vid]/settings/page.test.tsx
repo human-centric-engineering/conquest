@@ -53,6 +53,10 @@ vi.mock('next/navigation', () => ({
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  // F17.33: the page reads the version's topics so the settings-conflict check can tell how much of
+  // the instrument is conditional. Defaults to a version with none, which is the shape of every
+  // case in this file.
+  getVersionTopicsCached: vi.fn<() => Promise<{ topics: unknown[] } | null>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -299,6 +303,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+  workspaceDataMock.getVersionTopicsCached.mockResolvedValue({ topics: [] });
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: [] });
 });

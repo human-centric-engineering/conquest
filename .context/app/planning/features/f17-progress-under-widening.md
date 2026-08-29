@@ -2,7 +2,7 @@
 feature: F17.33
 title: Progress, and what the respondent is told, when the interview grows
 phase: P17 — Conditional Topics
-status: phases A + B + C1 shipped (2026-08-29); C2 + D open. §6.3 settled — see below
+status: phases A, B, C1 and D shipped (2026-08-29/30); C2 open and optional. §5.4 + §6.3 settled — see below
 owner: TBD
 deps: F17.1 (the plan), F17.6 (respondent amendment), F-progress (milestone banners), F4.5 (completion assessment)
 opened: 2026-08-29
@@ -414,7 +414,7 @@ answer, not a backfill.
 | **B**  | ✅ **Shipped.** The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                     | medium — §5.4 settled: a dedicated prompt     |
 | **C1** | ✅ **Shipped.** Amendment acknowledgement gains name, size and the respondent's own reason; §6.3 settled (ungated)                   | small — one function, one prompt paragraph    |
 | **C2** | Planner emits a per-topic respondent-facing reason (schema + prompt + carriage)                                                      | small–medium, and optional                    |
-| **D**  | `conditional-topics-progress-variance` + threading the figure into `ConfigConflictInput`                                             | small, mechanical, optional                   |
+| **D**  | ✅ **Shipped.** `conditional-topics-progress-variance` + `conditionalQuestionCountOf` threaded into `ConfigConflictInput`            | small, mechanical                             |
 
 A and B share the migration, so they want to be one branch even though they are two commits. C is
 independent of both and could go first if the copy matters more than the number. D is the tail and

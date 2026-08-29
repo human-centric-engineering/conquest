@@ -19,7 +19,9 @@ import { logger } from '@/lib/logging';
 import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
+  getVersionTopicsCached,
 } from '@/lib/app/questionnaire/workspace-data';
+import { conditionalQuestionCountOf } from '@/lib/app/questionnaire/authoring/config-conflicts';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
 export const metadata: Metadata = {
@@ -51,12 +53,20 @@ async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
 export default async function SettingsTab({ params }: PageProps) {
   const { id, vid } = await params;
 
-  const [detail, demoClientOptions, graph] = await Promise.all([
+  const [detail, demoClientOptions, graph, scope] = await Promise.all([
     getQuestionnaireDetailCached(id),
     getActiveDemoClients(),
     getVersionGraphCached(id, vid),
+    // F17.33: the conflict check that reads how much of the instrument is conditional needs the
+    // topics, which are authored on their own tab. Cached and already fetched by the version
+    // overview, so this rides the same read rather than adding one.
+    getVersionTopicsCached(id, vid),
   ]);
   if (!detail) notFound();
+
+  // `null` would mean "this surface cannot know"; here we looked, so a version with no conditional
+  // topics honestly reports zero and the check stays quiet.
+  const conditionalQuestionCount = conditionalQuestionCountOf(scope?.topics ?? []);
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -98,7 +108,13 @@ export default async function SettingsTab({ params }: PageProps) {
 
       {/* Version-scoped run-time config (F3.1 + F9.7). Editing a launched version forks a new
           draft (the panel surfaces the notice). Goal & audience are edited on the Structure tab. */}
-      {graph && <VersionSettingsPanel questionnaireId={id} graph={graph} />}
+      {graph && (
+        <VersionSettingsPanel
+          questionnaireId={id}
+          graph={graph}
+          conditionalQuestionCount={conditionalQuestionCount}
+        />
+      )}
 
       {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
       <section className="space-y-3">

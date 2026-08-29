@@ -33,18 +33,44 @@ Wiring: `config-editor.tsx` computes `conflicts` and passes `conflictsFor(sectio
 
 ## Rules (grounded in the runtime gating)
 
-| id                                    | Severity | When                                                                              | Why it's a conflict                                                                                                      |
-| ------------------------------------- | -------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `anonymous-hides-capture`             | error    | `anonymousMode` **and** profile capture on (fields present)                       | `resolve-capture.ts` returns `null` for anonymous → fields never collected                                               |
-| `form-only-conversational-capture`    | error    | `presentationMode='form'` **and** a field's effective placement is conversational | form-only never runs the interviewer, so in-chat capture can't happen                                                    |
-| `form-only-persona`                   | warning  | `form` **and** persona selection enabled                                          | the picker requires the chat carousel (`showPersona` needs `showChat`)                                                   |
-| `form-only-reasoning`                 | warning  | `form` **and** reasoning stream enabled                                           | the reasoning trace renders only in the chat surface                                                                     |
-| `form-only-composer`                  | warning  | `form` **and** voice or attachment input enabled                                  | those live in the chat composer, absent in form-only                                                                     |
-| `min-questions-unreachable`           | warning  | `minQuestionsAnswered > questionCount`                                            | completion can never satisfy the floor                                                                                   |
-| `sensitivity-no-support`              | info     | `sensitivityAwareness` **and** empty `supportMessage`                             | an empty message disables the signpost, so nothing shows                                                                 |
-| `conditional-topics-targeted-opening` | warning  | Conditional Topics on **and** `approach='targeted'`                               | the planner routes off the opening; targeted asks one narrow question from turn one, so there may be nothing to route on |
-| `conditional-topics-no-probes`        | warning  | Conditional Topics on **and** `limitOpeningProbes` **and** `maxOpeningProbes=0`   | an opening answer too vague to route on can never be clarified, so the planner falls back                                |
-| `conditional-topics-guided-openings`  | info     | Conditional Topics on **and** `openingMode='examples'` with something written     | the examples steer the very answer the planner reads, not just the tone                                                  |
+| id                                     | Severity | When                                                                                            | Why it's a conflict                                                                                                        |
+| -------------------------------------- | -------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `anonymous-hides-capture`              | error    | `anonymousMode` **and** profile capture on (fields present)                                     | `resolve-capture.ts` returns `null` for anonymous → fields never collected                                                 |
+| `form-only-conversational-capture`     | error    | `presentationMode='form'` **and** a field's effective placement is conversational               | form-only never runs the interviewer, so in-chat capture can't happen                                                      |
+| `form-only-persona`                    | warning  | `form` **and** persona selection enabled                                                        | the picker requires the chat carousel (`showPersona` needs `showChat`)                                                     |
+| `form-only-reasoning`                  | warning  | `form` **and** reasoning stream enabled                                                         | the reasoning trace renders only in the chat surface                                                                       |
+| `form-only-composer`                   | warning  | `form` **and** voice or attachment input enabled                                                | those live in the chat composer, absent in form-only                                                                       |
+| `min-questions-unreachable`            | warning  | `minQuestionsAnswered > questionCount`                                                          | completion can never satisfy the floor                                                                                     |
+| `sensitivity-no-support`               | info     | `sensitivityAwareness` **and** empty `supportMessage`                                           | an empty message disables the signpost, so nothing shows                                                                   |
+| `conditional-topics-targeted-opening`  | warning  | Conditional Topics on **and** `approach='targeted'`                                             | the planner routes off the opening; targeted asks one narrow question from turn one, so there may be nothing to route on   |
+| `conditional-topics-no-probes`         | warning  | Conditional Topics on **and** `limitOpeningProbes` **and** `maxOpeningProbes=0`                 | an opening answer too vague to route on can never be clarified, so the planner falls back                                  |
+| `conditional-topics-guided-openings`   | info     | Conditional Topics on **and** `openingMode='examples'` with something written                   | the examples steer the very answer the planner reads, not just the tone                                                    |
+| `conditional-topics-progress-variance` | info     | Conditional Topics on, milestone banners on, **and** more than 40% of questions are conditional | two respondents get interviews of very different lengths, so a percentage is a weak signal however honestly it is computed |
+
+### The rule that was deliberately NOT written (F17.33)
+
+The obvious rule here is _"Conditional Topics is on and progress milestones are on"_ — the two do
+interact, and the interaction used to be a real defect: widening an interview mid-session grew the
+coverage denominator and walked the progress bar backwards.
+
+That rule is not here, and the reason generalises. It would fire on the **default configuration** of
+a mainstream feature (`conditionalTopics.enabled` is the only thing the admin opted into;
+`milestoneBannerEnabled` defaults on), and the only honest advice it could give is "turn off your
+progress signal", which makes the experience worse on exactly the longest interviews. The defect was
+fixed in the figure instead — see
+[`completion-logic.md`](./completion-logic.md#and-a-third-figure-the-bar-actually-draws-progresspct-f1733).
+
+`conditional-topics-progress-variance` is what survived: a note about **variance**, not about the
+combination. When most of the instrument is conditional, two people are given interviews of such
+different lengths that a percentage is a weak signal however honestly it is computed — which is
+something an admin cannot see from either tab, and which has a real response (fewer thresholds,
+later ones, or a narrower conditional set).
+
+It needs a figure `ConfigView` does not carry, so `conditionalQuestionCountOf(topics)` is threaded
+from each surface's own topic load, and the field is `number | null` where `null` means **this
+surface could not know** — the check retires rather than reading a missing figure as "nothing is
+conditional". The Settings editor gets it from the page; the version overview and the policy panel
+already had the topics in hand.
 
 ### The three that cross a tab boundary
 

@@ -557,6 +557,7 @@ export function ConfigEditor({
   versionId,
   config,
   questionCount,
+  conditionalQuestionCount = null,
   isVersionLaunched = false,
   run,
   busy,
@@ -566,6 +567,17 @@ export function ConfigEditor({
   config: ConfigView;
   /** Live question count on the version — folded into the estimate's reload key so it refreshes after question edits. */
   questionCount: number;
+  /**
+   * How many of those questions belong to a CONDITIONAL topic (F17.33) — what check 21 reads to
+   * decide whether this instrument's interviews vary enough in length for a progress percentage to
+   * be a weak signal. Topics are authored on their own tab, so the page loads them and hands the
+   * figure down.
+   *
+   * Defaults to `null` — "this mount cannot know" — which retires the check rather than reading a
+   * missing figure as "nothing here is conditional". A non-questionnaire mount genuinely cannot
+   * know, and a wrong reassurance is worse than a missing note.
+   */
+  conditionalQuestionCount?: number | null;
   /**
    * Whether the version being edited is launched. Drives only the public-link helper note
    * (a draft version's `/q/<versionId>` link won't boot a session until launch). Defaults to
@@ -920,6 +932,11 @@ export function ConfigEditor({
         conditionalTopicsEnabled,
         limitOpeningProbes: config.conditionalTopics.limitOpeningProbes,
         maxOpeningProbes: config.conditionalTopics.maxOpeningProbes,
+        // Milestones ARE edited here, so check 21 reacts as the admin flips the switch.
+        milestoneBannerEnabled,
+        // Topics live on their own tab; the page hands this down. `null` when it could not know,
+        // which retires check 21 rather than reading a missing figure as "nothing is conditional".
+        conditionalQuestionCount,
       }),
     [
       anonymousMode,
@@ -938,6 +955,8 @@ export function ConfigEditor({
       interviewerStrategy,
       houseRules,
       conditionalTopicsEnabled,
+      milestoneBannerEnabled,
+      conditionalQuestionCount,
       config.conditionalTopics,
     ]
   );
