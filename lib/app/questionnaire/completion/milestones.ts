@@ -102,8 +102,14 @@ export function resolveMilestoneCrossing(
     // told them. An admin can add a threshold to a LAUNCHED version (config is editable, and the
     // fork copies it), so a respondent sitting at 92% with 90 already banked can suddenly "cross"
     // a newly-added 60. Re-announcing there would repeat a beat they have already had. Bank it
-    // silently instead. (The banner's NUMBER is `coveragePct` either way, so a crossing that does
-    // fire can never contradict the progress bar.)
+    // silently instead.
+    //
+    // The banner's NUMBER is `coveragePct` — the UN-ratcheted figure — and since F17.33 the bar
+    // draws the ratcheted `progressPct`, so the two CAN read differently for a session whose scope
+    // widened: the bar holds at the highest figure already shown while the banner states the honest
+    // one. That is the deliberate half of the trade, not an oversight. A banner is spent once per
+    // threshold and must be spent on a figure the respondent genuinely reached, which a presentation
+    // floor is not. See `progress.ts` and completion-logic.md.
     announce: top > highestAnnounced ? top : null,
     coveragePct: pct,
     // Every crossed threshold is banked either way, so a skipped-over one never fires later.

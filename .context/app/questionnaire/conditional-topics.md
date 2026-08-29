@@ -303,6 +303,42 @@ setting governs telling someone about a plan they did not ask about — the mech
 request they made themselves is courtesy, and an interview that silently absorbs "can we talk about
 hiring?" without a word reads worse, not more discreet.
 
+### Why an area is here, on the respondent's own screen (F17.33)
+
+An interview that grows partway through does not only change what is asked — it changes what the
+respondent can SEE. The answer panel beside the conversation gains whole groups, minutes after they
+started answering. The interviewer's announcement covers the moment it happens and then scrolls
+away; the panel is still showing those areas an hour later, to someone who may no longer remember
+being told.
+
+So the explanation lives on the plan and travels with the area. `PlannedTopic.respondentReason` is a
+short plain sentence addressed to the respondent — distinct from `rationale`, which is written for
+an admin and reads like it (_"Not selected — nothing in the opening pointed at this area."_). The
+planner is asked for one per topic, grounded in what the person actually said.
+
+**Every seated conditional topic ends up with one.** `applyGuardrails` fills a deterministic default
+for anything that arrives without — a planner that omitted it, a hard-rule inclusion (whose own
+reason is the author's note to an admin), the fallback — because a group appearing on someone's
+screen with no explanation is the thing that makes them wonder what else is being decided about
+them. A respondent amendment carries _"You asked to cover this."_
+
+**The blind-spot check is the one reason that may not be derived from what they said**, because the
+planner has an absence of signal rather than evidence. It says _"A few questions on something we
+have not covered yet, so the picture is not one-sided"_ — a statement about the conversation, which
+is true and checkable, rather than about the respondent, which "you did not raise this" would be.
+Same rule as `respondentReasonFor`, same reason as the three-way naming split above.
+
+The panel renders it once per group where a group arrived whole (`DataSlotPanelGroup.addedReason`,
+`PanelSectionView.addedReason`), and per row where a conditional topic added rows into a group that
+was already on screen — the same sentence on six rows reads as a warning rather than an explanation.
+Always-run areas are never captioned: nothing appeared, so there is nothing to explain, and
+captioning them would make an ordinary questionnaire look like it was constantly justifying itself.
+
+Unlike the spoken announcement, the panel line is **not** gated on `conditionalTopics.announce`.
+That setting governs whether the interviewer talks about the plan; this answers a question the
+respondent is asking by looking at their own screen, and an unexplained area is worse than a quiet
+interviewer is good.
+
 **Widening has consequences beyond the plan.** The in-scope question set is the progress bar's
 denominator, so an amendment — and, far more often, the plan itself landing at the end of the
 opening — would make the figure the respondent is looking at fall. **It no longer does** (F17.33):

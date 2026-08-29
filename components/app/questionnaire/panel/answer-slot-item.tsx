@@ -77,6 +77,14 @@ export function AnswerSlotItem({
         )}
         <span className="min-w-0 flex-1">
           <span className="text-foreground block text-sm leading-snug">{slot.prompt}</span>
+          {/* F17.33: why this single question is here, when Conditional Topics added it into a
+              section that was already on screen. A section that arrived whole says it once under
+              its own heading instead, so this is usually absent. */}
+          {slot.addedReason ? (
+            <span className="text-muted-foreground mt-0.5 block text-xs italic">
+              {slot.addedReason}
+            </span>
+          ) : null}
           {slot.answered ? (
             <>
               {/* Free-text shows its living paraphrase (the respondent's account, significant

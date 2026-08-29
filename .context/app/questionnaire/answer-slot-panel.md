@@ -290,6 +290,30 @@ the canonical value or `provisional` state changed); `persistTurn` (`_lib/turn-r
 still updates either way (new paraphrase/confidence land); it just doesn't re-flash. The gap-filler's
 ids are always included (it only ever creates fresh fills).
 
+## Why an area is here (Conditional Topics, F17.33)
+
+A [Conditional Topics](./conditional-topics.md) interview grows partway through — the plan lands
+when the opening completes, and a respondent amendment can add an area later still. On this panel
+that is not an abstraction: whole groups appear, minutes after someone started answering.
+
+Areas the plan ADDED carry a short plain sentence saying why, drawn from
+`PlannedTopic.respondentReason` and joined to keys by `scope/reasons.ts`:
+
+- **Once per group** when the group arrived whole — `DataSlotPanelGroup.addedReason` (data-slot
+  mode) / `PanelSectionView.addedReason` (question mode), rendered as a quiet italic line under the
+  heading.
+- **Per row** when a conditional topic added rows into a group that was already on screen —
+  `DataSlotPanelSlot.addedReason` / `PanelSlotView.addedReason`.
+
+The two are exclusive: `sharedReason` hoists a reason every row agrees on onto the group and strips
+it from the rows, because the same sentence printed six times reads as a warning rather than an
+explanation. A group that MIXES always-asked rows with added ones has no single true statement to
+make about itself, so it makes none.
+
+**Nothing is captioned on an ordinary questionnaire**, or on the always-run parts of a conditional
+one: nothing appeared, so there is nothing to explain, and captioning everything would make a plain
+questionnaire look like it was constantly justifying itself.
+
 ## Not here
 
 Read-only display, so no `<FieldHelp>` (that's for form inputs). Session-lifecycle UX

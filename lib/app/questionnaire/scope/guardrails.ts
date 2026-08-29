@@ -43,6 +43,19 @@ import {
   type TopicCost,
 } from '@/lib/app/questionnaire/scope/budget';
 
+/**
+ * What a respondent is told when nothing better was produced (F17.33).
+ *
+ * Reached when the planner omitted `respondentReason`, and used verbatim for a rule-included topic
+ * — a hard rule's own reason is the author's note to an admin ("include when headcount > 50"), which
+ * is not a sentence to put in front of the person being interviewed.
+ *
+ * Says something true and unremarkable rather than apologising or explaining the mechanism. The
+ * alternative that was rejected — "we could not tell why this applies to you" — is accurate and a
+ * miserable thing to read about yourself.
+ */
+export const DEFAULT_RESPONDENT_REASON = 'Part of the ground this review covers.';
+
 /** One topic the planner proposed, before any guardrail has touched it. */
 export interface ProposedTopic {
   key: string;
@@ -56,6 +69,12 @@ export interface ProposedTopic {
    * topic's depth to decide as it always has.
    */
   members?: { questionKeys?: readonly string[]; dataSlotKeys?: readonly string[] };
+  /**
+   * The planner's plain-English reason for the RESPONDENT (F17.33) — what the panel shows beside
+   * this area. Optional: a model that omits it gets {@link DEFAULT_RESPONDENT_REASON} rather than
+   * an unexplained area on someone's screen.
+   */
+  respondentReason?: string;
 }
 
 /**
@@ -194,7 +213,8 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     key: string,
     source: PlannedTopic['source'],
     rationale: string,
-    members?: ProposedTopic['members']
+    members?: ProposedTopic['members'],
+    respondentReason?: string
   ): void => {
     if (seen.has(key)) return;
     const topic = byKey.get(key);
@@ -208,6 +228,11 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
       source,
       rationale,
       ...seatedMembers(topic, members),
+      // F17.33: every seated topic leaves here with a respondent-facing reason. The panel shows
+      // areas appearing partway through an interview, and an area that appears with no explanation
+      // is what makes someone wonder what else is being decided about them. A default is a worse
+      // sentence than the planner's own, and infinitely better than a blank.
+      respondentReason: (respondentReason ?? '').trim() || DEFAULT_RESPONDENT_REASON,
     });
   };
 
@@ -215,6 +240,8 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
   // truncated away by a model that proposed three other things it liked better.
   for (const key of input.rules.include) {
     if (input.rules.exclude.has(key)) continue;
+    // The rule's own reason is written by the AUTHOR for an admin ("include when headcount > 50"),
+    // so it is not offered to the respondent — the default is.
     seat(key, 'rule', input.rules.reasonByTopic.get(key) ?? 'A rule you set included this topic.');
   }
 
@@ -222,7 +249,13 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
   for (const proposal of input.proposed) {
     if (planned.length >= settings.maxConditionalTopics) break;
     if (input.rules.exclude.has(proposal.key)) continue;
-    seat(proposal.key, input.source, proposal.rationale, proposal.members);
+    seat(
+      proposal.key,
+      input.source,
+      proposal.rationale,
+      proposal.members,
+      proposal.respondentReason
+    );
   }
 
   // 4. The fallback — only when nothing at all was seated. An interview of just the always-run
@@ -233,7 +266,15 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     for (const key of settings.fallbackTopicKeys) {
       if (planned.length >= settings.maxConditionalTopics) break;
       if (input.rules.exclude.has(key)) continue;
-      seat(key, 'fallback', 'Chosen as a safe default because no clear signal was found.');
+      seat(
+        key,
+        'fallback',
+        'Chosen as a safe default because no clear signal was found.',
+        undefined,
+        // Deliberately not "we could not tell what you needed". True, and a poor thing to read
+        // about yourself; the respondent-facing version says what is happening, not what failed.
+        'Part of the ground this review covers.'
+      );
     }
   }
 
@@ -253,6 +294,13 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
       rationale:
         'Sampled as a blind-spot check — an area the respondent did not raise, so the result can ' +
         'surprise them rather than only confirm what they already believed.',
+      // The one reason that may NOT be derived from what the respondent said, because the planner
+      // has an absence of signal rather than evidence. "You did not raise this" is a claim about
+      // them; "we have not covered it yet" is a statement about the conversation, which is true,
+      // checkable, and accuses no one. See `respondentReasonFor` in `amendment.ts` and the
+      // three-way naming split in conditional-topics.md.
+      respondentReason:
+        'A few questions on something we have not covered yet, so the picture is not one-sided.',
     });
   }
 

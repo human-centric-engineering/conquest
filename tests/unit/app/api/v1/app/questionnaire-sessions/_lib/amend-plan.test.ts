@@ -244,6 +244,9 @@ describe('maybeAmendPlan — label-match resolution (tier 2, no model call)', ()
               depth: 'full',
               source: 'respondent',
               rationale: 'The respondent asked for this: "Can we also cover talent?"',
+              // F17.33: what the PANEL shows beside the area once it appears. The interviewer's
+              // acknowledgement is said once and scrolls away; this is still there an hour later.
+              respondentReason: 'You asked to cover this.',
             },
           ],
           excluded: [],

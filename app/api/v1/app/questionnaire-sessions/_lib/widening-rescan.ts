@@ -37,6 +37,13 @@
  * the pass finds nothing — including when there was nothing to look for — because otherwise every
  * subsequent turn would pay to rediscover that.
  *
+ * The ledger is also a **lease**, and that is what makes "once" true rather than merely intended.
+ * Turns can overlap — the composer lock is a client-side affordance, not a server-side mutex — so
+ * two of them could pass the check above, both pay for the read, and both bank it. `claimTopics`
+ * takes the lease with a compare-and-set before the paid call and `releaseTopics` gives it back if
+ * the call fails, so the rule below still holds end to end while the window a second turn could
+ * slip through shrinks from the whole call to nothing.
+ *
  * ## No AppAiRun
  *
  * Deliberately not recorded as an `AppAiRun`. This is extraction — the same class of work as the
@@ -207,17 +214,30 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
     const answeredIds = new Set(answeredRows.map((a) => a.questionSlotId));
     const filledIds = new Set(filledRows.map((f) => f.dataSlotId));
 
-    const wantedQuestions = new Set(targets.questionKeys);
-    const candidateRows = questionRows
+    // Walk `targets.*Keys` rather than the loaded rows, because the TARGET lists are the ones in plan
+    // order — the row queries carry no `orderBy`, so filtering them would truncate whatever order
+    // Postgres happened to return and silently drop a high-priority topic's questions while keeping a
+    // low-priority one's. The ledger banks every seated topic either way, so a dropped question is
+    // never re-read again this session; which ones get dropped therefore has to be the deliberate
+    // choice the cap's docblock describes.
+    const questionRowByKey = new Map(questionRows.map((q) => [q.key, q]));
+    const candidateRows = targets.questionKeys
+      .map((key) => questionRowByKey.get(key))
       .filter(
-        (q) =>
-          wantedQuestions.has(q.key) && !answeredIds.has(q.id) && isQuestionInScope(scope, q.key)
+        (q): q is (typeof questionRows)[number] =>
+          q !== undefined && !answeredIds.has(q.id) && isQuestionInScope(scope, q.key)
       )
       .slice(0, RESCAN_MAX_CANDIDATES);
-    const wantedDataSlots = new Set(targets.dataSlotKeys);
-    const dataSlotCandidateRows = dataSlotRows.filter(
-      (d) => wantedDataSlots.has(d.key) && !filledIds.has(d.id) && isDataSlotInScope(scope, d.key)
-    );
+    const dataSlotRowByKey = new Map(dataSlotRows.map((d) => [d.key, d]));
+    const dataSlotCandidateRows = targets.dataSlotKeys
+      .map((key) => dataSlotRowByKey.get(key))
+      .filter(
+        (d): d is (typeof dataSlotRows)[number] =>
+          d !== undefined && !filledIds.has(d.id) && isDataSlotInScope(scope, d.key)
+      )
+      // Capped for the same reason as the questions: both lists are rendered into one prompt, and a
+      // data-slot-mode version with many themes would otherwise carry an unbounded one.
+      .slice(0, RESCAN_MAX_CANDIDATES);
 
     if (candidateRows.length === 0 && dataSlotCandidateRows.length === 0) {
       // Nothing to look for — but the topics ARE re-read as far as this session is concerned, and
@@ -248,6 +268,26 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
       theme: d.theme ?? '',
     }));
 
+    // CLAIM the topics before paying for the read. Two turns can overlap — the composer lock is a
+    // client-side affordance, not a server-side mutex — and until this existed both could pass the
+    // ledger check above, both run this call, and both bank the result. Nothing corrupted
+    // (`upsertAnswerSlot` is idempotent) but the session paid twice for one answer.
+    //
+    // The claim is a compare-and-set against the EXACT value we read, so the loser is the turn whose
+    // ledger is already stale, and it loses before spending anything. Read-modify-write cannot do
+    // this: both turns compute the same union from the same stale read and both writes succeed.
+    const claimed = await claimTopics(
+      sessionId,
+      session.rescannedTopicKeys,
+      scanned,
+      targets.topicKeys
+    );
+    if (!claimed) {
+      // Another turn is re-reading these very topics right now. Skipping is the whole point — its
+      // writes land on the same rows this pass would have written.
+      return { kind: 'skipped', reason: 'another turn is already re-reading these topics' };
+    }
+
     const read = await askRescan({
       sessionId,
       transcript,
@@ -255,9 +295,13 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
       dataSlotCandidates,
     });
     if (!read) {
-      // A failed call is NOT recorded in the ledger: the topic is still un-re-read, and the next
-      // widening (or a retry on a later turn) may yet succeed. Recording it would turn one bad
-      // minute for the provider into a permanently thinner session.
+      // A failed call banks NOTHING — release the claim. The topic is still un-re-read, and the next
+      // widening (or a retry on a later turn) may yet succeed; recording it would turn one bad
+      // minute for the provider into a permanently thinner session. Claiming first does not weaken
+      // that rule, it just moves where it is enforced: the ledger is a lease for the duration of the
+      // call and a record only once the call returns. The one hole left is the process dying
+      // mid-call, which is a far smaller window than the whole call was.
+      await releaseTopics(sessionId, targets.topicKeys);
       return { kind: 'skipped', reason: 'no usable read' };
     }
 
@@ -324,7 +368,8 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
       dataSlotsWritten += reconciled.length;
     }
 
-    await markScanned(sessionId, scanned, targets.topicKeys);
+    // No `markScanned` here: the claim above already banked these topics, and re-writing them would
+    // clobber whatever a concurrent turn banked in the meantime.
 
     return {
       kind: 'rescanned',
@@ -458,14 +503,20 @@ async function askRescan(params: {
 async function loadTranscript(sessionId: string): Promise<string[]> {
   const turns = await prisma.appQuestionnaireTurn.findMany({
     where: { sessionId },
-    orderBy: { createdAt: 'asc' },
+    // `ordinal` is the session's 1-based turn index and is what every other turn reader orders by.
+    orderBy: { ordinal: 'asc' },
     select: { userMessage: true, agentResponse: true },
   });
 
+  // Respondent BEFORE interviewer within a turn: one row is "what they said" plus "what we replied",
+  // in that order. Emitting the reply first pairs every answer with the question that came AFTER it,
+  // which is precisely the mis-attribution rule 1 of the prompt asks the model to avoid. Same order
+  // and same blank-side filter as `evaluate-saved-turn.ts` — the message value is what is tested for
+  // emptiness, not the prefixed line, whose prefix is never zero-length.
   const lines: string[] = [];
   for (const turn of turns) {
-    if (turn.agentResponse) lines.push(`Interviewer: ${turn.agentResponse}`);
-    if (turn.userMessage) lines.push(`Respondent: ${turn.userMessage}`);
+    if (turn.userMessage.trim()) lines.push(`Respondent: ${turn.userMessage}`);
+    if (turn.agentResponse.trim()) lines.push(`Interviewer: ${turn.agentResponse}`);
   }
   return trimTranscript(lines, RESCAN_TRANSCRIPT_MAX_CHARS);
 }
@@ -481,6 +532,64 @@ async function markScanned(
     where: { id: sessionId },
     data: { rescannedTopicKeys: jsonInput(next) },
   });
+}
+
+/**
+ * Take the ledger lease on `added`, or report that another turn already holds it.
+ *
+ * A compare-and-set: the update applies only while the column still holds `expected` — the exact
+ * value this pass read at the top. Two overlapping turns read the same `expected`, so the first
+ * write moves the column off it and the second matches no rows and returns `false`.
+ *
+ * `expected` is the RAW column value, not `parseScannedKeys`'s cleaned copy: the comparison has to
+ * be against what is actually stored, and the cleaned copy differs from it for any row holding a
+ * non-string. Comparing against the cleaned copy would make the claim never match on exactly those
+ * rows, which is the silent-no-op failure mode — the pass would skip forever rather than run twice.
+ */
+async function claimTopics(
+  sessionId: string,
+  expected: unknown,
+  scanned: readonly string[],
+  added: readonly string[]
+): Promise<boolean> {
+  const next = [...new Set([...scanned, ...added])];
+  const { count } = await prisma.appQuestionnaireSession.updateMany({
+    where: { id: sessionId, rescannedTopicKeys: { equals: jsonInput(expected) } },
+    data: { rescannedTopicKeys: jsonInput(next) },
+  });
+  return count > 0;
+}
+
+/**
+ * Give the lease back after a failed read, so "a failed read banks nothing" still holds.
+ *
+ * Removes only the keys THIS pass added, read-modify-write rather than a restore-to-`expected`
+ * write: a concurrent turn may legitimately have banked other topics while the call was in flight,
+ * and rewinding the whole column would drop those too.
+ *
+ * Best-effort by construction. It runs on the failure path, and a failure to un-bank is the same
+ * outcome the ledger had before it was a lease — a topic that is not re-read. Throwing here would
+ * convert a degraded re-read into a caught error with a worse log line and no better result.
+ */
+async function releaseTopics(sessionId: string, added: readonly string[]): Promise<void> {
+  try {
+    const row = await prisma.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: { rescannedTopicKeys: true },
+    });
+    if (!row) return;
+    const drop = new Set(added);
+    const kept = parseScannedKeys(row.rescannedTopicKeys).filter((key) => !drop.has(key));
+    await prisma.appQuestionnaireSession.update({
+      where: { id: sessionId },
+      data: { rescannedTopicKeys: jsonInput(kept) },
+    });
+  } catch (err) {
+    logger.warn('widening rescan: could not release the ledger claim after a failed read', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /** Defensive parse of the ledger column: anything non-string is dropped rather than crashing. */

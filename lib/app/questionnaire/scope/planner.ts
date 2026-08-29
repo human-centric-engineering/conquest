@@ -62,6 +62,13 @@ const plannerSchema = z.object({
       topicKey: z.string(),
       rationale: z.string(),
       /**
+       * The plain-English reason the RESPONDENT may read beside this area in the panel (F17.33).
+       * Optional at the schema level so a model that omits it does not fail the whole plan;
+       * `applyGuardrails` fills a deterministic default for anything that arrives without one, so
+       * the panel can never show an unexplained area.
+       */
+      respondentReason: z.string().optional(),
+      /**
        * The items to ask, when only part of the topic applies (C6). Optional and rare — omitting it
        * is the normal answer, and means "all of it, at the topic's own depth".
        */
@@ -316,6 +323,12 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
           'safe default rather than acting on a guess. Do not inflate it.',
         '`rationale` is for the administrator: one sentence naming the specific thing in the ' +
           'opening that drove this choice.',
+        '`respondentReason` is for the RESPONDENT, and they will see it beside this area on their ' +
+          'own screen while they answer. One short plain sentence, addressed to them, saying why ' +
+          'you are covering this — grounded in what they told you ("You mentioned the team has ' +
+          'doubled this year, so we\'ll spend a little time on hiring."). No jargon, no keys, no ' +
+          'scores, and nothing about how the interview decides what to ask. Write it as a colleague ' +
+          'would explain themselves, not as a system reporting a decision.',
         '`respondentMessage` is spoken to the respondent before the chosen topics run: one or two ' +
           'warm, plain sentences naming the areas you want to go deeper on, in their language. ' +
           'Never mention keys, scores, confidence, criteria, or that a decision was made about them.',
@@ -339,7 +352,8 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
     section(
       'output_format',
       'Reply with ONLY JSON: {"selected":[{"topicKey":string,"rationale":string,' +
-        '"questionKeys"?:string[]}],"confidence":number,"respondentMessage":string}. ' +
+        '"respondentReason":string,"questionKeys"?:string[]}],"confidence":number,' +
+        '"respondentMessage":string}. ' +
         'No prose, no markdown fences.'
     )
   );
@@ -362,7 +376,8 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
         }),
       retryUserMessage:
         'That was not valid JSON. Reply with ONLY {"selected":[{"topicKey":string,' +
-        '"rationale":string}],"confidence":number,"respondentMessage":string}.',
+        '"rationale":string,"respondentReason":string}],"confidence":number,' +
+        '"respondentMessage":string}.',
       onFinalFailure: () => new Error('Planner response was not valid JSON after one retry'),
     });
 
@@ -502,6 +517,9 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   const proposed: ProposedTopic[] = asked.value.selected.map((s) => ({
     key: s.topicKey,
     rationale: s.rationale,
+    // F17.33: the line the respondent may read beside this area. Passed through as-is; a model that
+    // omitted it gets the guardrails' default rather than a blank explanation on someone's screen.
+    ...(s.respondentReason ? { respondentReason: s.respondentReason } : {}),
     // Only ever a NARROWING: `applyGuardrails` intersects it with the topic's own members and
     // discards it entirely when nothing survives, so a model listing keys from the wrong topic
     // leaves the plan exactly as it would have been without the field.

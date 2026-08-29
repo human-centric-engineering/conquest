@@ -186,3 +186,86 @@ describe('buildAnswerPanelView — narrowing & history', () => {
     expect(view.sections[0].slots[0].refinementHistory).toEqual(history);
   });
 });
+
+/**
+ * Why an area is here (F17.33).
+ *
+ * Conditional Topics adds areas partway through an interview, so the panel is where a respondent
+ * watches their questionnaire change. The rule this pins is the one that keeps the explanation
+ * readable rather than nagging: a section that arrived whole says it ONCE, under its heading.
+ */
+describe('buildAnswerPanelView — added-area reasons', () => {
+  const reason = 'You mentioned the team has doubled, so we’ll cover hiring.';
+
+  it('hoists one shared reason onto the section and drops it from the rows', () => {
+    const view = buildAnswerPanelView(
+      input({
+        sections: [
+          {
+            sectionId: 's1',
+            title: 'Hiring',
+            slots: [
+              {
+                slotKey: 'a',
+                prompt: 'A?',
+                type: 'free_text',
+                required: false,
+                addedReason: reason,
+              },
+              {
+                slotKey: 'b',
+                prompt: 'B?',
+                type: 'free_text',
+                required: false,
+                addedReason: reason,
+              },
+            ],
+          },
+        ],
+        answers: [],
+      })
+    );
+
+    expect(view.sections[0].addedReason).toBe(reason);
+    // Printed once, not on every row — the same sentence six times reads as a warning.
+    expect(view.sections[0].slots.every((s) => s.addedReason === undefined)).toBe(true);
+  });
+
+  it('leaves a MIXED section captioning its own rows', () => {
+    // Some rows were always asked and some were added: there is no single true statement the
+    // section can make about itself, so it makes none.
+    const view = buildAnswerPanelView(
+      input({
+        sections: [
+          {
+            sectionId: 's1',
+            title: 'About you',
+            slots: [
+              { slotKey: 'a', prompt: 'A?', type: 'free_text', required: false },
+              {
+                slotKey: 'b',
+                prompt: 'B?',
+                type: 'free_text',
+                required: false,
+                addedReason: reason,
+              },
+            ],
+          },
+        ],
+        answers: [],
+      })
+    );
+
+    expect(view.sections[0].addedReason).toBeUndefined();
+    expect(view.sections[0].slots[0].addedReason).toBeUndefined();
+    expect(view.sections[0].slots[1].addedReason).toBe(reason);
+  });
+
+  it('says nothing at all on an ordinary questionnaire', () => {
+    const view = buildAnswerPanelView(input());
+    expect(view.sections.every((s) => s.addedReason === undefined)).toBe(true);
+    expect(view.sections.flatMap((s) => s.slots).every((s) => s.addedReason === undefined)).toBe(
+      true
+    );
+  });
+});

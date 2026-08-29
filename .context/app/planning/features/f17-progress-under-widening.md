@@ -2,7 +2,7 @@
 feature: F17.33
 title: Progress, and what the respondent is told, when the interview grows
 phase: P17 — Conditional Topics
-status: phases A, B, C1 and D shipped (2026-08-29/30); C2 open and optional. §5.4 + §6.3 settled — see below
+status: shipped (2026-08-29/30) — phases A, B, C1, C2 and D. §5.4 + §6.3 settled below
 owner: TBD
 deps: F17.1 (the plan), F17.6 (respondent amendment), F-progress (milestone banners), F4.5 (completion assessment)
 opened: 2026-08-29
@@ -319,8 +319,8 @@ Bound by the plain-English rule: no "topic", "scope", "plan", "depth", "section 
   explain" is what has to go.
 - **Planner-seated topics** — the per-topic `rationale` exists but is written for an admin
   (_"Not selected — nothing in the opening pointed at this area."_). Rendering that at a respondent
-  is worse than saying nothing. This wants an optional respondent-facing reason from the planner —
-  a schema and prompt change, deferred to **C2** (§10).
+  is worse than saying nothing, so the planner now emits `PlannedTopic.respondentReason` alongside
+  it — **C2, shipped**, and larger than this spec first scoped it (see §6.4).
 - **The blind-spot check — never.** Its honest reason is "you did not raise it", and
   `chooseCheckTopic` has an _absence of signal_, not evidence about the respondent. The whole
   three-way naming split in `conditional-topics.md` exists to stop that claim being made on any
@@ -342,6 +342,40 @@ should not decide both.
 The same reasoning is why the added vocabulary is safe: what the acknowledgement gained is **what,
 how much and why-in-their-words**, and what it still refuses to say is anything about how the
 interview decides what to ask.
+
+### 6.4 The panel is where this actually matters (C2, as built)
+
+C2 was specced as "a per-topic respondent reason" and filed as optional, on the reasoning that the
+planner's whole-plan `respondentMessage` already explains the initial plan. **That reasoning was
+wrong, and it was wrong about the surface rather than the content.**
+
+The announcement is a chat message. It is said once and scrolls away. The **panel** is where a
+respondent watches their interview change: whole groups appear beside the conversation, minutes
+after they started answering, and are still there an hour later when the message that explained them
+is long gone. An area on screen with no explanation is the thing that makes someone wonder what else
+is being decided about them — and no amount of good chat copy reaches it.
+
+So C2 as built is the reason _plus the surface_:
+
+| Piece                                                   | Where                                                 |
+| ------------------------------------------------------- | ----------------------------------------------------- |
+| `PlannedTopic.respondentReason`                         | `scope/types.ts` (Json column — no migration)         |
+| The planner is asked for one per topic                  | `scope/planner.ts` — schema + prompt                  |
+| Every seated topic ends up with one                     | `applyGuardrails` + `DEFAULT_RESPONDENT_REASON`       |
+| A respondent-asked area says "You asked to cover this"  | `applyAmendment`                                      |
+| The blind-spot check says something that accuses no one | `guardrails.ts`, per §6.2                             |
+| plan + topics → per-key captions                        | `scope/reasons.ts` (pure)                             |
+| Group line / row line, never both                       | `sharedReason` + the panel loader and pure projection |
+| Rendered                                                | `answer-slot-panel.tsx`, `answer-slot-item.tsx`       |
+
+**The panel line is not gated on `announce`.** That setting decides whether the interviewer talks
+about the plan. This answers a question the respondent is asking by looking at their own screen, and
+an unexplained area is worse than a quiet interviewer is good — the same distinction §6.3 draws
+between mechanics and courtesy.
+
+**Always-run areas are never captioned.** Nothing appeared, so there is nothing to explain, and
+captioning everything would make an ordinary questionnaire look like it was constantly justifying
+itself.
 
 ## 7. Phase D — the settings conflict, kept narrow
 
@@ -408,13 +442,13 @@ answer, not a backfill.
 
 ## 10. Phasing
 
-| Phase  | Scope                                                                                                                                | Size                                          |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| **A**  | ✅ **Shipped.** `progressQuestions` + `progress.ts` + the `progressFloorPct` column + both orchestrators + the status view + the bar | small–medium — one migration, one pure module |
-| **B**  | ✅ **Shipped.** The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                     | medium — §5.4 settled: a dedicated prompt     |
-| **C1** | ✅ **Shipped.** Amendment acknowledgement gains name, size and the respondent's own reason; §6.3 settled (ungated)                   | small — one function, one prompt paragraph    |
-| **C2** | Planner emits a per-topic respondent-facing reason (schema + prompt + carriage)                                                      | small–medium, and optional                    |
-| **D**  | ✅ **Shipped.** `conditional-topics-progress-variance` + `conditionalQuestionCountOf` threaded into `ConfigConflictInput`            | small, mechanical                             |
+| Phase  | Scope                                                                                                                                    | Size                                          |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| **A**  | ✅ **Shipped.** `progressQuestions` + `progress.ts` + the `progressFloorPct` column + both orchestrators + the status view + the bar     | small–medium — one migration, one pure module |
+| **B**  | ✅ **Shipped.** The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                         | medium — §5.4 settled: a dedicated prompt     |
+| **C1** | ✅ **Shipped.** Amendment acknowledgement gains name, size and the respondent's own reason; §6.3 settled (ungated)                       | small — one function, one prompt paragraph    |
+| **C2** | ✅ **Shipped, and bigger than scoped (§6.4).** Planner emits a per-topic respondent reason; guardrails guarantee one; the PANEL shows it | medium — the surface was the point            |
+| **D**  | ✅ **Shipped.** `conditional-topics-progress-variance` + `conditionalQuestionCountOf` threaded into `ConfigConflictInput`                | small, mechanical                             |
 
 A and B share the migration, so they want to be one branch even though they are two commits. C is
 independent of both and could go first if the copy matters more than the number. D is the tail and
@@ -446,3 +480,71 @@ should not be done before A and B, because most of what it would warn about will
 | The re-read makes the plan-time turn feel slower                  | Started after persistence, awaited after `done` — the `captureExtraction` pattern                              |
 | The announcement becomes a system notice                          | It stays a briefing instruction in the interviewer's voice, and the plain-English vocabulary ban is tested     |
 | A reason is given for the blind-spot check                        | §6.2, tested — this is the one that would make a claim about the respondent the planner never had evidence for |
+
+## 13. What the gates found after the code was written
+
+Three things came out of the review pass on the finished branch. Two were fixed; the third was
+scoped down deliberately, and the arithmetic is here so the next person does not re-derive it.
+
+### 13.1 The re-read could be paid for twice (fixed)
+
+`rescannedTopicKeys` was checked at the top of `maybeRescanAfterWidening` and written at the bottom,
+with the model call in between. Two overlapping turns — the composer lock is a client-side
+affordance, not a server-side mutex — could both pass the check, both pay, and both bank. Nothing
+was corrupted (`upsertAnswerSlot` is idempotent and the writes agree), but the session paid twice
+for one answer.
+
+The obvious fix — bank before the call — contradicts the rule in §5 that a failed read banks
+nothing, whose reason still stands: recording a provider blip turns one bad minute into a
+permanently thinner session. So the ledger became a **lease** instead. `claimTopics` takes it with a
+compare-and-set against the exact value read (`updateMany` with the old value in the `WHERE`, so the
+turn whose read is already stale matches no rows and skips without spending); `releaseTopics` gives
+it back when the call fails. The rule holds end to end, and the window a second turn can slip
+through goes from the whole model call to nothing. The residual hole is the process dying mid-call,
+which leaves a topic banked and un-re-read — strictly smaller than what it replaced.
+
+The compare-and-set reads the **raw** column, not `parseScannedKeys`'s cleaned copy. Comparing
+against the cleaned copy would make the claim never match on any row holding a non-string, and the
+pass would then skip for ever rather than run twice — a silent failure worse than the bug.
+
+### 13.2 The briefing quoted too much of the respondent back (fixed)
+
+`applyAmendment` stores up to 1,000 characters of the request, and the F17.33 briefing line
+interpolated all of them, while the sibling admin-facing `rationale` sliced to 200. The two are
+quoting the same sentence for two readers, and the difference was not a considered trade — it was
+the storage cap leaking into a prompt because nobody re-capped it there. It matters more in the
+briefing than in the rationale: that quote lands in the **instruction** position of the interviewer's
+prompt, so an unbounded run of the respondent's own text sits where the interviewer's own rules live.
+
+Both surfaces now share `quoteRespondent` — 200 characters, cut at a word boundary with an ellipsis
+rather than mid-word, so the interviewer is never asked to tie its acknowledgement to a severed
+clause. The full request is still stored and the amendment is still honoured in full; only how much
+is read back is bounded.
+
+### 13.3 Five inherited coverage failures — three fixed, two left, on purpose
+
+`npm run test:changed:coverage` held five files below the 80% floor. All five were already below it
+at the merge base: this branch changed 3 lines in one of them and 12–62 in the others, so none of
+the gap is branch-added, and the floor gates on authorship rather than on who wrote the untested
+part.
+
+Three were cheap and are now green, because the uncovered code was genuinely worth a test:
+
+| File                             | Was              | What was missing                                                                                                                    |
+| -------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `scope/planner.ts`               | 73.95% branches  | the multi-select/numeric/boolean answer renderings, the `parse` callback and its retry contract, the un-awaited `logCost` rejection |
+| `[id]/v/[vid]/page.tsx`          | 47.05% functions | the archived-versions block, and both rating-scale launch-blocker counts                                                            |
+| `[id]/v/[vid]/settings/page.tsx` | 71.42% functions | the two lookup maps the policy panel is given                                                                                       |
+
+Two are left red, and getting them green is not this branch's work:
+
+- **`messages/route.ts`** — 74.16% branches (287/387). Covering every branch this branch added
+  still lands at 296/387 ≈ 76%; clearing 80 needs ~14 more branches of a 1,421-line streaming turn
+  route.
+- **`policy-evaluation-structure.ts`** — 1.92% statements. The branch changed three lines. Clearing
+  80 means building the file's tests out from nothing.
+
+Both are worth doing; neither is worth doing here, where it would bury a behaviour change under a
+few hundred lines of unrelated test. The floor is a local gate (`/pre-pr`, the pre-commit hook) and
+no CI job runs coverage, so what this costs is a red line in a local run and this note explaining
+it — not a silent hole. **Do not exempt them**; the floor has no waiver mechanism on purpose.

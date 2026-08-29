@@ -4,6 +4,7 @@ import {
   applyGuardrails,
   chooseCheckTopic,
   plannerCandidates,
+  DEFAULT_RESPONDENT_REASON,
   type ApplyGuardrailsInput,
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
@@ -715,5 +716,54 @@ describe('applyGuardrails — a proposal that names only part of a topic (C6 / F
     // drops the topic rather than overrunning the respondent's time.
     const unpriced = applyGuardrails(input({ ...shared, budget: { budgetSeconds: 60, costs } }));
     expect(unpriced.topics).toEqual([]);
+  });
+});
+
+/**
+ * Every seated area leaves the guardrails with something to say for itself (F17.33).
+ *
+ * The panel shows areas appearing partway through an interview, and an area that appears with no
+ * explanation is what makes someone wonder what else is being decided about them. So this is a
+ * guarantee, not a best effort: whatever the planner did or failed to do, no seated conditional
+ * topic reaches a respondent's screen uncaptioned.
+ */
+describe('applyGuardrails — respondent-facing reasons', () => {
+  it('keeps the planner’s own words when it produced them', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: [
+          { key: 'talent', rationale: 'admin-facing', respondentReason: 'You mentioned hiring.' },
+        ],
+      })
+    );
+    expect(plan.topics.find((t) => t.key === 'talent')?.respondentReason).toBe(
+      'You mentioned hiring.'
+    );
+  });
+
+  it('falls back to a default when the planner omitted one', () => {
+    const plan = applyGuardrails(
+      input({ proposed: [{ key: 'talent', rationale: 'admin-facing' }] })
+    );
+    expect(plan.topics.find((t) => t.key === 'talent')?.respondentReason).toBe(
+      DEFAULT_RESPONDENT_REASON
+    );
+  });
+
+  it('gives EVERY seated topic one, whatever seated it', () => {
+    const plan = applyGuardrails(input({ proposed: [{ key: 'talent', rationale: 'r' }] }));
+    expect(plan.topics.length).toBeGreaterThan(0);
+    expect(plan.topics.every((t) => (t.respondentReason ?? '').length > 0)).toBe(true);
+  });
+
+  it('never tells the respondent they failed to raise something', () => {
+    // The blind-spot check's honest reason is an ABSENCE of signal. "You did not raise this" is a
+    // claim about them; "we have not covered it yet" is a statement about the conversation.
+    const plan = applyGuardrails(
+      input({ proposed: [], settings: settings({ includeCheckTopic: true }) })
+    );
+    for (const topic of plan.topics) {
+      expect(topic.respondentReason ?? '').not.toMatch(/you (did not|didn.t|have not|haven.t)/i);
+    }
   });
 });

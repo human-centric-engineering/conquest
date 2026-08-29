@@ -122,6 +122,94 @@ describe('persistTurn', () => {
     );
   });
 
+  it('forwards every optional telemetry field to recordTurn, and omits the ones left out', async () => {
+    // Each is spread only when present, so a turn that carries none must not write nulls over a
+    // column — and a turn that carries them must not silently drop the trace they came from.
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'msg',
+      agentResponse: 'reply',
+      targetedQuestionId: null,
+      targetedDataSlotId: 'ds-1',
+      questionCardKey: 'role',
+      reasoning: [{ kind: 'selection', tone: 'insight', label: 'Chose the role question next' }],
+      inspectorCalls: [
+        {
+          label: 'Answer extraction',
+          model: 'gpt-test',
+          provider: 'openai',
+          latencyMs: 120,
+          costUsd: 0,
+          prompt: [],
+          response: '{"answers":[]}',
+        },
+      ],
+      durationMs: 1_234,
+      promptTokens: 900,
+      completionTokens: 120,
+      funnelPhase: 'narrow',
+      coverage: 0.62,
+      idempotencyKey: 'attempt-7',
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+    });
+
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetedDataSlotId: 'ds-1',
+        questionCardKey: 'role',
+        durationMs: 1_234,
+        promptTokens: 900,
+        completionTokens: 120,
+        funnelPhase: 'narrow',
+        coverage: 0.62,
+        idempotencyKey: 'attempt-7',
+        // A zero-cost turn writes NULL rather than 0, so the cost trend is not diluted by turns
+        // that never called a model.
+        costUsd: null,
+      })
+    );
+    const recorded = (seamMock.recordTurn as Mock).mock.calls[0][0];
+    expect(recorded.reasoning).toHaveLength(1);
+    expect(recorded.inspectorCalls).toHaveLength(1);
+  });
+
+  it('omits every optional telemetry key when the turn carries none', async () => {
+    // The other half of the conditional spreads at turn-run.ts:255-272. Presence-only assertions
+    // would stay green if a regression made these unconditional, writing nulls over columns a
+    // deterministic turn never populated.
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'msg',
+      agentResponse: 'reply',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+    });
+
+    const recorded = (seamMock.recordTurn as Mock).mock.calls[0][0];
+    for (const key of [
+      'questionCardKey',
+      'targetedDataSlotId',
+      'reasoning',
+      'inspectorCalls',
+      'durationMs',
+      'promptTokens',
+      'completionTokens',
+      'funnelPhase',
+      'coverage',
+      'idempotencyKey',
+    ]) {
+      expect(recorded).not.toHaveProperty(key);
+    }
+  });
+
   it('STRENGTHENS confidence when a turn re-states an answer with the same value', async () => {
     // Existing inferred answer at 0.45; this turn re-states the SAME value at 0.5 → corroboration.
     (seamMock.loadAnswerSlot as Mock).mockResolvedValue(
@@ -789,6 +877,75 @@ describe('persistTurn', () => {
         .calls[0][0];
       expect(arg.data.raisedContradictions).toEqual(raisedContradictions);
       expect(arg.data.raisedMilestones).toEqual([25]);
+    });
+  });
+
+  describe('progress floor (F17.33)', () => {
+    beforeEach(() => {
+      (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    });
+
+    it('banks a risen progress floor on the session', async () => {
+      // Presentation state, written on the turn path so the read path (a GET) never has to.
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        progressFloorPct: 42,
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sess-1' },
+          data: expect.objectContaining({ progressFloorPct: 42 }),
+        })
+      );
+    });
+
+    it('rides the same update as the milestone ledger when both move', async () => {
+      // The whole point of the shared `undefined = leave untouched` convention: one write per turn.
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        raisedMilestones: [50],
+        progressFloorPct: 50,
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledTimes(1);
+      const arg = (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(arg.data.raisedMilestones).toEqual([50]);
+      expect(arg.data.progressFloorPct).toBe(50);
+    });
+
+    it('does NOT touch the column when the floor did not move this turn', async () => {
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        // progressFloorPct intentionally omitted — the honest figure did not beat the floor.
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -201,7 +201,11 @@ export function applyAmendment(
           key: topic.key,
           depth: 'full',
           source: 'respondent',
-          rationale: `The respondent asked for this: "${amendment.request.slice(0, 200)}"`,
+          rationale: `The respondent asked for this: "${quoteRespondent(amendment.request)}"`,
+          // F17.33: what the panel shows beside the area once it appears. The interviewer's
+          // acknowledgement is said once and scrolls away; this is still there an hour later, when
+          // they are looking at an area they may no longer remember asking for.
+          respondentReason: 'You asked to cover this.',
         },
       ],
       excluded: plan.excluded.filter((t) => t.key !== topic.key),
@@ -231,6 +235,42 @@ export function topicSizeWording(itemCount: number): string {
 }
 
 /**
+ * The most of a respondent's own words any surface quotes back at them.
+ *
+ * One constant for both surfaces on purpose. The admin-facing `rationale` and the interviewer
+ * briefing are quoting the SAME sentence for two readers, and a cap that differed between them was
+ * not a considered trade — it was the storage cap (`applyAmendment` keeps 1,000 chars) leaking into
+ * a prompt because nobody re-capped it there. The briefing is the surface that matters: its quote
+ * lands in the INSTRUCTION position of the interviewer's prompt, so an unbounded run of the
+ * respondent's own text sits where the interviewer's own rules live.
+ *
+ * 200 is not a limit on what they may ask for — the full request is still stored, and the amendment
+ * is still honoured in full. It is a limit on how much of it is read back, and an amendment request
+ * is a sentence ("can we cover hiring?"); a respondent who writes three paragraphs is identified by
+ * the first one just as well.
+ */
+const RESPONDENT_QUOTE_CHARS = 200;
+
+/**
+ * Trim a respondent's words to {@link RESPONDENT_QUOTE_CHARS} at a WORD boundary.
+ *
+ * The word boundary is the whole point of not writing `.slice(0, 200)` twice. A hard cut lands
+ * mid-word, and the briefing then asks the interviewer to tie its acknowledgement to a severed
+ * clause — which it will do, out loud, to the person who wrote it. An ellipsis says "there was
+ * more" in a way a truncated word does not.
+ *
+ * Falls back to the hard cut for text with no space in the first 200 characters, which is not prose
+ * and has no boundary to find.
+ */
+function quoteRespondent(request: string): string {
+  const text = request.trim();
+  if (text.length <= RESPONDENT_QUOTE_CHARS) return text;
+  const cut = text.slice(0, RESPONDENT_QUOTE_CHARS);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+/**
  * The reason a respondent may be told for an area being added — or `null` when there is none that
  * can honestly be given.
  *
@@ -250,7 +290,7 @@ export function respondentReasonFor(input: {
 }): string | null {
   if (input.source === 'check') return null;
   const request = input.request?.trim();
-  return request ? request : null;
+  return request ? quoteRespondent(request) : null;
 }
 
 /**
@@ -266,9 +306,11 @@ export function respondentReasonFor(input: {
  *  - **What** — the area's own label, in the instrument's own language.
  *  - **How much** — {@link topicSizeWording}, so several new questions arriving is something they
  *    were told about rather than something that happened to them.
- *  - **Why** — their own words. This is the one case where the reason needs no model call and no new
- *    field: `PlanAmendment.request` is already on the record. The earlier version of this line
- *    forbade explaining at all, which read as the interview quietly reorganising itself.
+ *  - **Why** — their own words, capped by `quoteRespondent`. This is the one case where the reason
+ *    needs no model call and no new field: `PlanAmendment.request` is already on the record. The
+ *    earlier version of this line forbade explaining at all, which read as the interview quietly
+ *    reorganising itself. The cap is not editorial — the quote lands in the instruction position of
+ *    the prompt, so the run of untrusted text sitting there is bounded to a sentence.
  *
  * The vocabulary ban stays, and it is what makes giving a reason safe: the interviewer may say what
  * it will now cover and why, and may not say anything about how the interview decides.

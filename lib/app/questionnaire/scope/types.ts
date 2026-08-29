@@ -233,6 +233,12 @@ export const TOPIC_CRITERIA_MAX_LENGTH = 2_000;
 export const SCOPE_RULE_VALUE_MAX_LENGTH = 500;
 export const PLANNER_INSTRUCTIONS_MAX_LENGTH = 4_000;
 export const RESPONDENT_MESSAGE_MAX_LENGTH = 1_000;
+/**
+ * A per-topic respondent-facing reason (F17.33). Much shorter than the whole-plan message: it is a
+ * line under an area's name in a side panel, not a paragraph, and a cap that allows a paragraph
+ * would eventually get one.
+ */
+export const RESPONDENT_REASON_MAX_LENGTH = 200;
 export const SCOPE_RATIONALE_MAX_LENGTH = 1_000;
 
 /**
@@ -676,6 +682,25 @@ export interface PlannedTopic {
    * as covered while contributing no answer.
    */
   members?: TopicMembers;
+  /**
+   * Why this area is being covered, **in words the respondent may read** (F17.33).
+   *
+   * Distinct from {@link rationale}, which is written for an admin and reads like one — _"Not
+   * selected — nothing in the opening pointed at this area."_ This is the sentence the panel shows
+   * beside an area that appeared partway through, and the interviewer may weave into the
+   * conversation.
+   *
+   * It exists because the panel is where a respondent NOTICES the interview changing. The
+   * interviewer's announcement is said once and scrolls away; the panel keeps showing new areas for
+   * the rest of the session, and an area that appeared with no explanation is the thing that makes
+   * someone wonder what else is being decided about them.
+   *
+   * **Every seated conditional topic ends up with one** — `applyGuardrails` fills a deterministic
+   * default when the planner did not produce one, so the panel can never show an unexplained area.
+   * Optional on the type only because a plan written before this existed has none, and a legacy plan
+   * must keep resolving.
+   */
+  respondentReason?: string;
 }
 
 /**
@@ -838,6 +863,18 @@ function asKeyList(value: unknown, max = 64, itemMax = MEMBER_KEY_MAX_LENGTH): s
     if (out.length >= max) break;
   }
   return out;
+}
+
+/**
+ * Project a planned topic's respondent-facing reason (F17.33) — `{}` when there is nothing to show.
+ *
+ * Spread rather than assigned for the same reason as {@link narrowPlannedMembers}: absent and empty
+ * are different answers here. A plan written before this field existed has no reason, and the panel
+ * must render nothing rather than an empty line where a sentence should be.
+ */
+function respondentReasonOf(value: unknown): { respondentReason?: string } {
+  const text = asText(value, RESPONDENT_REASON_MAX_LENGTH, '');
+  return text.length > 0 ? { respondentReason: text } : {};
 }
 
 /**
@@ -1011,6 +1048,10 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
               'llm'
             ),
             rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+            // F17.33. Absent on a plan written before respondent-facing reasons existed, which is
+            // why it is omitted rather than defaulted to '': the panel shows the line only when
+            // there IS one, and an empty string would render an empty explanation.
+            ...respondentReasonOf(t.respondentReason),
             // Absent on nearly every row. A stored `members` that narrows to nothing is dropped
             // rather than kept as an empty object — an empty subset means "the depth decides", and
             // carrying `{[], []}` would make every reader special-case the difference.

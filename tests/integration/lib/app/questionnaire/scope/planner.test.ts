@@ -632,3 +632,131 @@ describe('planScope — naming part of a topic (C6 / F17.29)', () => {
     expect(prompt).not.toContain('hq0: asks hq0');
   });
 });
+
+describe('planScope — rendering a stored answer value', () => {
+  beforeEach(() => {
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+  });
+
+  /** The system prompt the planner actually sent. */
+  function systemPromptOf(): string {
+    return (mocks.runStructuredCompletion as Mock).mock.calls[0][0].messages[0].content as string;
+  }
+
+  function answer(value: unknown, paraphrase: string | null = null) {
+    return { key: 'q1', prompt: 'Which regions?', value, paraphrase };
+  }
+
+  it('joins a multi-select answer rather than printing "[object Object]"', async () => {
+    // A checkbox question stores an ARRAY of mapped slugs. Rendered naively it reaches the model as
+    // `[object Object]` or `emea,apac` with no spacing — evidence the planner then reads as noise.
+    await planScope(params({ answers: [answer(['emea', 'apac', 'latam'])] }));
+
+    expect(systemPromptOf()).toContain('emea, apac, latam');
+  });
+
+  it('drops an empty multi-select instead of printing an empty answer', async () => {
+    // "Asked: … Answered:" with nothing after it reads to the model as a refusal to answer, which
+    // is a claim about the respondent that an unanswered question does not support.
+    await planScope(params({ answers: [answer([])] }));
+
+    expect(systemPromptOf()).not.toContain('Which regions?');
+  });
+
+  it('prints a numeric and a boolean answer, including the falsy ones', async () => {
+    // `0` and `false` are answers. A truthiness check here would silently drop both.
+    await planScope(
+      params({
+        answers: [
+          { key: 'q1', prompt: 'How many reps?', value: 0, paraphrase: null },
+          { key: 'q2', prompt: 'Using a CRM?', value: false, paraphrase: null },
+        ],
+      })
+    );
+
+    const prompt = systemPromptOf();
+    expect(prompt).toContain('Answered: 0');
+    expect(prompt).toContain('Answered: false');
+  });
+
+  it('drops an answer with nothing worth printing at all', async () => {
+    await planScope(params({ answers: [answer(null), answer('   '), answer(undefined)] }));
+
+    expect(systemPromptOf()).not.toContain('Which regions?');
+  });
+});
+
+describe('planScope — the structured-completion contract', () => {
+  /** The options object the planner handed `runStructuredCompletion`. */
+  function callOpts() {
+    return (mocks.runStructuredCompletion as Mock).mock.calls[0][0];
+  }
+
+  beforeEach(() => {
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+  });
+
+  it('parses a well-formed reply into the planner schema', async () => {
+    await planScope(params());
+
+    const parsed = callOpts().parse(
+      JSON.stringify({
+        selected: [
+          { topicKey: 'pipeline', rationale: 'deals stalling', respondentReason: 'you said so' },
+        ],
+        confidence: 0.8,
+        respondentMessage: 'Going deeper on pipeline.',
+      })
+    );
+
+    expect(parsed).toMatchObject({ confidence: 0.8 });
+    expect(parsed.selected[0].topicKey).toBe('pipeline');
+  });
+
+  it('returns null for a reply that is not the planner shape, so the retry fires', async () => {
+    await planScope(params());
+    const parse = callOpts().parse;
+
+    // Valid JSON, wrong shape — the schema is what decides, not the JSON parser.
+    expect(parse(JSON.stringify({ selected: 'pipeline' }))).toBeNull();
+    // Not JSON at all.
+    expect(parse('I think we should cover pipeline.')).toBeNull();
+  });
+
+  it('names the exact shape it wants in the retry, and fails rather than inventing a plan', async () => {
+    await planScope(params());
+    const opts = callOpts();
+
+    // A retry message that merely says "try again" gets the same malformed reply back.
+    expect(opts.retryUserMessage).toContain('selected');
+    expect(opts.retryUserMessage).toContain('confidence');
+    // The failure is an Error, not an empty plan: an empty plan would be indistinguishable from the
+    // model deliberately choosing nothing, and would be recorded as `llm` rather than a fallback.
+    expect(opts.onFinalFailure()).toBeInstanceOf(Error);
+  });
+
+  it('still returns the plan when cost logging rejects', async () => {
+    // Cost logging is best-effort and runs un-awaited. A rejection must not take the plan with it,
+    // and must not surface as an unhandled rejection either.
+    mocks.logCost.mockRejectedValueOnce(new Error('cost table gone'));
+    mocks.runStructuredCompletion.mockResolvedValue(
+      completion({
+        selected: [{ topicKey: 'pipeline', rationale: 'deals stalling' }],
+        confidence: 0.9,
+        respondentMessage: 'ok',
+      })
+    );
+
+    const result = await planScope(params());
+
+    expect(result.plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+    expect(result.plan.source).toBe('llm');
+    // Let the un-awaited `.catch` settle so a regression to a bare `void logCost(...)` surfaces here
+    // as an unhandled rejection rather than in an unrelated test.
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+});

@@ -177,6 +177,18 @@ describe('selectRescanTargets', () => {
     expect(targets.questionKeys).toEqual(['talent_q2']);
   });
 
+  it('returns nothing when the plan is decided but every seated topic is already re-read', () => {
+    // The second widening's caller reaches here on every remaining turn; it must not pay for the
+    // member walk to be told there is nothing outstanding.
+    expect(
+      selectRescanTargets({
+        plan: plan([{ key: 'talent', depth: 'full', source: 'llm', rationale: 'r' }]),
+        topics: TOPICS,
+        scanned: ['talent'],
+      })
+    ).toEqual({ topicKeys: [], questionKeys: [], dataSlotKeys: [] });
+  });
+
   it('de-duplicates members shared by two outstanding topics', () => {
     const shared = [
       topic('talent', 'conditional', { members: { dataSlotKeys: [], questionKeys: ['x', 'y'] } }),
@@ -281,5 +293,83 @@ describe('buildRescanPrompt', () => {
 
   it('omits the data-slot section entirely when there are none', () => {
     expect(prompt()).not.toContain('topics_to_check');
+  });
+
+  it('renders the data-slot candidates and widens the output contract to match', () => {
+    // Asking for `dataSlotFills` in the schema line but never listing the areas would spend the
+    // call on a field the model has no keys for.
+    const system = buildRescanPrompt({
+      transcript: ['Respondent: we run a hybrid week'],
+      candidateSlots: [],
+      dataSlotCandidates: [
+        {
+          key: 'ways_of_working',
+          name: 'Ways of working',
+          description: 'how the team works',
+          theme: 'Culture',
+        },
+      ],
+    }).system;
+
+    expect(system).toContain('topics_to_check');
+    expect(system).toContain('ways_of_working — Ways of working: how the team works');
+    expect(system).toContain('dataSlotFills');
+  });
+
+  it('carries a slot’s authoring guidance into the candidate line', () => {
+    const system = buildRescanPrompt({
+      transcript: ['Respondent: about forty people'],
+      candidateSlots: [
+        {
+          key: 'headcount',
+          type: 'numeric',
+          typeConfig: null,
+          prompt: 'How many people?',
+          required: false,
+          guidelines: 'Full-time equivalents only.',
+        },
+      ],
+    }).system;
+
+    expect(system).toContain('guidance: Full-time equivalents only.');
+  });
+
+  it('reads plain-string choices as well as {value} objects', () => {
+    const system = buildRescanPrompt({
+      transcript: ['Respondent: mostly remote'],
+      candidateSlots: [
+        {
+          key: 'location',
+          type: 'single_choice',
+          typeConfig: { options: ['remote', { value: 'office' }, { label: 'no value' }, 7] },
+          prompt: 'Where does the team work?',
+          required: false,
+        },
+      ],
+    }).system;
+
+    // Unusable shapes are dropped rather than rendered — `typeConfig` is a Json column, so a
+    // half-migrated row must not put `[object Object]` in front of the model as an allowed value.
+    expect(system).toContain('allowed values: remote | office');
+  });
+
+  it('renders no allowed-values line when the typeConfig has no usable options', () => {
+    const noOptions = (typeConfig: unknown) =>
+      buildRescanPrompt({
+        transcript: ['Respondent: hard to say'],
+        candidateSlots: [
+          {
+            key: 'mood',
+            type: 'single_choice',
+            typeConfig,
+            prompt: 'How is it going?',
+            required: false,
+          },
+        ],
+      }).system;
+
+    expect(noOptions(null)).not.toContain('allowed values');
+    expect(noOptions({ options: 'high,low' })).not.toContain('allowed values');
+    expect(noOptions({ options: [] })).not.toContain('allowed values');
   });
 });
