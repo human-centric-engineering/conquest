@@ -223,7 +223,7 @@ export function buildPackCsv(model: PackModel): string {
         String(model.conditionalTopics.maxConditionalTopics),
       ]),
       row([
-        'Samples one unselected topic to check for blind spots',
+        'Also samples one area the respondent did not raise',
         model.conditionalTopics.includeCheckTopic ? 'yes' : 'no',
       ]),
       row([

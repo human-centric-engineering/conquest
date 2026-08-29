@@ -410,6 +410,31 @@ capable of surprising them.
 > made `assessedItemCount` wrong and silently dropped that respondent from the cohort mean (F17.13).
 > A caller already holding the weights — the turn pipeline — still passes them and skips the load.
 
+#### What it is called, and where
+
+"Blind spot" is the right word for the **setting** and the wrong word for the **finding**, so the
+name is deliberately split three ways. The mechanism is one thing throughout — `includeCheckTopic`,
+`chooseCheckTopic`, `source: 'check'` — only the words around it change with the reader.
+
+| Surface                                   | Wording                                                                                                                                                                                     | Why                                                                                                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin settings, plan preview, analytics   | "blind-spot check"                                                                                                                                                                          | The admin is deciding whether to buy the benefit, and the benefit _is_ the name. Naming the mechanism instead ("samples an unselected topic") sells nothing.                           |
+| Questionnaire Pack (PDF / CSV / Markdown) | "one area the respondent did not raise is sampled briefly" — the CSV, whose cell is a yes/no, carries the same claim as a field label: "Also samples one area the respondent did not raise" | The pack is a document an admin hands to a client. "Blind spot" there reads as a claim about the respondent that the planner never made — it has an _absence of signal_, not evidence. |
+| Scope judge panel (`scope-evaluation/`)   | "unreachable topic"                                                                                                                                                                         | The panel's `coverage_and_burden` dimension used "blind spot" for a topic with **no path to selection** — a defect to fix, the opposite valence of the feature above.                  |
+
+The judge collision was the load-bearing one: in `guardrails.ts` a blind spot is something you
+deliberately sample, while in the judge prompt it was something you accidentally created. Same
+phrase, adjacent modules, and the judge reports on the very setting the other implements.
+`judge-prompt.ts` was already saying "unreachable topic" in its repair-op paragraph while its
+dimension paragraph said "blind spot"; the rename made one prompt agree with itself.
+
+Rejected alternatives, and the test each failed: **"elephant in the room"** asserts concealment —
+the planner has no evidence the respondent avoided anything, and the idiom moves the blame from
+unawareness to evasion. **"Undeclared issues"** pre-labels the answer as a problem when a clean
+light sample is a _successful_ check, and "undeclared" is compliance vocabulary implying a breached
+duty to disclose. Both also assume an adversarial subject, which the domain-neutrality rule for
+this surface does not allow.
+
 Forced to `light` regardless of how the topic is authored — its job in _that_ interview is to sample,
 not to score — and every surface reporting it must say so. `NotAssessedTopic.partial` carries that
 distinction: **"we looked lightly" and "we did not look" are different claims about a respondent.**
@@ -1350,7 +1375,7 @@ signal in, but v1 answers "is this well-designed" from the config alone.
 | `criteria_quality`    | Is each conditional topic's criteria specific and observable from an opening conversation? Do two topics' criteria overlap or conflict? | `orphaned_questions` / duplicate membership                                    |
 | `rule_integrity`      | Internal rule conflicts, redundant rules, a rule that excludes on weak/ambiguous evidence ("when in doubt, ask" violations)             | `rule_slot_unreachable` / `rule_veto_always_fires` / `rule_names_always_topic` |
 | `budget_realism`      | Does the budget leave realistic room for topics that matter; is `maxConditionalTopics` too tight or too loose for the topic mix         | the cost arithmetic itself — judges are fed the pre-computed numbers           |
-| `coverage_and_burden` | Topics with no realistic path to selection (a blind spot), unconditional bloat, overall burden vs. budget                               | `orphaned_questions`                                                           |
+| `coverage_and_burden` | Topics with no realistic path to selection (an unreachable topic), unconditional bloat, overall burden vs. budget                       | `orphaned_questions`                                                           |
 
 Each judge is blind to the others, same as the design-evaluation panel's judges — and unlike that
 panel, **there is no reconcile step**. The four dimensions target different fields of different

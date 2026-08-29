@@ -661,7 +661,7 @@ describe('buildPackMarkdown', () => {
       );
       // Up to N / minutes summary line and the check-topic fact.
       expect(md).toContain('Up to 3 conditional topic(s) per interview');
-      expect(md).toContain('one additional, unselected topic is sampled lightly');
+      expect(md).toContain('one area the respondent did not raise is sampled briefly');
       expect(md).toContain('interviews are budgeted to about 10 minute(s)');
     });
 

@@ -54,7 +54,7 @@ export const SCOPE_EVALUATION_DIMENSION_SPECS = {
     slug: 'app-questionnaire-scope-judge-coverage-burden',
     label: 'Coverage-and-Burden Judge',
     summary:
-      'Scores whether any topic has no realistic path to selection (a blind spot) or is effectively unconditional bloat, and whether overall topic count × depth risks overburdening a respondent.',
+      'Scores whether any topic has no realistic path to selection (an unreachable topic) or is effectively unconditional bloat, and whether overall topic count × depth risks overburdening a respondent.',
   },
 } as const satisfies Record<ScopeEvaluationDimension, ScopeDimensionSpec>;
 
