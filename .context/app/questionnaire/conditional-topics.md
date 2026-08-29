@@ -308,14 +308,32 @@ What it buys:
   `trigger_settled_at_opening` — a warning, never an error, because nothing is misconfigured and no
   edit clears it — saying what the questionnaire asked for and what will actually happen. Before
   this, an admin could only infer it from a gap in the analyst's list, which is a different screen
-  and a different frame of mind. Two more checks catch mis-reads: `trigger_on_always_topic` (a
-  trigger on a topic everyone is asked can never change anything) and `trigger_without_cues`. The
-  first two are mutually exclusive — on an always-run topic the settled-at-opening wording would be
-  false, not just redundant, and two warnings contradicting each other on one topic teach an admin
-  to distrust the panel.
+  and a different frame of mind. `trigger_on_always_topic` catches the mis-read where a trigger
+  lands on a topic everyone is asked, so it can never change anything. The two are mutually
+  exclusive — on an always-run topic the settled-at-opening wording would be false, not just
+  redundant, and two warnings contradicting each other on one topic teach an admin to distrust the
+  panel.
+
+  **`trigger_without_cues` is deliberately not raised.** It said a topic recorded what to watch for
+  "but no words to listen for", which was true and which nothing on any admin surface could fix:
+  cues are written by the analyst from the document, the editor shows a trigger read-only, and
+  nothing reads a cue yet. A warning whose only honest response is "I know, and I cannot" gets the
+  whole panel skimmed, which costs the warnings beside it that _are_ actionable. The code stays
+  registered in `conditional-topics-tabs.ts` because it has a future: the mid-interview-trigger
+  spec raises it as an **error** once an evaluator reads cues, at which point empty cues really are
+  a defect and a re-analysis is the fix.
+
 - **The author's real intent is captured while the document is still to hand.** The cues are words
   from the instrument, in the instrument's language — cheap to lift now, expensive to reconstruct
   later, and they are what would make an evaluator affordable if one is ever built.
+
+**One edit is allowed: removing it.** The topic editor shows a trigger read-only — authoring one by
+hand buys nothing while nothing fires it — with a single exception, which is that the record can be
+deleted. The record is written by an agent reading a document, and an agent can be wrong; without a
+remove, a condition it invented is permanent, displayed on the topic card and the routing panel,
+with no way for the one person who can see it is wrong to say so. Removing is not authoring: it
+discards a mis-read, and a re-analysis writes a fresh record. `topicInputSchema` already accepted
+`trigger: null`, so this is a control over an API that could always express it.
 
 The field is carried through every write path — the analyst's draft and its acceptance, the bulk
 save from the Topics tab, a version fork, and definition export/import. That is deliberate and

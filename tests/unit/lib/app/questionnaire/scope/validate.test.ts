@@ -885,7 +885,12 @@ describe('validateConditionalTopics — recorded triggers', () => {
     expect(issues.map((i) => i.code)).not.toContain('trigger_settled_at_opening');
   });
 
-  it('flags a trigger with no words to listen for', () => {
+  it('says nothing about a trigger with no words to listen for', () => {
+    // Deliberately NOT a finding. It was one, and it was unactionable: cues are written by the
+    // analyst from the document, the topic editor shows a trigger read-only, and nothing reads a
+    // cue yet — so the only honest response an admin had was "I know, and I cannot". A panel
+    // carrying a warning like that gets skimmed, and the warnings beside it are the ones that
+    // matter. It returns as an ERROR when an evaluator reads cues and a re-analysis is the fix.
     const issues = validateConditionalTopics({
       topics: [
         topic('open', 'opening'),
@@ -895,10 +900,26 @@ describe('validateConditionalTopics — recorded triggers', () => {
       allQuestionKeys: ['open_q', 'abuse_q'],
       allDataSlotKeys: [],
     });
-    expect(issues.map((i) => i.code)).toContain('trigger_without_cues');
+    expect(issues.map((i) => i.code)).not.toContain('trigger_without_cues');
   });
 
-  it('does not flag missing cues when the trigger has them', () => {
+  it('still reports what the questionnaire asked for on that same cue-less trigger', () => {
+    // Dropping the cue warning must not take the trigger's real finding with it: the gap between
+    // what the document asked for and what the interview does is unchanged by whether the analyst
+    // managed to name any cues.
+    const issues = validateConditionalTopics({
+      topics: [
+        topic('open', 'opening'),
+        topic('abuse', 'conditional', { trigger: { ...trigger, cues: [] } }),
+      ],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'abuse_q'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).toContain('trigger_settled_at_opening');
+  });
+
+  it('says nothing about cues when the trigger has them either', () => {
     const issues = validateConditionalTopics({
       topics: [topic('open', 'opening'), topic('abuse', 'conditional', { trigger })],
       settings: settings(),

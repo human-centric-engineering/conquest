@@ -190,7 +190,10 @@ admin-facing shape:
 - `GET …/versions/:vid/changes` — newest-first list, filterable by `status`,
   `changeType`, `targetEntityType` (Zod query params). Each row is enriched with a
   **dry-run revert verdict** (`revertable` + `revertBlockedReason` + `revertSummary`)
-  so the table can disable the Revert button and explain _why_ before a click.
+  so the table can disable the Revert button and explain _why_ before a click. The
+  payload also carries `fidelity` — what the ingest critic concluded about this
+  extraction — which is **not** affected by the filters, because it describes the
+  extraction as a whole.
 - `POST …/versions/:vid/changes/:changeId/revert` — revert one change. Scope-404 →
   `409` if already reverted → **dry-run the planner before forking** (`422`
   `REVERT_IMPOSSIBLE` with a typed `reason` on a doomed revert, so no orphan draft)
@@ -210,6 +213,13 @@ admin-facing shape:
 by change family (prunes / edits / inferences / structural), client-side filters,
 before/after JSON blocks, and a single confirm dialog driving the revert mutation
 through the shared `authoringMutate` runner (fork-redirect / `router.refresh()`).
+
+**The fidelity band** (`extraction-fidelity-band.tsx`) sits ABOVE that table, and the
+placement is the argument: two of its three findings are about edits _missing_ from
+the log below it, which on any other page would be a sentence about nothing. It is
+read-only, blocks nothing, and renders **only when there is something to say** — a
+clean extraction shows no band at all. See
+[`ingestion.md`](./ingestion.md#where-the-admin-sees-this).
 
 ## Re-ingest (F2.4)
 

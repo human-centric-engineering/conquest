@@ -345,6 +345,32 @@ describe('POST …/reingest — happy path', () => {
     );
   });
 
+  /**
+   * The route's half of the requiredness fix. `parseAndGuardUpload` already parsed `requiredMode`
+   * before this change — the route simply never passed it on, so the writer fell through to
+   * `writeGraph`'s `'optional'` default and unmarked the whole draft. Asserting the handoff here
+   * is what stops the value being dropped on the floor again; whether the writer then honours it
+   * is pinned by the writer's own unit tests.
+   */
+  it('forwards the requiredness choice to the writer', async () => {
+    await POST(
+      makeRequest('form.md', '# Form', 'text/markdown', { requiredMode: 'source' }),
+      ctx(PARAMS)
+    );
+
+    expect(reingestVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ requiredness: 'source' })
+    );
+  });
+
+  it("defaults the requiredness choice to 'all' when the form omits it", async () => {
+    await POST(makeRequest('form.md'), ctx(PARAMS));
+
+    // Never `'optional'`: that is the rewrite path's policy, not one a re-ingest may land on by
+    // omission. An API client that predates the field gets the same default the dialog shows.
+    expect(reingestVersion).toHaveBeenCalledWith(expect.objectContaining({ requiredness: 'all' }));
+  });
+
   it('writes an admin audit row keyed to the version with the re-ingest counts', async () => {
     await POST(makeRequest('onboarding.md'), ctx(PARAMS));
 

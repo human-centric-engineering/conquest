@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -189,6 +189,37 @@ describe('ReingestDialog', () => {
     expect(postedFormData(fetchMock).has('instructions')).toBe(false);
   });
 
+  /**
+   * Requiredness (the choice re-ingest never offered).
+   *
+   * The dialog had no such control, and the route dropped the parsed value, so every re-ingest
+   * rebuilt the draft with every question optional. Asserting on the posted FormData rather than
+   * on the radio's checked state is deliberate: a control that renders but never reaches the
+   * server is exactly the failure being fixed.
+   */
+  it('defaults to marking every rebuilt question required, and says so in the form body', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('all');
+  });
+
+  it("posts 'source' when the admin picks the document's own required markers", async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('radio', { name: /document’s required markers/i }));
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('source');
+  });
+
   it('renders the extracted counts on a successful (non-deduped) re-ingest', async () => {
     mockFetchSuccess({ sectionCount: 3, questionCount: 12, changeCount: 4, deduped: false });
     const user = await openDialog();
@@ -300,6 +331,144 @@ describe('ReingestDialog', () => {
 
     expect(await screen.findByText(/only draft versions can be re-ingested/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /replace structure/i })).toBeInTheDocument();
+  });
+
+  /**
+   * The handler's own guard, behind the `required` attribute.
+   *
+   * Clicking the button cannot reach it — `required` on the file input blocks the submit first,
+   * which is why this dispatches the submit event directly. That is not a contrivance: constraint
+   * validation is a browser courtesy that a `form.dispatchEvent(new Event('submit'))`, an
+   * autofilled-then-cleared input, or a browser with validation disabled all walk straight past.
+   * The guard is the only thing that stops a POST with no document in it, so it is worth an
+   * assertion of its own — including that it does not merely warn and continue.
+   */
+  it('refuses to submit without a document, and never reaches the network', async () => {
+    const fetchMock = mockFetchSuccess();
+    await openDialog();
+
+    const form = screen.getByRole('button', { name: /replace structure/i }).closest('form');
+    if (!form) throw new Error('submit button is not inside a form');
+    fireEvent.submit(form);
+
+    expect(await screen.findByText(/choose a document to upload/i)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the goal override when one is typed, and omits it when blank', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.type(
+      screen.getByRole('textbox', { name: /goal override/i }),
+      'Measure post-migration developer sentiment.'
+    );
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('goal')).toBe(
+      'Measure post-migration developer sentiment.'
+    );
+  });
+
+  /**
+   * Changing your mind back to the default.
+   *
+   * The `all` radio starts checked, so its handler never fires on the happy path — which means a
+   * broken one would look identical to a working one until an admin selected `source` and then
+   * reconsidered. Asserting on the posted body (not `checked`) keeps this honest: the question is
+   * what the server is told, not what the radio looks like.
+   */
+  it("posts 'all' again when the admin picks source markers and then changes their mind", async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('radio', { name: /document\u2019s required markers/i }));
+    await user.click(screen.getByRole('radio', { name: /make all fields required/i }));
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('all');
+  });
+
+  /**
+   * Dismissing the form without submitting must not leave the typing behind.
+   *
+   * The dialog is not unmounted on close — it is the same component instance every time — so
+   * without the explicit `reset()` on close, the next admin to open it would inherit the previous
+   * one's goal text and requiredness choice and POST them without ever seeing them.
+   */
+  it('clears a half-filled form when the dialog is dismissed unsubmitted', async () => {
+    const user = await openDialog();
+
+    await user.type(screen.getByRole('textbox', { name: /goal override/i }), 'abandoned draft');
+    await user.click(screen.getByRole('radio', { name: /document\u2019s required markers/i }));
+    await user.keyboard('{Escape}');
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /replace structure/i })).not.toBeInTheDocument()
+    );
+
+    await user.click(screen.getByRole('button', { name: /re-ingest/i }));
+    await screen.findByRole('button', { name: /replace structure/i });
+
+    expect(screen.getByRole('textbox', { name: /goal override/i })).toHaveValue('');
+    expect(screen.getByRole('radio', { name: /make all fields required/i })).toBeChecked();
+  });
+
+  /**
+   * The result screen's own dismissal. `Done` closes AND resets, so the dialog reopens on the
+   * form rather than on a stale success from the previous document — a result screen that
+   * outlived its run would read as "this re-ingest succeeded" about a run that never happened.
+   */
+  it('reopens on a blank form after the success screen is dismissed', async () => {
+    mockFetchSuccess({ sectionCount: 3, questionCount: 12, changeCount: 4, deduped: false });
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+    await screen.findByText(/re-ingested/i);
+
+    await user.click(screen.getByRole('button', { name: /^done$/i }));
+    await waitFor(() => expect(screen.queryByText(/re-ingested/i)).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /re-ingest/i }));
+
+    expect(await screen.findByRole('button', { name: /replace structure/i })).toBeInTheDocument();
+    expect(screen.queryByText(/re-ingested/i)).not.toBeInTheDocument();
+  });
+
+  it('renders singular nouns when the rebuild produced exactly one of each', async () => {
+    mockFetchSuccess({ sectionCount: 1, questionCount: 1, changeCount: 1, deduped: false });
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    const line = await screen.findByText(/re-ingested/i);
+    expect(line).toHaveTextContent(/1 section,/);
+    expect(line).toHaveTextContent(/1 question,/);
+    expect(line).toHaveTextContent(/1 extraction change\./);
+  });
+
+  it('reports a proposal of exactly one topic without claiming any are conditional', async () => {
+    mockFetchSuccess({
+      sectionCount: 2,
+      questionCount: 5,
+      changeCount: 1,
+      deduped: false,
+      conditionalTopicsProposal: { topicCount: 1, conditionalCount: 0 },
+    });
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /replace structure/i }));
+
+    const line = await screen.findByText(/document describes routing/i);
+    expect(line).toHaveTextContent(/1 topic\./);
+    expect(line).not.toHaveTextContent(/of them conditional/i);
   });
 
   it('surfaces a network failure inline without navigating away from the form', async () => {

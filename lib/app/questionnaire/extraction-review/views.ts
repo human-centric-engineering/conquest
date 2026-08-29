@@ -11,6 +11,7 @@
 import type { ChangeType, TargetEntityType } from '@/lib/app/questionnaire/ingestion/types';
 import type { RevertImpossibleReason } from '@/lib/app/questionnaire/extraction-review/planner';
 import type { ExtractionChangeStatus } from '@/lib/app/questionnaire/extraction-review/schemas';
+import type { VersionFidelityView } from '@/lib/app/questionnaire/ingestion/fidelity-detail';
 
 /** One extraction-change row, enriched for the review surface. */
 export interface ExtractionChangeView {
@@ -42,6 +43,16 @@ export interface ExtractionChangeView {
 export interface ExtractionChangeListResponse {
   changes: ExtractionChangeView[];
   counts: { applied: number; reverted: number; superseded: number };
+  /**
+   * What the fidelity critic concluded about this extraction, when a verify pass ran for the
+   * version. Null when none did (a composed questionnaire, an older version, a failed dispatch).
+   *
+   * It rides this payload rather than an endpoint of its own because it belongs to the same
+   * question the table answers — "what did the extractor do to my document?" — and two of its
+   * three signals are specifically about edits MISSING from that table. Costs one indexed query
+   * in a `Promise.all` that already runs three.
+   */
+  fidelity: VersionFidelityView | null;
 }
 
 /** The revert response payload — the flipped row id + the applied plan summary. */

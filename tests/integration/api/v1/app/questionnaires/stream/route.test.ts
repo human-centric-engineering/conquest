@@ -360,6 +360,47 @@ describe('POST /api/v1/app/questionnaires/stream — happy path', () => {
     );
   });
 
+  /**
+   * Source provenance is built from optional facts, and each is omitted rather than
+   * recorded as empty. A `pageCount: undefined` on a Markdown upload and a `mimeType: ''`
+   * on a browser that sent no type both read, later, as "we looked and there were none" —
+   * which is a different claim from "this format has no such thing".
+   */
+  it('records a page count only when the parser reported pages', async () => {
+    (parseDocument as Mock).mockResolvedValue({
+      ...PARSED_DOC,
+      // `hasText` on every page matters: a PDF whose pages are all blank is the scanned-document
+      // case, which the pipeline rejects before persistence ever runs.
+      pageInfo: [
+        { page: 1, hasText: true },
+        { page: 2, hasText: true },
+        { page: 3, hasText: true },
+      ],
+    });
+
+    const res = await POST(makeRequest('onboarding.pdf'));
+    await drainSse(res);
+
+    expect(persistIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ pageCount: 3 }),
+      })
+    );
+  });
+
+  it('omits mimeType entirely when the upload carried no content type', async () => {
+    const res = await POST(makeRequest('onboarding.md', '# Form\n1. Name', ''));
+    await drainSse(res);
+
+    const [[call]] = (persistIngestion as Mock).mock.calls as [
+      [{ source: Record<string, unknown> }],
+    ];
+    expect('mimeType' in call.source).toBe(false);
+    // The rest of the provenance is still recorded — the omission is scoped, not a bail-out.
+    expect(call.source.fileName).toBe('onboarding.md');
+    expect(call.source.fileHash).toEqual(expect.any(String));
+  });
+
   it('writes an admin audit row tagged mode: stream with the ingest counts', async () => {
     const res = await POST(makeRequest('onboarding.md'));
     await drainSse(res);
@@ -572,6 +613,20 @@ describe('POST /api/v1/app/questionnaires/stream — proposing scope during the 
 
     const messages = frames.filter((f) => f.type === 'phase').map((f) => f.data.message);
     expect(messages.some((m) => String(m).includes('6 topics, 3 of them conditional'))).toBe(true);
+  });
+
+  it('claims no conditional topics when the analyst proposed none', async () => {
+    // The message has two forms, and the shorter one is not a truncation: "0 of them
+    // conditional" sends the admin to the tab looking for a branch nobody proposed.
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 4, conditionalCount: 0 });
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const messages = frames.filter((f) => f.type === 'phase').map((f) => String(f.data.message));
+    expect(messages.some((m) => m.includes('Proposed 4 topics'))).toBe(true);
+    expect(messages.some((m) => /of them conditional/i.test(m))).toBe(false);
   });
 
   it('completes the upload when the proposal fails', async () => {

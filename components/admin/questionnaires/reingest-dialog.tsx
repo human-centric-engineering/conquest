@@ -84,12 +84,24 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   const fileInputId = useId();
   const goalId = useId();
   const instructionsId = useId();
+  const requiredModeName = useId();
   const tablesId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
   const [goal, setGoal] = useState('');
   const [instructions, setInstructions] = useState('');
+  /**
+   * How the rebuilt questions are marked required. Defaults to `'all'`, matching the upload
+   * dialog, because a re-ingest rebuilds the whole question graph and so faces exactly the same
+   * question a first ingest does.
+   *
+   * There is no "keep what this version had" option: the new extraction mints new question keys,
+   * so hand-tuned per-question flags have nothing to carry over onto. Saying so in the help text
+   * is the honest version — the flags were being discarded either way, silently, and written back
+   * as all-optional.
+   */
+  const [requiredMode, setRequiredMode] = useState<'all' | 'source'>('all');
   // On by default — the table pass self-detects (merges only when tables are found). Override.
   const [extractTables, setExtractTables] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -102,6 +114,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   function reset() {
     setGoal('');
     setInstructions('');
+    setRequiredMode('all');
     setExtractTables(true);
     setError(null);
     setResult(null);
@@ -130,6 +143,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       if (trimmedGoal.length > 0) body.set('goal', trimmedGoal);
       const trimmedInstructions = instructions.trim();
       if (trimmedInstructions.length > 0) body.set('instructions', trimmedInstructions);
+      body.set('requiredMode', requiredMode);
       // Always send the explicit value — the server defaults to on, so unchecking must
       // send 'false' to override rather than just omitting the field.
       body.set('extractTables', String(extractTables));
@@ -335,6 +349,57 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 placeholder="e.g. Skip the cover page and table of contents. Treat each numbered heading as a section. Replace the client's name with 'our organisation'."
               />
             </div>
+
+            <fieldset className="space-y-2 border-t pt-4">
+              <legend className="flex items-center gap-1 text-sm font-medium">
+                Required fields{' '}
+                <FieldHelp title="Required fields">
+                  <p>
+                    Replacing the structure rebuilds every question from the new document, so
+                    anything you marked required by hand on this draft is rebuilt too. This chooses
+                    what the rebuilt questions start as.
+                  </p>
+                  <p className="mt-2">
+                    <strong>Make all fields required</strong> marks every question mandatory.{' '}
+                    <strong>Use the document’s required markers</strong> keeps only the questions
+                    the new document explicitly flags (an asterisk, “(required)”, “mandatory”)
+                    required. You can change any question afterwards in the editor.
+                  </p>
+                </FieldHelp>
+              </legend>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={requiredModeName}
+                  value="all"
+                  checked={requiredMode === 'all'}
+                  onChange={() => setRequiredMode('all')}
+                  disabled={busy}
+                  className="mt-0.5"
+                />
+                <span>
+                  Make all fields required <span className="text-muted-foreground">(default)</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={requiredModeName}
+                  value="source"
+                  checked={requiredMode === 'source'}
+                  onChange={() => setRequiredMode('source')}
+                  disabled={busy}
+                  className="mt-0.5"
+                />
+                <span>
+                  Use the document’s required markers
+                  <span className="text-muted-foreground block text-xs">
+                    Only fields the document marks as required stay required; others become
+                    optional.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
 
             <div className="flex items-center gap-2 text-sm">
               <Checkbox

@@ -40,6 +40,7 @@ import {
   type SectionUpdateFields,
 } from '@/lib/app/questionnaire/extraction-review';
 import type { ChangeType, TargetEntityType } from '@/lib/app/questionnaire/ingestion/types';
+import { readFidelityDetail } from '@/lib/app/questionnaire/ingestion/fidelity-detail';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 /** The change-row fields the review surface reads / reverts. */
@@ -262,7 +263,7 @@ export async function listVersionChanges(
   if (filters.changeType) where.changeType = filters.changeType;
   if (filters.targetEntityType) where.targetEntityType = filters.targetEntityType;
 
-  const [rows, snapshot, statusGroups] = await Promise.all([
+  const [rows, snapshot, statusGroups, verifyRun] = await Promise.all([
     prisma.appQuestionnaireExtractionChange.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -274,6 +275,15 @@ export async function listVersionChanges(
       where: { versionId },
       _count: { _all: true },
     }),
+    // The fidelity critic's run for this version. NEWEST first, not the only one: a re-ingest
+    // writes a second row, and the current graph is the one the latest pass looked at — an older
+    // row describes questions that no longer exist. Rides this `Promise.all` rather than a serial
+    // read, and hits the `[versionId, createdAt]` index the table's primary search already uses.
+    prisma.appAiRun.findFirst({
+      where: { versionId, kind: 'extraction_verify' },
+      orderBy: { createdAt: 'desc' },
+      select: { detail: true, outputSnapshot: true, status: true, createdAt: true },
+    }),
   ]);
 
   const counts = { applied: 0, reverted: 0, superseded: 0 };
@@ -283,7 +293,13 @@ export async function listVersionChanges(
     else if (g.status === 'superseded') counts.superseded = g._count._all;
   }
 
-  return { changes: rows.map((row) => toChangeView(row, snapshot)), counts };
+  return {
+    changes: rows.map((row) => toChangeView(row, snapshot)),
+    counts,
+    // Filtering the change list never hides the fidelity read: it describes the extraction as a
+    // whole, and a `status=reverted` filter is not a statement about which findings still apply.
+    fidelity: verifyRun ? readFidelityDetail(verifyRun) : null,
+  };
 }
 
 // ─── Revert executor ──────────────────────────────────────────────────────────

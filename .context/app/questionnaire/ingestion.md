@@ -31,16 +31,61 @@ refusing a document over a fidelity nicety is worse than persisting it with the 
 record. All three land on the `extraction_verify` `AppAiRun.detail`, and the two deterministic ones
 are omitted from it when zero, so a key being present already means something happened.
 
-| Check                     | How                                                                                               | Says                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `disallowedEditCount`     | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
-| `unattributedPromptCount` | Deterministic — counts prompts matching neither the source nor any change record's `after`        | Whether the wording in the editor is the author's, or the model's   |
-| `coverage`                | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+| Check                    | How                                                                                               | Says                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `disallowedEditCount`    | Deterministic — counts `split_question` / `merge_questions` in the extractor's own change entries | Whether the "do not split" instruction is actually landing          |
+| `unattributedPromptKeys` | Deterministic — the KEYS of prompts matching neither the source nor any change record's `after`   | Whether the wording in the editor is the author's, or the model's   |
+| `coverage`               | The fidelity critic counts what the SOURCE says it contains, and compares                         | `matches` · `extra_questions` · `missing_questions` · `uncountable` |
+
+**The unattributed check reports keys, not just a number.** A count was the right signal for a
+corpus run — "is the instruction landing?" is answered by a number — and the wrong one for an
+admin, who otherwise has to diff a whole draft against the document by eye to find which two
+questions it means. `unattributedPromptCount` is still written beside the keys, derived from
+`.length` rather than tracked separately, because two fields describing one list eventually
+disagree.
+
+**One module owns the row's shape from both ends.** `lib/app/questionnaire/ingestion/fidelity-detail.ts`
+builds the `detail` blob and reads it back. The block used to be inlined in both stream routes,
+identically, and the commit that added `unattributedPromptCount` reached only one of them on its
+first pass — which on a provenance row is indistinguishable from an ingest that had nothing to
+report. The omit-when-empty rule is the reader's contract, not tidiness: a present key means
+something happened.
 
 `uncountable` is a first-class answer and should be common: plenty of instruments do not number
 their questions, and the prompt explicitly tells the critic that a guessed count is worse than an
 honest shrug. It is also told not to reason backwards from the number of questions it was given,
 without which the check is circular.
+
+#### Where the admin sees this
+
+The **Changes tab** (`…/v/:vid/extraction-changes`), in a band above the change log, because two of
+the three findings are about edits MISSING from that log — "this question was reworded and no
+change record says so" is only legible next to the table that would have recorded it.
+
+`GET …/versions/:vid/changes` carries a `fidelity` block for the version's newest
+`extraction_verify` run (`ExtractionChangeListResponse.fidelity`, null when no verify pass ran).
+Newest, not only: a re-ingest writes a second row and an older one describes questions that no
+longer exist. It rides the endpoint's existing `Promise.all`, on the `[versionId, createdAt]` index.
+
+The band **renders only when there is something to say** — `hasFidelityFindings`. A clean
+extraction shows nothing at all, because a panel that always appears saying "all good" is a panel
+people stop reading, which costs exactly the runs where it does have something. On the same
+reasoning it stays silent for `uncountable` coverage (the common, correct answer) and for
+`disallowedEditCount` alone, which is a question about the build rather than about this
+questionnaire and carries no admin action.
+
+Two things it reports that a naive reading would get wrong:
+
+- **`flaggedCount`, never `flagged.length`.** The verdicts are reconstructed from the run's output
+  snapshot, which the store caps and marks truncated — so on a long questionnaire the list can be
+  empty while three questions really were flagged.
+- **The unattributed count from a legacy row.** Rows written before the check reported keys carry a
+  count and no keys; the reader keeps the stored count so such a version reports "2 questions" it
+  cannot name, rather than silently reading as clean.
+
+`readFidelityDetail` `.catch()`es every field, deliberately. It parses a `Json` column written by a
+past build, and the wrong failure mode is not a crash — it is returning nothing, which renders
+identically to a faithful extraction.
 
 #### Why an unrecorded rewrite is the one worth counting
 
@@ -92,16 +137,16 @@ the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProg
 contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
 [Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
-| Field              | In       | Notes                                                                                   |
-| ------------------ | -------- | --------------------------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth. |
-| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).         |
-| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.               |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                          |
-| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**      |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                 |
-| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.               |
-| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.           |
+| Field              | In       | Notes                                                                                    |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.csv` / `.xlsx`. Extension is the source of truth.  |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).          |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.                |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                           |
+| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.**       |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.                  |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required. Re-ingest too. |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.            |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
@@ -128,8 +173,8 @@ lines later. Server-side the pair are `hasAllowedExtension` and `hasParseableExt
 
 ### Requiredness (`requiredMode`)
 
-The upload dialog offers two modes, defaulting to **all required** (the checked-by-default
-choice that mirrors create + edit):
+The upload dialog **and the re-ingest dialog** offer two modes, defaulting to **all required** (the
+checked-by-default choice that mirrors create + edit):
 
 - **`all`** (default) — every extracted question is written `required: true`.
 - **`source`** — honour the document's own required markers. The extractor reads an asterisk,
@@ -421,17 +466,25 @@ database.
 `writeGraph` resolves each slot's `required` flag from a `RequirednessPolicy`
 (`persistIngestion`'s `requiredness` input, default `'all'`):
 
-| Policy       | Slot `required`       | Set by                                                          |
-| ------------ | --------------------- | --------------------------------------------------------------- |
-| `'all'`      | `true`                | upload `requiredMode=all`; compose `requiredAll≠false`          |
-| `'source'`   | `q.required ?? false` | upload `requiredMode=source`                                    |
-| `'optional'` | `false`               | compose `requiredAll=false`; refine (`replaceVersionStructure`) |
+| Policy       | Slot `required`       | Set by                                                                                 |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------- |
+| `'all'`      | `true`                | upload + **re-ingest** `requiredMode=all`; compose `requiredAll≠false`                 |
+| `'source'`   | `q.required ?? false` | upload + **re-ingest** `requiredMode=source`                                           |
+| `'optional'` | `false`               | compose `requiredAll=false`; refine (`replaceVersionStructure`); the demo-content seed |
 
-`writeGraph`'s own default is `'optional'`, so the conversational-refine path
-(`replaceVersionStructure`) is unchanged — only `persistIngestion` defaults to
-`'all'`. The editor's bulk "All questions required" checkbox writes `required`
-directly via `updateMany` (`PATCH …/versions/:vid/questions`), not through this
-policy.
+**`writeGraph` takes the policy with no default, and that is the fix rather than a style
+preference.** It used to default to `'optional'`, and re-ingest — which called it with three
+arguments — inherited that: every re-ingest rebuilt the draft with **every question optional**, a
+policy neither dialog offers and no admin ever picked. The omission read as a decision. Now every
+caller states one, so the same mistake is a type error.
+
+Re-ingest asks the question the same way ingest does, defaulting to `'all'`. There is deliberately
+**no "keep what this version had"** option: a re-ingest re-extracts from a new document and mints
+new question keys, so per-question flags tuned by hand have nothing to carry over onto — they were
+being discarded either way, and the dialog now says so instead of writing all-optional in silence.
+
+The editor's bulk "All questions required" checkbox writes `required` directly via `updateMany`
+(`PATCH …/versions/:vid/questions`), not through this policy.
 
 ### Choice-option normalisation
 

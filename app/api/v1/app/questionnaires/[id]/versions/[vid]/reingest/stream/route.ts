@@ -34,6 +34,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { sseResponse } from '@/lib/api/sse';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
+import { buildFidelityDetail } from '@/lib/app/questionnaire/ingestion/fidelity-detail';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -134,7 +135,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
     // Capture the narrowed upload in its own const — control-flow narrowing of `guard.ok`
     // does not carry into the nested `drive()` generator closure below.
     const upload = guard.value;
-    const { file, fileHash, adminMeta } = upload;
+    const { file, fileHash, adminMeta, requiredMode } = upload;
 
     // Version-scoped dedup short-circuit — identical to the non-streaming route: matches
     // only the version's CURRENT (most recent) source doc, and only when the admin supplied
@@ -207,6 +208,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
           versionId: vid,
           extraction,
           admin: adminMeta,
+          requiredness: requiredMode,
           source: {
             fileName: file.name,
             fileHash,
@@ -254,24 +256,10 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
           costUsd: fidelity.costUsd,
           outputSnapshot: fidelity.verdicts,
           durationMs: fidelity.durationMs,
-          detail: {
-            flaggedCount: fidelity.flaggedCount,
-            // The three count-level signals, on the row a corpus run reads. `flaggedCount` says how
-            // many questions look wrong; these say whether the SET is, and whether its wording is
-            // the author's — both of which every per-question verdict can be `ok` and still miss.
-            // Omitted when zero so a clean re-ingest's row stays readable and a present key means
-            // something happened.
-            ...(fidelity.coverage ? { coverage: fidelity.coverage } : {}),
-            ...(fidelity.disallowedEditCount > 0
-              ? { disallowedEditCount: fidelity.disallowedEditCount }
-              : {}),
-            ...(fidelity.unattributedPromptCount > 0
-              ? { unattributedPromptCount: fidelity.unattributedPromptCount }
-              : {}),
-            totalCount: fidelity.totalCount,
-            repairOutcome: fidelity.repairOutcome,
-            fileName: file.name,
-          },
+          // Built by the shared writer rather than inline. This block and the ingest route's were
+          // duplicated verbatim, and the last field added to it reached only one of the two —
+          // which on a provenance row reads as "nothing to report", not as a bug.
+          detail: buildFidelityDetail({ ...fidelity, fileName: file.name }),
           ...(fidelity.repairOutcome === 'verifier_unavailable'
             ? {
                 error:

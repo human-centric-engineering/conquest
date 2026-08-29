@@ -36,7 +36,10 @@ type IngestTx = Parameters<Parameters<typeof executeTransaction>[0]>[0];
 /**
  * How a freshly-written question graph resolves each slot's `required` flag.
  *  - `'all'`      — every question is required (the admin's "mark all required" default).
- *  - `'optional'` — every question is optional (the historical behaviour; refine keeps it).
+ *  - `'optional'` — every question is optional. Chosen deliberately by the whole-structure
+ *    rewrite path (`replaceVersionStructure`), never inherited: it used to be this function's
+ *    DEFAULT, which is how re-ingest — a flow whose own dialog never offered the choice — quietly
+ *    made every question optional on every run. Ask for it by name or you cannot get it.
  *  - `'source'`   — honour what the extractor read off the document (`q.required ?? false`).
  */
 export type RequirednessPolicy = 'all' | 'optional' | 'source';
@@ -144,7 +147,11 @@ export async function writeGraph(
   tx: IngestTx,
   versionId: string,
   extraction: ExtractQuestionnaireStructureData,
-  requiredness: RequirednessPolicy = 'optional'
+  /**
+   * Required, with no default. Every caller states its policy, because the one that forgot got
+   * `'optional'` — see {@link RequirednessPolicy} — and silently unmarked a whole questionnaire.
+   */
+  requiredness: RequirednessPolicy
 ): Promise<GraphCounts> {
   // Sections first — slots and change records reference them.
   const sectionIdByOrdinal = new Map<number, string>();
@@ -403,7 +410,10 @@ export async function replaceVersionStructure(
       });
     }
 
-    const counts = await writeGraph(tx, versionId, extraction);
+    // Explicitly `'optional'`, which is this path's long-standing behaviour: a refine/rewrite
+    // re-authors the prompts rather than re-reading a source document, so there are no required
+    // markers to honour and nothing asked the admin what they wanted.
+    const counts = await writeGraph(tx, versionId, extraction, 'optional');
 
     // Conditional Topics (P17): the rewrite replaced every question key, so topic membership may now
     // point at rows that no longer exist. Prune, drop the emptied, seed what is uncovered — rather

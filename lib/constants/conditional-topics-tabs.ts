@@ -64,6 +64,9 @@ const TAB_BY_ISSUE_CODE: Readonly<Record<string, ConditionalTopicsTab>> = {
   // the row points. The other two are mis-reads an admin corrects on the topic itself.
   trigger_settled_at_opening: 'topics',
   trigger_on_always_topic: 'topics',
+  // Reserved, not currently raised: `validate.ts` stopped emitting it because no admin surface can
+  // supply a cue. The mapping stays because the mid-interview-trigger spec raises it as an error
+  // once something reads cues, and it belongs on the same tab when it comes back.
   trigger_without_cues: 'topics',
 
   // Fixed in the settings: a rule, a limit, a list of keys.

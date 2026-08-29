@@ -763,4 +763,45 @@ describe('TopicListEditor — a recorded trigger', () => {
     expect(saved.find((d) => d.key === 'pricing')?.trigger).toEqual(TRIGGER);
     expect(saved.find((d) => d.key === 'spine')?.trigger).toBeNull();
   });
+
+  it('lets the admin remove a record the analyst got wrong', async () => {
+    // The record is written by an agent reading a document, and an agent can be wrong. Without
+    // this, an invented condition is permanent — shown on this card and on the routing panel, with
+    // no way for the one person who can see it is wrong to say so.
+    const { onSave } = renderEditor({ topics: withTrigger() });
+
+    openRow('Pricing and packaging');
+    fireEvent.click(await screen.findByRole('button', { name: /isn’t in the questionnaire/i }));
+
+    const saved = await savedDrafts(onSave);
+    expect(saved.find((d) => d.key === 'pricing')?.trigger).toBeNull();
+  });
+
+  it('drops the record from the card as soon as it is removed', async () => {
+    renderEditor({ topics: withTrigger() });
+
+    openRow('Pricing and packaging');
+    fireEvent.click(await screen.findByRole('button', { name: /isn’t in the questionnaire/i }));
+
+    // Removing is not authoring: there is nothing left to show and no empty form in its place.
+    expect(
+      screen.queryByText(/The questionnaire said to add this whenever it comes up/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('touches no other topic’s record', async () => {
+    // The save rewrites the whole set, so a remove that reached the wrong draft — or all of them —
+    // would look identical to a successful one on the card the admin was looking at.
+    const twoTriggers = TOPICS.map((t) =>
+      t.key === 'pricing' || t.key === 'spine' ? { ...t, trigger: TRIGGER } : t
+    );
+    const { onSave } = renderEditor({ topics: twoTriggers });
+
+    openRow('Pricing and packaging');
+    fireEvent.click(await screen.findByRole('button', { name: /isn’t in the questionnaire/i }));
+
+    const saved = await savedDrafts(onSave);
+    expect(saved.find((d) => d.key === 'pricing')?.trigger).toBeNull();
+    expect(saved.find((d) => d.key === 'spine')?.trigger).toEqual(TRIGGER);
+  });
 });

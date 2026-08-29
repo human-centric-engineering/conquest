@@ -244,10 +244,11 @@ export async function* orchestrateExtraction(
     });
   }
 
-  const unattributedPromptCount = countUnattributedPrompts(extraction, documentText);
-  if (unattributedPromptCount > 0) {
+  const unattributedPromptKeys = findUnattributedPrompts(extraction, documentText);
+  if (unattributedPromptKeys.length > 0) {
     ctx.log.warn('ingest reworded question prompts without recording the edit', {
-      unattributedPromptCount,
+      unattributedPromptCount: unattributedPromptKeys.length,
+      unattributedPromptKeys,
       totalQuestions: total,
       repairOutcome,
     });
@@ -282,7 +283,7 @@ export async function* orchestrateExtraction(
         costUsd: verification.costUsd,
         coverage,
         disallowedEditCount,
-        unattributedPromptCount,
+        unattributedPromptKeys,
         durationMs: verification.durationMs,
       },
     },
@@ -358,18 +359,24 @@ function recordedPrompt(change: ChangeRecordIntent): string | null {
 }
 
 /**
- * Count prompts that appear neither in the source nor in the editorial log. Deterministic — no
- * model involved. See `FidelityRecord.unattributedPromptCount` for why this is worth a column.
+ * The KEYS of questions whose prompt appears neither in the source nor in the editorial log.
+ * Deterministic — no model involved. See `FidelityRecord.unattributedPromptKeys` for why this is
+ * worth a column.
+ *
+ * Keys rather than a bare count, because the count alone is unactionable: an admin told "2
+ * questions were reworded without a record" has to diff the whole draft against the document by
+ * eye to find which two. The count is derived from this, never tracked separately, so the two can
+ * never disagree.
  *
  * Substring containment rather than per-question alignment, because alignment needs to know which
  * source line each question came from and nothing in the extraction says. Containment can only err
  * one way — a prompt that happens to appear somewhere else in the document reads as attributed —
  * which is the right direction for a signal that must never cry wolf on a clean ingest.
  */
-function countUnattributedPrompts(
+function findUnattributedPrompts(
   extraction: ExtractQuestionnaireStructureData,
   documentText: string
-): number {
+): string[] {
   const source = flattenWhitespace(documentText);
   const declared = new Set(
     extraction.changes
@@ -377,10 +384,12 @@ function countUnattributedPrompts(
       .filter((p): p is string => p !== null)
       .map(flattenWhitespace)
   );
-  return extraction.questions.filter((q) => {
-    const prompt = flattenWhitespace(q.prompt);
-    return !source.includes(prompt) && !declared.has(prompt);
-  }).length;
+  return extraction.questions
+    .filter((q) => {
+      const prompt = flattenWhitespace(q.prompt);
+      return !source.includes(prompt) && !declared.has(prompt);
+    })
+    .map((q) => q.key);
 }
 
 async function runVerification(

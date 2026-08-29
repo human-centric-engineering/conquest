@@ -32,6 +32,7 @@ import {
   writeGraph,
   writeSourceDocument,
   type IngestionSourceInput,
+  type RequirednessPolicy,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { reconcileTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
 
@@ -55,6 +56,21 @@ export interface ReingestVersionInput {
   extraction: ExtractQuestionnaireStructureData;
   /** Admin-supplied goal/audience from the re-ingest form (admin wins per field). */
   admin: { goal?: string; audience?: Partial<AudienceShape> };
+  /**
+   * How the rebuilt questions resolve their `required` flag — the re-ingest dialog's own choice,
+   * the same one the upload dialog offers.
+   *
+   * Required rather than defaulted, because the default is what went wrong: this writer used to
+   * call `writeGraph` with no policy at all, and `writeGraph`'s own default was `'optional'`. So
+   * every re-ingest silently unmarked every question — a THIRD policy, which neither dialog
+   * offers and no admin ever picked.
+   *
+   * There is no "keep what the version had" option, and that absence is honest rather than a
+   * shortcut: a re-ingest re-extracts from a new document and mints new question keys, so
+   * per-question flags an admin tuned by hand have nothing to carry over onto. The choice here is
+   * what the REBUILT set starts as, which is exactly what the dialog says.
+   */
+  requiredness: RequirednessPolicy;
   source: IngestionSourceInput;
 }
 
@@ -74,7 +90,7 @@ export interface ReingestVersionResult {
  * the extraction (via the shared pipeline). All-or-nothing.
  */
 export async function reingestVersion(input: ReingestVersionInput): Promise<ReingestVersionResult> {
-  const { versionId, extraction, admin, source } = input;
+  const { versionId, extraction, admin, requiredness, source } = input;
 
   return executeTransaction(async (tx) => {
     // Read the current status + goal/audience inside the tx so the read-then-
@@ -125,7 +141,7 @@ export async function reingestVersion(input: ReingestVersionInput): Promise<Rein
       select: { id: true },
     });
 
-    const counts = await writeGraph(tx, versionId, extraction);
+    const counts = await writeGraph(tx, versionId, extraction, requiredness);
     await writeSourceDocument(tx, versionId, source);
 
     // Conditional Topics (P17): re-ingest replaces the whole graph, so topic membership is reconciled

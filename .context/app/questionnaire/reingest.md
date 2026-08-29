@@ -19,7 +19,7 @@ the structure-refresh counterpart to F1.1's create-from-scratch ingest.
 `POST /api/v1/app/questionnaires/:id/versions/:vid/reingest` — multipart upload,
 admin-only. Synchronous (parse → LLM extraction → transactional replace). Same
 form fields as the F1.1 ingest (`file`, `goal`, `instructions`,
-`audience.<field>`, `extractTables`). `file` accepts `.xlsx` (flattened to
+`audience.<field>`, `extractTables`, `requiredMode`). `file` accepts `.xlsx` (flattened to
 Markdown by `flattenWorkbook`, same as ingest) and `instructions` carries
 free-text extractor steering — both inherited for free through the shared
 `parseAndGuardUpload` / `extractFromDocument` helpers. See
@@ -120,6 +120,19 @@ vocabulary — and therefore any manual authoring edits and tag assignments on t
 draft. **Preserved:** the questionnaire title, the version row (id / number /
 status), and prior source documents. The UI confirms before calling because the
 wipe is destructive.
+
+**Requiredness** is the re-ingest dialog's own choice — the same two modes the upload dialog
+offers, defaulting to all-required. It has to be asked, because the wipe above takes the draft's
+per-question `required` flags with it; the choice is what the REBUILT questions start as, and there
+is no "keep what was there" option because the new extraction mints new question keys for the
+flags to land on.
+
+This was silently wrong until it was asked. The dialog had no control and the route dropped the
+value `parseAndGuardUpload` had already parsed, so `writeGraph` fell through to its own
+`'optional'` default: every re-ingest rebuilt the draft with every question optional — a third
+policy no dialog offers. `writeGraph` now takes the policy with **no default**, so the same
+omission is a type error rather than a silent rewrite. See
+[`ingestion.md`](./ingestion.md#requiredness-policy).
 
 **Goal/audience** are re-resolved through the admin-wins-per-field merge with the
 **pre-existing** arm fed the version's current values, so a re-ingest whose new
