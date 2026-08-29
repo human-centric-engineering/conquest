@@ -39,7 +39,9 @@ import {
   discoverFonts,
   discoverImages,
   harvestSite,
+  isThirdPartyLogo,
   normaliseUrl,
+  readSiteName,
 } from '@/lib/app/questionnaire/brand-import/harvest';
 
 const parse = (html: string): Document => new JSDOM(html).window.document;
@@ -91,7 +93,10 @@ describe('discoverImages', () => {
     `);
 
     const found = discoverImages(doc, 'https://acme.example/');
-    expect(found.logo).toEqual({ url: 'https://cdn.acme.example/org.png', via: 'schema.org' });
+    expect(found.logoCandidates[0]).toEqual({
+      url: 'https://cdn.acme.example/org.png',
+      via: 'schema.org',
+    });
   });
 
   it('finds an Organization nested under an @graph, which is how most sites publish it', () => {
@@ -101,7 +106,7 @@ describe('discoverImages', () => {
       </script>
     `);
 
-    expect(discoverImages(doc, 'https://acme.example/').logo?.url).toBe(
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates[0]?.url).toBe(
       'https://cdn.acme.example/o.png'
     );
   });
@@ -111,7 +116,7 @@ describe('discoverImages', () => {
       <header><img alt="Acme logo" src="/assets/mark-2024.png"></header>
     `);
 
-    expect(discoverImages(doc, 'https://acme.example/').logo).toEqual({
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates[0]).toEqual({
       url: 'https://acme.example/assets/mark-2024.png',
       via: 'header',
     });
@@ -120,7 +125,7 @@ describe('discoverImages', () => {
   it('falls back again to any image whose filename says logo', () => {
     const doc = parse(`<main><img src="/img/logo.svg"></main>`);
 
-    expect(discoverImages(doc, 'https://acme.example/').logo).toEqual({
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates[0]).toEqual({
       url: 'https://acme.example/img/logo.svg',
       via: 'filename',
     });
@@ -162,7 +167,7 @@ describe('discoverImages', () => {
 
   it('drops an http image, because the column will not accept one', () => {
     const doc = parse(`<header><img class="logo" src="http://cdn.acme.example/logo.png"></header>`);
-    expect(discoverImages(doc, 'https://acme.example/').logo).toBeNull();
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates).toEqual([]);
   });
 });
 
@@ -294,7 +299,7 @@ describe('harvestSite', () => {
     // A missing image must not fail an import that already found a declared colour.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.brand.logo?.url).toBe('https://acme.example/logo.png');
+    expect(result.brand.logoCandidates[0]?.url).toBe('https://acme.example/logo.png');
     expect(result.brand.declared.has('#0a1a3a')).toBe(true);
   });
 
@@ -309,5 +314,85 @@ describe('harvestSite', () => {
       candidates: { hex: string }[];
     }[];
     expect(sources.some((s) => s.candidates.some((c) => c.hex === '#5469d4'))).toBe(true);
+  });
+});
+
+describe('excluding somebody else’s logo', () => {
+  /**
+   * From a real import: a company called Eagle Eye Solutions got a circular **Forbes** logo. A
+   * marketing homepage is full of files literally named `logo` that belong to press outlets, review
+   * sites, partners and customers, and every one of them beats the real lockup on a filename match
+   * if it appears earlier in the DOM.
+   */
+  const img = (html: string): Element => parse(html).querySelector('img') as Element;
+
+  it('rejects a press outlet by name, wherever it appears', () => {
+    expect(isThirdPartyLogo(img('<img src="/img/forbes-logo.svg">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img alt="G2 logo" src="/a.svg">'))).toBe(true);
+  });
+
+  it('rejects an anonymous image by the role its own attributes claim', () => {
+    expect(isThirdPartyLogo(img('<img class="partner-logo" src="/a.svg">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img alt="As seen in" src="/a.svg">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img src="/awards/badge-2024.png">'))).toBe(true);
+  });
+
+  it('rejects an innocent-looking file by the section it sits in', () => {
+    // `eagle.svg` inside "our clients" is a client's mark, and only its position says so.
+    expect(
+      isThirdPartyLogo(
+        img('<section class="our-clients"><div><a><img src="/eagle.svg"></a></div></section>')
+      )
+    ).toBe(true);
+    expect(isThirdPartyLogo(img('<div class="logo-wall"><img src="/x.svg"></div>'))).toBe(true);
+  });
+
+  it('leaves the company’s own lockup alone', () => {
+    expect(
+      isThirdPartyLogo(
+        img('<header><img class="site-logo" alt="Eagle Eye" src="/logo.svg"></header>')
+      )
+    ).toBe(false);
+  });
+
+  it('keeps a press badge out of the candidate list entirely', () => {
+    const doc = parse(`
+      <header><img class="logo" src="/eagleeye-logo.svg"></header>
+      <section class="as-seen-in"><img class="logo" src="/forbes-logo.svg"></section>
+    `);
+
+    const { logoCandidates } = discoverImages(doc, 'https://acme.example/');
+
+    expect(logoCandidates.map((c) => c.url)).toEqual(['https://acme.example/eagleeye-logo.svg']);
+  });
+
+  it('keeps several real candidates so the analyst can choose between them', () => {
+    const doc = parse(`
+      <header><img class="logo" src="/a-logo.svg"></header>
+      <div class="navbar"><img class="brand" src="/b-logo.svg"></div>
+    `);
+
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates).toHaveLength(2);
+  });
+});
+
+describe('readSiteName', () => {
+  // The name a lockup has to match. Without it "is this actually their logo?" is unanswerable.
+  it('prefers what the site states outright', () => {
+    const doc = parse(
+      '<meta property="og:site_name" content="Eagle Eye Solutions"><title>Home | EE</title>'
+    );
+    expect(readSiteName(doc, 'https://eagleeye.example/')).toBe('Eagle Eye Solutions');
+  });
+
+  it('takes the head of a title, which is usually "Company — tagline"', () => {
+    const doc = parse('<title>Eagle Eye Solutions | Retail intelligence</title>');
+    expect(readSiteName(doc, 'https://eagleeye.example/')).toBe('Eagle Eye Solutions');
+  });
+
+  it('falls back to the hostname, which is right in substance if not in spelling', () => {
+    expect(readSiteName(parse('<html></html>'), 'https://www.eagleeye.example/')).toBe(
+      'eagleeye.example'
+    );
   });
 });

@@ -63,6 +63,8 @@ const TIMEOUT_MS = 30_000;
 const ROLE_TO_FIELD: Record<string, ImportableColorField> = {
   pageBackground: 'canvasColor',
   bodyText: 'inkColor',
+  darkPageBackground: 'canvasColorDark',
+  darkBodyText: 'inkColorDark',
   primaryButton: 'ctaColor',
   primaryButtonGradientEnd: 'ctaColorEnd',
   accent: 'accentColor',
@@ -77,6 +79,10 @@ const ROLE_NAMES = Object.keys(ROLE_TO_FIELD);
 const ROLE_BRIEF: Record<string, string> = {
   pageBackground: 'the ground the page is drawn on — usually the largest area by far',
   bodyText: 'the colour running text is set in on that ground',
+  darkPageBackground:
+    'the ground for DARK mode — a deeper tone from the same brand, clearly darker than the light ' +
+    'ground. Only if the palette actually contains one; it is derived otherwise',
+  darkBodyText: 'the colour text is set in on that dark ground — usually a near-white',
   primaryButton: "the brand's main call-to-action colour (the primary button)",
   primaryButtonGradientEnd:
     'the second colour of the button gradient, ONLY if the button is visibly a gradient',
@@ -263,6 +269,11 @@ function buildMessages(input: AssignRolesInput, sawImage: boolean): LlmMessage[]
         'round, or invent a colour — if the right colour is not in the list, return null.',
       'Return null for any role the page does not have. Most pages have no header band, no ' +
         'button gradient and no second accent. Guessing one is worse than leaving it out.',
+      'The questionnaire is rendered in BOTH light and dark mode, so the two grounds must be ' +
+        'clearly different from each other. If the palette has no genuinely darker tone, return ' +
+        'null for the dark roles rather than repeating the light ground — a derived one is used.',
+      'Text must READ on the ground you put it on. A dark text colour on a dark ground will be ' +
+        'discarded, so return null instead when nothing in the list reads.',
       'The page background is almost always the colour with the largest share. The body text is ' +
         'almost always a dark near-neutral (or a light one on a dark page).',
       'A colour flagged as neutral is a grey, white, near-black or a tinted paper stock. Those ' +

@@ -15,6 +15,7 @@ export {
   canvasBackdropVars,
   contrastRatio,
   cssUrl,
+  darkenForDarkMode,
   readableTextColor,
   resolveTheme,
   themeToCssVariables,

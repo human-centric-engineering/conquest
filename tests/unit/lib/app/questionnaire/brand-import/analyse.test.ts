@@ -17,6 +17,9 @@ vi.mock('@/lib/app/questionnaire/brand-import/assign-roles', () => assignMock);
 const harvestMock = vi.hoisted(() => ({ harvestSite: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/brand-import/harvest', () => harvestMock);
 
+const logoMock = vi.hoisted(() => ({ verifyLogo: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/brand-import/verify-logo', () => logoMock);
+
 import { analyseScreenshot, analyseUrl } from '@/lib/app/questionnaire/brand-import/analyse';
 
 const CANDIDATES = [
@@ -92,7 +95,7 @@ describe('analyseScreenshot', () => {
     expect(result.fields.canvasColor?.source).toContain('no image model');
   });
 
-  it('annotates an unreadable canvas/ink pair without dropping either', async () => {
+  it('replaces an ink that cannot be read on the canvas we measured', async () => {
     assignMock.assignRoles.mockResolvedValue({
       assignments: [
         { field: 'canvasColor', hex: '#8a8a8a' },
@@ -106,8 +109,30 @@ describe('analyseScreenshot', () => {
 
     const result = await analyseScreenshot(input);
 
-    expect(result.fields.canvasColor?.caveat).toContain('WCAG AA');
-    expect(result.fields.inkColor?.value).toBe('#9a9a9a');
+    // The form WARNS about a low-contrast pair the admin typed, because a brand may genuinely be
+    // low-contrast and refusing would overrule their designer. An imported pair is nobody's
+    // decision yet, so shipping it only sets up a mistake the admin has to catch.
+    expect(result.fields.canvasColor?.value).toBe('#8a8a8a');
+    expect(result.fields.inkColor?.value).not.toBe('#9a9a9a');
+    expect(result.fields.inkColor?.source).toContain('would not have read');
+  });
+
+  it('fills both grounds and both inks, so the dark pair is reviewable', async () => {
+    assignMock.assignRoles.mockResolvedValue({
+      assignments: [{ field: 'canvasColor', hex: '#691b9a' }],
+      provider: 'openai',
+      model: 'gpt-test',
+      sawImage: true,
+    });
+
+    const result = await analyseScreenshot(input);
+
+    // A deep brand ground is exactly the case the resolver carries across to dark mode unchanged,
+    // which renders two identical panels.
+    expect(result.fields.canvasColorDark?.value).toBeDefined();
+    expect(result.fields.canvasColorDark?.value).not.toBe('#691b9a');
+    expect(result.fields.inkColor?.value).toBeDefined();
+    expect(result.fields.inkColorDark?.value).toBeDefined();
   });
 
   it('passes the client id through for cost attribution', async () => {
@@ -127,7 +152,9 @@ function harvested(overrides: Record<string, unknown> = {}) {
       candidates: CANDIDATES,
       hints: ['The page declares theme-color: #5469d4'],
       declared: new Set(['#5469d4']),
-      logo: { url: 'https://acme.example/logo.png', via: 'schema.org' },
+      logoCandidates: [{ url: 'https://acme.example/logo.png', via: 'schema.org' }],
+      logoImages: new Map([['https://acme.example/logo.png', Buffer.from('png')]]),
+      siteName: 'Acme',
       mark: { url: 'https://acme.example/touch.png', via: 'apple-touch-icon' },
       logoDark: null,
       fontFamilies: ['Space Grotesk'],
@@ -140,6 +167,11 @@ function harvested(overrides: Record<string, unknown> = {}) {
 describe('analyseUrl', () => {
   beforeEach(() => {
     harvestMock.harvestSite.mockResolvedValue(harvested());
+    logoMock.verifyLogo.mockResolvedValue({
+      url: 'https://acme.example/logo.png',
+      confidence: 'high',
+      reason: 'the lockup on the page, which reads “Acme”',
+    });
   });
 
   it('is `blocked` with the harvest’s own reason, and offers the screenshot', async () => {
@@ -157,7 +189,7 @@ describe('analyseUrl', () => {
     expect(result.candidates).toEqual([]);
   });
 
-  it('proposes the logo and the mark it discovered', async () => {
+  it('proposes the logo it checked, and the mark it discovered', async () => {
     const result = await analyseUrl({ url: 'https://acme.example/' });
 
     expect(result.fields.logoUrl?.value).toBe('https://acme.example/logo.png');

@@ -40,17 +40,17 @@ provider.
 
 ## What it proposes
 
-Eight colours (`surfaceColor`, `ctaColor`, `ctaColorEnd`, `accentColor`, `accentColorEnd`,
-`canvasColor`, `inkColor`, `logoBackgroundColor`), three images, the type pairing and — when the
-brand's face is not one we ship — the two custom families. Colours come from either route; images
-and type only from the URL route, since a screenshot contains no logo file and no font name.
+Ten colours (`surfaceColor`, `ctaColor`, `ctaColorEnd`, `accentColor`, `accentColorEnd`,
+`canvasColor`, `inkColor`, `canvasColorDark`, `inkColorDark`, `logoBackgroundColor`), three images,
+the type pairing and — when the brand's face is not one we ship — the two custom families. Colours
+come from either route; images and type only from the URL route, since a screenshot contains no logo
+file and no font name.
 
-Two deliberate omissions:
+One deliberate omission:
 
-| Not proposed                       | Why                                                                                                                                                                             |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `canvasColorDark` / `inkColorDark` | `darkenForDarkMode` already derives a dark palette from the light one, and that derivation is usually better than anything a light-mode page can say about a brand's dark mode. |
-| `bannerUrl`                        | The only banner-shaped image a site reliably exposes is `og:image` at ~1.9:1, and `BRAND_BANNER_SPEC` needs 4:1 within 12%. Proposing it would guarantee a rejected upload.     |
+| Not proposed | Why                                                                                                                                                                         |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bannerUrl`  | The only banner-shaped image a site reliably exposes is `og:image` at ~1.9:1, and `BRAND_BANNER_SPEC` needs 4:1 within 12%. Proposing it would guarantee a rejected upload. |
 
 ## Reading a website
 
@@ -72,7 +72,7 @@ could not see the page, and is labelled one.
 
 ### Finding the logo
 
-In descending order of how much the page is really telling us:
+Ranked in descending order of how much the page is really telling us:
 
 1. `schema.org` `Organization.logo` — the site asserting what its logo is. Searched recursively,
    because it is usually nested under an `@graph` or hung off a `WebSite.publisher`.
@@ -80,6 +80,49 @@ In descending order of how much the page is really telling us:
 3. Any image on the page whose filename says logo.
 4. `apple-touch-icon` → `logoMarkUrl`. Typically 180×180, so it clears `BRAND_MARK_SPEC`'s 128px
    floor, which the 32px favicon never does.
+
+**Every one of those signals is circumstantial**, and a real import proved it: a company called
+Eagle Eye Solutions was handed a circular **Forbes** logo. A marketing homepage is full of files
+literally named `logo` that belong to press outlets, review sites, partners and customers, and any
+of them beats the real lockup if it appears earlier in the DOM. So the ranking is a **list of
+candidates**, not an answer, and two things narrow it.
+
+#### Excluding somebody else's mark
+
+`isThirdPartyLogo` reads the image's own attributes AND walks its ancestors, because the evidence
+comes in two forms: `forbes-logo.svg` names the outlet, while an anonymous `eagle.svg` inside
+`<section class="our-clients">` is given away only by where it sits. Named outlets, role words
+(`as-seen`, `partner`, `award`, `badge`, `testimonial`) and container classes (`logo-wall`,
+`trusted-by`) are all excluded before ranking.
+
+This will never catch every case — the next site's badge is a company nobody has heard of.
+
+#### Reading the logo
+
+So the candidates are **looked at**. The model is asked what each wordmark SAYS — a transcription
+task — and the match against the site's own name (`og:site_name` → `<title>` head → hostname) is
+then done in code by `namesMatch`, on letters and digits alone so `eagleeye` matches
+`Eagle Eye Solutions`.
+
+The split is the same one the colour analyst uses, and for the same reason: **a model asked "is this
+their logo?" agrees; a model asked "what does it say?" answers `Forbes`**, and no string comparison
+turns that into `Eagle Eye Solutions`.
+
+Three outcomes:
+
+| Verdict                               | Result                                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Read, and it names the site           | Proposed, **high** confidence, with what it read shown to the admin.                      |
+| Read, and it names some other company | **Nothing is proposed**, and the reason says what it read.                                |
+| No readable text                      | Proposed, **low** confidence, saying we could not read a name in it. Most abstract marks. |
+| Could not be checked                  | The ranking's first candidate, **low** confidence, saying it was not verified.            |
+
+A mismatch **rejects** rather than downgrading. A wrong logo at "low confidence" is still a wrong
+logo, and the failure being fixed is an admin accepting one without looking. Proposing nothing is a
+worse-looking result and a better one: the admin uploads the file they can find in ten seconds.
+
+Confidence is therefore about what the logo IS, not about where it was found — the old scheme rated
+a `schema.org` claim "high" and could not tell a Forbes badge from a client's own lockup.
 
 `logoDarkUrl` comes only from an explicit `<source media="(prefers-color-scheme: dark)">` or a file
 named as both dark and logo. No looser guess: the dark lockup is a field admins rarely check, so the
@@ -235,6 +278,43 @@ dangerous parts, because the value goes into a URL we build server-side. A famil
 reason to contain a slash, a colon, an ampersand or a percent, and each is a way to reach a
 different path or smuggle a second query parameter into the request. `resolveCustomFontFamily`
 re-checks on read, since the column is plain text and a seed or a rollback can put anything in it.
+
+## Both grounds, always
+
+A questionnaire is drawn on a ground in **two modes**, and the respondent picks which — so the
+import answers for four fields, not one: canvas and ink in light, the same pair in dark.
+
+Leaving the dark pair to the resolver looked right and was not. `resolveTheme` derives a dark ground
+when none is set, but for a canvas that is **already dark** it carries the colour across unchanged,
+reasoning that darkening a navy again gives a black rectangle and loses the brand. That is a fair
+default for a colour an admin typed. For an import it produced a real failure: a brand whose canvas
+is a deep purple got two **identical** panels, and the admin was shown a light/dark comparison in
+which nothing differed and no way to tell that was a bug rather than the brand.
+
+So `ground.ts` completes the set:
+
+1. **The dark ground must differ from the light one.** The analyst's own choice is kept when it
+   clears `MIN_GROUND_SEPARATION` (a contrast ratio of 1.5 between the two grounds — they never
+   appear together, so they need to be _distinguishable_, not legible against each other).
+   Otherwise it is derived: a light canvas takes the platform's existing tint-over-near-black; an
+   already-dark canvas is **mixed toward near-black instead**, which keeps the hue while dropping
+   the luminance, so a deep purple becomes a deeper purple rather than either an unchanged purple or
+   a black rectangle.
+2. **An ink that cannot be read is replaced, not warned about.** The form warns and saves anyway for
+   a colour the admin typed — a brand may genuinely be low-contrast, and refusing would overrule
+   their designer. An imported ink is nobody's decision yet, so shipping an unreadable pair only
+   sets up a mistake the admin has to catch.
+3. **Both inks are filled in.** They resolve to what the theme would derive anyway, so nothing
+   renders differently — it just puts all four fields in front of the admin, which is the only way
+   the dark pair is reviewable at all.
+
+**The resolver is deliberately untouched.** Changing how it treats an already-dark canvas would
+silently repaint every demo client that has one.
+
+Deriving here is not the model inventing a colour: it is arithmetic on a colour the page really
+used, deterministic, and labelled as derived where the admin can see it. A site often has no
+dark-mode ground anywhere in its stylesheet — it may have no dark mode at all — so refusing to
+derive one would leave the field permanently empty for exactly the brands that need it.
 
 ## The failure contract
 

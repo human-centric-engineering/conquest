@@ -28,7 +28,13 @@ import {
   type RoleAssignment,
 } from '@/lib/app/questionnaire/brand-import/assign-roles';
 import { annotateContrast } from '@/lib/app/questionnaire/brand-import/contrast';
-import { harvestSite, type DiscoveredImage } from '@/lib/app/questionnaire/brand-import/harvest';
+import { completeGrounds } from '@/lib/app/questionnaire/brand-import/ground';
+import {
+  harvestSite,
+  type DiscoveredImage,
+  type HarvestedBrand,
+} from '@/lib/app/questionnaire/brand-import/harvest';
+import { verifyLogo } from '@/lib/app/questionnaire/brand-import/verify-logo';
 import { matchFontPairing } from '@/lib/app/questionnaire/brand-import/font-match';
 
 export interface ScreenshotInput {
@@ -75,13 +81,18 @@ export async function analyseScreenshot(input: ScreenshotInput): Promise<BrandIm
     });
   }
 
+  // `completeGrounds` before `annotateContrast`: it drops an unreadable ink and fills the dark
+  // pair, so by the time the contrast annotation runs there is nothing left for it to warn about
+  // unless the admin's own later edits create it.
   const fields = annotateContrast(
-    assignmentsToFields(assignments, {
-      confidence: sawImage ? 'high' : 'low',
-      source: sawImage
-        ? 'read from the screenshot'
-        : 'inferred from the screenshot’s palette (no image model available)',
-    })
+    completeGrounds(
+      assignmentsToFields(assignments, {
+        confidence: sawImage ? 'high' : 'low',
+        source: sawImage
+          ? 'read from the screenshot'
+          : 'inferred from the screenshot’s palette (no image model available)',
+      })
+    )
   );
 
   return analysedResult({
@@ -137,10 +148,15 @@ export async function analyseUrl(input: {
 
   const { brand } = harvested;
 
+  // The lockup is CHECKED, not just ranked: every signal the harvest can see is circumstantial, and
+  // a press badge named `logo.svg` satisfies all of them. See verify-logo.ts.
+  const logo = await chooseLogo(brand, input.demoClientId);
+
   // Images and type are found by parsing, not by measuring, so they are worth proposing even when
   // the page gave up no usable colours at all — a logo alone is a real result.
   const fields: Partial<Record<ImportableField, ProposedField>> = {
-    ...imageFields(brand.logo, brand.mark, brand.logoDark),
+    ...logo.field,
+    ...imageFields(brand.mark, brand.logoDark),
     ...fontField(brand.fontFamilies),
   };
 
@@ -163,11 +179,12 @@ export async function analyseUrl(input: {
 
   return analysedResult({
     source: 'url',
-    fields: annotateContrast(fields),
+    fields: annotateContrast(completeGrounds(fields)),
     candidates: brand.candidates,
     degraded,
     note: joinNotes(
       brand.note,
+      logo.note,
       degraded
         ? 'We read the site but could not work out which colour is which — no AI provider was available. Pick from the palette below.'
         : null
@@ -219,14 +236,12 @@ const IMAGE_SOURCE_COPY: Record<DiscoveredImage['via'], string> = {
 const HIGH_CONFIDENCE_PROVENANCE = new Set<DiscoveredImage['via']>(['schema.org', 'dark-variant']);
 
 function imageFields(
-  logo: DiscoveredImage | null,
   mark: DiscoveredImage | null,
   logoDark: DiscoveredImage | null
 ): Partial<Record<ImportableField, ProposedField>> {
   const fields: Partial<Record<ImportableField, ProposedField>> = {};
 
   for (const [field, image] of [
-    ['logoUrl', logo],
     ['logoMarkUrl', mark],
     ['logoDarkUrl', logoDark],
   ] as const) {
@@ -297,4 +312,62 @@ function fontField(families: string[]): Partial<Record<ImportableField, Proposed
 function joinNotes(...notes: (string | null)[]): string | undefined {
   const kept = notes.filter((note): note is string => Boolean(note));
   return kept.length > 0 ? kept.join(' ') : undefined;
+}
+
+/**
+ * Decide which candidate lockup — if any — to propose.
+ *
+ * Three outcomes, and the middle one is the reason this exists:
+ *
+ *  - **Checked and matched.** The model read a wordmark and it names the site. High confidence,
+ *    with what it read shown to the admin so they can disagree at a glance.
+ *  - **Checked and rejected.** It read somebody else's name. Nothing is proposed, and the note says
+ *    what it read — a wrong logo accepted without looking is exactly the failure being fixed here,
+ *    and it is not made acceptable by a "low confidence" label.
+ *  - **Not checked.** No vision model, or the call failed. The harvest's own ranking is proposed at
+ *    low confidence, saying it was not verified — an unchecked guess still beats no logo, as long
+ *    as it admits to being one.
+ */
+async function chooseLogo(
+  brand: HarvestedBrand,
+  demoClientId?: string
+): Promise<{ field: Partial<Record<ImportableField, ProposedField>>; note: string | null }> {
+  const candidates = brand.logoCandidates;
+  if (candidates.length === 0) return { field: {}, note: null };
+
+  const withBytes = candidates.flatMap((candidate) => {
+    const buffer = brand.logoImages.get(candidate.url);
+    return buffer ? [{ url: candidate.url, buffer }] : [];
+  });
+
+  const verdict = await verifyLogo({
+    candidates: withBytes,
+    siteName: brand.siteName,
+    demoClientId,
+  });
+
+  if (!verdict) {
+    const fallback = candidates[0];
+    return {
+      field: {
+        logoUrl: {
+          value: fallback.url,
+          confidence: 'low',
+          source: `${IMAGE_SOURCE_COPY[fallback.via]} — we could not check it, so look before you accept it`,
+        },
+      },
+      note: null,
+    };
+  }
+
+  if (!verdict.url) {
+    return { field: {}, note: verdict.reason };
+  }
+
+  return {
+    field: {
+      logoUrl: { value: verdict.url, confidence: verdict.confidence, source: verdict.reason },
+    },
+    note: null,
+  };
 }

@@ -98,3 +98,24 @@ export function distance(a: Rgb, b: Rgb): number {
   const db = a.b - b.b;
   return Math.sqrt((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db);
 }
+
+/**
+ * Mix one colour toward another by `weight` (0–1), in plain sRGB.
+ *
+ * Used to derive a dark-mode ground from a brand's own canvas. sRGB rather than a perceptual
+ * space deliberately: the job is "make this visibly deeper while keeping its hue", which a linear
+ * channel mix does well enough, and the alternative is a colour-space round trip for a value the
+ * admin can see and override.
+ */
+export function mix(hex: string, toward: string, weight: number): string | null {
+  const from = parseHex(hex);
+  const to = parseHex(toward);
+  if (!from || !to) return null;
+
+  const w = Math.max(0, Math.min(1, weight));
+  return toHex({
+    r: from.r * (1 - w) + to.r * w,
+    g: from.g * (1 - w) + to.g * w,
+    b: from.b * (1 - w) + to.b * w,
+  });
+}

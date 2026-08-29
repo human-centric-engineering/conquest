@@ -67,6 +67,8 @@ const FIELD_LABELS: Record<ImportableField, string> = {
   accentColorEnd: 'Second accent',
   canvasColor: 'Canvas colour',
   inkColor: 'Ink colour',
+  canvasColorDark: 'Canvas colour (dark mode)',
+  inkColorDark: 'Ink colour (dark mode)',
   logoBackgroundColor: 'Logo background colour',
   logoUrl: 'Logo',
   logoMarkUrl: 'Mark (square)',

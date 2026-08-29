@@ -30,13 +30,9 @@
  *
  * Eight colours, three images, one typeface. Two deliberate omissions:
  *
- *  - `canvasColorDark` / `inkColorDark` — `darkenForDarkMode` already derives a dark palette from
- *    the light one (see theming/theme.ts). Proposing a measured dark pair would override a
- *    derivation that is usually better than anything a light-mode page can tell us about a brand's
- *    dark mode.
- *  - `bannerUrl` — the only banner-shaped image a site reliably exposes is `og:image` at roughly
- *    1.9:1, and `BRAND_BANNER_SPEC` requires 4:1 within 12%. Proposing it would guarantee a
- *    rejected upload, so the banner stays a manual choice.
+ * `bannerUrl` is the one deliberate omission: the only banner-shaped image a site reliably exposes
+ * is `og:image` at roughly 1.9:1, and `BRAND_BANNER_SPEC` requires 4:1 within 12%. Proposing it
+ * would guarantee a rejected upload, so the banner stays a manual choice.
  */
 export const IMPORTABLE_FIELDS = [
   'surfaceColor',
@@ -46,6 +42,11 @@ export const IMPORTABLE_FIELDS = [
   'accentColorEnd',
   'canvasColor',
   'inkColor',
+  // The dark pair. Proposed rather than left to the resolver: `resolveTheme` carries an
+  // ALREADY-DARK canvas across to dark mode unchanged, so a brand with a deep ground would get two
+  // identical panels and an admin would be shown a comparison in which nothing differs.
+  'canvasColorDark',
+  'inkColorDark',
   'logoBackgroundColor',
   'logoUrl',
   'logoMarkUrl',
@@ -69,6 +70,8 @@ export const IMPORTABLE_COLOR_FIELDS = [
   'accentColorEnd',
   'canvasColor',
   'inkColor',
+  'canvasColorDark',
+  'inkColorDark',
   'logoBackgroundColor',
 ] as const;
 

@@ -31,6 +31,7 @@ export {
   chroma,
   distance,
   isNeutral,
+  mix,
   parseHex,
   toHex,
   type Rgb,
@@ -45,6 +46,12 @@ export {
   type RoleAssignment,
 } from '@/lib/app/questionnaire/brand-import/assign-roles';
 export { annotateContrast } from '@/lib/app/questionnaire/brand-import/contrast';
+export {
+  MIN_GROUND_SEPARATION,
+  completeGrounds,
+  darkGroundFor,
+  groundsAreDistinct,
+} from '@/lib/app/questionnaire/brand-import/ground';
 export {
   analyseScreenshot,
   analyseUrl,
@@ -69,7 +76,9 @@ export {
   discoverFonts,
   discoverImages,
   harvestSite,
+  isThirdPartyLogo,
   normaliseUrl,
+  readSiteName,
   type DiscoveredImage,
   type HarvestOutcome,
   type HarvestedBrand,
@@ -77,3 +86,11 @@ export {
 } from '@/lib/app/questionnaire/brand-import/harvest';
 
 export { matchFontPairing, type FontMatch } from '@/lib/app/questionnaire/brand-import/font-match';
+
+export {
+  judge,
+  namesMatch,
+  verifyLogo,
+  type LogoCandidateInput,
+  type LogoVerdict,
+} from '@/lib/app/questionnaire/brand-import/verify-logo';

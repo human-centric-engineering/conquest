@@ -129,12 +129,19 @@ describe('blockedResult', () => {
 });
 
 describe('field sets', () => {
-  it('never proposes the derived dark pair or the banner', () => {
-    // `canvasColorDark` / `inkColorDark` are derived by the theme resolver and usually better
-    // than anything a light-mode page can tell us; `og:image` is ~1.9:1 and would fail the 4:1
-    // banner spec on upload.
-    expect(IMPORTABLE_FIELDS).not.toContain('canvasColorDark');
-    expect(IMPORTABLE_FIELDS).not.toContain('inkColorDark');
+  it('proposes both grounds, because the resolver cannot always tell them apart', () => {
+    // `resolveTheme` carries an ALREADY-DARK canvas across to dark mode unchanged — a deliberate
+    // default for a typed colour, and the wrong outcome for an import: a brand with a deep purple
+    // ground got two identical panels and a comparison in which nothing differed.
+    expect(IMPORTABLE_FIELDS).toContain('canvasColor');
+    expect(IMPORTABLE_FIELDS).toContain('canvasColorDark');
+    expect(IMPORTABLE_FIELDS).toContain('inkColor');
+    expect(IMPORTABLE_FIELDS).toContain('inkColorDark');
+  });
+
+  it('never proposes the banner', () => {
+    // `og:image` is ~1.9:1 and is the only banner-shaped image a site reliably exposes, so it
+    // would fail the 4:1 banner spec on upload every time.
     expect(IMPORTABLE_FIELDS).not.toContain('bannerUrl');
   });
 

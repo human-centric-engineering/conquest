@@ -63,7 +63,12 @@ export interface HarvestedBrand {
   hints: string[];
   /** Hexes the page DECLARED (theme-color, brand custom properties) — these earn high confidence. */
   declared: Set<string>;
-  logo: DiscoveredImage | null;
+  /** Lockup candidates, best guess first — the analyst picks between them by looking at them. */
+  logoCandidates: DiscoveredImage[];
+  /** The bytes of each fetched candidate, keyed by url. Already downloaded for the palette. */
+  logoImages: Map<string, Buffer>;
+  /** What the site calls itself — the name a lockup has to match to be this company's. */
+  siteName: string | null;
   mark: DiscoveredImage | null;
   logoDark: DiscoveredImage | null;
   fontFamilies: string[];
@@ -76,8 +81,8 @@ export type HarvestOutcome = { ok: true; brand: HarvestedBrand } | { ok: false; 
 /** Stylesheets fetched. Two or three carries a design system; a dozen is a crawl. */
 const MAX_STYLESHEETS = 3;
 
-/** Images fetched for their pixels — the logo, the mark, and one spare. */
-const MAX_IMAGES = 3;
+/** Images fetched for their pixels — the lockup candidates, the mark, and the dark lockup. */
+const MAX_IMAGES = 5;
 
 /** Stylesheet bytes parsed. A Tailwind bundle can be megabytes; the brand is declared early. */
 const MAX_CSS_CHARS = 600_000;
@@ -95,6 +100,36 @@ const WEIGHT = { logo: 5, mark: 2, declared: 3, frequency: 1 } as const;
 
 /** Attributes and filenames that mark an image as the site's lockup. */
 const LOGO_HINT = /logo|wordmark|brand/i;
+
+/**
+ * Images that match {@link LOGO_HINT} and are somebody ELSE's logo.
+ *
+ * The single most common way this feature picks the wrong image. A marketing site's homepage is
+ * full of files literally named `logo` that belong to press outlets, review sites, integration
+ * partners and customers — an "As seen in Forbes" strip is a row of logos, and every one of them
+ * beats the company's own on a naive filename match if it happens to appear earlier in the DOM.
+ *
+ * Two lists because the evidence comes in two forms: a NAME (the outlet itself), and a ROLE (the
+ * word "partner" or "award" attached to an otherwise anonymous file). Both are checked against the
+ * image's own attributes and against the section it sits in.
+ */
+const THIRD_PARTY_NAME =
+  /\b(?:forbes|techcrunch|bloomberg|reuters|wsj|guardian|telegraph|cnbc|bbc|wired|mashable|venturebeat|g2|capterra|trustpilot|gartner|glassdoor|producthunt|ycombinator|aws|azure|salesforce|shopify|stripe|hubspot|sap|oracle)\b/i;
+
+const THIRD_PARTY_ROLE =
+  /\b(?:as[-_ ]?seen|featured[-_ ]?in|as[-_ ]?featured|press|media|award|accredit|certif|badge|partner|integration|client|customer|testimonial|sponsor|member(?:ship)?|review)\b/i;
+
+/**
+ * Sections whose images are, by definition, not the site's own logo.
+ *
+ * Checked on the image's ancestors: a file called `eagle.svg` inside `<section class="our-clients">`
+ * is a client's mark however innocent its name looks.
+ */
+const THIRD_PARTY_CONTAINER =
+  /(?:press|media|partner|client|customer|testimonial|award|accredit|sponsor|logo-?(?:wall|strip|cloud|grid|bar)|as-seen|featured-in|trusted-by)/i;
+
+/** How many lockup candidates are kept for verification. Beyond four it is all page furniture. */
+const MAX_LOGO_CANDIDATES = 4;
 
 /** A dark-mode lockup, named the way sites actually name them. */
 const DARK_HINT = /(?:^|[-_/])dark|dark[-_.]|inverse|white/i;
@@ -174,7 +209,9 @@ export async function harvestSite(
       candidates,
       hints,
       declared,
-      logo: images.logo,
+      logoCandidates: images.logoCandidates,
+      logoImages: imagePalettes.buffers,
+      siteName: readSiteName(doc, base),
       mark: images.mark,
       logoDark: images.logoDark,
       fontFamilies: discoverFonts(doc, css),
@@ -205,25 +242,46 @@ export function normaliseUrl(raw: string): string | null {
 }
 
 interface DiscoveredImages {
-  logo: DiscoveredImage | null;
+  /**
+   * Lockup candidates, best guess first.
+   *
+   * A LIST rather than a single answer, because the ranking is a heuristic over filenames and DOM
+   * position and it is wrong often enough to matter — a press badge named `logo.svg` beats the real
+   * lockup on every signal this function can see, if it happens to appear first. The candidates go
+   * to the analyst, which can actually look at them.
+   */
+  logoCandidates: DiscoveredImage[];
   mark: DiscoveredImage | null;
   logoDark: DiscoveredImage | null;
 }
 
 /**
- * Find the lockup, the square mark and the dark lockup.
+ * Find the lockup candidates, the square mark and the dark lockup.
  *
- * Ordered by how much the page is really telling us. A `schema.org` `Organization.logo` is the site
+ * Candidates are ordered by how much the page is really telling us. A `schema.org` `Organization.logo` is the site
  * asserting "this is our logo"; an `<img>` in the header whose class says `logo` is very nearly
  * that; a filename containing "logo" is a guess that happens to be right most of the time. The
  * favicon is last because it is often a generic square rather than the brand.
  *
+ * Images that are plainly somebody ELSE's mark are excluded before ranking — see
+ * {@link isThirdPartyLogo}.
+ *
  * Exported for its own test: this ordering is the difference between proposing a wordmark and
- * proposing a 16px favicon, and it is easier to get wrong than it looks.
+ * proposing a press badge, and it is easier to get wrong than it looks.
  */
 export function discoverImages(doc: Document, base: string): DiscoveredImages {
-  const logo =
-    fromJsonLd(doc, base) ?? fromHeaderImage(doc, base) ?? fromFilename(doc, base) ?? null;
+  const candidates: DiscoveredImage[] = [];
+  const seen = new Set<string>();
+  for (const found of [
+    fromJsonLd(doc, base),
+    ...fromHeaderImages(doc, base),
+    ...fromFilenames(doc, base),
+  ]) {
+    if (!found || seen.has(found.url)) continue;
+    seen.add(found.url);
+    candidates.push(found);
+    if (candidates.length >= MAX_LOGO_CANDIDATES) break;
+  }
 
   // apple-touch-icon is typically 180x180 — square by definition and large enough to clear the
   // mark spec's 128px floor, which the 16px favicon never does.
@@ -234,7 +292,42 @@ export function discoverImages(doc: Document, base: string): DiscoveredImages {
       'apple-touch-icon'
     ) ?? absolute(doc.querySelector('link[rel~="icon"]')?.getAttribute('href'), base, 'icon');
 
-  return { logo, mark, logoDark: fromDarkVariant(doc, base) };
+  return { logoCandidates: candidates, mark, logoDark: fromDarkVariant(doc, base) };
+}
+
+/**
+ * True when an image is plainly somebody else's mark.
+ *
+ * Reads the image's own attributes AND walks its ancestors, because the two carry different
+ * evidence: `forbes-logo.svg` names the outlet, while an anonymous `eagle.svg` inside
+ * `<section class="our-clients">` is given away only by where it sits.
+ *
+ * Exported for its own test — this is the single most common way the import picks the wrong image.
+ */
+export function isThirdPartyLogo(img: Element): boolean {
+  const own = [
+    img.getAttribute('class'),
+    img.getAttribute('id'),
+    img.getAttribute('alt'),
+    img.getAttribute('title'),
+    img.getAttribute('src'),
+  ].join(' ');
+  if (THIRD_PARTY_NAME.test(own) || THIRD_PARTY_ROLE.test(own)) return true;
+
+  // Six levels reaches the section wrapper from an image nested in a card and a link, without
+  // reaching <body> on a normal page.
+  let node: Element | null = img.parentElement;
+  for (let depth = 0; node && depth < 6; depth++) {
+    const context = [
+      node.getAttribute('class'),
+      node.getAttribute('id'),
+      node.getAttribute('aria-label'),
+    ].join(' ');
+    if (THIRD_PARTY_CONTAINER.test(context) || THIRD_PARTY_NAME.test(context)) return true;
+    node = node.parentElement;
+  }
+
+  return false;
 }
 
 function fromJsonLd(doc: Document, base: string): DiscoveredImage | null {
@@ -298,30 +391,33 @@ function findOrganizationLogo(node: unknown, depth = 0): string | null {
   return null;
 }
 
-function fromHeaderImage(doc: Document, base: string): DiscoveredImage | null {
+function fromHeaderImages(doc: Document, base: string): DiscoveredImage[] {
+  const found: DiscoveredImage[] = [];
   const scopes = ['header', 'nav', '[class*="header" i]', '[class*="navbar" i]'];
   for (const scope of scopes) {
     for (const container of Array.from(doc.querySelectorAll(scope))) {
       for (const img of Array.from(container.querySelectorAll('img'))) {
         const signature = `${img.getAttribute('class') ?? ''} ${img.getAttribute('id') ?? ''} ${img.getAttribute('alt') ?? ''} ${img.getAttribute('src') ?? ''}`;
         if (!LOGO_HINT.test(signature)) continue;
+        if (isThirdPartyLogo(img)) continue;
         const resolved = absolute(img.getAttribute('src'), base, 'header');
-        if (resolved) return resolved;
+        if (resolved) found.push(resolved);
       }
     }
   }
-  return null;
+  return found;
 }
 
-function fromFilename(doc: Document, base: string): DiscoveredImage | null {
+function fromFilenames(doc: Document, base: string): DiscoveredImage[] {
+  const found: DiscoveredImage[] = [];
   for (const img of Array.from(doc.querySelectorAll('img'))) {
     const src = img.getAttribute('src');
-    if (src && LOGO_HINT.test(src)) {
-      const resolved = absolute(src, base, 'filename');
-      if (resolved) return resolved;
-    }
+    if (!src || !LOGO_HINT.test(src)) continue;
+    if (isThirdPartyLogo(img)) continue;
+    const resolved = absolute(src, base, 'filename');
+    if (resolved) found.push(resolved);
   }
-  return null;
+  return found;
 }
 
 /**
@@ -418,12 +514,13 @@ async function collectCss(doc: Document, base: string, budget: HarvestBudget): P
 async function measureImages(
   images: DiscoveredImages,
   budget: HarvestBudget
-): Promise<{ logo: ColorCandidate[]; mark: ColorCandidate[] }> {
-  const wanted = [images.logo, images.mark, images.logoDark]
+): Promise<{ logo: ColorCandidate[]; mark: ColorCandidate[]; buffers: Map<string, Buffer> }> {
+  const wanted = [...images.logoCandidates, images.mark, images.logoDark]
     .filter((image): image is DiscoveredImage => image !== null)
     .slice(0, MAX_IMAGES);
 
   const measured = new Map<string, ColorCandidate[]>();
+  const buffers = new Map<string, Buffer>();
   for (const image of wanted) {
     const fetched: FetchOutcome = await fetchResource(image.url, budget, { accept: 'image/*' });
     if (!fetched.ok) {
@@ -433,12 +530,45 @@ async function measureImages(
     // sharp rasterises SVG natively, so a vector logo needs no special case to be measured. It
     // does need one to be STORED — see the upload route.
     measured.set(image.url, await extractPalette(fetched.buffer, { max: 6 }));
+    buffers.set(image.url, fetched.buffer);
   }
 
+  // The palette is taken from the FIRST candidate only. Mixing several lockups' colours would be
+  // worse than taking one: on a page where the ranking is wrong, blending a press badge's palette
+  // into the brand's is how a stray red ends up proposed as an accent.
+  const primary = images.logoCandidates[0];
+
   return {
-    logo: (images.logo && measured.get(images.logo.url)) || [],
+    logo: (primary && measured.get(primary.url)) || [],
     mark: (images.mark && measured.get(images.mark.url)) || [],
+    buffers,
   };
+}
+
+/**
+ * What the site calls itself.
+ *
+ * The name a candidate lockup has to match to be this company's, so it is what makes "is this
+ * actually their logo?" an answerable question rather than a vibe. `og:site_name` is the site
+ * stating it outright; a `<title>` is usually "Company — tagline", so only the part before the
+ * first separator is kept; the hostname is the last resort and is almost always right in
+ * substance if not in spelling.
+ */
+export function readSiteName(doc: Document, base: string): string | null {
+  const og = doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content')?.trim();
+  if (og) return og;
+
+  const title = doc.querySelector('title')?.textContent?.trim();
+  if (title) {
+    const head = title.split(/\s+[|\u2013\u2014\-\u00b7:]\s+/)[0]?.trim();
+    if (head) return head;
+  }
+
+  try {
+    return new URL(base).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
 }
 
 /** Colours found in an inline `<svg>` in the page header — a logo with no file to fetch. */
