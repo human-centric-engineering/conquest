@@ -150,7 +150,16 @@ export interface CapabilitySlotView {
 }
 
 /** The structural half of a turn — everything but the per-turn `userMessage` + `flags`. */
-export type TurnContextBase = Omit<TurnState, 'userMessage' | 'flags'>;
+export type TurnContextBase = Omit<TurnState, 'userMessage' | 'flags' | 'progressQuestions'> & {
+  /**
+   * F17.33. Optional on {@link TurnState} — a hand-built state (a unit test, the preview harness)
+   * may leave it out and get today's behaviour — but this loader ALWAYS computes it, so every
+   * consumer downstream of a real session can read it without a fallback. Narrowing it here rather
+   * than making it required upstream keeps the "omitted = `questions`" contract where the pure
+   * layer needs it, and removes the `?? questions` dance where it cannot arise.
+   */
+  progressQuestions: QuestionView[];
+};
 
 /** Audience calibration the interviewer uses to set tone + language (subset of `AudienceShape`). */
 export interface TurnAudience {

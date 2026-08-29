@@ -75,6 +75,22 @@ _free-text_ question is usually over-consolidated. Typed batteries consolidate w
 items → one "Role satisfaction" slot, each mapped onto its own scale); distinct free-text questions
 do not, because there is only one paraphrase to give them. See `data-slots.md`.
 
+## The other way a fill arrives: a topic coming into scope late (F17.33)
+
+[Conditional Topics](./conditional-topics.md) settles what is asked LATE — when the opening
+completes, and again if the respondent asks for a topic back. Extraction candidates come from the
+scoped lists, so **a question that was out of scope on the turn it was answered was never a
+candidate**, and the answer sits in the transcript with nothing written to the form.
+
+`app/api/v1/app/questionnaire-sessions/_lib/widening-rescan.ts` re-reads the transcript once per
+newly-seated topic and writes what it finds through this same machinery: `provenance: 'inferred'`,
+the same two ceilings, gap-fill only, and `reconcileChatDataSlotFills` afterwards so the panel shows
+the area as captured. It is the opportunistic case by construction — nobody asked the question — so
+it needs no new confidence rules, and question fidelity already stops it closing out a `must_ask`
+item. Its prompt is deliberately the INVERSE of the extractor's: the extractor reads a reply to a
+question that was just asked and should lean in; the re-read is looking for something volunteered in
+passing, so it is told that an empty result is the expected one.
+
 ## Anti-patterns
 
 - **Don't** down-propagate to an already-answered question — you'd overwrite a real answer with a

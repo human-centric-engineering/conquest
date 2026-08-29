@@ -86,6 +86,7 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
 import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
@@ -1226,6 +1227,15 @@ async function handleMessage(
         });
       }
 
+      // F17.33: a topic that has only just come into scope may already have been answered — the
+      // extractor never saw the question, because it was not a candidate on the turn the respondent
+      // answered it. Re-read the transcript for whatever this widening (the plan above, or the
+      // amendment above that) just brought in. STARTED here, AWAITED after `done`, for the same
+      // reason as the capture extraction below: a multi-second call must not extend the composer
+      // lock on a respondent who has already waited for the planner. Never throws, and skips at one
+      // small query on every session that is not conditional-topics or has nothing outstanding.
+      const wideningRescan = maybeRescanAfterWidening(sessionId);
+
       // Conversational profile capture (F-capture): once the turn is persisted, best-effort extract
       // the gathered profile details from the transcript and persist them once complete. Fully
       // non-fatal (own try/catch) and only runs while the snapshot is still absent, so it stops itself
@@ -1342,6 +1352,18 @@ async function handleMessage(
       // already unlocked, but the generator keeps running until it returns, so the snapshot write still
       // completes within this request. Non-fatal — it can never reject.
       if (captureExtraction) await captureExtraction;
+
+      // F17.33: likewise the transcript re-read (started above). Its answers land before the
+      // generator returns, so the next status poll shows them.
+      const rescanned = await wideningRescan;
+      if (rescanned.kind === 'rescanned') {
+        log.info('Re-read the conversation for newly in-scope topics', {
+          sessionId,
+          topicKeys: rescanned.topicKeys,
+          answersWritten: rescanned.answersWritten,
+          dataSlotsWritten: rescanned.dataSlotsWritten,
+        });
+      }
     }
 
     return sseResponse(drive(), { signal: request.signal });

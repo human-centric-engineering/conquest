@@ -2,7 +2,7 @@
 feature: F17.33
 title: Progress, and what the respondent is told, when the interview grows
 phase: P17 — Conditional Topics
-status: phase A shipped (2026-08-29); B–D in progress. Decisions still needed at §5.4 (which extractor) and §6.3 (announce gating)
+status: phases A + B shipped (2026-08-29); C–D in progress. Decision still needed at §6.3 (announce gating)
 owner: TBD
 deps: F17.1 (the plan), F17.6 (respondent amendment), F-progress (milestone banners), F4.5 (completion assessment)
 opened: 2026-08-29
@@ -272,9 +272,21 @@ candidate set is cheapest and proven (the route already narrows it), but its pro
 "the turn that just happened" and would be reading a whole transcript. A dedicated prompt is more
 honest about the task — _"these questions were not being asked at the time; has the respondent
 already answered any of them?"_ — and can be told to be conservative, which is the right bias when
-nobody asked the question. **Recommendation: dedicated prompt, reusing the extractor's schema and
-the answer-fit resolver.** Sign-off needed because it is the difference between a small phase and a
-medium one.
+nobody asked the question. **Settled: a dedicated prompt, reusing `answerExtractionSchema` and
+`normalizeAnswerIntents`.** The value validation is the part that must not be reimplemented; the
+framing is the part that must not be reused. The re-read's prompt is the extractor's inverse — the
+extractor reads a reply to a question just asked and is right to lean in, while this pass hunts for
+something volunteered in passing, and is told in as many words that an empty result is the expected
+one.
+
+**One thing the implementation added beyond this spec.** The runner resolves the session's actual
+scope (`buildSessionScope`) and intersects its candidates with it, even though `selectRescanTargets`
+already computes the same members from the same helper. Two surfaces that agree by construction
+until one is handed different inputs is the exact shape of F17.13, where the form rendered a light
+topic's top-two-by-weight while the answers guard admitted the first-two-authored. Writing an answer
+to a question this interview will never show is the same class of mistake and would be invisible —
+the row simply appears. It also makes the module honest with the scope leak guard, which caught it
+on the first run and would otherwise have needed an allowlist entry claiming something false.
 
 ### 5.5 What it is honest about
 
@@ -386,13 +398,13 @@ answer, not a backfill.
 
 ## 10. Phasing
 
-| Phase  | Scope                                                                                                                                | Size                                            |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| **A**  | ✅ **Shipped.** `progressQuestions` + `progress.ts` + the `progressFloorPct` column + both orchestrators + the status view + the bar | small–medium — one migration, one pure module   |
-| **B**  | The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                                     | medium — the real work; §5.4 decides how medium |
-| **C1** | Amendment acknowledgement gains name, size and the respondent's own reason; `announce` gating settled                                | small — one function, one prompt paragraph      |
-| **C2** | Planner emits a per-topic respondent-facing reason (schema + prompt + carriage)                                                      | small–medium, and optional                      |
-| **D**  | `conditional-topics-progress-variance` + threading the figure into `ConfigConflictInput`                                             | small, mechanical, optional                     |
+| Phase  | Scope                                                                                                                                | Size                                          |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| **A**  | ✅ **Shipped.** `progressQuestions` + `progress.ts` + the `progressFloorPct` column + both orchestrators + the status view + the bar | small–medium — one migration, one pure module |
+| **B**  | ✅ **Shipped.** The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                     | medium — §5.4 settled: a dedicated prompt     |
+| **C1** | Amendment acknowledgement gains name, size and the respondent's own reason; `announce` gating settled                                | small — one function, one prompt paragraph    |
+| **C2** | Planner emits a per-topic respondent-facing reason (schema + prompt + carriage)                                                      | small–medium, and optional                    |
+| **D**  | `conditional-topics-progress-variance` + threading the figure into `ConfigConflictInput`                                             | small, mechanical, optional                   |
 
 A and B share the migration, so they want to be one branch even though they are two commits. C is
 independent of both and could go first if the copy matters more than the number. D is the tail and

@@ -289,9 +289,15 @@ before the plan exists the bar is measured against every question that could sti
 deciding the plan moves it UP, and a session-scoped floor turns any remaining widening into a stall
 rather than a reversal. See [`completion-logic.md`](./completion-logic.md#and-a-third-figure-the-bar-actually-draws-progresspct-f1733).
 
-Still open: whatever the respondent already said about a newly-seated topic was out of scope when
-they said it, so the extractor never saw the question it answered — specced in
-[`f17-progress-under-widening.md`](../planning/features/f17-progress-under-widening.md) §5.
+The second consequence is that whatever the respondent already said about a newly-seated topic was
+out of scope when they said it — extraction candidates come from the scoped lists — so the extractor
+never saw the question it answered, and the interviewer asks it again. **A re-read now closes that**
+(`widening-rescan.ts`, F17.33): once per topic per session, the transcript is read back against
+whatever the widening brought in, and anything already answered is written as an ordinary
+opportunistic fill — capped, `inferred`, gap-fill only, and never able to satisfy a `must_ask`
+question on its own. It runs after the turn persists and is awaited after the `done` frame, so it
+never extends the wait of a respondent who has just waited for the planner. A failed read banks
+nothing, so the topic stays outstanding for a later turn.
 
 ### What the document asked for, when the opening cannot decide it (F17.31a)
 
