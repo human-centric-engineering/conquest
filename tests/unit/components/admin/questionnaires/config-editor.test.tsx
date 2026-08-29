@@ -32,7 +32,7 @@ import {
   DEFAULT_INVITEE_FIELDS,
   type HouseRule,
 } from '@/lib/app/questionnaire/types';
-import { DIMENSION_PHRASES, personaToneClause } from '@/lib/app/questionnaire/chat/tone';
+import { DIMENSION_PHRASES } from '@/lib/app/questionnaire/chat/tone';
 
 // ─── Shadcn Select → native <select> ─────────────────────────────────────────
 // Radix Select's popover doesn't work in jsdom; replace with a native select so
@@ -1458,13 +1458,22 @@ describe('ConfigEditor', () => {
     expect(screen.getByText(/no tone clause is added/i)).toBeInTheDocument();
   });
 
-  it('previews the exact persona clause the prompt receives', () => {
+  it('edits the persona prose without echoing the assembled prompt clause back', () => {
+    // The clause preview was removed: it restated the admin's own sentence wrapped in boilerplate,
+    // which read as duplication rather than information. The textarea is the whole control now.
     setup(customVoice());
     fireEvent.click(switchNear(/^Persona/));
     const textarea = screen.getByPlaceholderText(/supportive career coach/i);
     fireEvent.change(textarea, { target: { value: 'You are a blunt consultant' } });
-    const clause = personaToneClause('You are a blunt consultant');
-    expect(screen.getByText((c) => c.includes(clause))).toBeInTheDocument();
+    expect(textarea).toHaveValue('You are a blunt consultant');
+    // The admin's own sentence appears once, in the box. Nothing echoes it back inside the
+    // assembled clause. (The field's help still quotes the boilerplate TEMPLATE, with no admin
+    // text in it — that is explanation, not duplication, so the matcher requires both halves.)
+    expect(
+      screen.queryByText(
+        (c) => c.includes('You are a blunt consultant') && c.includes('Adopt this persona')
+      )
+    ).not.toBeInTheDocument();
   });
 
   it('reflects a stored enabled dimension from config', () => {
@@ -1480,7 +1489,7 @@ describe('ConfigEditor', () => {
     expect(screen.getByText('Formal')).toBeInTheDocument();
   });
 
-  it('shows the signed −2…+2 dial value (stored 1–5 → display) and a scale legend', () => {
+  it('shows the signed −2…+2 dial value (stored 1–5 → display) and a collapsed scale legend', () => {
     const content = () => settingsContent();
     // Stored 5 (the max pole) shows as +2 on the display scale.
     setup(
@@ -1492,7 +1501,9 @@ describe('ConfigEditor', () => {
       })
     );
     expect(content().getByText('+2')).toBeInTheDocument();
-    // The scale legend explains the balanced-vs-intensity split (phrases unique to the legend).
+    // The scale legend collapses behind a summary — read once, then out of the way. Its body still
+    // renders (a closed <details> keeps its content in the DOM), so both halves are asserted.
+    expect(content().getByText('How the dials work')).toBeInTheDocument();
     expect(content().getByText(/Each dial runs from/)).toBeInTheDocument();
     expect(content().getByText(/treat 0 as neutral/)).toBeInTheDocument();
   });
