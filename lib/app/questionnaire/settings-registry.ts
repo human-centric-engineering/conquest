@@ -463,6 +463,15 @@ export const SETTING_DESCRIPTORS = {
         return [{ label: 'Interviewer voice', value: 'Custom tone for this questionnaire' }];
       }
       const pinned = c.personas.find((p) => p.key === c.personaSelection.defaultPersonaKey);
+      // The interviewers this questionnaire offers — the admin's tick-boxes, or the whole library
+      // for the empty "all of them" shape.
+      const offered =
+        c.personaSelection.availableKeys.length > 0
+          ? c.personas.filter((p) => c.personaSelection.availableKeys.includes(p.key))
+          : c.personas;
+      // Switching needs something to switch to: with one interviewer offered the setting is inert,
+      // and saying "Yes" here would misdescribe what a respondent actually sees.
+      const canSwitch = c.personaSelection.allowRespondentSwitch && offered.length >= 2;
       const rows: SettingRow[] = [
         {
           label: 'Interviewer voice',
@@ -470,10 +479,21 @@ export const SETTING_DESCRIPTORS = {
         },
         {
           label: 'Respondents may switch interviewer',
-          value: yesNo(c.personaSelection.allowRespondentSwitch),
+          value: yesNo(canSwitch),
         },
       ];
-      if (c.personaSelection.allowRespondentSwitch) {
+      // Only meaningful once the library is resolved (`toConfigView` fills it); a bare default
+      // config carries no personas and would render a nonsense "All 0".
+      if (c.personas.length > 0) {
+        rows.splice(1, 0, {
+          label: 'Interviewers available',
+          value:
+            offered.length === c.personas.length
+              ? `All ${c.personas.length}`
+              : offered.map((p) => p.label).join(', '),
+        });
+      }
+      if (canSwitch) {
         rows.push({
           label: 'Interviewer switching via',
           value: PERSONA_SWITCHER_LABELS[c.personaSelection.switcher],

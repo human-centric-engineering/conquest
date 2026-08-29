@@ -5,12 +5,14 @@
  * voice" either/or shown in `config-editor.tsx` when built-in-persona mode is on.
  *
  * Tests pin what the component DOES:
- *  - the persona dropdown lists the library, marks the pinned one, and fires
+ *  - a tick-box per persona says which interviewers the questionnaire offers, with select-all /
+ *    deselect-all, the last one un-tickable, and the pinned default re-pinned when it's un-ticked
+ *  - the default dropdown lists only the OFFERED personas, marks the pinned one, and fires
  *    `onSelectionChange({ defaultPersonaKey })` on change
  *  - the "Let respondents switch" toggle fires `onSelectionChange({ allowRespondentSwitch })` and
  *    reveals/hides the switcher-style select (which fires `onSelectionChange({ switcher })`)
- *  - the read-only preview renders the pinned persona's name, description, prompt, and active tone
- *    dials on the signed −2…+2 scale — and shows the neutral fallback when no dials are active
+ *  - every tick-box carries the persona's respondent-facing description, and its prompt + tone dials
+ *    sit behind a per-persona "More about {name}" toggle that opens one detail at a time
  *
  * The shadcn Select/Switch/FieldHelp are replaced with plain inputs so the popover-free controls
  * work in jsdom.
@@ -92,6 +94,7 @@ function richTone(): ToneSettings {
 
 const CONFIDANT: PersonaOption = {
   key: 'confidant',
+  category: 'character',
   label: 'The Confidant',
   description: 'Warm and easy — like talking things through with a friend.',
   tone: richTone(),
@@ -99,6 +102,7 @@ const CONFIDANT: PersonaOption = {
 
 const PLAIN: PersonaOption = {
   key: 'plain',
+  category: 'general',
   label: 'The Plain One',
   description: '',
   tone: { ...DEFAULT_TONE_SETTINGS },
@@ -107,6 +111,7 @@ const PLAIN: PersonaOption = {
 /** A persona whose label is blank — the panel must fall back to showing its key. */
 const NAMELESS: PersonaOption = {
   key: 'nameless-voice',
+  category: 'general',
   label: '   ',
   description: '',
   tone: { ...DEFAULT_TONE_SETTINGS },
@@ -118,10 +123,24 @@ function makeSelection(over: Partial<PersonaSelectionSettings> = {}): PersonaSel
   return {
     enabled: true,
     defaultPersonaKey: 'confidant',
+    // Empty ⇒ every persona in the passed library is offered (the "all of them" shape).
+    availableKeys: [],
     allowRespondentSwitch: false,
     switcher: 'page',
     ...over,
   };
+}
+
+/** Open a persona's detail pane by its "More about {name}" toggle, and return that toggle. */
+function openDetail(name: string): HTMLElement {
+  const toggle = screen.getByRole('button', { name: `More about ${name}` });
+  fireEvent.click(toggle);
+  return toggle;
+}
+
+/** The availability tick-box for a persona, addressed by its accessible (label) name. */
+function tickBox(name: string | RegExp): HTMLInputElement {
+  return screen.getByRole<HTMLInputElement>('checkbox', { name });
 }
 
 function renderPanel(over: Partial<PersonaSelectionSettings> = {}, onSelectionChange = vi.fn()) {
@@ -173,23 +192,46 @@ describe('PersonaLibraryPanel', () => {
     expect(onSelectionChange).toHaveBeenCalledWith({ switcher: 'indicator' });
   });
 
-  it('previews the pinned persona: name, description, prompt, and active tone dials (signed scale)', () => {
-    renderPanel({ defaultPersonaKey: 'confidant' });
-    expect(screen.getByText('The Confidant')).toBeInTheDocument();
+  it("shows every persona's respondent-facing description beside its tick-box", () => {
+    renderPanel();
+    // The admin reads exactly what the respondent will read, without opening anything.
     expect(
       screen.getByText('Warm and easy — like talking things through with a friend.')
     ).toBeInTheDocument();
-    expect(screen.getByText('Lead with warmth and make people feel heard.')).toBeInTheDocument();
+  });
+
+  it('keeps the prompt and tone dials behind the per-persona toggle', () => {
+    renderPanel();
+    const prompt = 'Lead with warmth and make people feel heard.';
+    // The system prompt is not on screen until asked for.
+    expect(screen.queryByText(prompt)).not.toBeInTheDocument();
+
+    openDetail('The Confidant');
+    expect(screen.getByText(prompt)).toBeInTheDocument();
     // Active dials rendered with their signed display value: empathy +2, formality −2.
     const empathy = screen.getByText('Empathy').closest('span')!;
     expect(within(empathy).getByText('+2')).toBeInTheDocument();
     const formality = screen.getByText('Formality').closest('span')!;
     expect(within(formality).getByText('-2')).toBeInTheDocument();
+
+    // The toggle closes what it opened.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide The Confidant' }));
+    expect(screen.queryByText(prompt)).not.toBeInTheDocument();
   });
 
-  it('shows the neutral fallback when the pinned persona has no active tone dials', () => {
-    renderPanel({ defaultPersonaKey: 'plain' });
-    expect(screen.getByText('The Plain One')).toBeInTheDocument();
+  it('opens one detail at a time, so the library cannot become a wall of text', () => {
+    renderPanel();
+    openDetail('The Confidant');
+    expect(screen.getByRole('button', { name: 'Hide The Confidant' })).toBeInTheDocument();
+    openDetail('The Plain One');
+    // Opening the second closed the first.
+    expect(screen.queryByRole('button', { name: 'Hide The Confidant' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide The Plain One' })).toBeInTheDocument();
+  });
+
+  it('shows the neutral fallback for a persona with no active tone dials', () => {
+    renderPanel();
+    openDetail('The Plain One');
     expect(screen.getByText(/Neutral — no tone dials applied\./)).toBeInTheDocument();
   });
 
@@ -198,8 +240,122 @@ describe('PersonaLibraryPanel', () => {
     renderPanel({ defaultPersonaKey: 'no-such-persona' });
     const personaSelect = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
     expect(personaSelect.value).toBe('confidant');
-    // Preview renders the fallback persona.
-    expect(screen.getByText('The Confidant')).toBeInTheDocument();
+    // And the fallback persona is the row marked as the default.
+    expect(tickBox(/The Confidant/).id).toBe('persona-available-confidant');
+  });
+
+  // ── Which interviewers the questionnaire offers ──────────────────────────
+
+  it('ticks every persona for the empty "offer everything" shape', () => {
+    renderPanel();
+    expect(tickBox(/The Confidant/).checked).toBe(true);
+    expect(tickBox('The Plain One').checked).toBe(true);
+    expect(screen.getByText('2 of 2 interviewers available.')).toBeInTheDocument();
+  });
+
+  it('ticks only the offered personas when a subset is stored', () => {
+    renderPanel({ availableKeys: ['confidant'] });
+    expect(tickBox(/The Confidant/).checked).toBe(true);
+    expect(tickBox('The Plain One').checked).toBe(false);
+  });
+
+  it('un-ticking a persona saves the remaining offered keys', () => {
+    const { onSelectionChange } = renderPanel();
+    fireEvent.click(tickBox('The Plain One'));
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      availableKeys: ['confidant'],
+      defaultPersonaKey: 'confidant',
+    });
+  });
+
+  it('re-pins the default when the pinned persona is un-ticked', () => {
+    const { onSelectionChange } = renderPanel({ defaultPersonaKey: 'confidant' });
+    fireEvent.click(tickBox(/The Confidant/));
+    // Only "plain" survives, so it becomes the default without the admin pinning it.
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      availableKeys: ['plain'],
+      defaultPersonaKey: 'plain',
+    });
+  });
+
+  it('will not let the last offered interviewer be un-ticked', () => {
+    const { onSelectionChange } = renderPanel({
+      availableKeys: ['confidant'],
+      defaultPersonaKey: 'confidant',
+    });
+    const last = tickBox(/The Confidant/);
+    expect(last.disabled).toBe(true);
+    fireEvent.click(last);
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it('ticking the last un-ticked persona normalises back to the empty "all" shape', () => {
+    const { onSelectionChange } = renderPanel({
+      availableKeys: ['confidant'],
+      defaultPersonaKey: 'confidant',
+    });
+    fireEvent.click(tickBox('The Plain One'));
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      availableKeys: [],
+      defaultPersonaKey: 'confidant',
+    });
+  });
+
+  it('select all offers the whole library, saved as the empty shape', () => {
+    const { onSelectionChange } = renderPanel({
+      availableKeys: ['confidant'],
+      defaultPersonaKey: 'confidant',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      availableKeys: [],
+      defaultPersonaKey: 'confidant',
+    });
+  });
+
+  it('disables select all once the whole library is already offered', () => {
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'Select all' })).toBeDisabled();
+  });
+
+  it('deselect all keeps the pinned default — something must always be offered', () => {
+    const { onSelectionChange } = renderPanel({ defaultPersonaKey: 'plain' });
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      availableKeys: ['plain'],
+      defaultPersonaKey: 'plain',
+    });
+  });
+
+  it('with one interviewer offered: it is the default, the dropdown and switching are inert', () => {
+    renderPanel({
+      availableKeys: ['plain'],
+      defaultPersonaKey: 'plain',
+      allowRespondentSwitch: true,
+    });
+    expect(
+      screen.getByText(
+        'One interviewer available — it is the default, and respondents see no picker.'
+      )
+    ).toBeInTheDocument();
+    // The default dropdown lists only the offered persona, and can't be changed.
+    const personaSelect = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
+    expect(personaSelect.value).toBe('plain');
+    expect(personaSelect).toBeDisabled();
+    expect(screen.queryByRole('option', { name: /The Confidant/ })).not.toBeInTheDocument();
+    // Nothing to switch between, so the switch is disabled and the switcher-style select is hidden.
+    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.queryByText(/How respondents switch interviewer/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deselect all' })).toBeDisabled();
+  });
+
+  it('groups the tick-boxes under one heading per category the library uses', () => {
+    renderPanel();
+    // CONFIDANT is character, PLAIN is general.
+    expect(screen.getByText('General purpose')).toBeInTheDocument();
+    expect(screen.getByText('Character and engagement')).toBeInTheDocument();
+    // No heading for a category nothing in this library belongs to.
+    expect(screen.queryByText('HR and people')).not.toBeInTheDocument();
   });
 
   it('uses the persona key as the label when a persona has no name', () => {
@@ -214,6 +370,8 @@ describe('PersonaLibraryPanel', () => {
     );
     // Blank label → the key is shown, both in the dropdown option and the preview name.
     expect(screen.getByRole('option', { name: /nameless-voice · Selected/ })).toBeInTheDocument();
-    expect(screen.getByText('nameless-voice')).toBeInTheDocument();
+    // The tick-box and its detail toggle both fall back to the key.
+    expect(screen.getByRole('checkbox', { name: /nameless-voice/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More about nameless-voice' })).toBeInTheDocument();
   });
 });

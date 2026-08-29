@@ -91,7 +91,6 @@ import {
 import { HouseRulesPanel } from '@/components/admin/questionnaires/house-rules-panel';
 import { InterviewerStrategyPanel } from '@/components/admin/questionnaires/interviewer-strategy-panel';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
-import { personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 import {
   CHAT_TEXT_SIZES,
   CHAT_TEXT_SIZE_LABELS,
@@ -2234,7 +2233,6 @@ export function ConfigEditor({
                             “Adopt this persona throughout — let it shape your voice and the
                             perspective you bring: …”
                           </span>{' '}
-                          The exact clause is shown beneath the box.
                         </p>
                       </FieldHelp>
                     </Label>
@@ -2245,40 +2243,13 @@ export function ConfigEditor({
                         value={tone.persona.text}
                         onChange={(e) => setTonePersona({ text: e.target.value })}
                         maxLength={TONE_PERSONA_MAX_LENGTH}
-                        rows={2}
+                        rows={5}
                         disabled={busy}
                         placeholder="e.g. You are an experienced, supportive career coach."
                         className="max-w-md"
                       />
-                      {/* Live "what's added" preview — the precise persona clause the prompt receives. */}
-                      <p className="text-muted-foreground max-w-md text-xs leading-relaxed">
-                        {tone.persona.text.trim() ? (
-                          <>
-                            <span className="font-medium">Adds to the prompt:</span>{' '}
-                            <span className="text-foreground/80 italic">
-                              “{personaToneClause(tone.persona.text)}”
-                            </span>
-                          </>
-                        ) : (
-                          'Enter persona text above to see the exact clause it adds.'
-                        )}
-                      </p>
                     </div>
                   )}
-                </div>
-
-                {/* Scale legend — explains the signed −2…+2 dials and the balanced-vs-intensity split
-                    (the same distinction each row's help + live preview reflect per dial). */}
-                <div className="bg-muted/30 text-muted-foreground rounded-md border p-3 text-xs leading-relaxed">
-                  Each dial runs from <strong className="text-foreground">−2 to +2</strong> with{' '}
-                  <strong className="text-foreground">0</strong> in the middle.{' '}
-                  <strong className="text-foreground">Balanced</strong> dials (empathy, formality,
-                  verbosity, reading complexity, humour) treat 0 as neutral — it adds nothing —
-                  while − and + push toward the two opposite styles shown under each slider.{' '}
-                  <strong className="text-foreground">Intensity</strong> dials (mirroring, mimicry,
-                  warmth, curiosity) run low → high, so every position adds a clause; switch the
-                  dial off for none. The exact clause each position injects is shown live beneath
-                  its slider.
                 </div>
 
                 {TONE_DIMENSION_META.map((meta) => (
@@ -2291,6 +2262,28 @@ export function ConfigEditor({
                     onLevel={(level) => setToneDimension(meta.key, { level })}
                   />
                 ))}
+
+                {/* Scale legend — the signed −2…+2 dials and the balanced-vs-intensity split. It
+                    sits AFTER the dials and collapsed (the house `<details>` pattern): read once
+                    and rarely again, so it is a footnote to the controls rather than a gate in
+                    front of them. */}
+                <details className="group bg-muted/30 rounded-md border">
+                  <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-2 p-3 text-xs font-medium select-none">
+                    How the dials work
+                    <span className="ml-auto font-normal group-open:hidden">−2 to +2</span>
+                  </summary>
+                  <div className="text-muted-foreground px-3 pb-3 text-xs leading-relaxed">
+                    Each dial runs from <strong className="text-foreground">−2 to +2</strong> with{' '}
+                    <strong className="text-foreground">0</strong> in the middle.{' '}
+                    <strong className="text-foreground">Balanced</strong> dials (empathy, formality,
+                    verbosity, reading complexity, humour) treat 0 as neutral — it adds nothing —
+                    while − and + push toward the two opposite styles shown under each slider.{' '}
+                    <strong className="text-foreground">Intensity</strong> dials (mirroring,
+                    mimicry, warmth, curiosity) run low → high, so every position adds a clause;
+                    switch the dial off for none. The exact clause each position injects is shown
+                    live beneath its slider.
+                  </div>
+                </details>
               </>
             )}
           </SettingsGroup>

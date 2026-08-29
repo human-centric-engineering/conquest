@@ -638,9 +638,44 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
  * respondent selection ({@link PersonaSelectionSettings}), the respondent picks one of these and it
  * REPLACES the version's `tone` for their session.
  */
+/**
+ * What a built-in persona is FOR — the situation it was written for, used to group the library so an
+ * admin running (say) an HR review can find the voices suited to it without reading all of them.
+ *
+ * Admin-facing organisation only: a category never reaches a respondent (the client menu is
+ * key/label/description) and never changes how a persona behaves. `character` is the odd one out —
+ * those personas lead with personality rather than a professional setting, and suit engagement-led
+ * questionnaires whatever the subject.
+ */
+export const PERSONA_CATEGORIES = [
+  'general',
+  'research',
+  'corporate',
+  'customer',
+  'hr',
+  'advisory',
+  'wellbeing',
+  'character',
+] as const;
+export type PersonaCategory = (typeof PERSONA_CATEGORIES)[number];
+
+/** Admin-facing group headings for {@link PERSONA_CATEGORIES}, in the same order. */
+export const PERSONA_CATEGORY_LABELS: Record<PersonaCategory, string> = {
+  general: 'General purpose',
+  research: 'Research and discovery',
+  corporate: 'Corporate and consulting',
+  customer: 'Customer experience',
+  hr: 'HR and people',
+  advisory: 'Advisory and professional services',
+  wellbeing: 'Wellbeing and sensitive topics',
+  character: 'Character and engagement',
+};
+
 export type PersonaOption = {
   /** Stable slug, unique within the library — persisted as the session's choice. */
   key: string;
+  /** The situation this voice was written for. Groups the admin library; never shown to respondents. */
+  category: PersonaCategory;
   /** Display name (admin + respondent facing), e.g. "The Straight-Talking Curmudgeon". */
   label: string;
   /** One-line respondent-facing description shown on the selection card. */
@@ -672,9 +707,22 @@ export type PersonaSelectionSettings = {
   /** The pinned persona — applied to every respondent (and pre-selected when switching is allowed). */
   defaultPersonaKey: string;
   /**
-   * When true, respondents may switch interviewer among the library (via {@link switcher}); when
-   * false, everyone gets the pinned `defaultPersonaKey` and no picker/switcher renders. Only
-   * meaningful while `enabled`.
+   * Which built-in personas this questionnaire OFFERS — the admin's tick-box subset of the fixed
+   * library. Everything downstream (the pinned default, the respondent picker, a crafted PATCH)
+   * is confined to these keys.
+   *
+   * The empty array is the "all of them" shape, not "none": it's what an untouched/legacy row reads
+   * as, and what the admin panel saves when every box is ticked — so such a questionnaire picks up
+   * any persona later added to the built-in library. Narrowing (`narrowPersonaSelection`) drops
+   * unknown keys and guarantees `defaultPersonaKey` is one of the offered set; when exactly one
+   * persona is offered it IS the default. Only meaningful while `enabled`.
+   */
+  availableKeys: string[];
+  /**
+   * When true, respondents may switch interviewer among the offered personas (via {@link
+   * switcher}); when false, everyone gets the pinned `defaultPersonaKey` and no picker/switcher
+   * renders. Only meaningful while `enabled` — and inert when only one persona is offered, since
+   * there is then nothing to switch to.
    */
   allowRespondentSwitch: boolean;
   /** How the respondent picks/switches interviewer, when switching is allowed. See {@link PersonaSwitcher}. */
@@ -696,6 +744,8 @@ export const DEFAULT_PERSONA_KEY = 'neutral-coach';
 export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
   enabled: true,
   defaultPersonaKey: DEFAULT_PERSONA_KEY,
+  // Empty ⇒ the whole built-in library is offered (see `availableKeys`).
+  availableKeys: [],
   allowRespondentSwitch: false,
   switcher: 'page',
 };

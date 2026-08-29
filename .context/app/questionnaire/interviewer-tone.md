@@ -93,13 +93,20 @@ resolved `tone` reaches the phraser. An all-off block adds nothing. See
 
 The **Interviewer tone & persona** group in `ConfigEditor` (`components/admin/questionnaires/config-editor.tsx`):
 a persona toggle + textarea, then nine dimension rows (enable `Switch`, and when on a signed −2…+2
-`Slider` centred on 0, with pole captions and a scale legend explaining the balanced-vs-intensity
-split). The group always renders. The whole block is sent on save and validated by `toneSettingsSchema`
+`Slider` centred on 0, with pole captions). The balanced-vs-intensity scale legend sits in a
+collapsed `<details>` ("How the dials work") **below** the rows — it is read once and rarely again,
+so it is a footnote to the controls rather than a gate in front of them. The group always renders. The whole block is sent on save and validated by `toneSettingsSchema`
 (`authoring/config-schema.ts`, `.strict()` — unknown keys and out-of-range levels are rejected).
 
-**Live "what's added" preview.** Each dimension row (and the persona textarea) shows the _exact_
-clause the current position injects, so an author sees precisely what the dial does to the prompt.
-This reads straight from the prompt source — `ToneDimensionRow` imports the exported
-`DIMENSION_PHRASES` map, and the persona box calls the exported `personaToneClause(text)` — so the
-preview can never drift from what `buildToneInstructions` actually sends. A neutral-midpoint bipolar
-dial shows "no tone clause is added".
+**Live "what's added" preview.** Each **dimension row** shows the _exact_ clause the current position
+injects, so an author sees precisely what the dial does to the prompt. This reads straight from the
+prompt source — `ToneDimensionRow` imports the exported `DIMENSION_PHRASES` map — so the preview can
+never drift from what `buildToneInstructions` actually sends. A neutral-midpoint bipolar dial shows
+"no tone clause is added".
+
+The **persona textarea has no such preview**, and deliberately so. A dial's clause is prompt text the
+admin never wrote and cannot otherwise see, which is the whole value of showing it. The persona
+clause is the admin's own sentence wrapped in one fixed line of boilerplate, so the preview restated
+what they had just typed and read as duplication. `personaToneClause` is still exported and still the
+single source of that wrapper for `buildToneInstructions`; the field's help quotes the boilerplate
+template (with no admin text in it) for anyone who wants to know the shape.

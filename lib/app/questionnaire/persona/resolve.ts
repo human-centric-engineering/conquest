@@ -9,12 +9,17 @@
  *
  * `enabled` here means "show the picker": the caller (route / page) enables it only when built-in
  * persona mode is on, exactly as the intro surface does. It requires
- * built-in persona mode on AND respondent switching allowed AND at least two personas — when
- * switching is off the pinned persona still governs the interviewer, there's just no picker.
+ * built-in persona mode on AND respondent switching allowed AND at least two OFFERED personas —
+ * when switching is off (or the admin offers only one interviewer) the pinned persona still governs
+ * the interviewer, there's just no picker.
  */
 
 import { prisma } from '@/lib/db/client';
-import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/persona/settings';
+import {
+  availablePersonas,
+  narrowPersonas,
+  narrowPersonaSelection,
+} from '@/lib/app/questionnaire/persona/settings';
 import type { PersonaSwitcher } from '@/lib/app/questionnaire/types';
 
 /**
@@ -30,9 +35,9 @@ export interface PersonaMenuOption {
 
 /** The client-safe persona menu a respondent surface renders (no tone / prompt prose). */
 export interface ResolvedSessionPersonas {
-  /** Whether the picker should be shown: per-version toggle on AND at least two personas. */
+  /** Whether the picker should be shown: per-version toggle on AND at least two offered personas. */
   enabled: boolean;
-  /** The persona cards to choose from. Always populated (built-ins when unconfigured). */
+  /** The persona cards to choose from — the ones this questionnaire offers (all, when unconfigured). */
   personas: PersonaMenuOption[];
   /** The persona this respondent has chosen, or `null` when they haven't (⇒ the default applies). */
   selectedPersonaKey: string | null;
@@ -65,8 +70,11 @@ export async function resolveSessionPersonas(
   if (!session) return null;
 
   const config = session.version.config;
-  const personas = narrowPersonas(config?.personas);
   const selection = narrowPersonaSelection(config?.personaSelection);
+  // Only the personas this questionnaire offers reach the respondent — the admin's tick-boxes are
+  // the menu. Offer exactly one and there is nothing to pick, so no picker renders (`enabled`
+  // below needs two) and that one persona governs as the default.
+  const personas = availablePersonas(narrowPersonas(config?.personas), selection);
 
   return {
     // Show the picker only when built-in mode is on, respondents are allowed to switch, and there

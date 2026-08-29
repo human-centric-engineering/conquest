@@ -3,8 +3,9 @@
  *
  * The DB seam for the respondent persona menu. Pins: `null` on a missing session; the client menu
  * strips the tone/prompt prose (only key/label/description ship); `enabled` (show the picker)
- * requires built-in mode on AND respondent switching allowed AND at least two personas; an
- * unconfigured library resolves to the built-ins; and the session's `selectedPersonaKey` + the
+ * requires built-in mode on AND respondent switching allowed AND at least two OFFERED personas; an
+ * unconfigured library resolves to the built-ins and `availableKeys` narrows it to what the
+ * questionnaire offers; and the session's `selectedPersonaKey` + the
  * config default flow through.
  *
  * @see lib/app/questionnaire/persona/resolve.ts
@@ -64,7 +65,7 @@ describe('resolveSessionPersonas', () => {
   });
 
   it('shows the picker only when built-in mode is on, switching is allowed, and there are ≥2 personas', async () => {
-    // Built-in mode on + switching on → the picker (8 built-ins).
+    // Built-in mode on + switching on, with the whole library offered → the picker.
     dbMock.findUnique.mockResolvedValue(
       row({
         personaSelection: {
@@ -109,5 +110,41 @@ describe('resolveSessionPersonas', () => {
     const out = await resolveSessionPersonas('sess-1');
     expect(out?.selectedPersonaKey).toBe('comedian');
     expect(out?.defaultPersonaKey).toBe('philosopher');
+  });
+
+  it('offers only the personas the questionnaire makes available', async () => {
+    dbMock.findUnique.mockResolvedValue(
+      row({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'philosopher',
+          availableKeys: ['philosopher', 'comedian'],
+          allowRespondentSwitch: true,
+        },
+      })
+    );
+    const out = await resolveSessionPersonas('sess-1');
+    // Library order, not the order they were ticked in.
+    expect(out?.personas.map((p) => p.key)).toEqual(['comedian', 'philosopher']);
+    expect(out?.enabled).toBe(true);
+  });
+
+  it('shows no picker when only one persona is available, and pins it as the default', async () => {
+    dbMock.findUnique.mockResolvedValue(
+      row({
+        personaSelection: {
+          enabled: true,
+          // A default that is no longer offered — the read path re-pins it to the lone survivor.
+          defaultPersonaKey: 'philosopher',
+          availableKeys: ['comedian'],
+          allowRespondentSwitch: true,
+        },
+      })
+    );
+    const out = await resolveSessionPersonas('sess-1');
+    expect(out?.personas.map((p) => p.key)).toEqual(['comedian']);
+    expect(out?.defaultPersonaKey).toBe('comedian');
+    // Nothing to choose between ⇒ no picker, even with switching allowed.
+    expect(out?.enabled).toBe(false);
   });
 });

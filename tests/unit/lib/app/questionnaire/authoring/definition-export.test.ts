@@ -312,6 +312,7 @@ describe('parseDefinitionImport', () => {
     const personaSelection = {
       enabled: true,
       defaultPersonaKey: 'philosopher',
+      availableKeys: [],
       allowRespondentSwitch: true,
       switcher: 'both' as const,
     };

@@ -28,6 +28,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 
 function configOf(overrides: Partial<QuestionnaireConfigShape> = {}): ConfigView {
   return { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...overrides, saved: true };
@@ -370,6 +371,47 @@ describe('value formatting', () => {
   it('lists the shown invitee fields, marking the required ones', () => {
     const { byLabel } = rowsOf(configOf({ accessMode: 'invitation_only' }));
     expect(byLabel.get('Invitee details collected')).toBe('First name, Surname, Email (required)');
+  });
+
+  it('names the interviewers a questionnaire offers, and says All when it offers the library', () => {
+    const personas = BUILT_IN_PERSONAS.map((p) => ({ ...p }));
+    const all = configOf({
+      personas,
+      personaSelection: { ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection, enabled: true },
+    });
+    expect(rowsOf(all).byLabel.get('Interviewers available')).toBe(`All ${personas.length}`);
+
+    const some = configOf({
+      personas,
+      personaSelection: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+        enabled: true,
+        defaultPersonaKey: 'comedian',
+        availableKeys: ['comedian', 'philosopher'],
+        allowRespondentSwitch: true,
+      },
+    });
+    const labelOf = (key: string) => personas.find((p) => p.key === key)!.label;
+    expect(rowsOf(some).byLabel.get('Interviewers available')).toBe(
+      `${labelOf('comedian')}, ${labelOf('philosopher')}`
+    );
+  });
+
+  it('reports switching as No when only one interviewer is offered — the setting is inert', () => {
+    // With nothing to switch to no picker ever renders, so "Yes" would misdescribe the run.
+    const config = configOf({
+      personas: BUILT_IN_PERSONAS.map((p) => ({ ...p })),
+      personaSelection: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+        enabled: true,
+        defaultPersonaKey: 'comedian',
+        availableKeys: ['comedian'],
+        allowRespondentSwitch: true,
+      },
+    });
+    const { byLabel } = rowsOf(config);
+    expect(byLabel.get('Respondents may switch interviewer')).toBe('No');
+    expect(byLabel.has('Interviewer switching via')).toBe(false);
   });
 
   it('renders enabled tone dials on the admin-facing signed scale', () => {

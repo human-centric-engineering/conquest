@@ -4,7 +4,8 @@
  * Pins the route wiring: gate order (live-sessions flag → load → access → persona flag), both
  * respondent access modes (authenticated owner / anonymous session token), the GET platform-flag-off
  * short-circuit (returns `persona: null` without resolving), the PATCH flag-off 404, and that a chosen
- * key is validated against the resolved library before it's persisted. The resolver
+ * key is validated against the resolved menu — the personas the questionnaire OFFERS, not the whole
+ * built-in library — before it's persisted. The resolver
  * (`resolveSessionPersonas`) and session lookup/update are mocked, but the REAL `resolveTurnAccess`
  * runs (only the HMAC token verify is stubbed), so 401/403/404 reflect real access logic.
  *
@@ -149,6 +150,16 @@ describe('PATCH — set the chosen persona', () => {
 
   it('422s an unknown persona key without writing', async () => {
     const res = await PATCH(req('PATCH', { personaKey: 'ghost' }), ctx);
+    expect(res.status).toBe(422);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it('422s a real built-in persona the questionnaire does not offer, without writing', async () => {
+    // The menu is the offered subset (`availableKeys`), so a key that exists in the built-in library
+    // but was un-ticked by the admin is refused exactly like a made-up one. Distinct from the
+    // 'ghost' case above: this key is real, and would be accepted if the route ever validated
+    // against the whole library instead of the resolved menu.
+    const res = await PATCH(req('PATCH', { personaKey: 'curmudgeon' }), ctx);
     expect(res.status).toBe(422);
     expect(dbMock.update).not.toHaveBeenCalled();
   });

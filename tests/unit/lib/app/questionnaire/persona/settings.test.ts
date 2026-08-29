@@ -7,19 +7,24 @@
  *   - `narrowPersonas` always yields the full built-in set, ignoring any stored/legacy value;
  *   - with selection OFF, `resolveEffectiveTone` returns the version tone byte-for-byte (the
  *     "nothing changes when the feature is off" guarantee);
- *   - with selection ON, the chosen persona's tone replaces it, falling back to the default key.
+ *   - with selection ON, the chosen persona's tone replaces it, falling back to the default key;
+ *   - the library is global but the OFFER is per-version — `availableKeys` narrows which built-ins a
+ *     questionnaire may use, empty meaning "all of them", and the pinned default is always one of
+ *     the offered set (so offering exactly one persona makes it the default with nothing pinned).
  */
 
 import { describe, it, expect } from 'vitest';
 
 import {
+  availablePersonaKeys,
+  availablePersonas,
   narrowPersonas,
   narrowPersonaSelection,
   selectPersona,
   resolveEffectiveTone,
   resolveSessionTone,
 } from '@/lib/app/questionnaire/persona/settings';
-import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
+import { BUILT_IN_PERSONAS, BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
 import {
   DEFAULT_PERSONA_KEY,
   DEFAULT_TONE_SETTINGS,
@@ -37,7 +42,13 @@ function markedTone(text: string): ToneSettings {
 }
 
 function persona(key: string, text = `voice-${key}`): PersonaOption {
-  return { key, label: `Label ${key}`, description: `Desc ${key}`, tone: markedTone(text) };
+  return {
+    key,
+    category: 'general',
+    label: `Label ${key}`,
+    description: `Desc ${key}`,
+    tone: markedTone(text),
+  };
 }
 
 describe('narrowPersonaSelection', () => {
@@ -46,6 +57,7 @@ describe('narrowPersonaSelection', () => {
       expect(narrowPersonaSelection(bad)).toEqual({
         enabled: false,
         defaultPersonaKey: DEFAULT_PERSONA_KEY,
+        availableKeys: [],
         allowRespondentSwitch: false,
         switcher: 'page',
       });
@@ -63,6 +75,7 @@ describe('narrowPersonaSelection', () => {
     ).toEqual({
       enabled: true,
       defaultPersonaKey: 'comedian',
+      availableKeys: [],
       allowRespondentSwitch: true,
       switcher: 'indicator',
     });
@@ -79,6 +92,7 @@ describe('narrowPersonaSelection', () => {
     ).toEqual({
       enabled: false,
       defaultPersonaKey: DEFAULT_PERSONA_KEY,
+      availableKeys: [],
       allowRespondentSwitch: false,
       switcher: 'page',
     });
@@ -90,9 +104,99 @@ describe('narrowPersonaSelection', () => {
     ).toEqual({
       enabled: true,
       defaultPersonaKey: 'director',
+      availableKeys: [],
       allowRespondentSwitch: false,
       switcher: 'page',
     });
+  });
+});
+
+describe('narrowPersonaSelection — available interviewers', () => {
+  const [first, second] = BUILT_IN_PERSONA_KEYS;
+
+  it('keeps a ticked subset, in library order, whatever order it was stored in', () => {
+    const out = narrowPersonaSelection({
+      enabled: true,
+      defaultPersonaKey: second,
+      availableKeys: [second, first],
+      allowRespondentSwitch: true,
+      switcher: 'page',
+    });
+    expect(out.availableKeys).toEqual([first, second]);
+  });
+
+  it('drops unknown keys and de-duplicates', () => {
+    const out = narrowPersonaSelection({
+      enabled: true,
+      defaultPersonaKey: first,
+      availableKeys: [first, first, 'no-such-persona', 42, ''],
+      allowRespondentSwitch: false,
+      switcher: 'page',
+    });
+    expect(out.availableKeys).toEqual([first]);
+  });
+
+  it('reads a missing / junk / all-unknown list as the empty "offer everything" shape', () => {
+    for (const bad of [undefined, null, 'nope', {}, ['no-such-persona']]) {
+      const out = narrowPersonaSelection({
+        enabled: true,
+        defaultPersonaKey: first,
+        availableKeys: bad,
+        allowRespondentSwitch: false,
+        switcher: 'page',
+      });
+      expect(out.availableKeys).toEqual([]);
+      // Empty is "all of them", never "none of them".
+      expect(availablePersonaKeys(out)).toEqual(BUILT_IN_PERSONA_KEYS);
+    }
+  });
+
+  it('re-pins a default that is no longer offered to the first offered persona', () => {
+    const out = narrowPersonaSelection({
+      enabled: true,
+      defaultPersonaKey: first,
+      availableKeys: [second],
+      allowRespondentSwitch: true,
+      switcher: 'page',
+    });
+    expect(out.defaultPersonaKey).toBe(second);
+  });
+
+  it('makes a lone offered persona the default even when nothing was pinned to it', () => {
+    const out = narrowPersonaSelection({
+      enabled: true,
+      defaultPersonaKey: '',
+      availableKeys: [second],
+      allowRespondentSwitch: true,
+      switcher: 'page',
+    });
+    expect(out.defaultPersonaKey).toBe(second);
+    expect(availablePersonaKeys(out)).toEqual([second]);
+  });
+});
+
+describe('availablePersonas', () => {
+  const [first, second] = BUILT_IN_PERSONA_KEYS;
+
+  it('narrows the library to the offered keys, in library order', () => {
+    const selection = narrowPersonaSelection({
+      enabled: true,
+      defaultPersonaKey: first,
+      availableKeys: [second, first],
+      allowRespondentSwitch: true,
+      switcher: 'page',
+    });
+    expect(availablePersonas(narrowPersonas(), selection).map((p) => p.key)).toEqual([
+      first,
+      second,
+    ]);
+  });
+
+  it('yields the whole library for the empty "offer everything" shape', () => {
+    const selection = narrowPersonaSelection({ enabled: true, defaultPersonaKey: first });
+    expect(availablePersonas(narrowPersonas(), selection).map((p) => p.key)).toEqual(
+      BUILT_IN_PERSONA_KEYS
+    );
   });
 });
 
@@ -150,6 +254,7 @@ describe('resolveEffectiveTone', () => {
       personaSelection: {
         enabled: false,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: false,
         switcher: 'page',
       },
@@ -165,6 +270,7 @@ describe('resolveEffectiveTone', () => {
       personaSelection: {
         enabled: true,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: true,
         switcher: 'page',
       },
@@ -180,10 +286,29 @@ describe('resolveEffectiveTone', () => {
       personaSelection: {
         enabled: true,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: true,
         switcher: 'page',
       },
       selectedPersonaKey: null,
+    });
+    expect(out.persona.text).toBe('voice-a');
+  });
+
+  it('ignores a chosen persona the questionnaire no longer offers', () => {
+    // The respondent picked 'b' while it was still ticked; the admin has since un-ticked it, so the
+    // pinned default governs again rather than a voice this questionnaire no longer offers.
+    const out = resolveEffectiveTone({
+      toneConfig: versionTone,
+      personas,
+      personaSelection: {
+        enabled: true,
+        defaultPersonaKey: 'a',
+        availableKeys: ['a'],
+        allowRespondentSwitch: true,
+        switcher: 'page',
+      },
+      selectedPersonaKey: 'b',
     });
     expect(out.persona.text).toBe('voice-a');
   });
@@ -195,6 +320,7 @@ describe('resolveEffectiveTone', () => {
       personaSelection: {
         enabled: true,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: true,
         switcher: 'page',
       },
@@ -219,6 +345,7 @@ describe('resolveSessionTone (full session gate)', () => {
       personaSelection: {
         enabled: false,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: true,
         switcher: 'page',
       },
@@ -232,6 +359,7 @@ describe('resolveSessionTone (full session gate)', () => {
       personaSelection: {
         enabled: true,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: true,
         switcher: 'page',
       },
@@ -248,6 +376,7 @@ describe('resolveSessionTone (full session gate)', () => {
       personaSelection: {
         enabled: true,
         defaultPersonaKey: 'a',
+        availableKeys: [],
         allowRespondentSwitch: false,
         switcher: 'page',
       },

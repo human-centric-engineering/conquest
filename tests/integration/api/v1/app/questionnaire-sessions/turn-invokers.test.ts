@@ -165,6 +165,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       personaSelection: {
         enabled: false,
         defaultPersonaKey: 'neutral-coach',
+        availableKeys: [],
         allowRespondentSwitch: false,
         switcher: 'page',
       },
