@@ -34,7 +34,7 @@ vi.mock('@/lib/storage/image', () => imageMock);
 
 vi.mock('@/lib/validations/storage', () => ({ getMaxFileSizeBytes: () => 5 * 1024 * 1024 }));
 
-const analyseMock = vi.hoisted(() => ({ analyseScreenshot: vi.fn() }));
+const analyseMock = vi.hoisted(() => ({ analyseScreenshot: vi.fn(), analyseUrl: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/brand-import', () => analyseMock);
 
 import { POST } from '@/app/api/v1/app/demo-clients/brand-import/route';
@@ -43,6 +43,14 @@ type Handler = (request: Request, session: unknown) => Promise<Response>;
 const post = POST as unknown as Handler;
 
 const SESSION = { user: { id: 'admin-1' } };
+
+function jsonRequest(body: unknown): Request {
+  return new Request('http://localhost/api/v1/app/demo-clients/brand-import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
 
 function request(fields: Record<string, string | File>): Request {
   const body = new FormData();
@@ -73,6 +81,7 @@ beforeEach(() => {
   imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: 'image/png' });
   imageMock.readImageDimensions.mockResolvedValue({ width: 1440, height: 900 });
   analyseMock.analyseScreenshot.mockResolvedValue(OK_RESULT);
+  analyseMock.analyseUrl.mockResolvedValue({ ...OK_RESULT, source: 'url' });
 });
 
 describe('POST /api/v1/app/demo-clients/brand-import', () => {
@@ -185,5 +194,64 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
 
     expect(response.status).toBe(429);
     expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/app/demo-clients/brand-import (url)', () => {
+  it('routes a JSON body to the site harvest', async () => {
+    const response = await post(jsonRequest({ url: 'acme.example' }), SESSION);
+    const body = (await response.json()) as { data: { source: string } };
+
+    expect(response.status).toBe(200);
+    expect(body.data.source).toBe('url');
+    expect(analyseMock.analyseUrl).toHaveBeenCalledWith({
+      url: 'acme.example',
+      demoClientId: undefined,
+    });
+    // The two shapes are distinguished by content type, so a JSON body must never be read as
+    // multipart — `request.formData()` on a JSON body would throw before any of this ran.
+    expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+  });
+
+  it('passes the client id through when the edit form supplies one', async () => {
+    await post(jsonRequest({ url: 'acme.example', demoClientId: 'dc-1' }), SESSION);
+
+    expect(analyseMock.analyseUrl).toHaveBeenCalledWith({
+      url: 'acme.example',
+      demoClientId: 'dc-1',
+    });
+  });
+
+  it('returns a blocked harvest as a 200 carrying its next step', async () => {
+    // A bot wall is the single most common outcome of this feature and it is not an error: the
+    // admin needs the reason and the screenshot tab, not a 502.
+    analyseMock.analyseUrl.mockResolvedValue({
+      ...OK_RESULT,
+      source: 'url',
+      outcome: 'blocked',
+      fields: {},
+      reason: 'That site refused our request (403).',
+      nextStep: 'screenshot',
+    });
+
+    const response = await post(jsonRequest({ url: 'acme.example' }), SESSION);
+    const body = (await response.json()) as { data: { outcome: string; nextStep: string } };
+
+    expect(response.status).toBe(200);
+    expect(body.data.outcome).toBe('blocked');
+    expect(body.data.nextStep).toBe('screenshot');
+  });
+
+  it('rejects a JSON body with no address', async () => {
+    await expect(post(jsonRequest({}), SESSION)).rejects.toThrow('website address is required');
+  });
+
+  it('applies the sub-cap to the url branch too', async () => {
+    limiterMock.brandImportLimiter.check.mockReturnValue({ success: false, reset: 1 });
+
+    const response = await post(jsonRequest({ url: 'acme.example' }), SESSION);
+
+    expect(response.status).toBe(429);
+    expect(analyseMock.analyseUrl).not.toHaveBeenCalled();
   });
 });

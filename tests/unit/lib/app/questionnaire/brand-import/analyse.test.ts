@@ -14,7 +14,10 @@ vi.mock('@/lib/app/questionnaire/brand-import/palette', () => paletteMock);
 const assignMock = vi.hoisted(() => ({ assignRoles: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/brand-import/assign-roles', () => assignMock);
 
-import { analyseScreenshot } from '@/lib/app/questionnaire/brand-import/analyse';
+const harvestMock = vi.hoisted(() => ({ harvestSite: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/brand-import/harvest', () => harvestMock);
+
+import { analyseScreenshot, analyseUrl } from '@/lib/app/questionnaire/brand-import/analyse';
 
 const CANDIDATES = [
   { hex: '#ffffff', share: 0.7, neutral: true },
@@ -112,6 +115,122 @@ describe('analyseScreenshot', () => {
 
     expect(assignMock.assignRoles).toHaveBeenCalledWith(
       expect.objectContaining({ demoClientId: 'dc-1' })
+    );
+  });
+});
+
+/** A harvest that found everything, so each test can knock one thing out. */
+function harvested(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    brand: {
+      candidates: CANDIDATES,
+      hints: ['The page declares theme-color: #5469d4'],
+      declared: new Set(['#5469d4']),
+      logo: { url: 'https://acme.example/logo.png', via: 'schema.org' },
+      mark: { url: 'https://acme.example/touch.png', via: 'apple-touch-icon' },
+      logoDark: null,
+      fontFamilies: ['Space Grotesk'],
+      note: null,
+      ...overrides,
+    },
+  };
+}
+
+describe('analyseUrl', () => {
+  beforeEach(() => {
+    harvestMock.harvestSite.mockResolvedValue(harvested());
+  });
+
+  it('is `blocked` with the harvest’s own reason, and offers the screenshot', async () => {
+    harvestMock.harvestSite.mockResolvedValue({
+      ok: false,
+      reason: 'That site refused our request (403) — many sites block automated readers.',
+    });
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.outcome).toBe('blocked');
+    expect(result.nextStep).toBe('screenshot');
+    expect(result.reason).toContain('403');
+    // Nothing was measured, so nothing is offered — including no empty palette to imply otherwise.
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('proposes the logo and the mark it discovered', async () => {
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.fields.logoUrl?.value).toBe('https://acme.example/logo.png');
+    // A schema.org logo is the site asserting what its logo is, not us inferring it.
+    expect(result.fields.logoUrl?.confidence).toBe('high');
+    expect(result.fields.logoMarkUrl?.confidence).toBe('low');
+  });
+
+  it('proposes a typeface when the site loads one we ship', async () => {
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.fields.fontPairing?.value).toBe('contemporary');
+    expect(result.fields.fontPairing?.confidence).toBe('high');
+  });
+
+  it('marks a declared colour high and an inferred one low', async () => {
+    assignMock.assignRoles.mockResolvedValue({
+      assignments: [
+        { field: 'ctaColor', hex: '#5469d4' },
+        { field: 'canvasColor', hex: '#ffffff' },
+      ],
+      provider: 'openai',
+      model: 'gpt-test',
+      sawImage: false,
+    });
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    // #5469d4 is in `declared` — the site named it. #ffffff was ranked out of pixels by a model
+    // that could not see the page.
+    expect(result.fields.ctaColor?.confidence).toBe('high');
+    expect(result.fields.ctaColor?.source).toContain('declares');
+    expect(result.fields.canvasColor?.confidence).toBe('low');
+  });
+
+  it('still proposes the logo when role assignment is unavailable', async () => {
+    assignMock.assignRoles.mockRejectedValue(new Error('No active LLM provider is configured'));
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.degraded).toBe(true);
+    // Images and type are found by parsing, not by measuring, so they survive a missing provider.
+    expect(result.fields.logoUrl).toBeDefined();
+    expect(result.fields.fontPairing).toBeDefined();
+    expect(result.candidates).toEqual(CANDIDATES);
+  });
+
+  it('never calls the model when the site gave up no colours', async () => {
+    harvestMock.harvestSite.mockResolvedValue(harvested({ candidates: [] }));
+
+    await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(assignMock.assignRoles).not.toHaveBeenCalled();
+  });
+
+  it('carries the budget note through, so a truncated harvest does not read as complete', async () => {
+    harvestMock.harvestSite.mockResolvedValue(
+      harvested({ note: 'Some of the site was not read — we stopped after 12 requests.' })
+    );
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.reason).toContain('12 requests');
+  });
+
+  it('passes the page’s own declarations to the analyst as context', async () => {
+    await analyseUrl({ url: 'https://acme.example/', demoClientId: 'dc-1' });
+
+    expect(assignMock.assignRoles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints: ['The page declares theme-color: #5469d4'],
+        demoClientId: 'dc-1',
+      })
     );
   });
 });

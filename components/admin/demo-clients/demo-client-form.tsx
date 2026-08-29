@@ -451,11 +451,11 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
             onClick={() => setImportOpen(true)}
           >
             <Wand2 className="mr-2 h-4 w-4" />
-            Import from a screenshot
+            Import from their website
           </Button>
           <p className="text-muted-foreground text-xs">
-            Upload a screenshot of the client&apos;s website and we&apos;ll suggest colours from it.
-            Check you&apos;re entitled to use their branding.
+            Paste the client&apos;s web address (or upload a screenshot) and we&apos;ll suggest
+            colours, a logo and a typeface. Check you&apos;re entitled to use their branding.
           </p>
         </div>
 
@@ -463,6 +463,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           open={importOpen}
           onOpenChange={setImportOpen}
           demoClientId={client?.id}
+          uploadEnabled={uploadEnabled}
           onApply={applyImportedBrand}
         />
 

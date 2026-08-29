@@ -19,6 +19,19 @@
  * Keys are FIXED per client and kind (`demo-clients/<id>/logo.png`), so re-uploading
  * overwrites rather than accumulating orphans; the stored URL carries a `?v=` cache-bust
  * so browsers pick the new file up. Writes are audited like every other client edit.
+ *
+ * ## Two byte sources, one pipeline (brand import)
+ *
+ * POST accepts either a multipart upload or a JSON `{ sourceUrl }` naming an image on the open web
+ * — how the brand importer re-hosts a logo it discovered on a prospect's site. Only the first step
+ * differs: the URL branch fetches through the SSRF-guarded, redirect-revalidating fetcher and
+ * rasterises SVG, then rejoins the SAME path (magic bytes → dimensions → `processImage` →
+ * `storage.upload` → column → audit). Every guard therefore applies to both, which is the point of
+ * splitting at the source rather than writing a second handler.
+ *
+ * Re-hosting rather than storing the remote URL is deliberate: `logoUrl` renders in invitation
+ * emails and export PDFs, and a hotlink to someone else's CDN breaks the moment they move the file.
+ * The importer falls back to the plain URL only when storage is not configured.
  */
 
 import { successResponse } from '@/lib/api/responses';
@@ -38,6 +51,8 @@ import {
   SUPPORTED_IMAGE_TYPES,
 } from '@/lib/storage/image';
 import { deleteByPrefix } from '@/lib/storage/upload';
+import { HarvestBudget, fetchResource } from '@/lib/app/questionnaire/brand-import';
+import { rasteriseSvg } from '@/app/api/v1/app/demo-clients/_lib/rasterise-svg';
 import {
   BRAND_IMAGE_SPECS,
   validateImageDimensions,
@@ -73,6 +88,71 @@ type BrandImageRoute = {
   POST: ReturnType<typeof withAdminAuth<{ id: string }>>;
   DELETE: ReturnType<typeof withAdminAuth<{ id: string }>>;
 };
+
+/**
+ * Read the bytes out of a multipart upload.
+ *
+ * The byte cap is checked against the declared file size BEFORE the body is read into a Buffer, so
+ * an oversized upload costs us nothing beyond the headers.
+ */
+async function bytesFromUpload(request: Request): Promise<Buffer> {
+  const formData = await request.formData();
+  const file = formData.get('file');
+  if (!file || !(file instanceof File)) {
+    throw new APIError('No file provided', ErrorCodes.VALIDATION_ERROR, 400);
+  }
+
+  const maxSize = getMaxFileSizeBytes();
+  if (file.size > maxSize) {
+    const maxSizeMB = Math.round(maxSize / (1024 * 1024));
+    throw new APIError(
+      `File size exceeds maximum of ${maxSizeMB} MB`,
+      ErrorCodes.FILE_TOO_LARGE,
+      400,
+      { maxSize: maxSizeMB }
+    );
+  }
+
+  return Buffer.from(await file.arrayBuffer());
+}
+
+/**
+ * Fetch the bytes from an image on the open web — the brand importer re-hosting a discovered logo.
+ *
+ * Two things happen here that the upload branch does not need:
+ *
+ *  - **The SSRF-guarded fetcher**, re-validating on every redirect hop. This endpoint takes a URL
+ *    from an admin and fetches it server-side, which is the exact shape of an SSRF, and a guard
+ *    applied only to the first URL would be no guard at all.
+ *  - **SVG rasterisation.** Vector logos are common and `MAGIC_BYTES` has no SVG signature — nor
+ *    should it, since SVG is text and an XSS/XXE vector. So it is converted to PNG here and only
+ *    the raster is ever stored or served.
+ */
+async function bytesFromSourceUrl(request: Request): Promise<Buffer> {
+  const body = (await request.json().catch(() => null)) as { sourceUrl?: unknown } | null;
+  const sourceUrl = typeof body?.sourceUrl === 'string' ? body.sourceUrl.trim() : '';
+  if (!sourceUrl) {
+    throw new APIError('No image address provided', ErrorCodes.VALIDATION_ERROR, 400);
+  }
+
+  const fetched = await fetchResource(
+    sourceUrl,
+    new HarvestBudget({
+      maxRequests: 6,
+      maxResourceBytes: getMaxFileSizeBytes(),
+      maxTotalBytes: getMaxFileSizeBytes(),
+      timeoutMs: 15_000,
+    }),
+    { accept: 'image/*' }
+  );
+
+  if (!fetched.ok) {
+    throw new APIError(fetched.reason, ErrorCodes.VALIDATION_ERROR, 400);
+  }
+
+  const rasterised = await rasteriseSvg(fetched.buffer, fetched.contentType, sourceUrl);
+  return rasterised ?? fetched.buffer;
+}
 
 /**
  * POST + DELETE for one brand-image kind.
@@ -117,26 +197,9 @@ export function brandImageHandlers(kind: BrandImageKind): BrandImageRoute {
       throw new NotFoundError('Demo client not found');
     }
 
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!file || !(file instanceof File)) {
-      throw new APIError('No file provided', ErrorCodes.VALIDATION_ERROR, 400);
-    }
-
-    const maxSize = getMaxFileSizeBytes();
-    if (file.size > maxSize) {
-      const maxSizeMB = Math.round(maxSize / (1024 * 1024));
-      throw new APIError(
-        `File size exceeds maximum of ${maxSizeMB} MB`,
-        ErrorCodes.FILE_TOO_LARGE,
-        400,
-        {
-          maxSize: maxSizeMB,
-        }
-      );
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const buffer = request.headers.get('content-type')?.includes('application/json')
+      ? await bytesFromSourceUrl(request)
+      : await bytesFromUpload(request);
 
     // Never trust the client-declared MIME.
     const validation = validateImageMagicBytes(buffer);

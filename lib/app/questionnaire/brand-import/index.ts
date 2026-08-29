@@ -47,5 +47,33 @@ export {
 export { annotateContrast } from '@/lib/app/questionnaire/brand-import/contrast';
 export {
   analyseScreenshot,
+  analyseUrl,
   assignmentsToFields,
 } from '@/lib/app/questionnaire/brand-import/analyse';
+
+export {
+  extractColorFrequency,
+  extractDeclaredBrandColors,
+  parseCssColor,
+} from '@/lib/app/questionnaire/brand-import/css-color';
+
+export {
+  DEFAULT_BUDGET,
+  HarvestBudget,
+  fetchResource,
+  type BudgetLimits,
+  type FetchOutcome,
+} from '@/lib/app/questionnaire/brand-import/fetch';
+
+export {
+  discoverFonts,
+  discoverImages,
+  harvestSite,
+  normaliseUrl,
+  type DiscoveredImage,
+  type HarvestOutcome,
+  type HarvestedBrand,
+  type ImageProvenance,
+} from '@/lib/app/questionnaire/brand-import/harvest';
+
+export { matchFontPairing, type FontMatch } from '@/lib/app/questionnaire/brand-import/font-match';

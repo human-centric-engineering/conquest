@@ -1,15 +1,24 @@
-# Brand import (screenshot)
+# Brand import
 
-> **DEMO-ONLY.** Reads a prospect's branding off a picture of their website and proposes
-> demo-client theme values. It persists nothing and stores nothing — see
-> [demo-clients.md](./demo-clients.md) for the columns it proposes into and what they render.
+> **DEMO-ONLY.** Reads a prospect's branding off their website — or off a screenshot of it — and
+> proposes demo-client theme values. Colours persist nothing; a re-hosted logo writes its column
+> immediately, exactly as an upload does. See [demo-clients.md](./demo-clients.md) for the columns
+> it proposes into and what they render.
 
-Branding a demo client by hand is a dozen fields copied out of a brand guideline, and it is the
-step most likely to be skipped. This reads them off a screenshot of the client's own site instead.
+Branding a demo client by hand is a dozen fields copied out of a brand guideline, and it is the step
+most likely to be skipped. This reads them off the client's own site instead.
 
-**Phase 1 ships the screenshot route only.** The URL route (paste an address, we fetch and parse the
-page) is phase 2; the failure copy already points at the screenshot route because that is where a
-blocked URL import will send the admin.
+Two ways in, and the second exists because of how the first fails:
+
+| Route           | What it does                                                              | When                                                  |
+| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Website URL** | Fetches the page, its stylesheets and its logo; parses and measures them. | The default. Also the only route that finds a logo.   |
+| **Screenshot**  | Measures the colours in an image the admin uploaded.                      | When the site blocks us, needs a login, or is all JS. |
+
+We cannot render a website server-side — Playwright is a dev dependency and Chromium on a
+serverless function is a size-and-cold-start fight we would lose. The admin's browser already has.
+That single constraint is why the screenshot route exists at all, and why every `blocked` outcome
+points at it.
 
 ## The measurement principle
 
@@ -32,13 +41,113 @@ provider.
 ## What it proposes
 
 Eight colours (`surfaceColor`, `ctaColor`, `ctaColorEnd`, `accentColor`, `accentColorEnd`,
-`canvasColor`, `inkColor`, `logoBackgroundColor`), three images and the type pairing. Two deliberate
-omissions:
+`canvasColor`, `inkColor`, `logoBackgroundColor`), three images and the type pairing. Colours come
+from either route; images and type only from the URL route, since a screenshot contains no logo file
+and no font name.
+
+Two deliberate omissions:
 
 | Not proposed                       | Why                                                                                                                                                                             |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `canvasColorDark` / `inkColorDark` | `darkenForDarkMode` already derives a dark palette from the light one, and that derivation is usually better than anything a light-mode page can say about a brand's dark mode. |
 | `bannerUrl`                        | The only banner-shaped image a site reliably exposes is `og:image` at ~1.9:1, and `BRAND_BANNER_SPEC` needs 4:1 within 12%. Proposing it would guarantee a rejected upload.     |
+
+## Reading a website
+
+### The trust ladder
+
+A brand colour found three different ways deserves three different levels of confidence, and
+flattening them would throw that away. The harvest weights its sources accordingly:
+
+| Source                                        | Weight | Why                                                                                   |
+| --------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| The logo's own pixels (and inline header SVG) | 5      | A logo **is** the brand. It is also the only signal that survives an empty SPA shell. |
+| The square mark / touch icon                  | 2      | Real, but often a generic square rather than the lockup.                              |
+| What the page declares                        | 3      | `theme-color` and `--brand-primary` are statements of intent, not accidents.          |
+| Colour frequency across the stylesheets       | 1      | Real, and mostly greys. Earns its place only by sometimes being all there is.         |
+
+A hex in the **declared** set is reported to the admin as high confidence with the reason attached
+("the site declares this colour as part of its brand"); everything else is a guess by a model that
+could not see the page, and is labelled one.
+
+### Finding the logo
+
+In descending order of how much the page is really telling us:
+
+1. `schema.org` `Organization.logo` — the site asserting what its logo is. Searched recursively,
+   because it is usually nested under an `@graph` or hung off a `WebSite.publisher`.
+2. An `<img>` in a `<header>`/`<nav>` whose class, id, alt or src says logo/brand/wordmark.
+3. Any image on the page whose filename says logo.
+4. `apple-touch-icon` → `logoMarkUrl`. Typically 180×180, so it clears `BRAND_MARK_SPEC`'s 128px
+   floor, which the 32px favicon never does.
+
+`logoDarkUrl` comes only from an explicit `<source media="(prefers-color-scheme: dark)">` or a file
+named as both dark and logo. No looser guess: the dark lockup is a field admins rarely check, so the
+wrong artwork there is worse than none.
+
+Non-https references are dropped rather than proposed — `isBrandImageSrc` would reject them on save,
+so offering one would hand the admin a value the form then refuses.
+
+### Colour notation
+
+`css-color.ts` reads hex (3/4/6/8), `rgb()`, `hsl()`, `oklch()` and `oklab()`. **OKLCH is not
+optional**: Tailwind 4 emits it for its entire palette, so a hex-only parser finds nothing on a
+current site. The OKLab→sRGB conversion is written out against the published matrix rather than
+pulled from a colour library — thirty lines of arithmetic against a dependency every fork would
+carry.
+
+Alpha is parsed and discarded, never composited onto an assumed background: that would invent a
+light grey that appears nowhere in the design.
+
+### The budget
+
+Harvesting is a fan-out, not one document, so the caps are on the whole run: **12 requests, 2MB per
+resource, 8MB total, 20s wall clock**. Redirect hops count. Exceeding a cap is a **result, not an
+error** — we stop, and the note ("we stopped after 12 requests") is what keeps a truncated harvest
+from reading as a complete answer.
+
+### SSRF
+
+Every request goes through `checkSafeProviderUrl` **on the first URL and on every redirect hop**.
+That is not defence in depth, it is the only thing standing in the way: the guard validates one URL,
+so under `redirect: 'follow'` a public address that 302s to `169.254.169.254` reaches cloud metadata
+through a guard that reported `ok` — and in this feature that response would then be _measured and
+echoed back as a proposed brand colour_.
+
+Its documented limits are inherited, not fixed here: no DNS resolution, so a hostname pointing at a
+private address is not blocked, and rebinding is not defended against. See `lib/security/safe-url.ts`.
+
+The user agent is honest (`ConQuest-BrandImport/1.0`). Sites that refuse non-browser agents will
+refuse us, and that is a `blocked` outcome with the screenshot offered — a better answer than
+impersonating Chrome to get around someone's stated preference.
+
+## Re-hosting a discovered logo
+
+`brandImageHandlers` POST accepts either a multipart upload or `{ sourceUrl }`. Only the byte source
+differs; both rejoin the same pipeline (magic bytes → dimensions → `processImage` →
+`storage.upload` → column → audit), so every existing guard applies to an imported logo.
+
+Re-hosting rather than storing the remote URL matters because `logoUrl` renders in invitation emails
+and export PDFs, where a hotlink to someone else's CDN breaks the moment they move the file. When
+storage is unconfigured — or the client has not been saved yet, so there is no key to write under —
+the dialog falls back to the remote address and says so.
+
+**SVG never survives the boundary.** Vector lockups are the norm, so they must be handled; but SVG
+has no magic bytes for `validateImageMagicBytes` to recognise (nor should the validator be widened
+to sniff for `<svg`), and it can carry `<script>` and external entities that would execute from our
+own origin inside our own documents. `rasterise-svg.ts` converts it to PNG at 1600px — above every
+brand spec's box, so `processImage` only ever scales down — and only the raster is stored.
+
+## Typefaces
+
+`font-match.ts` maps discovered families onto one of the six pairings, in two tiers: an **exact**
+match on one of the ten faces we actually load, or a **shape** match from the family's name (a
+Didone, a grotesque, a monospace). Google Fonts links outrank `font-family` stacks, since a loaded
+face is a deliberate choice where a stack is mostly fallbacks.
+
+A family that places nowhere resolves to **nothing, not `neutral`**. `neutral` is a real choice an
+admin may have made deliberately, and proposing it as a fallback would overwrite that with a value
+we never measured — the same mistake as defaulting a colour field.
 
 ## The failure contract
 
@@ -113,10 +222,16 @@ counting its empty margin would rank "nothing" as the brand's primary colour.
 
 ## Gates on the route
 
-`withAdminAuth` → per-admin sub-cap (`brandImportLimiter`, 10/min) → byte cap → magic bytes →
-pixel ceiling → minimum edge → analyse.
+`withAdminAuth` → per-admin sub-cap (`brandImportLimiter`, 10/min) → then, by content type:
 
-Two orderings matter:
+- **JSON** → shape check → harvest (which carries its own budget and SSRF guard).
+- **multipart** → byte cap → magic bytes → pixel ceiling → minimum edge → analyse.
+
+The two shapes are distinguished by content type rather than a mode flag: a JSON body and a
+multipart body are already different requests, and a flag that could disagree with its payload is a
+third thing to keep in step.
+
+Two orderings matter on the screenshot branch:
 
 - **`MAX_INPUT_PIXELS` is checked from the image header, before any decode.** A solid-colour
   16000×16000 PNG is ~200KB on disk and ~1GB decoded — it clears the byte cap and every other gate.

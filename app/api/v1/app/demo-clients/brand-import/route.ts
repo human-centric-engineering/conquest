@@ -1,12 +1,16 @@
 /**
- * Brand import — screenshot analysis.
+ * Brand import — read a prospect's branding from their website or from a screenshot of it.
  *
- * POST /api/v1/app/demo-clients/brand-import   (multipart: `file`, optional `demoClientId`)
- *   Admin-only. Measures the colours in a screenshot of a prospect's website and returns proposed
- *   demo-client theme values for the admin to adjudicate.
+ * POST /api/v1/app/demo-clients/brand-import
+ *   Admin-only. Two request shapes, one result contract:
+ *     - `application/json`  `{ url, demoClientId? }`   — fetch and parse the site.
+ *     - `multipart/form-data`  `file`, `demoClientId?` — measure a screenshot.
  *
- *   Gate order: withAdminAuth → per-admin import sub-cap → size → magic bytes → pixel ceiling →
- *   analyse.
+ *   Gate order (screenshot): withAdminAuth → per-admin import sub-cap → size → magic bytes →
+ *   pixel ceiling → minimum edge → analyse.
+ *   Gate order (url): withAdminAuth → per-admin import sub-cap → shape → harvest, which applies
+ *   the SSRF guard on every redirect hop of every request it makes and works to a fixed budget of
+ *   requests, bytes and wall clock.
  *
  *   **Persists nothing, and stores nothing.** The image is analysed in memory and dropped — a
  *   screenshot of someone else's website is evidence for a decision, not an asset we have any
@@ -27,6 +31,8 @@
  *   single-client handler.
  */
 
+import { z } from 'zod';
+
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { APIError, ErrorCodes } from '@/lib/api/errors';
@@ -39,7 +45,7 @@ import {
   validateImageMagicBytes,
 } from '@/lib/storage/image';
 import { MAX_INPUT_PIXELS } from '@/lib/app/questionnaire/theming';
-import { analyseScreenshot } from '@/lib/app/questionnaire/brand-import';
+import { analyseScreenshot, analyseUrl } from '@/lib/app/questionnaire/brand-import';
 import { brandImportLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 /**
@@ -51,6 +57,18 @@ import { brandImportLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-li
  */
 const MIN_SCREENSHOT_EDGE = 320;
 
+/**
+ * The JSON body of a URL import.
+ *
+ * `url` is only shape-checked here. The SSRF guard is applied inside the harvest, on the first
+ * request AND on every redirect hop — validating once at the boundary would be the exact mistake
+ * that lets `https://example.com` → 302 → `http://169.254.169.254/` through.
+ */
+const urlImportSchema = z.object({
+  url: z.string().trim().min(1).max(2048),
+  demoClientId: z.string().trim().max(64).optional(),
+});
+
 export const POST = withAdminAuth(async (request, session) => {
   const log = await getRouteLogger(request);
   const adminId = session.user.id;
@@ -59,6 +77,32 @@ export const POST = withAdminAuth(async (request, session) => {
   if (!rl.success) {
     log.warn('Brand import rate limit exceeded', { adminId, reset: rl.reset });
     return createRateLimitResponse(rl);
+  }
+
+  // The two shapes are distinguished by content type rather than by a mode flag: a JSON body and a
+  // multipart body are already different requests, and a flag that could disagree with the payload
+  // is a third thing to keep in step.
+  if (request.headers.get('content-type')?.includes('application/json')) {
+    const parsed = urlImportSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      throw new APIError('A website address is required', ErrorCodes.VALIDATION_ERROR, 400);
+    }
+
+    const result = await analyseUrl({
+      url: parsed.data.url,
+      demoClientId: parsed.data.demoClientId,
+    });
+
+    log.info('Brand import analysed a website', {
+      adminId,
+      demoClientId: parsed.data.demoClientId,
+      outcome: result.outcome,
+      fields: Object.keys(result.fields).length,
+      candidates: result.candidates.length,
+      degraded: result.degraded,
+    });
+
+    return successResponse(result);
   }
 
   const formData = await request.formData();
