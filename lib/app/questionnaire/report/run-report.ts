@@ -33,6 +33,7 @@ import {
   buildUnansweredQuestionsBlock,
 } from '@/lib/app/questionnaire/report/content';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 import {
   generateReportFromInputs,
   type GeneratedReport,
@@ -48,6 +49,10 @@ interface LegMaterial {
   total: number;
   unansweredBlock: string;
   goal: string | null;
+  /** Conditional Topics (P17): what THIS leg did not cover, or covered only as a sample. */
+  notAssessed: NotAssessedTopic[];
+  /** Conditional Topics (P17): what THIS leg covered in full — see {@link mergeNotAssessed}. */
+  assessedTopicLabels: string[];
 }
 
 /**
@@ -86,7 +91,56 @@ async function loadLegMaterial(
     total: panel.totalCount,
     unansweredBlock: buildUnansweredQuestionsBlock(panel.sections),
     goal: loaded.goal,
+    notAssessed: loaded.notAssessed ?? [],
+    assessedTopicLabels: loaded.assessedTopicLabels ?? [],
   };
+}
+
+/** Match topics across legs by label, case- and whitespace-insensitively. */
+function topicIdentity(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+/**
+ * Merge the legs' Conditional Topics records into one journey-level record.
+ *
+ * A run spans several questionnaires, each with its own topics, so the same area can appear in more
+ * than one leg with a different outcome. Two rules follow from that, and both exist to stop the
+ * report contradicting its own transcript:
+ *
+ *  1. **A topic any leg assessed in full is dropped entirely.** The prompt's not-assessed fence says
+ *     "you know nothing whatsoever about this respondent in these areas — do not write about them".
+ *     Applying that to an area another leg measured properly would suppress the journey's best
+ *     material. Silence about the gap is the lesser error.
+ *  2. **Sampled beats skipped.** If one leg sampled an area and another skipped it, the respondent
+ *     WAS asked about it and their answers are in the transcript. Presenting it as never-asked would
+ *     be false; `partial` therefore wins whenever any leg contributed a sample.
+ *
+ * Question counts are summed — every entry counts questions that were not asked, so the sum is the
+ * journey's total unasked questions for that area. Journey order is preserved (first appearance).
+ * Topics are matched by LABEL, not key: keys are version-scoped, so two legs describing the same
+ * area almost never share one.
+ */
+function mergeNotAssessed(legs: readonly LegMaterial[]): NotAssessedTopic[] {
+  const assessedSomewhere = new Set(
+    legs.flatMap((leg) => leg.assessedTopicLabels.map(topicIdentity))
+  );
+
+  const merged = new Map<string, NotAssessedTopic>();
+  for (const leg of legs) {
+    for (const topic of leg.notAssessed) {
+      const identity = topicIdentity(topic.label);
+      if (assessedSomewhere.has(identity)) continue; // rule 1
+      const existing = merged.get(identity);
+      if (!existing) {
+        merged.set(identity, { ...topic });
+        continue;
+      }
+      existing.questionCount += topic.questionCount;
+      existing.partial = existing.partial || topic.partial; // rule 2
+    }
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -156,6 +210,7 @@ export async function generateRunReport(runId: string): Promise<GeneratedReport>
   // next mid-way is at partial coverage overall, and the caveat should say so — reporting the
   // final leg's completion alone would overstate how much of the journey was actually answered.
   const completionPct = total > 0 ? Math.round((answered / total) * 100) : 100;
+  const notAssessed = mergeNotAssessed(materials);
 
   return generateReportFromInputs({
     settings,
@@ -176,5 +231,10 @@ export async function generateRunReport(runId: string): Promise<GeneratedReport>
     // A sentinel in the same shape as the preview path's `preview:<vid>`. Used only for research
     // logging and KB warnings, never as a lookup key.
     sessionId: `run:${runId}`,
+    // What the journey never asked about. The per-leg transcripts above are already narrowed to the
+    // questions each leg actually asked, so this adds no material — it tells the writer WHY an area
+    // is missing, which is what stops it reading a deliberately-skipped area as a respondent who
+    // declined, or recommending they "complete" something they were told did not apply.
+    ...(notAssessed.length > 0 ? { notAssessed } : {}),
   });
 }

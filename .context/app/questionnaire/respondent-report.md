@@ -374,7 +374,9 @@ but the evidence points at Y" is owed the fact that the second half came from fi
 **Not covered:** the config preview (below) does not render the block. A synthesised respondent has no
 typed answers to score, so a preview could only ever show the statements half and would print "no
 scores were computed" for a version that does have a schema — misleading about the admin's own
-configuration. `generateRunReport` (F15.4b) does not pass it either; it already drops `notAssessed`.
+configuration. `generateRunReport` (F15.4b) does not pass it either — but it **does** pass
+`notAssessed` now; see [Experience Reports](./experience-reports.md#not-assessed-topics-across-a-journey)
+for how several legs' records merge into one.
 
 ## Config preview (AI-synthesised)
 

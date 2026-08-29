@@ -126,6 +126,34 @@ arbitrate:
 | goal     | the **entry** leg    | later legs' goals show in their own headed sections              |
 | coverage | **summed** over legs | the final leg alone overstates how much was answered             |
 
+### Not-assessed topics across a journey
+
+Each leg's `loadSessionExport` already narrows its sections to the questions that leg actually asked
+(Conditional Topics, P17), so the transcript a run report reads can never contain an untriggered
+question. `notAssessed` adds no material — it tells the writer **why** an area is absent, which is
+what stops the report reading a deliberately-skipped area as a respondent who declined, or telling
+them to go and "complete" something they were told did not apply.
+
+Merging N legs' records is not a concatenation, because the same area can appear in more than one leg
+with a different outcome. `mergeNotAssessed` matches topics by **label**, case- and
+whitespace-insensitively — keys are version-scoped, so two legs describing the same area almost never
+share one — and applies two rules, both of which exist to stop the report contradicting its own
+transcript:
+
+| Situation                                           | Result        | Why                                                                                                                                                                              |
+| --------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One leg assessed it **in full**, another skipped it | **dropped**   | the prompt's fence reads "you know nothing whatsoever about this respondent in these areas"; applying that to an area Part 1 measured would suppress the journey's best material |
+| One leg **sampled** it, another skipped it          | **`partial`** | the respondent WAS asked, and their answers are in the transcript — calling it never-asked would be false                                                                        |
+| Both skipped it                                     | summed        | every entry counts questions that were not asked, so the sum is the journey's total for that area                                                                                |
+
+The first rule needs to know what a leg covered, which `notAssessed` alone cannot say — a fully
+covered topic simply does not appear in it. So `LoadedSessionExport` carries
+`assessedTopicLabels` (topics in scope with no member left out) alongside it. A **sampled** topic is
+deliberately not in that list: it was not covered in full, so it must not suppress another leg's gap.
+
+Order follows the journey (first appearance). A run with nothing skipped omits the key entirely
+rather than passing `[]`, so a non-adaptive journey produces exactly the prompt it did before P17.
+
 **Per-leg `## Part N — <title>` headings are load-bearing.** Without them the writer reads a flat
 wall of Q&A and cannot see the respondent was asked about a topic twice, in two questionnaires —
 the progression a journey report exists to notice.
