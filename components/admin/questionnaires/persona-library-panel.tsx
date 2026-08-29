@@ -6,10 +6,22 @@
  * Rendered inside the merged "Interviewer tone & persona" SettingsGroup in `config-editor.tsx`, only
  * when the admin has picked "Built-in persona" mode (the outer mode toggle owns `personaSelection.enabled`;
  * this panel assumes it's on). The persona library is FIXED ({@link BUILT_IN_PERSONAS}) — a curated set
- * of named voices, not editable config. So this panel owns no persona editing: it lets the admin pin
- * which built-in persona governs the interviewer, optionally lets respondents switch among the library
- * (and how), and previews the pinned persona read-only (name + description + prose + tone dials). An
- * admin who wants a bespoke voice picks "Custom voice" mode and uses the tone block instead.
+ * of named voices, not editable config. So this panel owns no persona editing: it lets the admin tick
+ * WHICH of the built-in personas this questionnaire offers, pin which of those governs the interviewer,
+ * optionally let respondents switch among the offered ones (and how), and previews the pinned persona
+ * read-only (name + description + prose + tone dials). An admin who wants a bespoke voice picks
+ * "Custom voice" mode and uses the tone block instead.
+ *
+ * Two rules keep the offered set and the pinned default coherent, enforced here and re-enforced on the
+ * read path (`narrowPersonaSelection`) so a hand-crafted PATCH can't break them:
+ *   - at least one persona is always offered — the last ticked box can't be un-ticked, and
+ *     "Deselect all" falls back to the pinned default alone;
+ *   - the pinned default is always one of the offered ones — un-ticking it re-pins the first
+ *     survivor, and offering exactly one persona makes THAT one the default automatically.
+ *
+ * Every box ticked is stored as an empty `availableKeys` (the "whole library" shape) rather than all
+ * ten keys, so a questionnaire that offers everything keeps offering everything if the built-in
+ * library ever grows.
  *
  * Owns no state of its own: the parent holds `personaSelection` and passes the setter, exactly like
  * the tone block, so the single "Save configuration" PATCH sends it. `personas` is passed in for the
@@ -18,6 +30,8 @@
 
 import { Drama } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -59,33 +73,131 @@ export function PersonaLibraryPanel({
   busy: boolean;
   onSelectionChange: (patch: Partial<PersonaSelectionSettings>) => void;
 }) {
-  const selectedKey = personas.some((p) => p.key === selection.defaultPersonaKey)
+  // What this questionnaire offers: the admin's ticked subset, or the whole library for the empty
+  // "all of them" shape. Kept in library order so the boxes and the dropdown always agree.
+  const offered =
+    selection.availableKeys.length > 0
+      ? personas.filter((p) => selection.availableKeys.includes(p.key))
+      : [...personas];
+  const offeredKeys = offered.map((p) => p.key);
+  const onlyOne = offered.length === 1;
+
+  // The pinned default, clamped to what's offered — `narrowPersonaSelection` clamps identically on
+  // the read path, so the panel never shows a default the saved config wouldn't actually use.
+  const selectedKey = offered.some((p) => p.key === selection.defaultPersonaKey)
     ? selection.defaultPersonaKey
-    : (personas[0]?.key ?? DEFAULT_PERSONA_KEY);
+    : (offered[0]?.key ?? personas[0]?.key ?? DEFAULT_PERSONA_KEY);
   const selected = personas.find((p) => p.key === selectedKey) ?? personas[0] ?? null;
   // Show the current default first in the dropdown, then the rest in their canonical order.
   const orderedPersonas = [
-    ...personas.filter((p) => p.key === selectedKey),
-    ...personas.filter((p) => p.key !== selectedKey),
+    ...offered.filter((p) => p.key === selectedKey),
+    ...offered.filter((p) => p.key !== selectedKey),
   ];
+
+  /**
+   * Save a new offered set, holding both invariants: an empty set is refused (something must always
+   * be offered), the complete library is normalised back to the empty "all" shape, and the pinned
+   * default is re-pinned to the first survivor whenever it's no longer offered — which is what makes
+   * a lone offered persona the default without the admin pinning it.
+   */
+  const setOffered = (keys: readonly string[]) => {
+    const next = personas.filter((p) => keys.includes(p.key)).map((p) => p.key);
+    if (next.length === 0) return;
+    onSelectionChange({
+      availableKeys: next.length === personas.length ? [] : next,
+      defaultPersonaKey: next.includes(selectedKey) ? selectedKey : (next[0] ?? selectedKey),
+    });
+  };
 
   return (
     <div className="space-y-5">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Label className="text-sm font-medium">
+            Interviewers available{' '}
+            <FieldHelp title="Available interviewers">
+              Tick the built-in interviewers this questionnaire may use. Only these appear to
+              respondents, and only one of these can be the default below. At least one must stay
+              ticked — tick just one and it becomes the default automatically, with no picker shown
+              to respondents (there is nothing to choose between).
+            </FieldHelp>
+          </Label>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy || offered.length === personas.length}
+              onClick={() => setOffered(personas.map((p) => p.key))}
+            >
+              Select all
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy || onlyOne}
+              // Something must always be offered, so "deselect all" leaves the pinned default —
+              // which then satisfies the one-offered-persona-is-the-default rule on its own.
+              onClick={() => setOffered([selectedKey])}
+            >
+              Deselect all
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {personas.map((p) => {
+            const ticked = offeredKeys.includes(p.key);
+            return (
+              <label
+                key={p.key}
+                htmlFor={`persona-available-${p.key}`}
+                className="text-foreground flex items-start gap-2 text-sm"
+              >
+                <Checkbox
+                  id={`persona-available-${p.key}`}
+                  checked={ticked}
+                  // The last remaining interviewer can't be un-ticked — a questionnaire with no
+                  // interviewer has no voice to run with.
+                  disabled={busy || (ticked && onlyOne)}
+                  onCheckedChange={(checked) =>
+                    setOffered(
+                      checked ? [...offeredKeys, p.key] : offeredKeys.filter((k) => k !== p.key)
+                    )
+                  }
+                  className="mt-0.5"
+                />
+                <span>
+                  {p.label.trim() || p.key}
+                  {p.key === selectedKey && (
+                    <span className="text-muted-foreground"> · default</span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <p className="text-muted-foreground text-xs">
+          {onlyOne
+            ? 'One interviewer available — it is the default, and respondents see no picker.'
+            : `${offered.length} of ${personas.length} interviewers available.`}
+        </p>
+      </div>
+
       <div className="space-y-1.5">
         <Label className="text-sm font-medium">
-          Persona{' '}
-          <FieldHelp title="Interviewer persona">
-            The built-in interviewer that governs this questionnaire — its voice replaces this
+          Default interviewer{' '}
+          <FieldHelp title="Default interviewer">
+            The available interviewer that governs this questionnaire — its voice replaces this
             version’s custom tone &amp; persona. Everyone gets this persona unless you let
             respondents switch below (then it’s the default, pre-selected on the picker). The
             personas themselves are fixed; to hand-tune a voice, switch to “Custom voice” instead.
-            Also requires the platform persona-selection flag.
           </FieldHelp>
         </Label>
         <Select
           value={selectedKey}
           onValueChange={(v) => onSelectionChange({ defaultPersonaKey: v })}
-          disabled={busy}
+          disabled={busy || onlyOne}
         >
           <SelectTrigger className="max-w-xs">
             <SelectValue placeholder="Select a persona" />
@@ -107,19 +219,21 @@ export function PersonaLibraryPanel({
             onCheckedChange={(allowRespondentSwitch) =>
               onSelectionChange({ allowRespondentSwitch })
             }
-            disabled={busy}
+            // Nothing to switch between when only one interviewer is available.
+            disabled={busy || onlyOne}
           />
           <Label className="text-sm font-medium">
             Let respondents switch interviewer{' '}
             <FieldHelp title="Respondent-switched persona">
               When on, respondents can change interviewer for their own session — picking any of the
-              built-in personas via the switcher below. The persona above becomes the default they
-              start on. When off, everyone gets the persona above and no picker or switcher appears.
+              interviewers ticked above via the switcher below. The default above is the one they
+              start on. When off, everyone gets the default and no picker or switcher appears. Needs
+              at least two available interviewers.
             </FieldHelp>
           </Label>
         </div>
 
-        {selection.allowRespondentSwitch && (
+        {selection.allowRespondentSwitch && !onlyOne && (
           <div className="border-border/60 ml-1 space-y-1.5 border-l pl-4">
             <Label className="text-sm font-medium">
               How respondents switch interviewer{' '}

@@ -294,6 +294,16 @@ const personaSelectionSchema = z
   .object({
     enabled: z.boolean(),
     defaultPersonaKey: z.string().trim().min(1).max(PERSONA_KEY_MAX_LENGTH),
+    /**
+     * The personas this questionnaire offers. Empty is the "offer the whole library" shape (what an
+     * untouched version stores and what the editor sends with every box ticked) — never "offer
+     * none". Keys are checked against the built-in library, and the default must be one of them,
+     * in the superRefine below.
+     */
+    availableKeys: z
+      .array(z.string().trim().min(1).max(PERSONA_KEY_MAX_LENGTH))
+      .max(BUILT_IN_PERSONA_KEYS.length)
+      .default([]),
     allowRespondentSwitch: z.boolean().default(false),
     switcher: z.enum(PERSONA_SWITCHERS),
   })
@@ -606,10 +616,29 @@ export const updateConfigSchema = z
 
     // The default persona must be one of the fixed built-in personas.
     if (cfg.personaSelection !== undefined) {
-      if (!BUILT_IN_PERSONA_KEYS.includes(cfg.personaSelection.defaultPersonaKey)) {
+      const { defaultPersonaKey, availableKeys } = cfg.personaSelection;
+      if (!BUILT_IN_PERSONA_KEYS.includes(defaultPersonaKey)) {
         ctx.addIssue({
           code: 'custom',
           message: 'Default persona must be one of the built-in personas',
+          path: ['personaSelection', 'defaultPersonaKey'],
+        });
+      }
+      const unknown = availableKeys.filter((key) => !BUILT_IN_PERSONA_KEYS.includes(key));
+      if (unknown.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Available interviewers must all be built-in personas',
+          path: ['personaSelection', 'availableKeys'],
+        });
+      }
+      // The pinned default has to be one the questionnaire actually offers — otherwise the read
+      // path would silently re-pin it, and the admin's saved default would be a lie. (An empty
+      // list offers everything, so nothing to check there.)
+      if (availableKeys.length > 0 && !availableKeys.includes(defaultPersonaKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Default persona must be one of the available interviewers',
           path: ['personaSelection', 'defaultPersonaKey'],
         });
       }

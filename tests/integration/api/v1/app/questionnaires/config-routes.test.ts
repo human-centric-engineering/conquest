@@ -381,6 +381,7 @@ describe('upsert + response', () => {
     const personaSelection = {
       enabled: true,
       defaultPersonaKey: 'philosopher',
+      availableKeys: ['philosopher', 'comedian'],
       allowRespondentSwitch: true,
       switcher: 'both' as const,
     };
@@ -391,6 +392,23 @@ describe('upsert + response', () => {
     const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
     expect(call.create.personaSelection).toEqual(personaSelection);
     expect(call.update.personaSelection).toEqual(personaSelection);
+  });
+
+  it('stores an omitted availableKeys as the empty "offer everything" shape', async () => {
+    // A caller that predates the setting (or an older export) must not land a block the read path
+    // has to repair — the Zod default fills it in on the way through.
+    const personaSelection = {
+      enabled: true,
+      defaultPersonaKey: 'philosopher',
+      allowRespondentSwitch: true,
+      switcher: 'both' as const,
+    };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ personaSelection }));
+
+    const res = await configPATCH(req({ personaSelection }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create.personaSelection).toEqual({ ...personaSelection, availableKeys: [] });
   });
 
   it('writes the cohortReport block through the JSON boundary', async () => {

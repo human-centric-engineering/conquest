@@ -572,6 +572,59 @@ describe('updateConfigSchema — persona selection (F-persona)', () => {
     ).toBe(false);
   });
 
+  it('defaults a missing availableKeys to the empty "offer everything" shape', () => {
+    const res = updateConfigSchema.safeParse({
+      personaSelection: { enabled: true, defaultPersonaKey: 'director', switcher: 'page' },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.personaSelection?.availableKeys).toEqual([]);
+    }
+  });
+
+  it('accepts an availableKeys subset that contains the default persona', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'director',
+          availableKeys: ['director', 'empath'],
+          allowRespondentSwitch: true,
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects an availableKeys entry that is not a built-in persona', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'director',
+          availableKeys: ['director', 'not-a-builtin'],
+          allowRespondentSwitch: false,
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects a default persona the questionnaire does not offer', () => {
+    // Otherwise the read path would silently re-pin it and the saved default would be a lie.
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'director',
+          availableKeys: ['empath'],
+          allowRespondentSwitch: false,
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(false);
+  });
+
   it('ignores a custom persona library — a stray `personas` field is not stored', () => {
     const custom = [{ key: 'a', label: 'A', description: 'A voice.' }];
     // Sent alongside a valid selection: parses, but `personas` is stripped (not a known field).

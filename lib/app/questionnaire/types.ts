@@ -672,9 +672,22 @@ export type PersonaSelectionSettings = {
   /** The pinned persona — applied to every respondent (and pre-selected when switching is allowed). */
   defaultPersonaKey: string;
   /**
-   * When true, respondents may switch interviewer among the library (via {@link switcher}); when
-   * false, everyone gets the pinned `defaultPersonaKey` and no picker/switcher renders. Only
-   * meaningful while `enabled`.
+   * Which built-in personas this questionnaire OFFERS — the admin's tick-box subset of the fixed
+   * library. Everything downstream (the pinned default, the respondent picker, a crafted PATCH)
+   * is confined to these keys.
+   *
+   * The empty array is the "all of them" shape, not "none": it's what an untouched/legacy row reads
+   * as, and what the admin panel saves when every box is ticked — so such a questionnaire picks up
+   * any persona later added to the built-in library. Narrowing (`narrowPersonaSelection`) drops
+   * unknown keys and guarantees `defaultPersonaKey` is one of the offered set; when exactly one
+   * persona is offered it IS the default. Only meaningful while `enabled`.
+   */
+  availableKeys: string[];
+  /**
+   * When true, respondents may switch interviewer among the offered personas (via {@link
+   * switcher}); when false, everyone gets the pinned `defaultPersonaKey` and no picker/switcher
+   * renders. Only meaningful while `enabled` — and inert when only one persona is offered, since
+   * there is then nothing to switch to.
    */
   allowRespondentSwitch: boolean;
   /** How the respondent picks/switches interviewer, when switching is allowed. See {@link PersonaSwitcher}. */
@@ -696,6 +709,8 @@ export const DEFAULT_PERSONA_KEY = 'neutral-coach';
 export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
   enabled: true,
   defaultPersonaKey: DEFAULT_PERSONA_KEY,
+  // Empty ⇒ the whole built-in library is offered (see `availableKeys`).
+  availableKeys: [],
   allowRespondentSwitch: false,
   switcher: 'page',
 };

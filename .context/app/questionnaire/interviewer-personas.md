@@ -15,9 +15,9 @@ either the hand-tuned custom [interviewer-tone](./interviewer-tone.md) block **o
 configure both at once.
 
 The persona set is **fixed** — the ten built-in personas, hard-coded in code, not editable config.
-In built-in mode the admin pins _which_ persona governs and _whether_ respondents may switch. An admin
-who wants a bespoke voice picks "Custom voice" and tunes the
-[interviewer-tone](./interviewer-tone.md) block instead.
+In built-in mode the admin ticks _which_ of them this questionnaire offers, pins _which_ of those
+governs, and says _whether_ respondents may switch between them. An admin who wants a bespoke voice
+picks "Custom voice" and tunes the [interviewer-tone](./interviewer-tone.md) block instead.
 
 > A respondent-experience feature, like [presentation-mode](./presentation-mode.md) and the
 > tone/strategy siblings. **Always on**; the remaining gate is the per-version `personaSelection.enabled`
@@ -27,17 +27,47 @@ who wants a bespoke voice picks "Custom voice" and tunes the
 
 One stored setting on `AppQuestionnaireConfig`, plus one column on the session:
 
-- **`personaSelection`** — `{ enabled, defaultPersonaKey, allowRespondentSwitch, switcher }`:
+- **`personaSelection`** — `{ enabled, defaultPersonaKey, availableKeys, allowRespondentSwitch, switcher }`:
   - `enabled` — built-in persona mode on (the either/or discriminator against `config.tone`).
   - `defaultPersonaKey` — the **pinned** persona that governs for everyone (and the default the picker
     pre-selects when switching is allowed). Must be a built-in key (validated in `config-schema.ts`
-    against `BUILT_IN_PERSONA_KEYS`).
-  - `allowRespondentSwitch` — opt-in: when on, respondents may switch among the library via `switcher`;
-    when off, everyone gets the pinned persona and **no picker/switcher renders**.
+    against `BUILT_IN_PERSONA_KEYS`) **and** one of `availableKeys`.
+  - `availableKeys` — **which built-ins this questionnaire offers** (see below). `[]` means _all of
+    them_, never _none_.
+  - `allowRespondentSwitch` — opt-in: when on, respondents may switch among the offered personas via
+    `switcher`; when off, everyone gets the pinned persona and **no picker/switcher renders**. Inert
+    when only one persona is offered — there is nothing to switch to.
   - `switcher` — how respondents switch, when allowed (see below).
 - **`AppQuestionnaireSession.selectedPersonaKey`** — the respondent's choice (null ⇒ default applies).
 - **`personas`** — a **legacy** `Json` column, always `[]` and **ignored**. `narrowPersonas`
   disregards it and always returns the fixed built-in library. Kept only to avoid a migration.
+
+## Which personas a questionnaire offers (`availableKeys`)
+
+The library is global; the **offer is per-version**. The Settings panel shows a **tick-box per
+built-in persona** — "Interviewers available" — with **Select all** / **Deselect all**. Only ticked
+personas reach a respondent, and only a ticked persona can be the pinned default.
+
+Two invariants hold it together. They're enforced in the panel, re-checked in Zod
+(`config-schema.ts`), and re-applied defensively on the read path (`narrowPersonaSelection`), so a
+hand-crafted PATCH or a legacy row can't break them:
+
+1. **At least one persona is always offered.** The last ticked box can't be un-ticked, and "Deselect
+   all" falls back to the pinned default alone. A questionnaire with no interviewer has no voice.
+2. **The pinned default is always one of the offered personas.** Un-ticking it re-pins the first
+   survivor — so ticking **exactly one** persona makes _that_ persona the default automatically,
+   with nothing for the admin to pin. With one offered persona the default dropdown and the
+   "let respondents switch" toggle both go inert (disabled), and no picker ever renders
+   (`resolveSessionPersonas` needs **two** offered personas to enable it).
+
+`[]` is the **"offer everything"** shape, not "offer nothing": it's what an untouched/legacy row
+reads as, and what the panel saves when every box is ticked — so a questionnaire that offers the
+whole library keeps offering it if the library ever grows. `narrowPersonaSelection` drops unknown
+keys and returns the survivors in library order, so the offer reads the same everywhere.
+
+At turn time `resolveEffectiveTone` confines the choice to the offered set: a `selectedPersonaKey`
+chosen before the admin un-ticked it is stale and falls back to the pinned default, exactly like any
+other unknown key.
 
 The **library is fixed and hard-coded**: `BUILT_IN_PERSONAS`
 (`lib/app/questionnaire/persona/presets.ts`) — the `neutral-coach` default (a calm, objective
@@ -52,13 +82,15 @@ The menu (which personas exist + the default) lives on the **version config**; t
 **session**. They meet at turn time:
 
 1. **Admin** picks **"Built-in persona"** mode on the merged **Settings → Interviewer tone & persona**
-   group (the mode toggle flips `personaSelection.enabled`), then pins the persona and — optionally —
-   turns on **"Let respondents switch interviewer"** (`allowRespondentSwitch`) + a switcher style
-   (`persona-library-panel.tsx`, gated by the `personaSelection.enabled` config toggle). The panel is a
-   dropdown (the pinned persona first, tagged _Selected_) + a **read-only preview** — name (badged
-   _Selected_), respondent-facing description, persona prompt, and its active tone dials — no editing.
-   Only `personaSelection` is saved, through the same config PATCH as tone.
-2. **Respondent** — only when `allowRespondentSwitch` — picks via the **switcher** the admin chose
+   group (the mode toggle flips `personaSelection.enabled`), ticks which interviewers the
+   questionnaire offers, pins the default among them, and — optionally — turns on **"Let respondents
+   switch interviewer"** (`allowRespondentSwitch`) + a switcher style (`persona-library-panel.tsx`,
+   gated by the `personaSelection.enabled` config toggle). The panel is the availability tick-boxes
+   (with select/deselect all) + a default dropdown over the offered personas (the pinned one first,
+   tagged _Selected_) + a **read-only preview** — name (badged _Selected_), respondent-facing
+   description, persona prompt, and its active tone dials — no editing. Only `personaSelection` is
+   saved, through the same config PATCH as tone.
+2. **Respondent** — only when `allowRespondentSwitch` and ≥2 offered personas — picks via the **switcher** the admin chose
    (`personaSelection.switcher`); see the next section. The pinned persona leads the picker grid,
    badged _Default_. The choice PATCHes `…/questionnaire-sessions/:id/persona` (fail-soft). With
    switching off there is no picker — the pinned persona simply governs.
@@ -71,7 +103,7 @@ The menu (which personas exist + the default) lives on the **version config**; t
 
 ```
 config.personas ─┐
-config.personaSelection ─┼─▶ resolveEffectiveTone ─▶ toneConfig ─▶ buildToneInstructions ─▶ prompt
+config.personaSelection ─┼─▶ availablePersonas ─▶ resolveEffectiveTone ─▶ toneConfig ─▶ buildToneInstructions ─▶ prompt
 session.selectedPersonaKey ─┘   (falls back to config.tone when selection is off)
 ```
 
@@ -102,11 +134,11 @@ prompt + gentle dials), so choosing it applies that voice — it is not the bare
 
 ## Client safety
 
-`resolveSessionPersonas` (`persona/resolve.ts`) returns a **tone-free** menu — only
-`{ key, label, description }` per persona. The persona prompt prose (`tone.persona.text`) is a system
+`resolveSessionPersonas` (`persona/resolve.ts`) returns a **tone-free** menu of the **offered**
+personas only — `{ key, label, description }` each. The persona prompt prose (`tone.persona.text`) is a system
 prompt and is **never shipped to the respondent client**; it only ever drives the interviewer
 server-side. The GET `…/persona` route returns this menu; the menu's `enabled` (show the picker)
-requires built-in mode on **AND** `allowRespondentSwitch` **AND** ≥2 personas. The PATCH `…/persona`
+requires built-in mode on **AND** `allowRespondentSwitch` **AND** ≥2 _offered_ personas. The PATCH `…/persona`
 route likewise 422s a choice when the menu isn't `enabled`, so a crafted request can't override the
 pinned persona.
 
@@ -116,13 +148,13 @@ pinned persona.
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Types + defaults    | `lib/app/questionnaire/types.ts` (`PersonaOption`, `PersonaSelectionSettings`)                                                  |
 | Built-in library    | `lib/app/questionnaire/persona/presets.ts`                                                                                      |
-| Narrow + resolve    | `lib/app/questionnaire/persona/settings.ts` (`resolveEffectiveTone`)                                                            |
+| Narrow + resolve    | `lib/app/questionnaire/persona/settings.ts` (`narrowPersonaSelection`, `availablePersonas`, `resolveEffectiveTone`)             |
 | Session menu (DB)   | `lib/app/questionnaire/persona/resolve.ts`                                                                                      |
 | Zod validation      | `lib/app/questionnaire/authoring/config-schema.ts` (`personaSelectionSchema`)                                                   |
 | Read/write config   | `_lib/detail.ts` (`toConfigView`), `…/versions/[vid]/config/route.ts`                                                           |
 | Turn-time injection | `app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`                                                                  |
 | Session persona API | `app/api/v1/app/questionnaire-sessions/[id]/persona/route.ts` (GET/PATCH)                                                       |
-| Admin control       | `config-editor.tsx` (`VoiceModeToggle` either/or) + `persona-library-panel.tsx` (pin + switch + preview)                        |
+| Admin control       | `config-editor.tsx` (`VoiceModeToggle` either/or) + `persona-library-panel.tsx` (offer + pin + switch + preview)                |
 | Respondent picker   | `components/app/questionnaire/persona/persona-picker.tsx`; carousel in `session-workspace.tsx`                                  |
 | In-chat switcher    | `components/app/questionnaire/persona/interviewer-switcher.tsx` (chip + modal); wired in `session-workspace.tsx`                |
 | Gate                | Per-version `personaSelection.enabled` config toggle (no platform flag — always on; see [feature-flags.md](./feature-flags.md)) |
