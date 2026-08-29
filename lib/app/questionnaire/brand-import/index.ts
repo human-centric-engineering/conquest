@@ -52,11 +52,7 @@ export {
   darkGroundFor,
   groundsAreDistinct,
 } from '@/lib/app/questionnaire/brand-import/ground';
-export {
-  analyseBrand,
-  type BrandImportInput,
-  type ScreenshotImage,
-} from '@/lib/app/questionnaire/brand-import/analyse';
+export { analyseBrand, type BrandImportInput } from '@/lib/app/questionnaire/brand-import/analyse';
 
 export {
   extractColorFrequency,

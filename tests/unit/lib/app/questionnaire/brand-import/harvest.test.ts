@@ -172,9 +172,8 @@ describe('discoverImages', () => {
     });
   });
 
-  it('prefers the touch icon over the favicon for the square mark', () => {
-    // apple-touch-icon is typically 180x180 and clears the mark spec's 128px floor; a favicon is
-    // usually 32px and never would.
+  it('takes the touch icon for the square mark', () => {
+    // apple-touch-icon is typically 180x180 and clears the mark spec's 128px floor.
     const doc = parse(`
       <link rel="icon" href="/favicon.ico">
       <link rel="apple-touch-icon" href="/touch.png">
@@ -184,6 +183,20 @@ describe('discoverImages', () => {
       url: 'https://acme.example/touch.png',
       via: 'apple-touch-icon',
     });
+  });
+
+  /**
+   * No favicon fallback — a proposal guaranteed to fail is worse than none.
+   *
+   * A favicon is 16 or 32px and can never clear BRAND_MARK_SPEC's 128px floor, so the re-host POST
+   * rejects it on dimensions. `rehost()` then keeps the REMOTE address (the right call for a logo a
+   * CDN merely refused us) and `isBrandImageSrc` accepts any https URL — so the .ico was written
+   * into the square-mark column and drawn at mark size.
+   */
+  it('proposes no mark at all rather than a favicon that cannot clear the spec', () => {
+    const doc = parse(`<link rel="icon" href="/favicon.ico">`);
+
+    expect(discoverImages(doc, 'https://acme.example/').mark).toBeNull();
   });
 
   it('takes a dark lockup only from an explicit dark-mode source', () => {

@@ -107,13 +107,14 @@ export function completeGrounds(
   const proposedDark = out.canvasColorDark?.value;
   if (!proposedDark || !groundsAreDistinct(canvas, proposedDark)) {
     const derived = darkGroundFor(canvas);
-    if (derived) {
+    // A derivation that lands back on the canvas says nothing — that is what happens when the
+    // brand's ground is already at NEAR_BLACK and there is no luminance left to take out of it.
+    // Proposing it would put a field in front of the admin whose value repeats the one above it.
+    if (derived && derived.toLowerCase() !== canvas.toLowerCase()) {
       out.canvasColorDark = {
         value: derived,
         confidence: 'low',
-        source: proposedDark
-          ? 'derived — the dark ground we found was too close to the light one'
-          : 'derived from the canvas, so dark mode is not the same colour',
+        source: derivedSource(canvas, derived, proposedDark),
       };
     } else if (proposedDark) {
       delete out.canvasColorDark;
@@ -127,6 +128,28 @@ export function completeGrounds(
   if (darkCanvas) fillInk(out, 'inkColorDark', darkCanvas);
 
   return out;
+}
+
+/**
+ * The line the admin reads under a derived dark ground.
+ *
+ * Three cases, and the third is why this is a function rather than a ternary. `groundsAreDistinct`
+ * gates the analyst's OWN dark ground but is deliberately not applied to the derived one, because
+ * for an already-dark brand nothing we could derive would pass it: deepening `#111827` gives
+ * `#0d1017`, a ratio of about 1.07 against the light ground, and the only value that would clear
+ * 1.5 is a lighter one — the opposite of a dark mode. Dropping the field instead would hand the
+ * question back to `resolveTheme`, which carries an already-dark canvas across UNCHANGED, and two
+ * identical panels is the exact bug the four-field import was built to fix.
+ *
+ * So the deepening is kept and the copy stops overclaiming. Saying "dark mode is not the same
+ * colour" of a pair the admin can barely tell apart reads as a broken preview; naming it as the
+ * subtle change it is explains what they are looking at.
+ */
+function derivedSource(canvas: string, derived: string, proposedDark: string | undefined): string {
+  if (proposedDark) return 'derived — the dark ground we found was too close to the light one';
+  return groundsAreDistinct(canvas, derived)
+    ? 'derived from the canvas, so dark mode is not the same colour'
+    : 'derived — a deeper cut of the canvas, which is as far as an already-dark brand goes';
 }
 
 /** Set an ink field from the ground it sits on, unless a readable one is already proposed. */

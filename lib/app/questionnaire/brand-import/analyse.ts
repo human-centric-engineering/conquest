@@ -62,18 +62,11 @@ import { matchFontPairing } from '@/lib/app/questionnaire/brand-import/font-matc
  */
 const SOURCE_WEIGHT = { site: 2, screenshot: 3 } as const;
 
-/** One screenshot as it reaches analysis: bytes plus the type we DETECTED in them. */
-export interface ScreenshotImage {
-  buffer: Buffer;
-  /** The type the magic-byte check DETECTED, never the one the browser claimed. */
-  mediaType: string;
-}
-
 export interface BrandImportInput {
   /** The client's website. Absent when the admin has only a picture. */
   url?: string;
   /** Screenshots of it. Empty when the admin has only an address. */
-  screenshots?: ScreenshotImage[];
+  screenshots?: Buffer[];
   /** The client this import is for, when the form has one. Threaded through for cost attribution. */
   demoClientId?: string;
 }
@@ -117,7 +110,7 @@ export async function analyseBrand(input: BrandImportInput): Promise<BrandImport
   // Screenshots are merged with each other first, so that a set of five frames still weighs the
   // same against the site as a single frame does — otherwise "upload more pictures" would quietly
   // become "outvote the logo".
-  const shotPalettes = await Promise.all(screenshots.map((shot) => extractPalette(shot.buffer)));
+  const shotPalettes = await Promise.all(screenshots.map((shot) => extractPalette(shot)));
   const screenshotCandidates = mergePalettes(
     shotPalettes
       .filter((palette) => palette.length > 0)
@@ -141,10 +134,10 @@ export async function analyseBrand(input: BrandImportInput): Promise<BrandImport
         candidates,
         demoClientId: input.demoClientId,
         hints: brand?.hints,
-        images: screenshots.map((shot) => ({
-          base64: shot.buffer.toString('base64'),
-          mediaType: shot.mediaType,
-        })),
+        // `assignRoles` resizes and re-encodes these itself, the same way `verifyLogo`
+        // thumbnails its candidates: preparing an image for a model belongs beside the call that
+        // sends it.
+        images: screenshots,
       });
       Object.assign(
         fields,
@@ -262,7 +255,6 @@ const IMAGE_SOURCE_COPY: Record<DiscoveredImage['via'], string> = {
   header: 'found in the site’s header',
   filename: 'an image on the page named like a logo',
   'apple-touch-icon': 'the site’s touch icon (square)',
-  icon: 'the site’s favicon',
   'dark-variant': 'the site’s dark-mode lockup',
 };
 

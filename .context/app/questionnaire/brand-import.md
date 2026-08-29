@@ -114,7 +114,12 @@ Ranked in descending order of how much the page is really telling us:
 2. An `<img>` in a `<header>`/`<nav>` whose class, id, alt or src says logo/brand/wordmark.
 3. Any image on the page whose filename says logo.
 4. `apple-touch-icon` → `logoMarkUrl`. Typically 180×180, so it clears `BRAND_MARK_SPEC`'s 128px
-   floor, which the 32px favicon never does.
+   floor. **There is no favicon fallback**, and that is the point: a 16 or 32px `.ico` can never
+   clear the floor, so proposing one produced a field guaranteed to fail. The re-host rejects it on
+   dimensions, a failed re-host deliberately keeps the _remote_ address (right for a logo a CDN
+   merely refused us), and `isBrandImageSrc` accepts any https URL — so the favicon was written into
+   the square-mark column and drawn at mark size. A site with no touch icon simply has no mark to
+   propose.
 
 **Every one of those signals is circumstantial**, and a real import proved it: a company called
 Eagle Eye Solutions was handed a circular **Forbes** logo. A marketing homepage is full of files
@@ -360,6 +365,19 @@ So `ground.ts` completes the set:
    already-dark canvas is **mixed toward near-black instead**, which keeps the hue while dropping
    the luminance, so a deep purple becomes a deeper purple rather than either an unchanged purple or
    a black rectangle.
+
+   `MIN_GROUND_SEPARATION` gates the analyst's ground but is deliberately **not** re-applied to the
+   derived one. For an already-dark brand nothing we could derive would pass it — deepening
+   `#111827` gives `#0d1017`, a ratio of about 1.07 — and the only value that would clear 1.5 is a
+   _lighter_ one, which is the opposite of a dark mode. Dropping the field instead would hand the
+   question back to `resolveTheme`, which carries an already-dark canvas across unchanged, and two
+   identical panels is the exact bug this was built to fix. So the deepening is kept and the **copy**
+   carries the honesty: a pair that did clear the threshold reads "so dark mode is not the same
+   colour", one that did not reads "a deeper cut of the canvas, which is as far as an already-dark
+   brand goes". The one case with nothing to say is a canvas already at near-black, where the
+   derivation returns the canvas itself — that field is withheld rather than shown repeating the
+   value above it.
+
 2. **An ink that cannot be read is replaced, not warned about.** The form warns and saves anyway for
    a colour the admin typed — a brand may genuinely be low-contrast, and refusing would overrule
    their designer. An imported ink is nobody's decision yet, so shipping an unreadable pair only
@@ -480,9 +498,33 @@ Two orderings matter on the screenshot branch:
 
 - **`MAX_INPUT_PIXELS` is checked from the image header, before any decode.** A solid-colour
   16000×16000 PNG is ~200KB on disk and ~1GB decoded — it clears the byte cap and every other gate.
-- **Magic bytes run before the detected type reaches the model.** The type attached to the vision
-  call is the DETECTED one, never the browser's claim, so a mislabelled upload cannot send the
-  provider a lie about its payload.
+- **Magic bytes run before anything reads the file as an image.** Nothing downstream trusts the
+  browser's claim about the type — and nothing reads the DETECTED one either, because `assignRoles`
+  re-encodes every frame before a model sees it (below), so the type attached to the vision call is
+  one we produced. This check earns its place as the gate that refuses a file that is not an image
+  at all.
+
+### Screenshots are resized before they reach the model
+
+`assignRoles` caps each frame's long edge at **1568px** and re-encodes it to PNG, the same way
+`verifyLogo` thumbnails its own candidates — preparing an image for a model belongs beside the call
+that sends it, not in the orchestrator.
+
+1568 is the providers' own downscale threshold, so a larger frame buys no detail: it is resized
+before it is ever tokenised. What it did cost was real — the route accepts up to three screenshots
+at the storage size cap each, and base64 adds a third again, so a set of large frames could exceed
+a provider's per-image limit outright and fail the call, losing the assignment we could still have
+made from the numbers.
+
+**PNG rather than JPEG**, because this feature is about colour. The model can only ever _return_ a
+hex from the measured candidate list — `narrowAssignments` guarantees that — so a lossy encode could
+never fabricate a colour, but it could blur which region is which and move a real colour onto the
+wrong role. A UI screenshot is flat colour, which PNG compresses well, so losslessness is cheap
+here; the resize is what does the work.
+
+The palette is measured from the **original** bytes, not the downsample — `extractPalette` runs
+before any of this. A frame that cannot be decoded is dropped and the others still go; if none can,
+the call runs on the numbers alone, exactly as it does for a model without vision.
 
 The route is collection-scoped (`/brand-import`, not `/[id]/brand-import`) because the create form
 has no client id yet and colours are worth importing before the client exists. `demoClientId` is

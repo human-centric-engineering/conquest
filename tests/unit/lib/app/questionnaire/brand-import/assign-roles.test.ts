@@ -9,9 +9,13 @@
  *    really checking.
  * 2. **A model that cannot see is not a failure.** When the resolved model lacks `vision` the
  *    image is dropped and the call still runs on the numbers, marked so.
+ * 3. **What reaches the provider is bytes we encoded.** Screenshots are resized and re-encoded to
+ *    PNG before they are attached, so `sharp` is deliberately NOT mocked here — the frames below
+ *    are real images, and the assertions are about what came out the far side.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import sharp from 'sharp';
 
 const prismaMock = vi.hoisted(() => ({ aiAgent: { findUnique: vi.fn() } }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -43,6 +47,25 @@ const CANDIDATES = [
   { hex: '#111114', share: 0.2, neutral: true },
   { hex: '#5469d4', share: 0.1, neutral: false },
 ];
+
+/** A real PNG of the given size — `forVision` runs sharp for real, so a fake buffer would drop. */
+async function png(width: number, height: number): Promise<Buffer> {
+  return sharp({
+    create: { width, height, channels: 3, background: '#5469d4' },
+  })
+    .png()
+    .toBuffer();
+}
+
+/** The image parts of the single call the mocked provider received. */
+function attachedImages(): { source?: { data: string; mediaType: string } }[] {
+  const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
+  const parts = messages[1].content as {
+    type: string;
+    source?: { data: string; mediaType: string };
+  }[];
+  return parts.filter((part) => part.type === 'image');
+}
 
 describe('narrowAssignments', () => {
   it('maps the roles it recognises onto their columns', () => {
@@ -119,38 +142,88 @@ describe('assignRoles', () => {
   });
 
   it('attaches the image when the resolved model can read one', async () => {
-    const result = await assignRoles({
-      candidates: CANDIDATES,
-      images: [{ base64: 'AAAA', mediaType: 'image/png' }],
-    });
+    const result = await assignRoles({ candidates: CANDIDATES, images: [await png(400, 300)] });
 
     expect(result.sawImages).toBe(true);
-    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
-    const parts = messages[1].content as { type: string }[];
-    expect(parts.some((part) => part.type === 'image')).toBe(true);
+    expect(attachedImages()).toHaveLength(1);
   });
 
   it('attaches every screenshot to the same call, and says they are one brand', async () => {
     const result = await assignRoles({
       candidates: CANDIDATES,
-      images: [
-        { base64: 'AAAA', mediaType: 'image/png' },
-        { base64: 'BBBB', mediaType: 'image/jpeg' },
-      ],
+      images: [await png(400, 300), await png(320, 240)],
     });
 
     expect(result.sawImages).toBe(true);
-    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
-    const parts = messages[1].content as { type: string; source?: { data: string } }[];
-    expect(parts.filter((part) => part.type === 'image').map((part) => part.source?.data)).toEqual([
-      'AAAA',
-      'BBBB',
-    ]);
+    expect(attachedImages()).toHaveLength(2);
     // Without this the model has been seen to answer per image, which produces two palettes and
     // nothing to arbitrate between them.
-    const text = parts.find((part) => part.type === 'text') as unknown as { text: string };
-    expect(text.text).toContain('2 screenshots');
-    expect(text.text).toContain('one set of roles');
+    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
+    const parts = messages[1].content as { type: string; text?: string }[];
+    const text = parts.find((part) => part.type === 'text')?.text ?? '';
+    expect(text).toContain('2 screenshots');
+    expect(text).toContain('one set of roles');
+  });
+
+  it('declares the type it encoded, not one the upload claimed', async () => {
+    // The bytes attached are ours — re-encoded a line earlier — so the media type is an assertion
+    // about our own output rather than anything trusted from the request.
+    await assignRoles({ candidates: CANDIDATES, images: [await png(400, 300)] });
+
+    expect(attachedImages()[0]?.source?.mediaType).toBe('image/png');
+  });
+
+  it('resizes a large screenshot down to the provider’s own ceiling before sending it', async () => {
+    // A full-size frame buys no detail — the provider downscales past 1568px anyway — and three of
+    // them at the upload cap could exceed a per-image limit and fail the whole call.
+    await assignRoles({ candidates: CANDIDATES, images: [await png(4000, 3000)] });
+
+    const data = attachedImages()[0]?.source?.data ?? '';
+    const meta = await sharp(Buffer.from(data, 'base64')).metadata();
+    expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(1568);
+    expect(meta.format).toBe('png');
+  });
+
+  it('bounds the long edge whichever one it is, so a tall page is capped too', async () => {
+    await assignRoles({ candidates: CANDIDATES, images: [await png(900, 6000)] });
+
+    const meta = await sharp(
+      Buffer.from(attachedImages()[0]?.source?.data ?? '', 'base64')
+    ).metadata();
+    expect(meta.height).toBeLessThanOrEqual(1568);
+  });
+
+  it('leaves a small screenshot at its own size rather than blowing it up', async () => {
+    await assignRoles({ candidates: CANDIDATES, images: [await png(320, 240)] });
+
+    const meta = await sharp(
+      Buffer.from(attachedImages()[0]?.source?.data ?? '', 'base64')
+    ).metadata();
+    expect(meta.width).toBe(320);
+    expect(meta.height).toBe(240);
+  });
+
+  it('keeps the readable frames when one of several cannot be decoded', async () => {
+    // One bad frame among three is not a reason to lose the other two.
+    const result = await assignRoles({
+      candidates: CANDIDATES,
+      images: [await png(400, 300), Buffer.from('not an image at all')],
+    });
+
+    expect(result.sawImages).toBe(true);
+    expect(attachedImages()).toHaveLength(1);
+  });
+
+  it('falls back to the numbers when no screenshot can be decoded at all', async () => {
+    const result = await assignRoles({
+      candidates: CANDIDATES,
+      images: [Buffer.from('not an image at all')],
+    });
+
+    expect(result.sawImages).toBe(false);
+    expect(result.assignments).toHaveLength(2);
+    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
+    expect(typeof messages[1].content).toBe('string');
   });
 
   it('drops the image and still assigns when the model has no vision capability', async () => {
@@ -158,15 +231,26 @@ describe('assignRoles', () => {
     // could still have made from the shares alone.
     providerMock.assertModelSupportsAttachments.mockRejectedValue(new Error('no vision'));
 
-    const result = await assignRoles({
-      candidates: CANDIDATES,
-      images: [{ base64: 'AAAA', mediaType: 'image/png' }],
-    });
+    const result = await assignRoles({ candidates: CANDIDATES, images: [await png(400, 300)] });
 
     expect(result.sawImages).toBe(false);
     expect(result.assignments).toHaveLength(2);
     const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
     expect(typeof messages[1].content).toBe('string');
+  });
+
+  it('does not re-encode anything when the model cannot see', async () => {
+    // Preparing frames a model will never read is pure waste, so the resize is gated on the
+    // capability check rather than run first and thrown away.
+    providerMock.assertModelSupportsAttachments.mockRejectedValue(new Error('no vision'));
+
+    await assignRoles({
+      candidates: CANDIDATES,
+      // Undecodable: if this reached sharp it would log, and the cost record would still say 0.
+      images: [Buffer.from('not an image at all')],
+    });
+
+    expect(vi.mocked(logAppLlmCost).mock.calls[0][0].extra?.images).toBe(0);
   });
 
   it('attributes the spend with no version, because an import has none', async () => {

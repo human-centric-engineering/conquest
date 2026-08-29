@@ -53,7 +53,7 @@ import {
   validateImageMagicBytes,
 } from '@/lib/storage/image';
 import { MAX_INPUT_PIXELS } from '@/lib/app/questionnaire/theming';
-import { analyseBrand, type ScreenshotImage } from '@/lib/app/questionnaire/brand-import';
+import { analyseBrand } from '@/lib/app/questionnaire/brand-import';
 import { brandImportLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 /**
@@ -90,14 +90,14 @@ const urlImportSchema = z.object({
 });
 
 /**
- * Put one uploaded file through every gate and hand back the bytes with their DETECTED type.
+ * Put one uploaded file through every gate and hand back the bytes.
  *
  * Throws an `APIError` on anything malformed, which is the right shape for these: unlike "we could
  * not find a brand in there", a file that is not an image is fixed by sending a different file, not
  * by trying another route. Per file rather than per request, so the second picture is checked as
  * carefully as the first.
  */
-async function readScreenshot(file: File): Promise<ScreenshotImage> {
+async function readScreenshot(file: File): Promise<Buffer> {
   const maxSize = getMaxFileSizeBytes();
   if (file.size > maxSize) {
     const maxSizeMB = Math.round(maxSize / (1024 * 1024));
@@ -111,8 +111,10 @@ async function readScreenshot(file: File): Promise<ScreenshotImage> {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // Never trust the client-declared MIME — the detected type is also what gets attached to the
-  // vision call, so a wrong one would reach the provider as a lie about the payload.
+  // Never trust the client-declared MIME. Nothing downstream reads the DETECTED type either —
+  // `assignRoles` re-encodes every frame to PNG before it reaches a model, so the type attached to
+  // the vision call is one we produced. This check earns its place as the gate that refuses a file
+  // that is not an image at all.
   const validation = validateImageMagicBytes(buffer);
   if (!validation.valid || !validation.detectedType) {
     throw new APIError(
@@ -147,7 +149,7 @@ async function readScreenshot(file: File): Promise<ScreenshotImage> {
     );
   }
 
-  return { buffer, mediaType: validation.detectedType };
+  return buffer;
 }
 
 export const POST = withAdminAuth(async (request, session) => {
@@ -207,7 +209,7 @@ export const POST = withAdminAuth(async (request, session) => {
     throw new APIError('That website address is too long', ErrorCodes.VALIDATION_ERROR, 400);
   }
 
-  const screenshots: ScreenshotImage[] = [];
+  const screenshots: Buffer[] = [];
   for (const file of files) {
     screenshots.push(await readScreenshot(file));
   }

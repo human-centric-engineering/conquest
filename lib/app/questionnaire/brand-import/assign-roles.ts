@@ -29,6 +29,8 @@
  * palette with `degraded: true`. The admin always gets the colours; only the mapping is at risk.
  */
 
+import sharp from 'sharp';
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { z } from 'zod';
@@ -44,7 +46,7 @@ import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
 import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import { bulletList, joinSections, titledBlock } from '@/lib/app/questionnaire/prompt/format';
 import { BRAND_IMPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
-import { HEX_COLOR_PATTERN } from '@/lib/app/questionnaire/theming';
+import { HEX_COLOR_PATTERN, MAX_INPUT_PIXELS } from '@/lib/app/questionnaire/theming';
 import type {
   ColorCandidate,
   ImportableColorField,
@@ -52,6 +54,21 @@ import type {
 
 const MAX_TOKENS = 700;
 const TIMEOUT_MS = 30_000;
+
+/**
+ * The longest edge, in pixels, of a screenshot as it goes to the model.
+ *
+ * 1568 is the providers' OWN downscale threshold — an image longer than this on either edge is
+ * resized before it is ever tokenised, so shipping the full frame buys no detail and costs the
+ * upload. What it did cost was real: the route accepts up to {@link MAX_SCREENSHOTS} frames at the
+ * storage size cap each, and base64 adds a third again, so three large screenshots could exceed a
+ * provider's per-image limit outright and fail the whole call — losing the assignment we could
+ * still have made from the numbers.
+ *
+ * `fit: 'inside'` so it bounds the LONG edge whichever one that is. A full-page screenshot is tall,
+ * not wide, and capping only the width would leave it enormous.
+ */
+const VISION_MAX_EDGE = 1568;
 
 /**
  * The roles the analyst assigns, and the column each one lands in.
@@ -114,7 +131,7 @@ export interface AssignRolesInput {
    * decision about one brand, and asking per image would produce N answers with nothing to
    * arbitrate between them.
    */
-  images?: { base64: string; mediaType: string }[];
+  images?: Buffer[];
   /**
    * Things the page told us outright — a `theme-color` meta, a `--brand-primary` custom property.
    * Passed as hints rather than applied directly so the analyst can reconcile them with what it
@@ -159,10 +176,21 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
   // Ask before attaching: a model without `vision` in the curated matrix would reject the whole
   // call, losing the assignment we could still have made from the numbers alone.
   let sawImages = false;
+  let attachable: string[] = [];
   if (input.images && input.images.length > 0) {
     try {
       await assertModelSupportsAttachments(providerSlug, model, ['vision']);
-      sawImages = true;
+      // Only once vision is confirmed: re-encoding frames a model cannot read is pure waste.
+      attachable = (await Promise.all(input.images.map(forVision))).filter(
+        (encoded): encoded is string => encoded !== null
+      );
+      sawImages = attachable.length > 0;
+      if (!sawImages) {
+        logger.info('Brand import: no screenshot could be prepared for the model', {
+          providerSlug,
+          model,
+        });
+      }
     } catch {
       logger.info('Brand import: resolved model cannot read images, assigning from palette only', {
         providerSlug,
@@ -174,7 +202,7 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
   const result = await runStructuredCompletion<z.infer<typeof assignmentSchema>>({
     provider,
     model,
-    messages: buildMessages(input, sawImages),
+    messages: buildMessages(input, attachable),
     temperature: agent.temperature,
     maxTokens: agent.maxTokens || MAX_TOKENS,
     timeoutMs: TIMEOUT_MS,
@@ -198,7 +226,7 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
     versionId: null,
     extra: {
       candidates: input.candidates.length,
-      images: sawImages ? (input.images?.length ?? 0) : 0,
+      images: attachable.length,
       demoClientId: input.demoClientId,
     },
   });
@@ -270,8 +298,45 @@ const RESPONSE_SCHEMA: Record<string, unknown> = {
   required: ['roles'],
 };
 
-function buildMessages(input: AssignRolesInput, sawImages: boolean): LlmMessage[] {
-  const images = sawImages ? (input.images ?? []) : [];
+/**
+ * One screenshot, resized and re-encoded for the model. Base64 PNG, or null if it cannot be read.
+ *
+ * PNG rather than JPEG deliberately. This whole feature is about colour, and while the model can
+ * only ever RETURN a hex from the measured candidate list — `narrowAssignments` guarantees that, so
+ * a shifted pixel could never become a fabricated colour — a lossy encode could still blur which
+ * region is which and move a colour onto the wrong ROLE. A UI screenshot is flat colour, which is
+ * exactly what PNG compresses well, so losslessness costs little here. The resize is what does the
+ * work: capping the long edge at {@link VISION_MAX_EDGE} takes a 4000x3000 frame down by a factor
+ * of six in pixels.
+ *
+ * Flattened onto white because a screenshot can arrive as a PNG with alpha, and a provider that
+ * composites onto black would be shown a page nobody has ever seen.
+ *
+ * Returns null rather than throwing: one undecodable frame among three is not a reason to lose the
+ * other two, and no frames at all simply drops us to assigning from the numbers.
+ */
+async function forVision(buffer: Buffer): Promise<string | null> {
+  try {
+    const resized = await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
+      .resize({
+        width: VISION_MAX_EDGE,
+        height: VISION_MAX_EDGE,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .flatten({ background: '#ffffff' })
+      .png()
+      .toBuffer();
+    return resized.toString('base64');
+  } catch (error) {
+    logger.info('Brand import: a screenshot could not be prepared for the model', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function buildMessages(input: AssignRolesInput, images: string[]): LlmMessage[] {
   const system = joinSections(
     'You are a brand analyst. You are given the colours MEASURED from a company website (or a ' +
       'screenshot of one) and you decide which role each colour plays on the page.',
@@ -330,9 +395,11 @@ function buildMessages(input: AssignRolesInput, sawImages: boolean): LlmMessage[
 
   const parts: ContentPart[] = [
     { type: 'text', text },
-    ...images.map((image): ContentPart => ({
+    // `image/png` is asserted, not detected: these are bytes WE encoded a line above, so the type
+    // is ours rather than anything the upload claimed about itself.
+    ...images.map((data): ContentPart => ({
       type: 'image',
-      source: { type: 'base64', mediaType: image.mediaType, data: image.base64 },
+      source: { type: 'base64', mediaType: 'image/png', data },
     })),
   ];
 

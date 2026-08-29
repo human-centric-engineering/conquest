@@ -126,6 +126,48 @@ describe('completeGrounds', () => {
     expect(out.canvasColorDark?.source).toContain('too close');
   });
 
+  /**
+   * For an already-dark brand the derived ground CANNOT clear `MIN_GROUND_SEPARATION` — the only
+   * value that would is a lighter one, which is the opposite of a dark mode. So the field is still
+   * proposed (dropping it hands the question back to `resolveTheme`, which carries a dark canvas
+   * across unchanged, and two identical panels is the bug this was built to fix) and the copy is
+   * what changes: it must not claim a difference the admin cannot see.
+   */
+  it('does not claim a visible difference it did not achieve on a dark brand', () => {
+    const out = completeGrounds({
+      canvasColor: { value: '#111827', confidence: 'high', source: 'measured' },
+    });
+
+    const dark = out.canvasColorDark;
+    expect(dark?.value).toBeDefined();
+    expect(dark?.value).not.toBe('#111827');
+    expect(groundsAreDistinct('#111827', dark?.value ?? '')).toBe(false);
+    expect(dark?.source).toContain('as far as an already-dark brand goes');
+    expect(dark?.source).not.toContain('not the same colour');
+  });
+
+  it('still says "not the same colour" when the derivation genuinely got there', () => {
+    const out = completeGrounds({
+      canvasColor: { value: '#ffffff', confidence: 'high', source: 'measured' },
+    });
+
+    const dark = out.canvasColorDark;
+    expect(groundsAreDistinct('#ffffff', dark?.value ?? '')).toBe(true);
+    expect(dark?.source).toContain('not the same colour');
+  });
+
+  it('proposes no dark ground at all when there is nothing left to deepen', () => {
+    // At NEAR_BLACK the deepening returns the canvas itself. A field whose value repeats the one
+    // above it tells the admin nothing, so it is not offered.
+    const out = completeGrounds({
+      canvasColor: { value: '#0a0a0a', confidence: 'high', source: 'measured' },
+    });
+
+    expect(out.canvasColorDark).toBeUndefined();
+    // The light pair is still completed — only the redundant field is withheld.
+    expect(out.inkColor?.value).toBeDefined();
+  });
+
   it('replaces an ink that cannot be read on the canvas', () => {
     const out = completeGrounds({
       canvasColor: measured('#8a8a8a'),

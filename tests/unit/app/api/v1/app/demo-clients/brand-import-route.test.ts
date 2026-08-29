@@ -95,18 +95,21 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
     expect(body.data.fields.canvasColor.value).toBe('#ffffff');
   });
 
-  it('passes the DETECTED media type to the analyser, never the browser-declared one', async () => {
-    // The detected type is what gets attached to the vision call; forwarding the client's claim
-    // would send the provider a lie about the payload.
+  it('hands the analyser the ORIGINAL bytes, whatever the upload called itself', async () => {
+    // The type the magic-byte check detects no longer travels with the frame: `assignRoles`
+    // re-encodes every screenshot to PNG before a model sees it, so the type attached to the vision
+    // call is one we produced (asserted in assign-roles.test.ts). What still matters here is that
+    // the UNTOUCHED bytes reach analysis — the palette is measured from the original, not from the
+    // downsample. The magic-byte check keeps its job as the gate that refuses a non-image, covered
+    // by 'rejects bytes that are not an image' below.
     imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: 'image/webp' });
 
-    await post(request({ file: screenshot() }), SESSION);
+    await post(request({ file: screenshot(64) }), SESSION);
 
-    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        screenshots: [expect.objectContaining({ mediaType: 'image/webp' })],
-      })
-    );
+    const passed = analyseMock.analyseBrand.mock.calls[0][0].screenshots;
+    expect(passed).toHaveLength(1);
+    expect(Buffer.isBuffer(passed[0])).toBe(true);
+    expect(passed[0]).toHaveLength(64);
   });
 
   it('threads an optional demoClientId through for cost attribution', async () => {
@@ -212,10 +215,7 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
     expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'acme.example',
-        screenshots: [
-          expect.objectContaining({ mediaType: 'image/png' }),
-          expect.objectContaining({ mediaType: 'image/png' }),
-        ],
+        screenshots: [expect.any(Buffer), expect.any(Buffer)],
       })
     );
   });

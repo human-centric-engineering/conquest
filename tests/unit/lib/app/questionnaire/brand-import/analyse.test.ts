@@ -31,7 +31,11 @@ const CANDIDATES = [
   { hex: '#5469d4', share: 0.1, neutral: false },
 ];
 
-const SHOT = { buffer: Buffer.from('image'), mediaType: 'image/png' };
+/**
+ * A screenshot is now just its bytes: `assignRoles` resizes and re-encodes them itself, so the
+ * detected media type stops at the route's magic-byte gate rather than travelling with the frame.
+ */
+const SHOT = Buffer.from('image');
 const input = { screenshots: [SHOT] };
 
 beforeEach(() => {
@@ -495,10 +499,7 @@ describe('analyseBrand: an address and screenshots together', () => {
     expect(assignMock.assignRoles).toHaveBeenCalledTimes(1);
     expect(assignMock.assignRoles).toHaveBeenCalledWith(
       expect.objectContaining({
-        images: [
-          { base64: SHOT.buffer.toString('base64'), mediaType: 'image/png' },
-          { base64: SHOT.buffer.toString('base64'), mediaType: 'image/png' },
-        ],
+        images: [SHOT, SHOT],
         hints: ['The page declares theme-color: #5469d4'],
       })
     );

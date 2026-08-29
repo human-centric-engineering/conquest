@@ -49,7 +49,7 @@ import {
 
 /** How an image was found. Drives both the confidence we report and the line the admin reads. */
 export type ImageProvenance =
-  'schema.org' | 'header' | 'filename' | 'apple-touch-icon' | 'icon' | 'dark-variant';
+  'schema.org' | 'header' | 'filename' | 'apple-touch-icon' | 'dark-variant';
 
 export interface DiscoveredImage {
   url: string;
@@ -293,14 +293,20 @@ export function discoverImages(doc: Document, base: string): DiscoveredImages {
     if (candidates.length >= MAX_LOGO_CANDIDATES) break;
   }
 
-  // apple-touch-icon is typically 180x180 — square by definition and large enough to clear the
-  // mark spec's 128px floor, which the 16px favicon never does.
-  const mark =
-    absolute(
-      doc.querySelector('link[rel~="apple-touch-icon"]')?.getAttribute('href'),
-      base,
-      'apple-touch-icon'
-    ) ?? absolute(doc.querySelector('link[rel~="icon"]')?.getAttribute('href'), base, 'icon');
+  // apple-touch-icon ONLY, and no favicon fallback.
+  //
+  // A touch icon is typically 180x180 — square by definition and comfortably over BRAND_MARK_SPEC's
+  // 128px floor. A favicon is 16 or 32px and can never clear it, so proposing one produced a field
+  // that was guaranteed to fail: the re-host POST rejects it on dimensions, `rehost()` treats a
+  // failed re-host as "keep the remote address" (right for a logo a CDN refused us), and
+  // `isBrandImageSrc` accepts any https URL — so a 16px .ico was written into the square-mark
+  // column and drawn at mark size. A site with no touch icon has no mark for us to propose, and
+  // saying nothing is the honest answer.
+  const mark = absolute(
+    doc.querySelector('link[rel~="apple-touch-icon"]')?.getAttribute('href'),
+    base,
+    'apple-touch-icon'
+  );
 
   return {
     logoCandidates: candidates,
