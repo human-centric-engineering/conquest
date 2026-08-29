@@ -132,7 +132,9 @@ export function SessionLifecycleBar({
               caption stands down and the bar speaks for itself. */}
           {showProgress && (
             <SessionProgressBar
-              coverage={view.completion.displayCoverage}
+              // F17.33: the ratcheted figure — see the standalone `progress` slot in
+              // `session-workspace.tsx` for why this is not `displayCoverage`.
+              coverage={view.completion.progressPct / 100}
               showPercentText={showProgressPercentText}
               sharesLine
               className="min-w-0 flex-1"

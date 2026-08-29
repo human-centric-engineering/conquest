@@ -67,6 +67,10 @@ import {
   milestoneMessage,
   resolveMilestoneCrossing,
 } from '@/lib/app/questionnaire/completion/milestones';
+import {
+  progressPctFromCoverage,
+  resolveDisplayedProgress,
+} from '@/lib/app/questionnaire/completion/progress';
 import { gradedCoverage } from '@/lib/app/questionnaire/selection/context';
 
 import type {
@@ -556,6 +560,12 @@ export async function runDataSlotTurn(
       : `${remainingQuestions.length} question(s) still unanswered.`,
   };
 
+  // F17.33: the progress denominator. Identical to `effective.questions` everywhere except a
+  // Conditional Topics session before its plan is decided, where it is the full candidate set so
+  // the plan landing cannot make the bar fall. The zero-question guard is passed the same list that
+  // was graded, so the guard and the figure can never disagree about which version is empty.
+  const progressQuestions = effective.progressQuestions ?? effective.questions;
+
   // 2b. Completeness milestones. Shared with `runTurn` so the banner fires identically on both
   // pipelines — this path is the one MOST sessions take (any version with data slots), so omitting
   // it here would make the whole feature a no-op in practice.
@@ -572,9 +582,9 @@ export async function runDataSlotTurn(
       { announce: null, coveragePct: 0, raisedMilestones: undefined }
     : resolveMilestoneCrossing(
         state.config,
-        gradedCoverage(effective.questions, effective.answered, state.config.answerConfidenceFloor),
+        gradedCoverage(progressQuestions, effective.answered, state.config.answerConfidenceFloor),
         state.raisedMilestones,
-        effective.questions.length
+        progressQuestions.length
       );
   if (milestone.announce !== null) {
     events.push({
@@ -583,6 +593,22 @@ export async function runDataSlotTurn(
       message: milestoneMessage(milestone.coveragePct),
     });
   }
+
+  // 2c. The progress floor (F17.33) — the ratchet that stops a scope widening reversing the bar.
+  // Same placement, same probe-turn skip and the same un-ratcheted input as `runTurn`: the two
+  // pipelines must agree on the figure or the feature would silently do nothing on whichever path
+  // forgot it, and this is the path most sessions take.
+  //
+  // Graded here rather than read off `assessment.displayCoverage`, which this pipeline sets to a
+  // raw answered/total count ratio (see above) — the same reason the milestone grades its own.
+  const progress = contradiction.suppressWrites
+    ? { pct: 0, progressFloorPct: undefined }
+    : resolveDisplayedProgress(
+        progressPctFromCoverage(
+          gradedCoverage(progressQuestions, effective.answered, state.config.answerConfidenceFloor)
+        ),
+        state.progressFloorPct ?? 0
+      );
 
   // 3. Respond.
   let response: TurnResponse;
@@ -758,6 +784,9 @@ export async function runDataSlotTurn(
         : {}),
       ...(milestone.raisedMilestones !== undefined
         ? { raisedMilestones: milestone.raisedMilestones }
+        : {}),
+      ...(progress.progressFloorPct !== undefined
+        ? { progressFloorPct: progress.progressFloorPct }
         : {}),
     },
     events,

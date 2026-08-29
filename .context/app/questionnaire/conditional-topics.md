@@ -282,6 +282,17 @@ The amendment is recorded on the plan (`InterviewPlan.amendments`) _and_ the add
 topic as a good selection would make the planner look better the worse it got. The acknowledgement
 rides the same one-turn briefing seam as the original announcement, matched on `atTurn`.
 
+**Widening has consequences beyond the plan.** The in-scope question set is the progress bar's
+denominator, so an amendment — and, far more often, the plan itself landing at the end of the
+opening — would make the figure the respondent is looking at fall. **It no longer does** (F17.33):
+before the plan exists the bar is measured against every question that could still be asked, so
+deciding the plan moves it UP, and a session-scoped floor turns any remaining widening into a stall
+rather than a reversal. See [`completion-logic.md`](./completion-logic.md#and-a-third-figure-the-bar-actually-draws-progresspct-f1733).
+
+Still open: whatever the respondent already said about a newly-seated topic was out of scope when
+they said it, so the extractor never saw the question it answered — specced in
+[`f17-progress-under-widening.md`](../planning/features/f17-progress-under-widening.md) §5.
+
 ### What the document asked for, when the opening cannot decide it (F17.31a)
 
 Some instruments say a section is added on something said **during** the conversation, not on how
@@ -2030,6 +2041,9 @@ compliance audit, a role-specific survey.
 ## Related
 
 - [`../planning/features/f17.1-ui.md`](../planning/features/f17.1-ui.md) onward — the trackers
+- [`../planning/features/f17-progress-under-widening.md`](../planning/features/f17-progress-under-widening.md)
+  — what the respondent sees and is told when scope widens: the progress figure, the announcement,
+  and re-reading the conversation for answers given before a topic was in scope
 - The pilot client research notes (held outside this repo) — the client
   requirement analysis this capability was generalised from
 - [`experiences.md`](./experiences.md) — routing _between_ questionnaires, the sibling mechanism

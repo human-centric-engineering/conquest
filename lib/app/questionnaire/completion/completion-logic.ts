@@ -122,7 +122,17 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
   // Progress-bar figure only: grades the FULL (ungated) answer set — tentative below-floor answers
   // earn partial credit, confirmed ones full — so the bar shows momentum a strict gate can't. Never
   // feeds a gate/threshold below. Collapses to `coverage` when the floor is 0.
-  const displayCoverage = gradedCoverage(ctx.questions, ctx.answered, floor);
+  //
+  // Measured against `progressQuestions` (F17.33), which is `questions` everywhere except a
+  // Conditional Topics session whose plan has not been decided yet — there it is the full candidate
+  // set, so the plan landing narrows the denominator rather than growing it. Every GATE figure above
+  // and below stays on `ctx.questions`: this changes what the respondent is shown, never what they
+  // are allowed to do.
+  const displayCoverage = gradedCoverage(
+    ctx.progressQuestions ?? ctx.questions,
+    ctx.answered,
+    floor
+  );
 
   const requiredUnansweredKeys = unansweredQuestions(gated)
     .filter((q) => q.required)

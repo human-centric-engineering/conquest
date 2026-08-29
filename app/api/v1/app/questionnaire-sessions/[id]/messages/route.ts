@@ -1153,6 +1153,11 @@ async function handleMessage(
           ...(result.sideEffects.raisedMilestones !== undefined
             ? { raisedMilestones: result.sideEffects.raisedMilestones }
             : {}),
+          // F17.33: persist a risen progress floor so the bar cannot reverse when scope widens
+          // (undefined = it did not move this turn).
+          ...(result.sideEffects.progressFloorPct !== undefined
+            ? { progressFloorPct: result.sideEffects.progressFloorPct }
+            : {}),
           keyToSlotId,
           // Retry dedup (F7.x): stamp this attempt's key so a later retry re-sending it replays
           // this turn instead of minting a duplicate.

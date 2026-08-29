@@ -80,6 +80,45 @@ the "floor off ⇒ prior behaviour" contract. The **data-slot** submit path over
 questions answered) and keeps both coverage figures from `assessCompletion`, so the bar behaves the
 same in either mode (`app/api/v1/app/questionnaire-sessions/_lib/session-status.ts`).
 
+### And a third figure the bar actually draws: `progressPct` (F17.33)
+
+`displayCoverage` is honest about _now_. It is not, on its own, safe to draw, because
+[Conditional Topics](./conditional-topics.md) can **widen** an interview after it has started — the
+plan landing at the end of the opening (every conditional-topics session) and a respondent
+amendment both add questions to the in-scope set, which is the denominator. Recomputed honestly the
+percentage therefore **falls**, at the exact moment the interviewer is announcing what it will now
+cover.
+
+Two rules answer that, and they are deliberately separate:
+
+1. **`progressQuestions` — the denominator is chosen so the figure moves the right way.** Optional
+   on `CompletionContext`, defaulting to `questions`, and different in exactly one case: a
+   Conditional Topics session **before its plan exists**, where it is the full candidate set rather
+   than the always-run phases. The bar then under-reads during the opening and steps **up** when the
+   plan excludes topics. Built once in `buildTurnContext` beside the scope filter, so no consumer
+   can pick the wrong list. **Every gate figure stays on `questions`** — this changes what the
+   respondent is shown, never what they are allowed to do.
+2. **`progressFloorPct` — the figure never goes backwards.** `resolveDisplayedProgress`
+   (`completion/progress.ts`) returns `max(computed, floor)`, and the floor is banked on the **turn**
+   path (both orchestrators, beside the milestone ledger) and **applied** on the read path
+   (`buildSessionStatusView`), because a GET must not write and nothing moves the coverage between
+   turns anyway. Capped at **99**: only a genuinely complete interview may ever show 100%, so a
+   widened session stalls one point short rather than claiming to be finished while the interviewer
+   is still asking.
+
+The floor is **presentation state, never a measurement.** Nothing analytic, no report and no export
+reads it; `displayCoverage` remains the un-ratcheted truth for all of those, and the **milestone
+ledger is deliberately fed the un-ratcheted figure too** — a banner must be spent on a threshold the
+respondent genuinely reached, not on one a presentation floor was holding.
+
+Milestones need no widening logic of their own: `resolveMilestoneCrossing` reads the same graded
+coverage the bar does, so rule 1 fixes them for free. That is the reason this is a fix to the number
+rather than a settings-conflict warning about the combination — see
+[`f17-progress-under-widening.md`](../planning/features/f17-progress-under-widening.md) §7.1.
+
+**A session that ends before its plan is decided reads low**, because it was measured against the
+whole instrument. That is honest — they did finish early — and the submit gate is untouched.
+
 There is no `completionConfig` blob and no `sweep_only` mode (the development plan's
 sketch): F4.5 maps onto the committed flat config fields (`minQuestionsAnswered`,
 `coverageThreshold`, `maxQuestionsPerSession`) and the existing

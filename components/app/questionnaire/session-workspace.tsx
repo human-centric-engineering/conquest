@@ -585,8 +585,12 @@ export function SessionWorkspace({
     // The bar draws its own progress. This standalone atom is for layouts that decompose the strip
     // and put coverage somewhere else entirely; Classic never places it.
     progress: lifecycle.view ? (
+      // F17.33: `progressPct` (a whole percent, already held at the highest figure this session has
+      // shown), not the raw `displayCoverage` — Conditional Topics can widen the interview mid-run
+      // and the bar must never walk backwards. Divided back to the component's [0, 1] contract; it
+      // rounds to the same integer.
       <SessionProgressBar
-        coverage={lifecycle.view.completion.displayCoverage}
+        coverage={lifecycle.view.completion.progressPct / 100}
         showPercentText={showProgressPercentText}
       />
     ) : null,

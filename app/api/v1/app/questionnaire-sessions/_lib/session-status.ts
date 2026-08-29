@@ -52,6 +52,10 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     answered: loaded.base.answered,
     config: loaded.base.config,
     sessionId: loaded.base.sessionId,
+    // F17.33: the PROGRESS denominator — the full candidate set on a Conditional Topics session
+    // whose plan is not decided yet, so the plan landing cannot walk the bar backwards. Identical to
+    // `questions` on every other version, and never read by the submit gate below.
+    progressQuestions: loaded.base.progressQuestions,
   });
 
   // Data Slots feature: only the SUBMIT gate is mode-specific — data-slot mode offers to submit
@@ -106,6 +110,8 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     ref: loaded.session.publicRef ?? null,
     experience,
     reopenAvailable,
+    // F17.33: applied to the drawn figure, never re-banked — this is a GET.
+    progressFloorPct: loaded.base.progressFloorPct ?? 0,
   });
 
   return {

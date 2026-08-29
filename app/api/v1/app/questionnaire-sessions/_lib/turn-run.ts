@@ -99,6 +99,13 @@ export async function persistTurn(opts: {
    * threshold. `undefined` (the default) leaves the column untouched.
    */
   raisedMilestones?: number[];
+  /**
+   * F17.33: the new `AppQuestionnaireSession.progressFloorPct` to write when this turn displayed a
+   * higher progress figure than the session ever has. `undefined` (the default) leaves it untouched.
+   * Presentation state — it stops the bar reversing when Conditional Topics widens the interview,
+   * and nothing analytic reads it.
+   */
+  progressFloorPct?: number;
   /** The send attempt's idempotency key (F7.x retry) — stamped on the turn for dedup-and-replay. */
   idempotencyKey?: string | null;
 }): Promise<string> {
@@ -206,14 +213,16 @@ export async function persistTurn(opts: {
   });
   sideEffectDataSlotIds.push(...reconciledDataSlotIds);
 
-  // Probe-confirm flow + "don't nag" ledgers: park a raised probe or clear a resolved one, and/or
-  // write the updated raised-contradiction / raised-milestone ledgers. Each is `undefined` = leave
-  // untouched (the common case); for the probe, `null` writes SQL NULL (DbNull) to clear. All ride
-  // one update so this turn's ledger state moves together.
+  // Probe-confirm flow + "don't nag" ledgers + the progress floor: park a raised probe or clear a
+  // resolved one, and/or write the updated raised-contradiction / raised-milestone ledgers and the
+  // new progress floor. Each is `undefined` = leave untouched (the common case); for the probe,
+  // `null` writes SQL NULL (DbNull) to clear. All ride one update so this turn's session state moves
+  // together.
   if (
     opts.pendingContradiction !== undefined ||
     opts.raisedContradictions !== undefined ||
-    opts.raisedMilestones !== undefined
+    opts.raisedMilestones !== undefined ||
+    opts.progressFloorPct !== undefined
   ) {
     await prisma.appQuestionnaireSession.update({
       where: { id: opts.sessionId },
@@ -232,6 +241,7 @@ export async function persistTurn(opts: {
             }
           : {}),
         ...(opts.raisedMilestones !== undefined ? { raisedMilestones: opts.raisedMilestones } : {}),
+        ...(opts.progressFloorPct !== undefined ? { progressFloorPct: opts.progressFloorPct } : {}),
       },
     });
   }

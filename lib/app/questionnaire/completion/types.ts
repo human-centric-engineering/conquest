@@ -37,6 +37,24 @@ import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
 export interface CompletionContext {
   /** Every question slot in the version (carries `required`, `weight`, ordinals). */
   questions: QuestionView[];
+  /**
+   * The denominator for {@link CompletionAssessment.displayCoverage} — the PROGRESS FIGURE only,
+   * never a gate input. Defaults to {@link questions} when absent, which is exactly today's
+   * behaviour on every version that does not use Conditional Topics.
+   *
+   * It differs in one case (F17.33). A Conditional Topics session before its plan exists has only
+   * the always-run phases in scope, so measuring progress against `questions` states a total that
+   * is about to GROW — the planner seats conditional topics the moment the opening completes, and
+   * the bar falls in the same beat as the interviewer announcing them. Passing the full candidate
+   * set here states a total that can only shrink, so the plan narrowing the interview moves the bar
+   * up. Wrong in the safe direction.
+   *
+   * Optional-with-a-fallback deliberately, against the usual preference for required fields: a
+   * caller that does not thread it keeps TODAY'S behaviour rather than silently widening a
+   * denominator. Two of `assessCompletion`'s callers are admin-side previews with no session and
+   * therefore no plan, where the distinction cannot arise.
+   */
+  progressQuestions?: QuestionView[];
   /** Answers captured so far this session. */
   answered: AnsweredView[];
   /** The version's resolved config (defaults when no row was ever saved). */

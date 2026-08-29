@@ -276,6 +276,7 @@ function makeStatus(
         kind: 'not_ready' as const,
         coverage: 0,
         displayCoverage: 0,
+        progressPct: 0,
         answeredCount: 0,
         requiredUnansweredKeys: [],
         capReached: false,

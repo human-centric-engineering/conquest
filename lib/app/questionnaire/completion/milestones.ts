@@ -21,6 +21,7 @@
  * how the number moves afterwards.
  */
 
+import { progressPctFromCoverage } from '@/lib/app/questionnaire/completion/progress';
 import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
 
 /** The milestone decision for one turn. */
@@ -75,8 +76,9 @@ export function resolveMilestoneCrossing(
   questionCount: number
 ): MilestoneOutcome {
   // Clamp before rounding so an out-of-range coverage can't reach a threshold it shouldn't.
-  // Computed up front so every return path carries the same figure the progress bar shows.
-  const pct = Math.round(Math.min(1, Math.max(0, displayCoverage)) * 100);
+  // Computed up front so every return path carries the same figure the progress bar shows — via the
+  // shared helper, so the banner's number and the bar's can never be rounded differently.
+  const pct = progressPctFromCoverage(displayCoverage);
   const silent = { announce: null, coveragePct: pct, raisedMilestones: undefined };
 
   if (!config.milestoneBannerEnabled) return silent;

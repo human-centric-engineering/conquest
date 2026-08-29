@@ -1098,6 +1098,18 @@ model AppQuestionnaireSession {
   // banner-shown this session — the orchestrator fires a threshold once, on first crossing, and never
   // again even if displayCoverage later dips (e.g. an answer is invalidated). Defaults to empty.
   raisedMilestones     Json     @default("[]")
+  // F17.33. Presentation state, NEVER a measurement: the highest whole-percent progress figure this
+  // session has ever displayed. The bar shows max(computed, this), so a scope widening — the plan
+  // landing, or a respondent amendment — can never make it run backwards. Banked on the TURN path
+  // beside raisedMilestones; the read path applies it and never writes. Nothing analytic, no report
+  // and no export reads it. Capped below 100 (see resolveDisplayedProgress): only the true computed
+  // figure may ever claim completion.
+  progressFloorPct     Int      @default(0)
+  // F17.33 ledger: topic keys whose members have already been re-read against the transcript after
+  // the scope widened (string[]). A topic seated mid-interview may have been answered before it was
+  // in scope, so its questions are read back out of the conversation once — and once only, which is
+  // what this records. Empty on every session that never widened.
+  rescannedTopicKeys   Json     @default("[]")
   // Conditional Topics (P17): the INTERVIEW PLAN — which topics this respondent's interview covers,
   // which were excluded and why, and what they were told (InterviewPlan — lib/.../scope/types.ts).
   // Written ONCE by the Scope Planner when the opening topics are covered, then frozen apart from

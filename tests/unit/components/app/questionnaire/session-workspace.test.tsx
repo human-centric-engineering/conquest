@@ -849,6 +849,7 @@ describe('SessionWorkspace', () => {
         kind: 'offer' as const,
         coverage: 0.9,
         displayCoverage: 0.9,
+        progressPct: 90,
         answeredCount: 3,
         requiredUnansweredKeys: [],
         capReached: false,
