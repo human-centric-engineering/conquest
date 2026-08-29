@@ -583,6 +583,43 @@ describe('POST …/reingest/stream — conditional topics candidacy wiring', () 
     expect(doneFrame.type).toBe('done');
     expect('conditionalTopicsCandidate' in doneFrame.data).toBe(false);
   });
+
+  /**
+   * The pre-check itself failing is not the same as it saying "no".
+   *
+   * It is a Prisma read, so it can throw for reasons that have nothing to do with this version.
+   * The route treats a thrown pre-check as ineligible — "when in doubt, don't check" — and the
+   * thing worth asserting is that the re-ingest the admin actually asked for still completes.
+   * A candidacy check is an optional extra; it must never take the replace down with it.
+   */
+  it('completes the re-ingest when the eligibility pre-check throws, announcing no check', async () => {
+    (isEligibleForScopeCandidacy as Mock).mockRejectedValue(new Error('connection terminated'));
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    expect(phaseNames).not.toContain('checking_scope');
+    expect(checkConditionalTopicsCandidacy).not.toHaveBeenCalled();
+
+    // The replace itself still happened and still reported its counts.
+    expect(reingestVersion).toHaveBeenCalled();
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect(doneFrame.data.questionCount).toBe(1);
+  });
+
+  it('survives a pre-check that rejects with a non-Error value', async () => {
+    // The warn path stringifies whatever it caught. A rejection carrying a bare string is the
+    // case where an `err.message` read would yield undefined and log a warning about nothing.
+    (isEligibleForScopeCandidacy as Mock).mockRejectedValue('connection terminated');
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    expect(frames[frames.length - 1].type).toBe('done');
+    expect(checkConditionalTopicsCandidacy).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Proposing during the re-upload (F17.22 Phase 2) ─────────────────────────────
@@ -606,6 +643,27 @@ describe('POST …/reingest/stream — proposing scope during the upload', () =>
       topicCount: 4,
       conditionalCount: 2,
     });
+  });
+
+  it('does not mention conditional topics when the analyst proposed none', async () => {
+    // The phase message has two forms, and the shorter one is not a truncation: claiming
+    // "0 of them conditional" on a proposal that is entirely unconditional invites the admin to
+    // go looking for a branch that was never proposed.
+    (checkConditionalTopicsCandidacy as Mock).mockResolvedValue(CANDIDATE);
+    (proposeScopeDuringIngest as Mock).mockResolvedValue({ topicCount: 3, conditionalCount: 0 });
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    // Two `proposing_scope` frames are emitted — "working…" before the analyst runs, then the
+    // result. The reported outcome is the last one.
+    const proposing = frames
+      .filter((f) => f.type === 'phase' && f.data.phase === 'proposing_scope')
+      .pop();
+    expect(proposing?.data.message).toContain('Proposed 3 topics');
+    // It still points at the tab by name; what it must not do is claim a conditional count.
+    expect(proposing?.data.message).not.toMatch(/of them conditional/i);
+    expect(proposing?.data.message).not.toMatch(/\b0\b/);
   });
 
   it('never runs the analyst when the version was pre-check ineligible', async () => {
