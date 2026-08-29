@@ -153,7 +153,7 @@ describe('discoverImages', () => {
       </picture>
     `);
 
-    expect(discoverImages(doc, 'https://acme.example/').logoDark).toEqual({
+    expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates[0]).toEqual({
       url: 'https://acme.example/logo-dark.svg',
       via: 'dark-variant',
     });
@@ -162,7 +162,7 @@ describe('discoverImages', () => {
   it('proposes no dark lockup rather than guessing one', () => {
     // The field is one an admin rarely checks, so the wrong artwork there is worse than none.
     const doc = parse(`<header><img class="logo" src="/logo.svg"></header>`);
-    expect(discoverImages(doc, 'https://acme.example/').logoDark).toBeNull();
+    expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates).toEqual([]);
   });
 
   it('drops an http image, because the column will not accept one', () => {
@@ -364,6 +364,38 @@ describe('excluding somebody else’s logo', () => {
     const { logoCandidates } = discoverImages(doc, 'https://acme.example/');
 
     expect(logoCandidates.map((c) => c.url)).toEqual(['https://acme.example/eagleeye-logo.svg']);
+  });
+
+  it('keeps a press badge out of the DARK lockup slot too', () => {
+    /*
+     * The reported failure, second time round. A "Forbes Communications Council" badge is named
+     * like a logo AND drawn white for a dark ground, so it matched the dark-variant rule — which
+     * had no third-party check at all. It then became the client's dark lockup, and from there
+     * their header band, because the band prefers the dark lockup whenever its ground is dark.
+     */
+    const doc = parse(`
+      <section class="press"><img src="/forbes-council-logo-white.png"></section>
+      <header><img src="/eagleeye-logo-white.svg"></header>
+    `);
+
+    const { logoDarkCandidates } = discoverImages(doc, 'https://acme.example/');
+
+    expect(logoDarkCandidates.map((c) => c.url)).toEqual([
+      'https://acme.example/eagleeye-logo-white.svg',
+    ]);
+  });
+
+  it('rejects a dark <source> whose own <picture> is a third party’s', () => {
+    const doc = parse(`
+      <div class="partners">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="/g2-logo-dark.svg">
+          <img src="/g2-logo.svg">
+        </picture>
+      </div>
+    `);
+
+    expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates).toEqual([]);
   });
 
   it('keeps several real candidates so the analyst can choose between them', () => {

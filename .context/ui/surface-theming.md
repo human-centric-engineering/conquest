@@ -189,6 +189,11 @@ own mode. `tests/unit/app/brand-theme-scheme-pinning.test.ts` resolves the real 
 and asserts all four cases, including that an unpinned surface still follows the viewer — a text
 assertion on the selectors would pass on a stylesheet whose specificity was upside down.
 
+One caveat on that test: happy-dom resolves which rules MATCH correctly but does **not** implement
+`:where()`'s zero-specificity rule, so it cannot adjudicate a specificity contest — which is how the
+bare-`:not()` regression above got past it. The `:where()` wrapper is therefore also asserted on the
+selector text, and the cascade itself was verified in real Chrome.
+
 ### 5. A nested surface can't re-theme its ancestors — `:has()` covers the backdrop
 
 Re-declaring tokens on a pinned subtree only affects that subtree. An ancestor

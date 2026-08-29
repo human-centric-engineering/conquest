@@ -19,6 +19,18 @@
  * value back. That matters because the failure is silent in the worst way: both panels still
  * render, both in the viewer's own mode, looking exactly like a working comparison.
  *
+ * ## What these tests can and cannot see
+ *
+ * happy-dom resolves which rules MATCH correctly, which is what everything below asserts. It does
+ * NOT implement `:where()`'s zero-specificity rule — a `:not(:where(x))` is weighed as though the
+ * `:where()` were not there. So it cannot adjudicate a specificity CONTEST, and one got past it:
+ * the first version of the opt-out used a bare `:not([data-scheme='light'])`, which added a level
+ * and pushed this block above `[data-canvas='custom']`, so a branded client's dark panel rendered
+ * with neutral near-black cards and band instead of its own ground. These tests passed throughout.
+ *
+ * The last case below is the guard for that, asserted on the selector text because it is the one
+ * thing this engine cannot be asked. Verified separately in real Chrome.
+ *
  * @see app/brand-theme.css
  * @see components/admin/demo-clients/demo-client-theme-preview.tsx
  */
@@ -59,7 +71,7 @@ const RULES = [
   ruleBlock("[data-surface='respondent'][data-scheme='light'] {"),
   ruleBlock("[data-surface='respondent'][data-scheme='dark'] {"),
   ruleBlock("[data-surface='respondent'] {\n  --color-primary: #18181b"),
-  ruleBlock(".dark [data-surface='respondent']:not([data-scheme='light']),"),
+  ruleBlock(".dark [data-surface='respondent']:not(:where([data-scheme='light'])),"),
 ].join('\n');
 
 /** Render three panels under a given root mode and read each one's resolved ground. */
@@ -110,5 +122,36 @@ describe('data-scheme pins a respondent surface to one mode', () => {
     // viewer's own mode, so this is the regression that would matter most.
     expect(grounds('').unpinned).toBe(NEUTRAL_RESPONDENT_GROUND.light.canvas);
     expect(grounds('dark').unpinned).toBe(NEUTRAL_RESPONDENT_GROUND.dark.canvas);
+  });
+});
+
+describe('the opt-out must not outweigh a client’s own ground', () => {
+  it('wraps every data-scheme exclusion in :where()', () => {
+    /*
+     * `:not(x)` takes the specificity of its argument; `:not(:where(x))` takes none. Without the
+     * `:where()` this block outranks `[data-surface='respondent'][data-canvas='custom']`, which is
+     * the rule that re-derives cards, borders and muted text from a client's canvas — so a branded
+     * questionnaire's dark mode silently reverts to the neutral chrome, which looks like a design
+     * choice rather than a bug. It shipped exactly once.
+     */
+    const bareNot = /:not\(\[data-scheme=/.exec(BRAND_THEME_CSS);
+    expect(bareNot, 'a data-scheme exclusion is missing its :where() wrapper').toBeNull();
+
+    // And the wrapped form is actually present, so this cannot pass by the selector being deleted.
+    expect(BRAND_THEME_CSS).toContain(":not(:where([data-scheme='light']))");
+  });
+
+  it('keeps the client-canvas rule after the dark block, so equal weights resolve its way', () => {
+    // Same specificity now, so source order decides — and the whole point of the canvas rule is to
+    // win over the neutral palette once a client has a ground of their own.
+    const darkBlock = BRAND_THEME_CSS.indexOf(
+      ".dark [data-surface='respondent']:not(:where([data-scheme='light']))"
+    );
+    const canvasBlock = BRAND_THEME_CSS.indexOf(
+      "[data-surface='respondent'][data-canvas='custom']"
+    );
+
+    expect(darkBlock).toBeGreaterThan(-1);
+    expect(canvasBlock).toBeGreaterThan(darkBlock);
   });
 });

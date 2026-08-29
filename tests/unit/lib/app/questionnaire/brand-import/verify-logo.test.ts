@@ -32,6 +32,7 @@ import { judge, namesMatch } from '@/lib/app/questionnaire/brand-import/verify-l
 const CANDIDATES = [
   { candidate: { url: 'https://acme.example/forbes.svg', buffer: Buffer.from('a') }, index: 0 },
   { candidate: { url: 'https://acme.example/logo.svg', buffer: Buffer.from('b') }, index: 1 },
+  { candidate: { url: 'https://acme.example/logo-white.svg', buffer: Buffer.from('c') }, index: 2 },
 ];
 
 describe('namesMatch', () => {
@@ -104,5 +105,56 @@ describe('judge', () => {
     // The indices in the prompt are positional; a reply outside the range is not a candidate.
     expect(judge({ index: 7, wordmark: 'eagleeye' }, CANDIDATES, 'Eagle Eye').url).toBeNull();
     expect(judge({ index: -1, wordmark: 'eagleeye' }, CANDIDATES, 'Eagle Eye').url).toBeNull();
+  });
+});
+
+describe('judge — the dark lockup', () => {
+  /*
+   * The dark slot is where a bad pick does the most damage: the header band prefers the dark lockup
+   * whenever its ground is dark, so a wrong image there replaces the right one everywhere a branded
+   * client actually looks. It is checked in the same call rather than trusted from a filename.
+   */
+  it('proposes the dark variant alongside an accepted lockup', () => {
+    const verdict = judge(
+      { index: 1, wordmark: 'eagleeye', darkIndex: 2 },
+      CANDIDATES,
+      'Eagle Eye Solutions'
+    );
+
+    expect(verdict.url).toBe('https://acme.example/logo.svg');
+    expect(verdict.darkUrl).toBe('https://acme.example/logo-white.svg');
+  });
+
+  it('proposes no dark variant when the lockup itself was rejected', () => {
+    // A "dark version" of somebody else's logo is not a thing worth proposing.
+    const verdict = judge(
+      { index: 0, wordmark: 'Forbes', darkIndex: 2 },
+      CANDIDATES,
+      'Eagle Eye Solutions'
+    );
+
+    expect(verdict.url).toBeNull();
+    expect(verdict.darkUrl).toBeNull();
+  });
+
+  it('treats a repeated index as "there isn’t one"', () => {
+    const verdict = judge(
+      { index: 1, wordmark: 'eagleeye', darkIndex: 1 },
+      CANDIDATES,
+      'Eagle Eye'
+    );
+    expect(verdict.darkUrl).toBeNull();
+  });
+
+  it('ignores a dark index outside the images it was shown', () => {
+    expect(
+      judge({ index: 1, wordmark: 'eagleeye', darkIndex: 9 }, CANDIDATES, 'Eagle Eye').darkUrl
+    ).toBeNull();
+  });
+
+  it('leaves the dark slot empty when the model says there is none', () => {
+    expect(
+      judge({ index: 1, wordmark: 'eagleeye', darkIndex: null }, CANDIDATES, 'Eagle Eye').darkUrl
+    ).toBeNull();
   });
 });

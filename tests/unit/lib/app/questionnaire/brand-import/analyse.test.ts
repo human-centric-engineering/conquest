@@ -156,7 +156,7 @@ function harvested(overrides: Record<string, unknown> = {}) {
       logoImages: new Map([['https://acme.example/logo.png', Buffer.from('png')]]),
       siteName: 'Acme',
       mark: { url: 'https://acme.example/touch.png', via: 'apple-touch-icon' },
-      logoDark: null,
+      logoDarkCandidates: [],
       fontFamilies: ['Space Grotesk'],
       note: null,
       ...overrides,
@@ -171,6 +171,7 @@ describe('analyseUrl', () => {
       url: 'https://acme.example/logo.png',
       confidence: 'high',
       reason: 'the lockup on the page, which reads “Acme”',
+      darkUrl: null,
     });
   });
 

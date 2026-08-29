@@ -124,6 +124,23 @@ worse-looking result and a better one: the admin uploads the file they can find 
 Confidence is therefore about what the logo IS, not about where it was found — the old scheme rated
 a `schema.org` claim "high" and could not tell a Forbes badge from a client's own lockup.
 
+#### The dark lockup goes through the same check
+
+`logoDarkUrl` is discovered separately (an explicit `prefers-color-scheme: dark` `<source>`, or a
+file named as both dark and logo) and originally had **no** third-party exclusion at all. That is
+how a "Forbes Communications Council" badge — named like a logo _and_ drawn white for a dark ground
+— became a client's dark lockup on the second attempt, after the light one had been fixed.
+
+It did more damage there than it would have in the light slot: `resolveTheme` picks
+`logoDarkUrl ?? logoUrl` for the header band whenever the band's ground is dark, and a brand with a
+deep canvas has a dark ground in **both** modes. So the wrong image replaced the right one
+everywhere the client actually looks.
+
+Both slots are now filled from one verification call: the model is asked for the logo AND for which
+of the other images, if any, is the _same lockup_ drawn light-on-dark. A dark variant is only
+proposed alongside an accepted lockup — a "dark version" of somebody else's logo is not worth
+proposing — and a repeated index is read as "there isn't one".
+
 `logoDarkUrl` comes only from an explicit `<source media="(prefers-color-scheme: dark)">` or a file
 named as both dark and logo. No looser guess: the dark lockup is a field admins rarely check, so the
 wrong artwork there is worse than none.

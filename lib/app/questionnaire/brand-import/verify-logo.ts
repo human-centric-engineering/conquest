@@ -69,12 +69,24 @@ export interface LogoVerdict {
   confidence: 'high' | 'low';
   /** Admin-facing provenance, e.g. "the lockup reads “eagleeye”". */
   reason: string;
+  /**
+   * The same lockup drawn for a dark ground, when one of the images is that.
+   *
+   * Checked in the SAME call rather than trusted from the filename, because the dark slot is where
+   * a bad pick does the most damage: the header band prefers the dark lockup whenever its ground is
+   * dark, so a wrong image here replaces the right one everywhere a branded client actually looks.
+   * Null whenever the light lockup itself was rejected — a "dark variant" of somebody else's logo
+   * is not a thing worth proposing.
+   */
+  darkUrl: string | null;
 }
 
 const verdictSchema = z.object({
   index: z.number().int().nullable(),
   /** What the lockup says, verbatim. Null for a purely graphical mark. */
   wordmark: z.string().nullable().optional(),
+  /** The same lockup drawn light-on-dark, if one of the images is that. */
+  darkIndex: z.number().int().nullable().optional(),
 });
 
 /**
@@ -136,7 +148,8 @@ export async function verifyLogo(params: {
       timeoutMs: TIMEOUT_MS,
       parse: (raw) => tryParseJson(raw, (parsed) => verdictSchema.safeParse(parsed).data ?? null),
       retryUserMessage:
-        'Respond with ONLY {"index": <number or null>, "wordmark": "<text or null>"} — no prose.',
+        'Respond with ONLY {"index": <number or null>, "wordmark": "<text or null>", ' +
+        '"darkIndex": <number or null>} — no prose.',
       responseSchema: RESPONSE_SCHEMA,
       responseSchemaName: 'logo_check',
       phase: 'brand-import-logo',
@@ -169,20 +182,31 @@ export async function verifyLogo(params: {
  * the admin, and it is deliberately code rather than a question put to the model.
  */
 export function judge(
-  value: { index: number | null; wordmark?: string | null },
+  value: { index: number | null; wordmark?: string | null; darkIndex?: number | null },
   attachable: { candidate: LogoCandidateInput; index: number }[],
   siteName: string | null
 ): LogoVerdict {
-  if (value.index === null || value.index < 0 || value.index >= attachable.length) {
+  const inRange = (index: number | null | undefined): boolean =>
+    typeof index === 'number' && index >= 0 && index < attachable.length;
+
+  if (!inRange(value.index)) {
     return {
       url: null,
       confidence: 'low',
       reason: 'None of the images on that page looked like the company’s own logo.',
+      darkUrl: null,
     };
   }
 
-  const chosen = attachable[value.index].candidate;
+  const chosen = attachable[value.index as number].candidate;
   const wordmark = value.wordmark?.trim() || null;
+
+  // A dark variant is only meaningful alongside an accepted lockup, and only when it is a
+  // DIFFERENT image — a model that repeats the index is saying "there isn't one".
+  const darkUrl =
+    inRange(value.darkIndex) && value.darkIndex !== value.index
+      ? attachable[value.darkIndex as number].candidate.url
+      : null;
 
   if (!wordmark) {
     // Most abstract marks. Not a failure, but not a confirmation either.
@@ -190,6 +214,7 @@ export function judge(
       url: chosen.url,
       confidence: 'low',
       reason: 'the logo we found on the page — we could not read a name in it, so check it',
+      darkUrl,
     };
   }
 
@@ -200,6 +225,7 @@ export function judge(
       reason:
         `The logo on that page reads “${wordmark}”, which is not ${siteName ?? 'the site'} — ` +
         'it is probably a press or partner badge. Upload the real one.',
+      darkUrl: null,
     };
   }
 
@@ -207,6 +233,7 @@ export function judge(
     url: chosen.url,
     confidence: 'high',
     reason: `the lockup on the page, which reads “${wordmark}”`,
+    darkUrl,
   };
 }
 
@@ -255,6 +282,10 @@ const RESPONSE_SCHEMA: Record<string, unknown> = {
       type: ['string', 'null'],
       description: 'The text in that logo, exactly as written. Null for a graphics-only mark.',
     },
+    darkIndex: {
+      type: ['integer', 'null'],
+      description: 'The same logo drawn light-on-dark, if one of the images is that. Else null.',
+    },
   },
   required: ['index'],
 };
@@ -269,6 +300,10 @@ function buildMessages(siteName: string | null, thumbs: Buffer[]): LlmMessage[] 
       'If none of the images is the company’s own logo, return null for the index. That is a ' +
         'normal answer and a much better one than picking the closest.',
       'Return the wordmark as null when the image is purely graphical with no readable text.',
+      'Some sites ship the SAME lockup twice — once in dark ink for light backgrounds, once in ' +
+        'light ink for dark ones. If one of the images is that second version of the logo you ' +
+        'chose, give its position as darkIndex. Otherwise return null: a different image that ' +
+        'merely happens to be light-on-dark is not it.',
     ])
   );
 
@@ -276,7 +311,8 @@ function buildMessages(siteName: string | null, thumbs: Buffer[]): LlmMessage[] 
   const text = joinSections(
     titledBlock('The company', siteName ?? '(unknown — judge from the images alone)'),
     `${count} image${count === 1 ? '' : 's'} follow${count === 1 ? 's' : ''}, in order, starting at index 0.`,
-    'Which one is this company’s own logo, and what does it say?'
+    'Which one is this company’s own logo, what does it say, and is one of the others the same ' +
+      'lockup drawn for a dark background?'
   );
 
   // Text first, then the images in index order — the indices in the prompt are positional, so the

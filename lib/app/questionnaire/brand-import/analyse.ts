@@ -156,7 +156,7 @@ export async function analyseUrl(input: {
   // the page gave up no usable colours at all — a logo alone is a real result.
   const fields: Partial<Record<ImportableField, ProposedField>> = {
     ...logo.field,
-    ...imageFields(brand.mark, brand.logoDark),
+    ...imageFields(brand.mark),
     ...fontField(brand.fontFamilies),
   };
 
@@ -236,15 +236,11 @@ const IMAGE_SOURCE_COPY: Record<DiscoveredImage['via'], string> = {
 const HIGH_CONFIDENCE_PROVENANCE = new Set<DiscoveredImage['via']>(['schema.org', 'dark-variant']);
 
 function imageFields(
-  mark: DiscoveredImage | null,
-  logoDark: DiscoveredImage | null
+  mark: DiscoveredImage | null
 ): Partial<Record<ImportableField, ProposedField>> {
   const fields: Partial<Record<ImportableField, ProposedField>> = {};
 
-  for (const [field, image] of [
-    ['logoMarkUrl', mark],
-    ['logoDarkUrl', logoDark],
-  ] as const) {
+  for (const [field, image] of [['logoMarkUrl', mark]] as const) {
     if (!image) continue;
     fields[field] = {
       value: image.url,
@@ -332,7 +328,10 @@ async function chooseLogo(
   brand: HarvestedBrand,
   demoClientId?: string
 ): Promise<{ field: Partial<Record<ImportableField, ProposedField>>; note: string | null }> {
-  const candidates = brand.logoCandidates;
+  // Light and dark candidates go into ONE call. The dark slot is where a bad pick does the most
+  // damage — the header band prefers the dark lockup whenever its ground is dark, so a wrong image
+  // there replaces the right one everywhere a branded client actually looks.
+  const candidates = [...brand.logoCandidates, ...brand.logoDarkCandidates];
   if (candidates.length === 0) return { field: {}, note: null };
 
   const withBytes = candidates.flatMap((candidate) => {
@@ -347,7 +346,8 @@ async function chooseLogo(
   });
 
   if (!verdict) {
-    const fallback = candidates[0];
+    const fallback = brand.logoCandidates[0];
+    if (!fallback) return { field: {}, note: null };
     return {
       field: {
         logoUrl: {
@@ -364,10 +364,16 @@ async function chooseLogo(
     return { field: {}, note: verdict.reason };
   }
 
-  return {
-    field: {
-      logoUrl: { value: verdict.url, confidence: verdict.confidence, source: verdict.reason },
-    },
-    note: null,
+  const field: Partial<Record<ImportableField, ProposedField>> = {
+    logoUrl: { value: verdict.url, confidence: verdict.confidence, source: verdict.reason },
   };
+  if (verdict.darkUrl) {
+    field.logoDarkUrl = {
+      value: verdict.darkUrl,
+      confidence: verdict.confidence,
+      source: 'the same lockup drawn for a dark background',
+    };
+  }
+
+  return { field, note: null };
 }

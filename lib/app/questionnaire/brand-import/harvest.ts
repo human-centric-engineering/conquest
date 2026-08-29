@@ -70,7 +70,8 @@ export interface HarvestedBrand {
   /** What the site calls itself — the name a lockup has to match to be this company's. */
   siteName: string | null;
   mark: DiscoveredImage | null;
-  logoDark: DiscoveredImage | null;
+  /** Dark-lockup candidates. Checked exactly as the light ones are — see verify-logo.ts. */
+  logoDarkCandidates: DiscoveredImage[];
   fontFamilies: string[];
   /** Set when the budget cut the harvest short. Surfaces on the result. */
   note: string | null;
@@ -213,7 +214,7 @@ export async function harvestSite(
       logoImages: imagePalettes.buffers,
       siteName: readSiteName(doc, base),
       mark: images.mark,
-      logoDark: images.logoDark,
+      logoDarkCandidates: images.logoDarkCandidates,
       fontFamilies: discoverFonts(doc, css),
       note: budget.note(),
     },
@@ -252,7 +253,8 @@ interface DiscoveredImages {
    */
   logoCandidates: DiscoveredImage[];
   mark: DiscoveredImage | null;
-  logoDark: DiscoveredImage | null;
+  /** Dark-lockup candidates, same shape and same reason as {@link logoCandidates}. */
+  logoDarkCandidates: DiscoveredImage[];
 }
 
 /**
@@ -292,7 +294,11 @@ export function discoverImages(doc: Document, base: string): DiscoveredImages {
       'apple-touch-icon'
     ) ?? absolute(doc.querySelector('link[rel~="icon"]')?.getAttribute('href'), base, 'icon');
 
-  return { logoCandidates: candidates, mark, logoDark: fromDarkVariant(doc, base) };
+  return {
+    logoCandidates: candidates,
+    mark,
+    logoDarkCandidates: fromDarkVariants(doc, base).slice(0, MAX_LOGO_CANDIDATES),
+  };
 }
 
 /**
@@ -427,26 +433,36 @@ function fromFilenames(doc: Document, base: string): DiscoveredImage[] {
  * whose name says dark AND says logo. No looser guess: proposing the wrong artwork for the dark
  * lockup is worse than proposing nothing, because the field is one an admin rarely checks.
  */
-function fromDarkVariant(doc: Document, base: string): DiscoveredImage | null {
+function fromDarkVariants(doc: Document, base: string): DiscoveredImage[] {
+  const found: DiscoveredImage[] = [];
+
   for (const source of Array.from(doc.querySelectorAll('source[media]'))) {
     const media = source.getAttribute('media') ?? '';
     if (!/prefers-color-scheme\s*:\s*dark/i.test(media)) continue;
+    // The `<picture>` this `<source>` belongs to carries the `<img>` whose context tells us whose
+    // logo it is — a dark-mode source inside a partner strip is still a partner's.
+    const img = source.closest('picture')?.querySelector('img');
+    if (img && isThirdPartyLogo(img)) continue;
     const srcset = source.getAttribute('srcset') ?? '';
     const first = srcset.split(',')[0]?.trim().split(/\s+/)[0];
-    if (first && LOGO_HINT.test(first)) {
+    if (first && LOGO_HINT.test(first) && !THIRD_PARTY_NAME.test(first)) {
       const resolved = absolute(first, base, 'dark-variant');
-      if (resolved) return resolved;
+      if (resolved) found.push(resolved);
     }
   }
 
   for (const img of Array.from(doc.querySelectorAll('img'))) {
     const src = img.getAttribute('src') ?? '';
-    if (LOGO_HINT.test(src) && DARK_HINT.test(src)) {
-      const resolved = absolute(src, base, 'dark-variant');
-      if (resolved) return resolved;
-    }
+    if (!LOGO_HINT.test(src) || !DARK_HINT.test(src)) continue;
+    // The exclusion that was missing here is how a "Forbes Communications Council" badge — named
+    // like a logo, drawn white for a dark ground — became a client's dark lockup, and then their
+    // header band, because the band prefers the dark lockup on a dark ground.
+    if (isThirdPartyLogo(img)) continue;
+    const resolved = absolute(src, base, 'dark-variant');
+    if (resolved) found.push(resolved);
   }
-  return null;
+
+  return found;
 }
 
 /**
@@ -515,7 +531,7 @@ async function measureImages(
   images: DiscoveredImages,
   budget: HarvestBudget
 ): Promise<{ logo: ColorCandidate[]; mark: ColorCandidate[]; buffers: Map<string, Buffer> }> {
-  const wanted = [...images.logoCandidates, images.mark, images.logoDark]
+  const wanted = [...images.logoCandidates, ...images.logoDarkCandidates, images.mark]
     .filter((image): image is DiscoveredImage => image !== null)
     .slice(0, MAX_IMAGES);
 
