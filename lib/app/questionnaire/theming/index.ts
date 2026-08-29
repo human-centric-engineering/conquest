@@ -15,6 +15,7 @@ export {
   canvasBackdropVars,
   contrastRatio,
   cssUrl,
+  darkenForDarkMode,
   readableTextColor,
   resolveTheme,
   themeToCssVariables,
@@ -34,6 +35,7 @@ export {
   BRAND_IMAGE_SPECS,
   BRAND_LOGO_SPEC,
   BRAND_MARK_SPEC,
+  MAX_INPUT_PIXELS,
   type BrandImageKind,
   isBrandImageSrc,
   recommendedSize,
@@ -44,12 +46,21 @@ export {
 export { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming/select';
 
 export {
+  CUSTOM_FONT_SLOTS,
+  CUSTOM_FONT_WEIGHTS,
   DEFAULT_FONT_PAIRING,
   FONT_PAIRINGS,
   FONT_PAIRING_COPY,
   FONT_PAIRING_STACKS,
   MONO_FONT_STACK,
   NEUTRAL_FONT_STACK,
+  customFontFaceId,
+  customFontStacks,
+  isCustomFontFamily,
+  resolveCustomFontFamily,
   resolveFontPairing,
+  type CustomFontFiles,
+  type CustomFontSlot,
+  type CustomFontWeight,
   type FontPairing,
 } from '@/lib/app/questionnaire/theming/fonts';

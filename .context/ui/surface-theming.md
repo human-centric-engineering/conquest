@@ -160,6 +160,40 @@ Use the wrong form and that surface renders light-on-light in dark mode. A pinne
 surface must also **re-declare every token** the parent surface set on `<html>`,
 because those inherit down into the subtree and must be reset to the pin's values.
 
+#### 4b. One page, two modes — the `data-scheme` pin
+
+Following the viewer's mode is right everywhere a user actually _uses_ a surface, and wrong in
+exactly one place: a **preview that shows both modes at once**. ConQuest's brand preview renders the
+same demo client light and dark side by side, and two panels on one page cannot both follow
+`<html>.dark`.
+
+`data-scheme` on the surface root pins one panel to each. It takes two changes to the dark block,
+and both are load-bearing:
+
+```css
+.dark [data-surface='respondent']:not(:where([data-scheme='light'])),  /* opt OUT of an inherited .dark */
+[data-surface='respondent'][data-scheme='dark'] {                      /* opt IN with no .dark ancestor */
+```
+
+Without the `:not()`, a light-pinned panel inside `<html>.dark` still matches the dark block — at
+_higher_ specificity than the unscoped light block — and both panels render dark. The second
+selector needs the extra attribute weight for the mirror case, where there is no `.dark` to inherit
+from at all.
+
+Any token declared on `:root` / `.dark` rather than on the surface must be re-declared per scheme
+too (ConQuest's is `--cq-respondent-canvas`): those live on an **ancestor** of the pinned panel, so
+they keep leaking the viewer's mode into it.
+
+**This is not a general theming mechanism.** Nothing but a preview should contradict the viewer's
+own mode. `tests/unit/app/brand-theme-scheme-pinning.test.ts` resolves the real rules in a document
+and asserts all four cases, including that an unpinned surface still follows the viewer — a text
+assertion on the selectors would pass on a stylesheet whose specificity was upside down.
+
+One caveat on that test: happy-dom resolves which rules MATCH correctly but does **not** implement
+`:where()`'s zero-specificity rule, so it cannot adjudicate a specificity contest — which is how the
+bare-`:not()` regression above got past it. The `:where()` wrapper is therefore also asserted on the
+selector text, and the cascade itself was verified in real Chrome.
+
 ### 5. A nested surface can't re-theme its ancestors — `:has()` covers the backdrop
 
 Re-declaring tokens on a pinned subtree only affects that subtree. An ancestor

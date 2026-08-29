@@ -116,8 +116,13 @@ describe('the preview declares itself a respondent surface', () => {
   // has to fake all three, which is how it ended up with a hand-written `var(a, var(b, var(c)))`
   // chain on the send button.
 
-  function previewRoot(container: HTMLElement): HTMLElement {
-    const node = container.querySelector('[aria-label="Session preview"]');
+  /**
+   * One of the two panels. Full mode renders the miniature twice — once pinned to each mode — so
+   * every assertion below has to say which it means; `light` is the arbitrary default because the
+   * markers under test are identical on both.
+   */
+  function previewRoot(container: HTMLElement, scheme: 'light' | 'dark' = 'light'): HTMLElement {
+    const node = container.querySelector(`[aria-label="Session preview, ${scheme} mode"]`);
     expect(node).not.toBeNull();
     return node as HTMLElement;
   }
@@ -153,8 +158,31 @@ describe('the preview declares itself a respondent surface', () => {
     );
     const root = previewRoot(container);
     expect(root.style.getPropertyValue('--app-canvas-light')).toBe('#f5f9ff');
-    // Derived — the admin never typed this, and it is the whole reason the preview follows
-    // dark mode rather than showing the light canvas in it.
+    // Derived — the admin never typed this, and it is the whole reason the dark panel is worth
+    // rendering at all.
     expect(root.style.getPropertyValue('--app-canvas-dark')).not.toBe('');
+  });
+
+  it('renders both modes at once, each pinned so it cannot follow the admin’s own', () => {
+    // Every other respondent surface follows <html>.dark, which two panels on one page cannot
+    // both do. `data-scheme` is what app/brand-theme.css reads to override that.
+    const { container } = render(<DemoClientThemePreview theme={{ ...UNCONFIGURED }} />);
+
+    expect(previewRoot(container, 'light').dataset.scheme).toBe('light');
+    expect(previewRoot(container, 'dark').dataset.scheme).toBe('dark');
+  });
+
+  it('gives both panels the same brand, so only the mode differs between them', () => {
+    // The panels are one client rendered twice. If they ever disagreed about anything but the
+    // mode, the comparison the admin is making would be meaningless.
+    const { container } = render(
+      <DemoClientThemePreview theme={{ ...UNCONFIGURED, canvasColor: '#0b1f3a' }} />
+    );
+
+    for (const scheme of ['light', 'dark'] as const) {
+      const root = previewRoot(container, scheme);
+      expect(root.dataset.canvas).toBe('custom');
+      expect(root.style.getPropertyValue('--app-canvas-light')).toBe('#0b1f3a');
+    }
   });
 });

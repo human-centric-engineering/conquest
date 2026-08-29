@@ -20,8 +20,15 @@
  */
 
 import {
+  CUSTOM_FONT_SLOTS,
+  CUSTOM_FONT_WEIGHTS,
   FONT_PAIRING_STACKS,
+  customFontFaceId,
+  customFontStacks,
+  resolveCustomFontFamily,
   resolveFontPairing,
+  type CustomFontFiles,
+  type CustomFontWeight,
   type FontPairing,
 } from '@/lib/app/questionnaire/theming/fonts';
 
@@ -106,6 +113,21 @@ export interface DemoClientTheme {
   canvasColorDark?: string | null;
   /** Text on the dark ground (hex). Null/absent → derived for contrast from it. */
   inkColorDark?: string | null;
+  /**
+   * The client's row id.
+   *
+   * A theme is otherwise pure presentation, and this is the one thing in it that is not — but a
+   * self-hosted typeface is an ASSET, and an asset has to be addressed. The `@font-face` rules for
+   * a custom pairing point at `/api/v1/app/demo-clients/<id>/font/<face>`, so the resolver needs
+   * the id to build them. Optional, and absent simply means no custom faces are emitted.
+   */
+  id?: string | null;
+  /** Google family for headings when `fontPairing` is `'custom'`. */
+  customFontDisplay?: string | null;
+  /** Google family for running text when `fontPairing` is `'custom'`. */
+  customFontBody?: string | null;
+  /** What we actually stored: slot → weight → storage URL. Json on the row, narrowed on read. */
+  customFontFiles?: unknown;
 }
 
 /**
@@ -186,6 +208,20 @@ export interface ResolvedTheme {
   bandLogoDarkUrl: string | null;
   /** The resolved type pairing; always a real pairing, `'neutral'` when unset or unknown. */
   fontPairing: FontPairing;
+  /** The client's own display family, narrowed on read. Null unless `fontPairing` is `custom`. */
+  customFontDisplay: string | null;
+  /** The client's own body family, narrowed on read. Null unless `fontPairing` is `custom`. */
+  customFontBody: string | null;
+  /**
+   * `@font-face` rules for a custom pairing's self-hosted faces, or null.
+   *
+   * Built here rather than by each renderer because the resolver is the only place that has both
+   * the client id and the stored file map, and because every surface that renders a brand already
+   * takes a `ResolvedTheme` and nothing else. Null whenever the pairing is not `custom`, no family
+   * is set, or nothing was ever fetched — in which case `fontPairing`'s own stack is the system
+   * one and the surface renders exactly as an unstyled client does.
+   */
+  fontFaceCss: string | null;
 }
 
 /**
@@ -278,6 +314,13 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
     theme?.logoMarkUrl ||
     logoDarkUrl
   );
+  // Custom type. Both families are narrowed on READ as well as on write: the columns are plain
+  // text, so a seed, a rollback or a direct write can put anything there, and an unrenderable
+  // family must fall back to the system stack rather than emit a broken `font-family`.
+  const fontPairing = resolveFontPairing(theme?.fontPairing);
+  const customFontDisplay = resolveCustomFontFamily(theme?.customFontDisplay);
+  const customFontBody = resolveCustomFontFamily(theme?.customFontBody);
+
   return {
     ctaColor: theme?.ctaColor ?? CONQUEST_THEME_DEFAULTS.ctaColor,
     accentColor: theme?.accentColor ?? CONQUEST_THEME_DEFAULTS.accentColor,
@@ -298,8 +341,87 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
     logoDarkUrl,
     bandLogoUrl,
     bandLogoDarkUrl,
-    fontPairing: resolveFontPairing(theme?.fontPairing),
+    fontPairing,
+    customFontDisplay,
+    customFontBody,
+    fontFaceCss:
+      fontPairing === 'custom'
+        ? buildFontFaceCss(
+            theme?.id ?? null,
+            {
+              display: customFontDisplay,
+              body: customFontBody,
+            },
+            narrowCustomFontFiles(theme?.customFontFiles)
+          )
+        : null,
   };
+}
+
+/**
+ * Narrow the `customFontFiles` Json column to the shape the renderer reads.
+ *
+ * Defensive at every level — the column is Json, so it can hold anything a seed or an older deploy
+ * put there, and a face map that is half-wrong must degrade to the weights that ARE valid rather
+ * than throwing inside a render.
+ */
+export function narrowCustomFontFiles(value: unknown): CustomFontFiles {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const out: CustomFontFiles = {};
+
+  for (const slot of CUSTOM_FONT_SLOTS) {
+    const slotValue = source[slot];
+    if (slotValue === null || typeof slotValue !== 'object' || Array.isArray(slotValue)) continue;
+
+    const weights: Partial<Record<`${CustomFontWeight}`, string>> = {};
+    for (const weight of CUSTOM_FONT_WEIGHTS) {
+      const url = (slotValue as Record<string, unknown>)[String(weight)];
+      if (typeof url === 'string' && url.length > 0) weights[`${weight}`] = url;
+    }
+    if (Object.keys(weights).length > 0) out[slot] = weights;
+  }
+
+  return out;
+}
+
+/**
+ * `@font-face` rules pointing at our OWN origin for each weight we stored.
+ *
+ * Same-origin is the whole design. The CSP's `font-src` is `'self' data:` and there is no app seam
+ * to widen it — `lib/app/csp.ts` exposes `frame-src` only — so linking a client's face from
+ * fonts.gstatic.com would need a platform edit to `lib/security/headers.ts`, which this fork is
+ * not supposed to make. Serving the file back through our own route needs no CSP change at all.
+ *
+ * `font-display: swap` deliberately: a questionnaire that renders instantly in the fallback and
+ * reflows into the brand's face beats one that renders nothing while a webfont loads. Only the
+ * weights we actually stored are declared, so a family that publishes no 600 simply lets the
+ * browser synthesise one.
+ */
+function buildFontFaceCss(
+  demoClientId: string | null,
+  families: { display: string | null; body: string | null },
+  files: CustomFontFiles
+): string | null {
+  if (!demoClientId) return null;
+
+  const rules: string[] = [];
+  for (const slot of CUSTOM_FONT_SLOTS) {
+    const family = families[slot];
+    const stored = files[slot];
+    if (!family || !stored) continue;
+
+    for (const weight of CUSTOM_FONT_WEIGHTS) {
+      if (!stored[`${weight}`]) continue;
+      const src = `/api/v1/app/demo-clients/${encodeURIComponent(demoClientId)}/font/${customFontFaceId(slot, weight)}`;
+      rules.push(
+        `@font-face{font-family:'${family.replace(/'/g, '')}';font-style:normal;` +
+          `font-weight:${weight};font-display:swap;src:${cssUrl(src)} format('woff2');}`
+      );
+    }
+  }
+
+  return rules.length > 0 ? rules.join('') : null;
 }
 
 /**
@@ -553,7 +675,12 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
   // an inline style always beats a stylesheet, so writing it here would pin the system stack
   // onto portalled roots that might later want their own.
   if (theme.fontPairing !== 'neutral') {
-    const stacks = FONT_PAIRING_STACKS[theme.fontPairing];
+    // `custom` cannot be a constant — its stack is the client's own families — so it is built
+    // here. Everything else reads its pairing straight off the table.
+    const stacks =
+      theme.fontPairing === 'custom'
+        ? customFontStacks(theme.customFontDisplay, theme.customFontBody)
+        : FONT_PAIRING_STACKS[theme.fontPairing];
     vars['--app-font-display'] = stacks.display;
     vars['--app-font-body'] = stacks.body;
   }

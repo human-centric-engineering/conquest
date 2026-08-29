@@ -13,6 +13,11 @@
  * canvas, their DERIVED dark canvas, and the ConQuest fallback without re-implementing any of
  * the three.
  *
+ * Full mode renders it TWICE, once pinned to each mode via `data-scheme`. A respondent can switch
+ * mode from any layout, so half of what an admin configures is only ever seen in the other one —
+ * and the dark ground is usually derived rather than typed, so an admin who never switches their
+ * own theme would otherwise never see what their brand actually becomes there.
+ *
  * Reuses the theming module rather than re-deriving anything: `resolveTheme()` fills
  * nulls with the ConQuest defaults (and resolves the logo backdrop), and the logo uses
  * the same escaped `--app-logo-url` background approach as {@link BrandThemeProvider}
@@ -64,11 +69,14 @@ function LogoThumb({
   logoUrl,
   backdrop,
   compact,
+  size = 'default',
 }: {
   logoUrl: string;
   /** Optional solid colour painted behind the logo (resolved logo backdrop). */
   backdrop?: string | null;
   compact?: boolean;
+  /** `band` is the miniature's own header lockup, which is drawn larger than a swatch row's. */
+  size?: 'default' | 'band';
 }) {
   // Escape through the shared theming sink so a hostile stored value can't break out of
   // url() (the same helper themeToCssVariables uses for --app-logo-url).
@@ -78,7 +86,7 @@ function LogoThumb({
       aria-label="Brand logo"
       className={cn(
         'inline-block bg-contain bg-center bg-no-repeat',
-        compact ? 'h-5 w-12' : 'h-8 w-32',
+        compact ? 'h-5 w-12' : size === 'band' ? 'h-10 w-40' : 'h-8 w-32',
         backdrop && 'rounded px-2'
       )}
       style={{
@@ -94,8 +102,19 @@ function LogoThumb({
  * header band (with the logo on its backdrop), a sample assistant/user exchange in the
  * accent colour, and the gradient send button. Suggestive, not pixel-accurate — enough
  * for the admin to recognise the brand before hitting "Preview as respondent".
+ *
+ * `scheme` pins the panel to one mode via `data-scheme`, which app/brand-theme.css reads. It is
+ * how the full preview shows light AND dark at once: every other respondent surface follows the
+ * viewer's own mode, and two panels on one page cannot both do that. Omitted, it behaves exactly
+ * as it always did and follows `<html>.dark`.
  */
-function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
+function ChromePreview({
+  resolved,
+  scheme,
+}: {
+  resolved: ResolvedTheme;
+  scheme?: 'light' | 'dark';
+}) {
   const vars = themeToCssVariables(resolved) as CSSProperties;
   // Text laid on the band uses the contrast-correct on-surface colour the session band uses;
   // with no surface the band sits on the canvas and reads the ink resolved for it.
@@ -122,22 +141,28 @@ function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
         // pairing rather than as a word in a dropdown.
         fontFamily: 'var(--app-font-body)',
       }}
+      // Pinned to one mode when the caller asks; otherwise the admin's own, as before.
+      data-scheme={scheme}
       className="overflow-hidden rounded-lg border"
-      aria-label="Session preview"
+      aria-label={scheme ? `Session preview, ${scheme} mode` : 'Session preview'}
       role="img"
     >
       {/* Surface header band — Brand · Title · Schedule, mirroring the respondent band.
           Falls back to a muted strip when no surface is set; sample title/dates are illustrative. */}
       <div
-        className="flex items-center gap-2.5 px-3 py-2.5"
+        className="flex items-center gap-3 px-4 py-3.5"
         style={{ backgroundColor: resolved.surfaceColor ?? 'var(--color-muted)', color: onBand }}
       >
         {resolved.bandLogoUrl && (
-          <LogoThumb logoUrl={resolved.bandLogoUrl} backdrop={resolved.logoBackgroundColor} />
+          <LogoThumb
+            logoUrl={resolved.bandLogoUrl}
+            backdrop={resolved.logoBackgroundColor}
+            size="band"
+          />
         )}
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold">Question session</span>
-        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium opacity-80">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">Question session</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium opacity-80">
+          <span aria-hidden className="h-2 w-2 rounded-full bg-emerald-500" />
           <span className="tabular-nums">1–30 Jun</span>
         </span>
       </div>
@@ -145,23 +170,29 @@ function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
       {/* Body: a sample assistant line + a user bubble tinted with the accent, on the client's
           own ground. The heading line is real type rather than a grey bar, because it is the
           only way the display face of the pairing shows up in the preview at all. */}
-      <div className="space-y-2 px-3 py-3" style={{ backgroundColor: canvas, color: ink }}>
-        <div className="flex items-start gap-2">
+      <div className="space-y-3 px-4 py-4" style={{ backgroundColor: canvas, color: ink }}>
+        <div className="flex items-start gap-2.5">
           <span
             aria-hidden
-            className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
+            className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: resolved.accentColor }}
           />
           <span
-            className="text-[11px] leading-tight font-semibold"
+            className="text-sm leading-snug font-semibold"
             style={{ fontFamily: 'var(--app-font-display)' }}
           >
             A question, set in this type
           </span>
         </div>
+        {/* Body copy in the pairing's BODY face, which the heading above cannot show — the two
+            faces of a pairing are frequently different, and a preview that only ever rendered the
+            display face made half of every choice invisible. */}
+        <p className="text-xs leading-relaxed opacity-70">
+          And the running text a respondent reads their questions in.
+        </p>
         <div className="flex justify-end">
           <span
-            className="rounded-lg rounded-br-sm px-3 py-1.5 text-[11px] text-transparent"
+            className="rounded-lg rounded-br-sm px-3.5 py-2 text-xs text-transparent"
             style={{
               backgroundColor: `color-mix(in srgb, ${resolved.accentColor} 14%, transparent)`,
             }}
@@ -173,15 +204,15 @@ function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
 
       {/* Composer: input + the gradient (or solid) send button, on the same ground. */}
       <div
-        className="flex items-center gap-2 border-t px-3 py-2"
+        className="flex items-center gap-2.5 border-t px-4 py-3"
         style={{ backgroundColor: canvas }}
       >
         <span
-          className="h-6 flex-1 rounded-md"
+          className="h-8 flex-1 rounded-md"
           style={{ backgroundColor: `color-mix(in srgb, ${ink} 8%, transparent)` }}
         />
         <span
-          className="inline-flex h-6 w-9 items-center justify-center rounded-md text-[10px] font-semibold"
+          className="inline-flex h-8 w-11 items-center justify-center rounded-md text-xs font-semibold"
           // Exactly what the respondent CTA reads, with no fallback chain of its own: the
           // preview now IS a respondent surface (see the root above), so the mode-aware
           // `[data-brand='conquest']` block fills these for an unbranded client — including
@@ -314,7 +345,19 @@ export function DemoClientThemePreview({
         </span>
       </div>
 
-      <ChromePreview resolved={resolved} />
+      {/* Both modes, side by side. A respondent can switch mode from any layout, so half of what
+          an admin configures here is only ever seen in the other one — and the DARK ground is
+          usually DERIVED (`darkenForDarkMode`) rather than typed, which means an admin who never
+          switches their own theme would otherwise never see the colour their brand actually
+          becomes. Showing one panel per mode is the only way that derivation is reviewable. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(['light', 'dark'] as const).map((scheme) => (
+          <div key={scheme} className="space-y-1.5">
+            <p className="text-muted-foreground text-xs font-medium capitalize">{scheme} mode</p>
+            <ChromePreview resolved={resolved} scheme={scheme} />
+          </div>
+        ))}
+      </div>
 
       <p className="text-muted-foreground text-sm italic">&ldquo;{resolved.welcomeCopy}&rdquo;</p>
       {!configured && (

@@ -21,7 +21,8 @@ import { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
  * the same shape as list/detail (one source of truth, no drift).
  */
 export const DEMO_CLIENT_SELECT = {
-  id: true,
+  // `id` is not listed here: the theme fragment below already selects it, because the resolver
+  // needs it to address the client's self-hosted font files. Listing it twice is a TS error.
   slug: true,
   name: true,
   description: true,
@@ -79,6 +80,8 @@ export function toDemoClientView(row: DemoClientRow): DemoClientView {
     logoMarkUrl: row.logoMarkUrl,
     logoDarkUrl: row.logoDarkUrl,
     fontPairing: row.fontPairing,
+    customFontDisplay: row.customFontDisplay,
+    customFontBody: row.customFontBody,
     questionnaireCount: row._count.questionnaires,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

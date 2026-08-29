@@ -55,6 +55,12 @@ export const FONT_PAIRINGS = [
   'humanist',
   'classical',
   'monospace',
+  // The escape hatch. Six pairings cover a lot of brands and will never cover a brand that has
+  // its own face — so `custom` names two Google families on the client row and we self-host them.
+  // Its stack below is the NEUTRAL one, because `custom` with no families set is not an error
+  // state to guard against: it is what the row looks like between choosing the option and loading
+  // the faces, and the system stack is the right thing to render meanwhile.
+  'custom',
 ] as const;
 
 export type FontPairing = (typeof FONT_PAIRINGS)[number];
@@ -115,6 +121,12 @@ export const FONT_PAIRING_STACKS: Record<FontPairing, { display: string; body: s
     display: `var(--font-brand-monospace-display), 'JetBrains Mono', ${MONO_FONT_STACK}`,
     body: `var(--font-brand-monospace-body), 'IBM Plex Mono', ${MONO_FONT_STACK}`,
   },
+  // Deliberately the system stack: see the note on the `custom` member above. The real stack is
+  // built per client by `customFontStacks`, which needs the families and cannot be a constant.
+  custom: {
+    display: NEUTRAL_FONT_STACK,
+    body: NEUTRAL_FONT_STACK,
+  },
 };
 
 /** Admin-facing copy for the pairing picker. One source, so the form and the pack agree. */
@@ -149,6 +161,11 @@ export const FONT_PAIRING_COPY: Record<FontPairing, { label: string; description
     description:
       'Fixed-width throughout — a terminal, a typewriter, an engineering brand. Distinctive, but slower to read in long answers.',
   },
+  custom: {
+    label: 'Custom',
+    description:
+      'Name the client’s own typefaces. We fetch them from Google Fonts once and serve them from here, so the questionnaire is set in the brand’s actual face rather than the nearest one we ship.',
+  },
 };
 
 /**
@@ -163,4 +180,91 @@ export function resolveFontPairing(value: string | null | undefined): FontPairin
   return FONT_PAIRINGS.includes(value as FontPairing)
     ? (value as FontPairing)
     : DEFAULT_FONT_PAIRING;
+}
+
+/* ── Custom type ───────────────────────────────────────────────────────────── */
+
+/**
+ * The weights we fetch and self-host for a custom family.
+ *
+ * Three, not the whole ramp. Body copy, a medium for emphasis and a bold for the masthead cover
+ * every weight the respondent surface actually sets; fetching nine would triple the download and
+ * the storage for faces nothing renders. Italics are deliberately absent for the same reason —
+ * the surface never sets one.
+ */
+export const CUSTOM_FONT_WEIGHTS = [400, 600, 700] as const;
+
+export type CustomFontWeight = (typeof CUSTOM_FONT_WEIGHTS)[number];
+
+/** Which of the two slots a custom face fills. */
+export const CUSTOM_FONT_SLOTS = ['display', 'body'] as const;
+
+export type CustomFontSlot = (typeof CUSTOM_FONT_SLOTS)[number];
+
+/**
+ * What a client actually has stored: slot → weight → the URL we put it at.
+ *
+ * A partial record at both levels, because a family may not publish every weight and a client may
+ * have set only one of the two slots. The render path treats a missing weight as "use what is
+ * there"; browsers synthesise the rest, which is far better than refusing to render the face.
+ */
+export type CustomFontFiles = Partial<
+  Record<CustomFontSlot, Partial<Record<`${CustomFontWeight}`, string>>>
+>;
+
+/**
+ * A Google Fonts family name we are willing to request.
+ *
+ * Letters, digits, spaces and the few punctuation marks real families use. This is the ONLY thing
+ * standing between an admin's text box and a URL we build server-side, so it is an allowlist of
+ * the charset rather than a blocklist of the dangerous parts: a family name has no legitimate
+ * reason to contain a slash, a colon, an ampersand or a percent, and each of those is a way to
+ * reach a different path or smuggle a second query parameter into the request.
+ */
+const CUSTOM_FONT_FAMILY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 '._-]{0,48}$/;
+
+export function isCustomFontFamily(value: string): boolean {
+  return CUSTOM_FONT_FAMILY_PATTERN.test(value.trim());
+}
+
+/**
+ * Narrow a stored family to one we will render, or null.
+ *
+ * Forgiving on read exactly as `resolveFontPairing` is: the column is plain text, so a seed, a
+ * rollback or a direct write can put anything there, and a questionnaire whose type is unreadable
+ * must fall back to the system stack rather than emit an unquotable `font-family`.
+ */
+export function resolveCustomFontFamily(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed !== '' && isCustomFontFamily(trimmed) ? trimmed : null;
+}
+
+/**
+ * The URL-safe id for one stored face, used as the path segment of the serving route.
+ *
+ * Derived from the family rather than stored, so the route can be addressed without a lookup table
+ * — and validated on the way back in, so the segment can only ever name a face we would have
+ * written.
+ */
+export function customFontFaceId(slot: CustomFontSlot, weight: CustomFontWeight): string {
+  return `${slot}-${weight}`;
+}
+
+/**
+ * Build the two `font-family` stacks for a client's custom faces.
+ *
+ * Each family leads its own stack and falls back to the neutral system stack — the same shape as
+ * every shipped pairing, so a face that fails to load degrades identically to one whose webfont is
+ * slow. A slot with no family set simply gets the neutral stack, which is why a half-configured
+ * custom pairing renders sensibly instead of rendering nothing.
+ */
+export function customFontStacks(
+  display: string | null,
+  body: string | null
+): { display: string; body: string } {
+  const stack = (family: string | null): string =>
+    family ? `'${family.replace(/'/g, '')}', ${NEUTRAL_FONT_STACK}` : NEUTRAL_FONT_STACK;
+
+  return { display: stack(display), body: stack(body) };
 }

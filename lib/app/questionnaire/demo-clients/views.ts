@@ -66,6 +66,10 @@ export interface DemoClientView {
   logoDarkUrl: string | null;
   /** One of `FONT_PAIRINGS` (theming/fonts.ts); null = the system stack. */
   fontPairing: string | null;
+  /** Google family for headings when `fontPairing` is `custom`; null = none loaded. */
+  customFontDisplay: string | null;
+  /** Google family for running text when `fontPairing` is `custom`; null = none loaded. */
+  customFontBody: string | null;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;
   createdAt: string;

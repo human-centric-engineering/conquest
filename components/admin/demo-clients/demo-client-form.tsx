@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Wand2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -51,6 +51,9 @@ import {
 } from '@/lib/app/questionnaire/theming';
 import { BrandImageField } from '@/components/admin/demo-clients/brand-image-field';
 import { BrandColorField } from '@/components/admin/demo-clients/brand-color-field';
+import { BrandImportDialog } from '@/components/admin/demo-clients/brand-import-dialog';
+import { CustomFontField } from '@/components/admin/demo-clients/custom-font-field';
+import type { ImportableField } from '@/lib/app/questionnaire/brand-import/result';
 
 /** True for an empty field, an https URL, or one of our own upload paths — shares the
  *  server's predicate (isBrandImageSrc) so the form and the API can't drift. */
@@ -140,6 +143,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
   const isEdit = client !== undefined;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const {
     register,
@@ -224,6 +228,38 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
   // after a change made entirely through the picker.
   const setColor = (field: ColorFieldName, value: string) =>
     setValue(field, value, { shouldDirty: true, shouldValidate: true });
+
+  /**
+   * Write accepted brand-import proposals into form state.
+   *
+   * Ordinary `setValue` calls with `shouldDirty`, so an import is indistinguishable from typing:
+   * the live preview updates, Save becomes enabled, and Cancel discards the lot. Nothing here
+   * touches the server — the import route persists nothing, and these values reach the columns
+   * through the same PATCH as every other edit on this form.
+   */
+  const applyImportedBrand = (values: Partial<Record<ImportableField, string>>) => {
+    let refresh = false;
+    for (const [field, value] of Object.entries(values) as [ImportableField, string][]) {
+      // The custom families are not form fields: the import already fetched and stored them
+      // server-side, exactly as it re-hosts a logo. Refresh so the panel below re-reads the row
+      // rather than showing what was there before the import.
+      if (field === 'customFontDisplay' || field === 'customFontBody') {
+        refresh = true;
+        continue;
+      }
+      if (field === 'fontPairing') {
+        // Forgiving, exactly as the picker is: a family the import names but this build does not
+        // ship resolves to the default rather than putting an unrenderable value in the select.
+        setValue('fontPairing', resolveFontPairing(value), {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+        continue;
+      }
+      setValue(field, value, { shouldDirty: true, shouldValidate: true });
+    }
+    if (refresh) router.refresh();
+  };
 
   const validHex = (v: string) => (HEX_COLOR_PATTERN.test(v.trim()) ? v.trim() : null);
   const validImage = (v: string) => (isBrandImageSrc(v.trim()) ? v.trim() : null);
@@ -412,6 +448,34 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           with the ConQuest banner; set any field and this client&apos;s brand takes over the
           session entirely.
         </p>
+
+        {/* Import is an accelerator for the fields below, so it sits at the top of the fieldset
+            rather than in the page header: it fills these boxes and nothing else. It proposes —
+            the admin accepts what they want, and the ordinary Save writes it. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isLoading}
+            onClick={() => setImportOpen(true)}
+          >
+            <Wand2 className="mr-2 h-4 w-4" />
+            Import from their website
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            Paste the client&apos;s web address (or upload a screenshot) and we&apos;ll suggest
+            colours, a logo and a typeface. Check you&apos;re entitled to use their branding.
+          </p>
+        </div>
+
+        <BrandImportDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          demoClientId={client?.id}
+          uploadEnabled={uploadEnabled}
+          onApply={applyImportedBrand}
+        />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <BrandColorField
@@ -710,9 +774,11 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
                   Broadsheet; <strong>Classical</strong> is a formal, high-contrast serif;{' '}
                   <strong>Contemporary</strong> is a grotesque drawn for Horizon; and{' '}
                   <strong>Monospace</strong> sets the whole conversation fixed-width — striking for
-                  an engineering brand, but slower to read once answers run long. Unlike the
-                  colours, this on its own does not make a questionnaire white-label — it is a
-                  design choice, not an identity. The one-line summary below updates as you choose.
+                  an engineering brand, but slower to read once answers run long.{' '}
+                  <strong>Custom</strong> is the escape hatch for a brand with its own face — name
+                  it below and we store the files ourselves. Unlike the colours, this on its own
+                  does not make a questionnaire white-label — it is a design choice, not an
+                  identity. The one-line summary below updates as you choose.
                 </FieldHelp>
               </Label>
               <select
@@ -738,6 +804,18 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
               <FormError message={errors.fontPairing?.message} />
             </div>
           </div>
+
+          {/* Shown only for the Custom pairing: everywhere else the two family boxes would be
+              controls with no effect, which is worse than an option the admin has to reveal. */}
+          {resolveFontPairing(fontPairing) === 'custom' && (
+            <CustomFontField
+              demoClientId={client?.id}
+              uploadEnabled={uploadEnabled}
+              initialDisplay={client?.customFontDisplay ?? null}
+              initialBody={client?.customFontBody ?? null}
+              disabled={isLoading}
+            />
+          )}
 
           <BrandImageField
             id="logoDarkUrl"

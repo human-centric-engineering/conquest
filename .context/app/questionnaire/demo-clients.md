@@ -263,6 +263,33 @@ The fragment is guarded at COMPILE time: `DEMO_CLIENT_THEME_SELECT satisfies Rec
 Required<DemoClientTheme>, true>` means a new field on the resolver's contract without a
 matching key is a type error. Add a theme column in one place and the whole product picks it up.
 
+### Custom type
+
+The six pairings are a picker; `fontPairing = 'custom'` is the escape hatch for a brand with its own
+face. `customFontDisplay` / `customFontBody` name two Google Fonts families and `customFontFiles`
+records the woff2 files we fetched and stored for them.
+
+They are **self-hosted, not linked**: the CSP's `font-src` is `'self' data:` and the only app-owned
+seam is `frame-src`, so a `<link>` to fonts.googleapis.com would need a platform edit. `resolveTheme`
+emits the `@font-face` rules (`ResolvedTheme.fontFaceCss`) pointing at
+`/api/v1/app/demo-clients/:id/font/:face`, which is also why `DemoClientTheme` carries `id` — a
+self-hosted face is an asset, and an asset has to be addressed.
+
+Loading applies immediately (like an image upload); `fontPairing` itself stays an ordinary form
+field, so loaded faces sit inert until the pairing is switched. Full design:
+[brand-import.md](./brand-import.md#custom-type).
+
+### Filling the theme from the client's website
+
+Every field in this section can also be **proposed** rather than typed. `Import from their website`
+in the Brand theming fieldset takes an address (or a screenshot), reads the page, its stylesheets
+and its logo, and proposes colours, a lockup, a mark and a typeface. The admin ticks what they want
+and the ordinary Save writes the colours; images and typefaces are stored immediately, exactly as an
+upload is. The model can only return colours that were actually measured.
+
+Full design, including the four-outcome failure contract and why a field we could not read is
+absent rather than defaulted: [brand-import.md](./brand-import.md).
+
 ### Brand images: upload or link (F7.2)
 
 Every brand image accepts **either** a pasted `https://` URL **or** an uploaded file. Both
@@ -435,10 +462,16 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   `resolveTheme()` and the same escaped `url()` sink (`cssUrl`) as `BrandThemeProvider`
   (never a raw `<img src>`), and renders a **miniature of the session chrome** (surface
   band + logo backdrop + gradient send button) so the admin recognises the brand before
-  opening "Preview as respondent". The miniature paints the client's **canvas and ink** and
-  sets its sample question in the chosen **display face** — the preview is not inside a
-  respondent surface, so it applies the ground itself rather than inheriting it, and the type
-  pairing is otherwise just a word in a dropdown. The band draws `bandLogoUrl`, so an admin who
+  opening "Preview as respondent". The miniature declares itself a **respondent surface**
+  (`data-surface='respondent'`, plus `data-brand` / `data-canvas`), so the client's ground, ink and
+  the ConQuest fallback palette all come from `app/brand-theme.css` rather than being re-faked here.
+  It sets its sample question in the chosen **display face** and its body line in the body face —
+  the two faces of a pairing are often different, and it is otherwise just a word in a dropdown.
+  Full mode renders it **twice, pinned to light and to dark** via `data-scheme`: a respondent can
+  switch mode from any layout, and the dark ground is usually _derived_ (`darkenForDarkMode`) rather
+  than typed, so an admin who never switches their own theme would otherwise never see what their
+  brand becomes there. See `.context/ui/surface-theming.md` §4b for why pinning needs its own
+  selectors. The band draws `bandLogoUrl`, so an admin who
   uploads a dark lockup sees the swap happen here; the full mode also shows that lockup on a
   dark chip (the only way to tell it is really the light-ink artwork) plus the square mark. Two modes: **compact** on the list's
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when

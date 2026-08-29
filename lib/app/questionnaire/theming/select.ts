@@ -54,6 +54,12 @@ export const DEMO_CLIENT_THEME_SELECT = {
   logoMarkUrl: true,
   logoDarkUrl: true,
   fontPairing: true,
+  // Custom type. `id` is here because a self-hosted face is an ASSET and has to be addressed:
+  // the resolver builds `@font-face` rules pointing at this client's own font route.
+  id: true,
+  customFontDisplay: true,
+  customFontBody: true,
+  customFontFiles: true,
 } as const;
 
 /**

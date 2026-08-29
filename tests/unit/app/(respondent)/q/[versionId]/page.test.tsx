@@ -159,6 +159,9 @@ const MOCK_THEME: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 function makeParams(versionId: string = VERSION_ID) {

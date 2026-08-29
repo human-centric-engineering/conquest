@@ -106,6 +106,36 @@
   --cq-respondent-canvas: #0a0a0a;
 }
 
+/* ==== Pinning a surface to one mode ====
+ * Every respondent surface follows <html>.dark, which is right everywhere a respondent actually
+ * answers a questionnaire — and wrong in exactly one place: the admin's brand preview shows the
+ * SAME client rendered light and dark at once, so the two panels have to disagree about the mode
+ * on one page.
+ *
+ * `data-scheme` on the surface root pins it. The dark blocks below opt out of `.dark` when it says
+ * `light`, and opt in without `.dark` when it says `dark`; the specificity works out because
+ * `[data-scheme='dark']` adds a class-level weight the unscoped light block does not have.
+ *
+ * The opt-out is `:not(:where([data-scheme='light']))`, and the `:where()` is load-bearing: a bare
+ * `:not([attr])` ADDS its argument's weight, which pushed the dark block above
+ * `[data-canvas='custom']` and stopped a client's own ground from re-deriving cards, borders and
+ * muted text in dark mode — a branded panel rendered with the neutral near-black chrome instead.
+ * `:where()` contributes nothing, so the block keeps exactly the specificity it had before pinning
+ * existed and the source order below decides, as it always did.
+ *
+ * `--cq-respondent-canvas` is re-declared here because it is set on `:root` / `.dark` — an
+ * ANCESTOR of the preview — so a pinned panel would otherwise inherit the admin's mode for the one
+ * token the whole neutral ground is built from.
+ *
+ * Deliberately not a general theming mechanism: nothing but a preview should ever contradict the
+ * viewer's own mode, and a respondent surface that did would be a bug. */
+[data-surface='respondent'][data-scheme='light'] {
+  --cq-respondent-canvas: #ffffff;
+}
+[data-surface='respondent'][data-scheme='dark'] {
+  --cq-respondent-canvas: #0a0a0a;
+}
+
 /* ==== Respondent (neutral white-label canvas) — light ====
  * Re-declares every token consumer set on <html> back to a clean neutral, so the
  * ConQuest brand stops at the chrome and the questionnaire's own `--app-*` brand is
@@ -158,8 +188,13 @@
   --app-font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-/* ==== Respondent (neutral white-label canvas) — dark (descendant of <html>.dark) ==== */
-.dark [data-surface='respondent'] {
+/* ==== Respondent (neutral white-label canvas) — dark (descendant of <html>.dark) ====
+ * The second selector is the `data-scheme` opt-out, and it exists for exactly one caller: the
+ * admin brand preview, which shows a client's light AND dark rendering side by side and so cannot
+ * have both panels follow <html>.dark like every other respondent surface does. See the
+ * `data-scheme` note above the light block. */
+.dark [data-surface='respondent']:not(:where([data-scheme='light'])),
+[data-surface='respondent'][data-scheme='dark'] {
   --color-primary: #fafafa;
   --color-primary-foreground: #18181b;
   --color-secondary: #27272a;
@@ -271,7 +306,8 @@
   --cq-band-border: #e7dccd; /* warm hairline */
 }
 
-.dark [data-surface='respondent'][data-brand='conquest'] {
+.dark [data-surface='respondent'][data-brand='conquest']:not(:where([data-scheme='light'])),
+[data-surface='respondent'][data-brand='conquest'][data-scheme='dark'] {
   --app-cta-color: #ffc73a; /* gold — the dark-surface CTA */
   --app-cta-gradient: #ffc73a;
   --app-accent-color: #5b8bff; /* blue-bright on navy */
@@ -293,7 +329,8 @@
 [data-surface='respondent'][data-brand='conquest'] {
   --app-on-cta: #fbf6ec; /* cream on navy */
 }
-.dark [data-surface='respondent'][data-brand='conquest'] {
+.dark [data-surface='respondent'][data-brand='conquest']:not(:where([data-scheme='light'])),
+[data-surface='respondent'][data-brand='conquest'][data-scheme='dark'] {
   --app-on-cta: #0a1a3a; /* ink on gold */
 }
 

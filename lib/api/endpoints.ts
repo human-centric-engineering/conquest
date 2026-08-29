@@ -943,6 +943,18 @@ export const API = {
       logoDark: (id: string): string => `/api/v1/app/demo-clients/${id}/logo-dark`,
       /** The client's private knowledge corpus (GET — client-scoped list, grounds its reports). */
       knowledge: (id: string): string => `/api/v1/app/demo-clients/${id}/knowledge`,
+      /**
+       * DEMO-ONLY (brand import): propose theme values from a screenshot of a prospect's site
+       * (POST, multipart). Collection-scoped — the create form has no client id yet — and it
+       * persists nothing.
+       */
+      brandImport: '/api/v1/app/demo-clients/brand-import',
+      /**
+       * DEMO-ONLY (custom type): load the client's own Google Fonts families (POST) or clear them
+       * (DELETE). Writes the families and the stored files immediately, like an image upload;
+       * `fontPairing` itself stays an ordinary form field.
+       */
+      fonts: (id: string): string => `/api/v1/app/demo-clients/${id}/fonts`,
     },
     /** Cohorts — groups of people (a team) under a demo client. Gated by APP_QUESTIONNAIRES_COHORTS. */
     COHORTS: {

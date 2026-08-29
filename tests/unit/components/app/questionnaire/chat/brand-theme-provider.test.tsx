@@ -37,6 +37,9 @@ const BASE: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 /** A client with no visual identity at all — the ConQuest fallback path. */
