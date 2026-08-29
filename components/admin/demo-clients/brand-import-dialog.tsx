@@ -1,20 +1,24 @@
 'use client';
 
 /**
- * DEMO-ONLY (brand import): propose a client's theme from their website, or from a screenshot of it.
+ * DEMO-ONLY (brand import): propose a client's theme from their website, from screenshots of it,
+ * or from both.
  *
  * Branding a demo client by hand means a dozen fields copied out of a brand guideline. This reads
- * them off the prospect's own site instead: paste an address and we fetch and parse it, or upload a
- * screenshot and we measure the colours in the picture. Either way the admin accepts what they want
- * and vetoes the rest.
+ * them off the prospect's own site instead: paste an address and we fetch and parse it, add
+ * screenshots and we measure the colours in the pictures. Either way the admin accepts what they
+ * want and vetoes the rest.
  *
- * ## Two tabs, one result
+ * ## One form, not two tabs
  *
- * The URL route is the one an admin reaches for; the screenshot route is what catches it when that
- * fails. Sites behind bot walls, behind logins, or built entirely in JavaScript give a server-side
- * fetcher nothing — and we cannot render them, because Chromium on a serverless function is a fight
- * we would lose. The admin's browser has already rendered the page, so when a URL import comes back
- * `blocked` the panel offers the other tab as the next step rather than as a consolation.
+ * These were two routes on two tabs, which framed them as alternatives: use the address, and fall
+ * back to a picture when the site blocks us. They are better read as complementary, because they
+ * see different things — only the site names the logo file and the typeface, only a screenshot
+ * measures what the rendered page is actually painted in. Tabs made "give us both", the most
+ * reliable thing an admin can do, the one combination the UI could not express.
+ *
+ * So: one address field, up to {@link MAX_SCREENSHOTS} pictures, one button. Either half alone
+ * still works, which is what an admin with only an address, or only a picture, has.
  *
  * ## Nothing is applied without a click, and colours are never saved here
  *
@@ -29,7 +33,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { Globe, Loader2, Upload } from 'lucide-react';
+import { Globe, Loader2, Upload, X } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
@@ -43,7 +47,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   isImportableColorField,
@@ -51,6 +54,14 @@ import {
   type ImportableField,
 } from '@/lib/app/questionnaire/brand-import/result';
 import type { BrandImageKind } from '@/lib/app/questionnaire/theming';
+
+/**
+ * Screenshots accepted in one import, mirroring the route's own cap.
+ *
+ * Held in both places on purpose: the server enforces it, and the form says it before the admin
+ * picks a fourth file rather than after.
+ */
+const MAX_SCREENSHOTS = 3;
 
 /**
  * Field → the label the form uses for it.
@@ -92,6 +103,15 @@ const IMAGE_ENDPOINTS: Record<BrandImageKind, (id: string) => string> = {
   'logo-dark': API.APP.DEMO_CLIENTS.logoDark,
 };
 
+/** The multipart body. The address rides WITH the pictures, so one call sees both. */
+function uploadBody(url: string, files: File[], demoClientId?: string): FormData {
+  const body = new FormData();
+  if (url) body.append('url', url);
+  for (const file of files) body.append('file', file);
+  if (demoClientId) body.append('demoClientId', demoClientId);
+  return body;
+}
+
 interface BrandImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -111,8 +131,8 @@ export function BrandImportDialog({
   onApply,
 }: BrandImportDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<'url' | 'screenshot'>('url');
   const [url, setUrl] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,38 +155,32 @@ export function BrandImportDialog({
     setAccepted(new Set(Object.keys(parsed.fields) as ImportableField[]));
   };
 
-  const importFromUrl = async () => {
-    if (!url.trim()) return;
+  /**
+   * Send whatever the admin has given us.
+   *
+   * Multipart when there are pictures — a JSON body cannot carry them — and JSON when there is only
+   * an address, which is also the documented shape of the endpoint for anything but this dialog.
+   * The route reads the two by content type, so the choice here is the whole protocol.
+   */
+  const runImport = async () => {
+    const address = url.trim();
+    if (!address && files.length === 0) return;
+
     reset();
     setBusy(true);
     try {
-      const response = await fetch(API.APP.DEMO_CLIENTS.brandImport, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), demoClientId }),
-      });
-      const parsed = await parseApiResponse<BrandImportResult>(response);
-      if (!parsed.success) {
-        setError(parsed.error.message);
-        return;
-      }
-      receive(parsed.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not read that website.');
-    } finally {
-      setBusy(false);
-    }
-  };
+      const response =
+        files.length > 0
+          ? await fetch(API.APP.DEMO_CLIENTS.brandImport, {
+              method: 'POST',
+              body: uploadBody(address, files, demoClientId),
+            })
+          : await fetch(API.APP.DEMO_CLIENTS.brandImport, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: address, demoClientId }),
+            });
 
-  const importFromFile = async (file: File) => {
-    reset();
-    setBusy(true);
-    try {
-      const body = new FormData();
-      body.append('file', file);
-      if (demoClientId) body.append('demoClientId', demoClientId);
-
-      const response = await fetch(API.APP.DEMO_CLIENTS.brandImport, { method: 'POST', body });
       const parsed = await parseApiResponse<BrandImportResult>(response);
       if (!parsed.success) {
         // The server's rejection carries the actionable detail (too small, wrong type, rate
@@ -176,12 +190,34 @@ export function BrandImportDialog({
       }
       receive(parsed.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not read that screenshot.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : files.length > 0
+            ? 'Could not read those screenshots.'
+            : 'Could not read that website.'
+      );
     } finally {
       setBusy(false);
       // Clear the input so re-picking the SAME file still fires a change event.
       if (inputRef.current) inputRef.current.value = '';
     }
+  };
+
+  /**
+   * Take the files the admin picked, up to the cap.
+   *
+   * Truncating is SAID rather than done quietly: silently keeping three of five looks exactly like
+   * an import that ignored two of the pictures they chose.
+   */
+  const addFiles = (picked: FileList | null) => {
+    if (!picked || picked.length === 0) return;
+    const chosen = [...files, ...Array.from(picked)];
+    setFiles(chosen.slice(0, MAX_SCREENSHOTS));
+    if (chosen.length > MAX_SCREENSHOTS) {
+      setError(`Up to ${MAX_SCREENSHOTS} screenshots — we kept the first ${MAX_SCREENSHOTS}.`);
+    }
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   const toggle = (field: ImportableField) => {
@@ -241,6 +277,9 @@ export function BrandImportDialog({
     if (!result) return;
     setApplying(true);
     setError(null);
+    // Tracked locally as well as in state: `setError` does not update `error` until the next
+    // render, so the close decision at the end of this function cannot read it.
+    let said: string | null = null;
     try {
       const values: Partial<Record<ImportableField, string>> = {};
       for (const field of accepted) {
@@ -260,25 +299,28 @@ export function BrandImportDialog({
           delete values.customFontDisplay;
           delete values.customFontBody;
           if (values.fontPairing === 'custom') delete values.fontPairing;
-          setError(
-            demoClientId
-              ? 'File storage is not configured, so custom typefaces could not be stored. Everything else was applied.'
-              : 'Save the client first to store its typefaces. Everything else was applied.'
-          );
+          said = demoClientId
+            ? 'File storage is not configured, so custom typefaces could not be stored. Everything else was applied.'
+            : 'Save the client first to store its typefaces. Everything else was applied.';
+          setError(said);
         } else {
           const failure = await loadFonts(values.customFontDisplay, values.customFontBody);
           if (failure) {
             delete values.customFontDisplay;
             delete values.customFontBody;
             if (values.fontPairing === 'custom') delete values.fontPairing;
-            setError(`${failure} Everything else was applied — pick a typeface by hand.`);
+            said = `${failure} Everything else was applied — pick a typeface by hand.`;
+            setError(said);
           }
         }
       }
 
       onApply(values);
-      // Stay open when something needs saying; the admin has to read why the type was skipped.
-      if (!wantsCustomType) {
+      // Stay open only when there is something to READ — the admin has to see why the type was
+      // skipped. Keying this on "custom type was involved" instead kept the dialog open on the
+      // SUCCESS path too, with nothing said: the admin's only cue was that it did not close, and
+      // pressing Apply again re-ran the logo re-host and the Google Fonts fetch.
+      if (!said) {
         onOpenChange(false);
         reset();
       }
@@ -313,77 +355,84 @@ export function BrandImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(next) => setTab(next as 'url' | 'screenshot')}>
-          <TabsList>
-            <TabsTrigger value="url">Website address</TabsTrigger>
-            <TabsTrigger value="screenshot">Screenshot</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="url" className="space-y-2 pt-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void importFromUrl();
-                  }
-                }}
-                placeholder="acme.example"
-                disabled={busy}
-                className="max-w-xs"
-                aria-label="Website address"
-              />
-              <Button
-                type="button"
-                onClick={() => void importFromUrl()}
-                disabled={busy || !url.trim()}
-              >
-                {busy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Globe className="mr-2 h-4 w-4" />
-                )}
-                Read the site
-              </Button>
-            </div>
-            <p className="text-muted-foreground text-xs">
-              Their homepage. We read the page, its stylesheets and its logo — nothing else, and
-              nothing is stored.
-            </p>
-          </TabsContent>
-
-          <TabsContent value="screenshot" className="space-y-2 pt-3">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void runImport();
+                }
+              }}
+              placeholder="acme.example"
+              disabled={busy}
+              className="max-w-xs"
+              aria-label="Website address"
+            />
             <input
               ref={inputRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              multiple
               className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void importFromFile(file);
-              }}
+              onChange={(e) => addFiles(e.target.files)}
             />
             <Button
               type="button"
               variant="outline"
-              disabled={busy}
+              disabled={busy || files.length >= MAX_SCREENSHOTS}
               onClick={() => inputRef.current?.click()}
             >
-              {busy ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-2 h-4 w-4" />
-              )}
-              Choose a screenshot
+              <Upload className="mr-2 h-4 w-4" />
+              Add a screenshot
             </Button>
-            <p className="text-muted-foreground text-xs">
-              A wide capture of the homepage works best — at least 320px on each side. Use this when
-              the site blocks us, needs a login, or draws itself in JavaScript.
-            </p>
-          </TabsContent>
-        </Tabs>
+          </div>
+
+          {files.length > 0 && (
+            <ul className="space-y-1">
+              {files.map((file, index) => (
+                <li
+                  key={`${file.name}-${index}`}
+                  className="flex items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-xs"
+                >
+                  <span className="truncate">{file.name}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2"
+                    disabled={busy}
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <Button
+            type="button"
+            onClick={() => void runImport()}
+            disabled={busy || (!url.trim() && files.length === 0)}
+          >
+            {busy ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Globe className="mr-2 h-4 w-4" />
+            )}
+            Read the brand
+          </Button>
+
+          <p className="text-muted-foreground text-xs">
+            An address, screenshots of the page, or both — both is the most reliable. Only the site
+            names their logo and typeface; only a picture shows what the page is really painted in.
+            Up to {MAX_SCREENSHOTS} screenshots, at least 320px on each side. Nothing is stored.
+          </p>
+        </div>
 
         <div className="space-y-4">
           {error && (
@@ -401,17 +450,14 @@ export function BrandImportDialog({
               role="status"
             >
               <p>{result.reason}</p>
-              {result.nextStep === 'screenshot' && tab === 'url' && (
+              {result.nextStep === 'screenshot' && files.length === 0 && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    setTab('screenshot');
-                    reset();
-                  }}
+                  onClick={() => inputRef.current?.click()}
                 >
-                  Try a screenshot instead
+                  Add a screenshot instead
                 </Button>
               )}
             </div>

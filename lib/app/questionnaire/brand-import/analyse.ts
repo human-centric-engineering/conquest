@@ -1,15 +1,29 @@
 /**
- * Brand import — the two entry points.
+ * Brand import — the entry point.
  *
  * Measure a palette, ask the analyst which colour plays which role, annotate the pair that has to
- * read against itself, and return the shared result contract. The URL path adds a harvest in front
- * of that and proposes images and a typeface as well; everything below the harvest is shared.
+ * read against itself, and return the shared result contract. A URL adds a harvest in front of that
+ * and proposes images and a typeface as well; everything below the harvest is shared.
  *
- * The screenshot route exists because we cannot render a website server-side. Playwright is a dev
- * dependency and Chromium on a serverless function is a size-and-cold-start fight we would lose;
- * meanwhile the admin's own browser has already rendered the page perfectly. So when a URL import
- * is blocked — a bot wall, a login, a heavy SPA — the answer is not a better fetcher, it is to ask
- * for the picture the admin can already see. That is why `blockedResult` always points here.
+ * ## Why an address and a picture are one call, not two routes
+ *
+ * We cannot render a website server-side — Playwright is a dev dependency and Chromium on a
+ * serverless function is a size-and-cold-start fight we would lose — while the admin's own browser
+ * has already rendered the page perfectly. That started as a fallback for a blocked fetch, and the
+ * two sources turned out to be complementary rather than alternative:
+ *
+ * | Source       | Sees                                                                      |
+ * | ------------ | ------------------------------------------------------------------------- |
+ * | The site     | The logo file, the typeface, `--brand-primary` — things only markup names. |
+ * | A screenshot | Painted AREA on the rendered page — the ground, the ink, what is really big. |
+ *
+ * A stylesheet cannot tell us which of its ninety colours the page is actually drawn in: our count
+ * of `#f8f2ec` in a CSS file is a count of tokens, not of pixels. The screenshot answers exactly
+ * that and nothing else. So both go into one merged palette and one analyst call — and either one
+ * on its own still works, which is what an admin with only an address, or only a picture, has.
+ *
+ * A blocked harvest is therefore no longer the end of the run: with screenshots in hand we analyse
+ * those and say the site itself could not be read, rather than returning nothing.
  */
 
 import { logger } from '@/lib/logging';
@@ -18,11 +32,12 @@ import {
   analysedResult,
   blockedResult,
   type BrandImportResult,
+  type BrandImportSource,
   type ColorCandidate,
   type ImportableField,
   type ProposedField,
 } from '@/lib/app/questionnaire/brand-import/result';
-import { extractPalette } from '@/lib/app/questionnaire/brand-import/palette';
+import { extractPalette, mergePalettes } from '@/lib/app/questionnaire/brand-import/palette';
 import {
   assignRoles,
   type RoleAssignment,
@@ -37,186 +52,208 @@ import {
 import { verifyLogo } from '@/lib/app/questionnaire/brand-import/verify-logo';
 import { matchFontPairing } from '@/lib/app/questionnaire/brand-import/font-match';
 
-export interface ScreenshotInput {
+/**
+ * Relative weight of the two evidence sources when both are present.
+ *
+ * The screenshot leads because it is the only source that measures the rendered page: it is what
+ * settles the ground and the ink, which a stylesheet's token counts cannot. The site is not far
+ * behind, because a brand's accent may occupy a few dozen pixels of one frame and still be the
+ * colour the company is known by — the logo's palette keeps it in the list.
+ */
+const SOURCE_WEIGHT = { site: 2, screenshot: 3 } as const;
+
+/** One screenshot as it reaches analysis: bytes plus the type we DETECTED in them. */
+export interface ScreenshotImage {
   buffer: Buffer;
   /** The type the magic-byte check DETECTED, never the one the browser claimed. */
   mediaType: string;
+}
+
+export interface BrandImportInput {
+  /** The client's website. Absent when the admin has only a picture. */
+  url?: string;
+  /** Screenshots of it. Empty when the admin has only an address. */
+  screenshots?: ScreenshotImage[];
   /** The client this import is for, when the form has one. Threaded through for cost attribution. */
   demoClientId?: string;
 }
 
 /**
- * Analyse a screenshot into proposed theme fields.
+ * Analyse a website, a set of screenshots, or both, into proposed theme fields.
  *
- * Never throws for an ordinary failure. An undecodable image, an unseeded agent and an unreachable
- * provider all resolve to a result the dialog can render — `empty` with a next step, or the
- * measured palette marked `degraded`. The only thing that reaches the route as an exception is a
- * genuine defect.
- */
-export async function analyseScreenshot(input: ScreenshotInput): Promise<BrandImportResult> {
-  const candidates = await extractPalette(input.buffer);
-
-  if (candidates.length === 0) {
-    return analysedResult({ source: 'screenshot', fields: {}, candidates: [], degraded: false });
-  }
-
-  let assignments: RoleAssignment[] = [];
-  let sawImage = false;
-  let degraded = false;
-
-  try {
-    const assigned = await assignRoles({
-      candidates,
-      demoClientId: input.demoClientId,
-      image: { base64: input.buffer.toString('base64'), mediaType: input.mediaType },
-    });
-    assignments = assigned.assignments;
-    sawImage = assigned.sawImage;
-  } catch (error) {
-    // Expected in a deployment with no provider configured, and after a provider outage. The
-    // palette is the expensive part and it is already in hand, so this degrades rather than fails.
-    degraded = true;
-    logger.info('Brand import: role assignment unavailable, returning the measured palette', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  // `completeGrounds` before `annotateContrast`: it drops an unreadable ink and fills the dark
-  // pair, so by the time the contrast annotation runs there is nothing left for it to warn about
-  // unless the admin's own later edits create it.
-  const fields = annotateContrast(
-    completeGrounds(
-      assignmentsToFields(assignments, {
-        confidence: sawImage ? 'high' : 'low',
-        source: sawImage
-          ? 'read from the screenshot'
-          : 'inferred from the screenshot’s palette (no image model available)',
-      })
-    )
-  );
-
-  return analysedResult({
-    source: 'screenshot',
-    fields,
-    candidates,
-    degraded,
-    note: degraded
-      ? 'We measured the colours but could not work out which is which — no AI provider was available. Pick from the palette below.'
-      : undefined,
-  });
-}
-
-/**
- * Turn role assignments into the result's field bag.
+ * Never throws for an ordinary failure. A bot wall, an undecodable image, an unseeded agent and an
+ * unreachable provider all resolve to a result the dialog can render — `blocked` or `empty` with a
+ * next step, or the measured palette marked `degraded`. The only thing that reaches the route as an
+ * exception is a genuine defect.
  *
- * Shared with the URL path, which assigns the same way over a differently-sourced palette.
+ * The caller guarantees at least one source; with neither, the honest answer is `empty` and that is
+ * what falls out of measuring nothing.
  */
-export function assignmentsToFields(
-  assignments: RoleAssignment[],
-  provenance: { confidence: ProposedField['confidence']; source: string }
-): Partial<Record<ImportableField, ProposedField>> {
-  const fields: Partial<Record<ImportableField, ProposedField>> = {};
-  for (const assignment of assignments) {
-    fields[assignment.field] = {
-      value: assignment.hex,
-      confidence: provenance.confidence,
-      source: provenance.source,
-    };
-  }
-  return fields;
-}
+export async function analyseBrand(input: BrandImportInput): Promise<BrandImportResult> {
+  const screenshots = input.screenshots ?? [];
+  const harvested = input.url ? await harvestSite(input.url) : null;
 
-/** Re-exported so the route can render a palette-only answer without reaching past this module. */
-export type { ColorCandidate };
-
-/**
- * Analyse a live website into proposed theme fields.
- *
- * The failure surface is much wider than the screenshot path's — a bot wall, a login, an
- * unresolvable host, a page that is really a PDF — so every one of those comes back as `blocked`
- * with a sentence naming what happened and the screenshot route offered. The admin's browser can
- * render what we cannot; that is the whole reason the other entry point exists.
- */
-export async function analyseUrl(input: {
-  url: string;
-  demoClientId?: string;
-}): Promise<BrandImportResult> {
-  const harvested = await harvestSite(input.url);
-  if (!harvested.ok) {
+  // An address we could not read AND no picture is the one case with nothing left to say. With
+  // screenshots in hand we carry on: they are a complete answer for colour, just not for the logo.
+  if (harvested && !harvested.ok && screenshots.length === 0) {
     return blockedResult({ source: 'url', reason: harvested.reason });
   }
 
-  const { brand } = harvested;
+  const brand = harvested?.ok ? harvested.brand : null;
 
-  // The lockup is CHECKED, not just ranked: every signal the harvest can see is circumstantial, and
-  // a press badge named `logo.svg` satisfies all of them. See verify-logo.ts.
-  const logo = await chooseLogo(brand, input.demoClientId);
+  const fields: Partial<Record<ImportableField, ProposedField>> = {};
+  let logoNote: string | null = null;
 
-  // Images and type are found by parsing, not by measuring, so they are worth proposing even when
-  // the page gave up no usable colours at all — a logo alone is a real result.
-  const fields: Partial<Record<ImportableField, ProposedField>> = {
-    ...logo.field,
-    ...imageFields(brand.mark),
-    ...fontField(brand.fontFamilies),
-  };
+  if (brand) {
+    // The lockup is CHECKED, not just ranked: every signal the harvest can see is circumstantial,
+    // and a press badge named `logo.svg` satisfies all of them. See verify-logo.ts.
+    const logo = await chooseLogo(brand, input.demoClientId);
+    logoNote = logo.note;
+    // Images and type are found by parsing, not by measuring, so they are worth proposing even
+    // when the page gave up no usable colours at all — a logo alone is a real result.
+    Object.assign(fields, logo.field, imageFields(brand.mark), fontField(brand.fontFamilies));
+  }
+
+  // Screenshots are merged with each other first, so that a set of five frames still weighs the
+  // same against the site as a single frame does — otherwise "upload more pictures" would quietly
+  // become "outvote the logo".
+  const shotPalettes = await Promise.all(screenshots.map((shot) => extractPalette(shot.buffer)));
+  const screenshotCandidates = mergePalettes(
+    shotPalettes
+      .filter((palette) => palette.length > 0)
+      .map((candidates) => ({
+        candidates,
+        weight: 1,
+      }))
+  );
+
+  const candidates = mergePalettes(
+    [
+      { candidates: brand?.candidates ?? [], weight: SOURCE_WEIGHT.site },
+      { candidates: screenshotCandidates, weight: SOURCE_WEIGHT.screenshot },
+    ].filter((source) => source.candidates.length > 0)
+  );
 
   let degraded = false;
-  if (brand.candidates.length > 0) {
+  if (candidates.length > 0) {
     try {
       const assigned = await assignRoles({
-        candidates: brand.candidates,
+        candidates,
         demoClientId: input.demoClientId,
-        hints: brand.hints,
+        hints: brand?.hints,
+        images: screenshots.map((shot) => ({
+          base64: shot.buffer.toString('base64'),
+          mediaType: shot.mediaType,
+        })),
       });
-      Object.assign(fields, colourFields(assigned.assignments, brand.declared));
+      Object.assign(
+        fields,
+        colourFields(assigned.assignments, {
+          declared: brand?.declared ?? new Set<string>(),
+          measured: new Set(screenshotCandidates.map((candidate) => candidate.hex)),
+          sawImages: assigned.sawImages,
+        })
+      );
     } catch (error) {
+      // Expected in a deployment with no provider configured, and after a provider outage. The
+      // palette is the expensive part and it is already in hand, so this degrades rather than fails.
       degraded = true;
-      logger.info('Brand import: role assignment unavailable for a site harvest', {
+      logger.info('Brand import: role assignment unavailable, returning the measured palette', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   return analysedResult({
-    source: 'url',
+    source: sourceOf(Boolean(brand), screenshots.length > 0),
+    // `completeGrounds` before `annotateContrast`: it drops an unreadable ink and fills the dark
+    // pair, so by the time the contrast annotation runs there is nothing left for it to warn about
+    // unless the admin's own later edits create it.
     fields: annotateContrast(completeGrounds(fields)),
-    candidates: brand.candidates,
+    candidates,
     degraded,
     note: joinNotes(
-      brand.note,
-      logo.note,
+      harvested && !harvested.ok
+        ? `We could not read that website — ${lowerFirst(harvested.reason)} ${
+            screenshots.length === 1 ? 'The screenshot was' : 'The screenshots were'
+          } used on their own, so there is no logo or typeface in what follows.`
+        : (brand?.note ?? null),
+      logoNote,
       degraded
-        ? 'We read the site but could not work out which colour is which — no AI provider was available. Pick from the palette below.'
+        ? 'We measured the colours but could not work out which is which — no AI provider was available. Pick from the palette below.'
         : null
     ),
   });
 }
 
 /**
+ * Which sources actually produced the answer.
+ *
+ * A URL that came back blocked is NOT reported as a source: the result the admin is reading was
+ * measured from their screenshots alone, and saying otherwise would attribute it to a page we
+ * never read.
+ */
+function sourceOf(hasSite: boolean, hasScreenshots: boolean): BrandImportSource {
+  if (hasSite && hasScreenshots) return 'combined';
+  return hasScreenshots ? 'screenshot' : 'url';
+}
+
+/** A harvest reason reads as its own sentence; inside one it needs its capital dropped. */
+function lowerFirst(sentence: string): string {
+  return sentence.charAt(0).toLowerCase() + sentence.slice(1);
+}
+
+/** Re-exported so the route can render a palette-only answer without reaching past this module. */
+export type { ColorCandidate };
+
+/**
  * Turn colour assignments into proposals, splitting confidence by how we came to know the colour.
  *
- * A hex the site DECLARED — as `theme-color`, or as a `--brand-primary` custom property — is the
- * site asserting its own brand, and is reported as high confidence with that reason attached.
- * Everything else was ranked out of pixels and stylesheet frequency by a model that could not see
- * the page, which is a genuine guess and is labelled as one. Flattening the two would tell an admin
- * that a border grey we happened to rank third is as certain as the colour the site named.
+ * Three kinds of evidence, and they are not equal:
+ *
+ *  - **The site DECLARED it** — as `theme-color`, or as a `--brand-primary` custom property. That
+ *    is the company asserting its own brand, and it is reported as high confidence with the reason
+ *    attached.
+ *  - **We MEASURED it in a screenshot** the admin took of the rendered page. Also high, when a
+ *    vision model actually read the picture: painted area is the strongest evidence there is for
+ *    what a page's ground and ink really are.
+ *  - **Neither** — it was ranked out of logo pixels and stylesheet token counts by a model that
+ *    could not see the page. That is a genuine guess, and it is labelled one.
+ *
+ * A colour that is both declared and measured is the strongest result this feature produces: two
+ * independent sources agreeing is the whole reason an admin can give us an address AND a picture.
+ * Flattening these would tell them that a border grey we happened to rank third is as certain as
+ * the colour the site named and the screenshot showed.
  */
 function colourFields(
   assignments: RoleAssignment[],
-  declared: Set<string>
+  evidence: { declared: Set<string>; measured: Set<string>; sawImages: boolean }
 ): Partial<Record<ImportableField, ProposedField>> {
   const fields: Partial<Record<ImportableField, ProposedField>> = {};
   for (const assignment of assignments) {
-    const wasDeclared = declared.has(assignment.hex);
+    const declared = evidence.declared.has(assignment.hex);
+    const measured = evidence.measured.has(assignment.hex);
+
     fields[assignment.field] = {
       value: assignment.hex,
-      confidence: wasDeclared ? 'high' : 'low',
-      source: wasDeclared
-        ? 'the site declares this colour as part of its brand'
-        : 'measured from the site’s logo and stylesheets',
+      confidence: declared || (measured && evidence.sawImages) ? 'high' : 'low',
+      source: provenanceCopy(declared, measured, evidence.sawImages),
     };
   }
   return fields;
+}
+
+function provenanceCopy(declared: boolean, measured: boolean, sawImages: boolean): string {
+  if (declared && measured) {
+    return 'the site declares this colour as part of its brand, and we measured it in your screenshot';
+  }
+  if (declared) return 'the site declares this colour as part of its brand';
+  if (measured) {
+    return sawImages
+      ? 'measured from your screenshot'
+      : 'inferred from your screenshot’s palette (no image model available)';
+  }
+  return 'measured from the site’s logo and stylesheets';
 }
 
 /** Admin-facing provenance for each way an image was found, in the same order as the trust ladder. */

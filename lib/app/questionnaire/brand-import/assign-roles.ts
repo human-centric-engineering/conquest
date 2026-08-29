@@ -106,8 +106,15 @@ export interface AssignRolesInput {
   candidates: ColorCandidate[];
   /** The client this import is for, when there is one — absent on the create form. Cost context. */
   demoClientId?: string;
-  /** A screenshot or page image to reason over, when we have one and a vision model to read it. */
-  image?: { base64: string; mediaType: string };
+  /**
+   * Screenshots to reason over, when we have any and a vision model to read them.
+   *
+   * A list rather than one image because an admin can show us more of the site than one frame
+   * holds — a hero, an interior page, a form. They go into a SINGLE call: the roles are one
+   * decision about one brand, and asking per image would produce N answers with nothing to
+   * arbitrate between them.
+   */
+  images?: { base64: string; mediaType: string }[];
   /**
    * Things the page told us outright — a `theme-color` meta, a `--brand-primary` custom property.
    * Passed as hints rather than applied directly so the analyst can reconcile them with what it
@@ -120,8 +127,8 @@ export interface AssignRolesResult {
   assignments: RoleAssignment[];
   provider: string;
   model: string;
-  /** False when the image was dropped because the resolved model cannot read one. */
-  sawImage: boolean;
+  /** False when the images were dropped because the resolved model cannot read one. */
+  sawImages: boolean;
 }
 
 /**
@@ -151,11 +158,11 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
 
   // Ask before attaching: a model without `vision` in the curated matrix would reject the whole
   // call, losing the assignment we could still have made from the numbers alone.
-  let sawImage = false;
-  if (input.image) {
+  let sawImages = false;
+  if (input.images && input.images.length > 0) {
     try {
       await assertModelSupportsAttachments(providerSlug, model, ['vision']);
-      sawImage = true;
+      sawImages = true;
     } catch {
       logger.info('Brand import: resolved model cannot read images, assigning from palette only', {
         providerSlug,
@@ -167,7 +174,7 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
   const result = await runStructuredCompletion<z.infer<typeof assignmentSchema>>({
     provider,
     model,
-    messages: buildMessages(input, sawImage),
+    messages: buildMessages(input, sawImages),
     temperature: agent.temperature,
     maxTokens: agent.maxTokens || MAX_TOKENS,
     timeoutMs: TIMEOUT_MS,
@@ -189,14 +196,18 @@ export async function assignRoles(input: AssignRolesInput): Promise<AssignRolesR
     // Genuinely version-less: a brand import belongs to a demo client, not to any questionnaire
     // version. The demo client rides in `extra` so the spend is still attributable.
     versionId: null,
-    extra: { candidates: input.candidates.length, sawImage, demoClientId: input.demoClientId },
+    extra: {
+      candidates: input.candidates.length,
+      images: sawImages ? (input.images?.length ?? 0) : 0,
+      demoClientId: input.demoClientId,
+    },
   });
 
   return {
     assignments: narrowAssignments(result.value.roles ?? {}, input.candidates),
     provider: providerSlug,
     model,
-    sawImage,
+    sawImages,
   };
 }
 
@@ -259,7 +270,8 @@ const RESPONSE_SCHEMA: Record<string, unknown> = {
   required: ['roles'],
 };
 
-function buildMessages(input: AssignRolesInput, sawImage: boolean): LlmMessage[] {
+function buildMessages(input: AssignRolesInput, sawImages: boolean): LlmMessage[] {
+  const images = sawImages ? (input.images ?? []) : [];
   const system = joinSections(
     'You are a brand analyst. You are given the colours MEASURED from a company website (or a ' +
       'screenshot of one) and you decide which role each colour plays on the page.',
@@ -295,14 +307,21 @@ function buildMessages(input: AssignRolesInput, sawImage: boolean): LlmMessage[]
     input.hints && input.hints.length > 0
       ? titledBlock('What the page declared about itself', bulletList(input.hints))
       : '',
-    sawImage
-      ? 'The screenshot is attached. Use what you can see — where each colour actually appears — ' +
-          'rather than area alone.'
+    images.length > 0
+      ? `${
+          images.length === 1
+            ? 'The screenshot is attached.'
+            : `${images.length} screenshots of the same site are attached.`
+        } Use what you can see — where each colour actually appears — rather than area alone.` +
+          (images.length > 1
+            ? ' They are different views of ONE brand, so return one set of roles covering all of ' +
+              'them, not one per image.'
+            : '')
       : 'No image is available, so reason from the shares and the neutral flags.',
     'Assign the roles now.'
   );
 
-  if (!sawImage || !input.image) {
+  if (images.length === 0) {
     return [
       { role: 'system', content: system },
       { role: 'user', content: text },
@@ -311,10 +330,10 @@ function buildMessages(input: AssignRolesInput, sawImage: boolean): LlmMessage[]
 
   const parts: ContentPart[] = [
     { type: 'text', text },
-    {
+    ...images.map((image): ContentPart => ({
       type: 'image',
-      source: { type: 'base64', mediaType: input.image.mediaType, data: input.image.base64 },
-    },
+      source: { type: 'base64', mediaType: image.mediaType, data: image.base64 },
+    })),
   ];
 
   return [

@@ -123,6 +123,32 @@ describe('mergePalettes', () => {
     expect(merged[0].share).toBeCloseTo(0.5, 5);
   });
 
+  it('names a merged bucket after its heaviest contributor, not whoever arrived first', () => {
+    // The Eagle Eye failure, in miniature. A logo's white margin and a page's warm paper stock are
+    // 39 apart on the redmean scale, so they merge — and with the logo merged first, a site whose
+    // ground is a cream could only ever be proposed `#ffffff`, a colour appearing nowhere on it.
+    const logo = [{ hex: '#ffffff', share: 0.05, neutral: true }];
+    const screenshot = [{ hex: '#f8f2ec', share: 0.8, neutral: true }];
+
+    const merged = mergePalettes([
+      { candidates: logo, weight: 2 },
+      { candidates: screenshot, weight: 3 },
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].hex).toBe('#f8f2ec');
+  });
+
+  it('keeps the first hex when it is the heavier of the two', () => {
+    // The mirror of the case above: order alone must not decide it either way.
+    const merged = mergePalettes([
+      { candidates: [{ hex: '#ffffff', share: 0.9, neutral: true }], weight: 3 },
+      { candidates: [{ hex: '#f8f2ec', share: 0.1, neutral: true }], weight: 1 },
+    ]);
+
+    expect(merged[0].hex).toBe('#ffffff');
+  });
+
   it('returns nothing when every source has zero weight', () => {
     expect(
       mergePalettes([{ candidates: [{ hex: '#5469d4', share: 1, neutral: false }], weight: 0 }])

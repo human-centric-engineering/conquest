@@ -53,9 +53,9 @@ export {
   groundsAreDistinct,
 } from '@/lib/app/questionnaire/brand-import/ground';
 export {
-  analyseScreenshot,
-  analyseUrl,
-  assignmentsToFields,
+  analyseBrand,
+  type BrandImportInput,
+  type ScreenshotImage,
 } from '@/lib/app/questionnaire/brand-import/analyse';
 
 export {

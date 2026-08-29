@@ -51,6 +51,47 @@ describe('analysedResult', () => {
     expect(result.nextStep).toBe('manual');
   });
 
+  it('points a one-sided partial answer at the source it has not used yet', () => {
+    const fromUrl = analysedResult({
+      source: 'url',
+      fields: { canvasColor: proposal('#ffffff') },
+      candidates: [],
+      degraded: false,
+    });
+    const fromScreenshot = analysedResult({
+      source: 'screenshot',
+      fields: { canvasColor: proposal('#ffffff') },
+      candidates: [],
+      degraded: false,
+    });
+    const fromBoth = analysedResult({
+      source: 'combined',
+      fields: { canvasColor: proposal('#ffffff') },
+      candidates: [],
+      degraded: false,
+    });
+
+    // Naming the missing half is the difference between guidance and a shrug — and a run that used
+    // both has no other half to offer.
+    expect(fromUrl.reason).toContain('Adding a screenshot');
+    expect(fromScreenshot.reason).toContain('address');
+    expect(fromBoth.reason).not.toContain('Adding');
+    expect(fromBoth.reason).toContain('that site and those screenshots');
+  });
+
+  it('sends an empty combined run to manual entry — both sources are already spent', () => {
+    const result = analysedResult({
+      source: 'combined',
+      fields: {},
+      candidates: [],
+      degraded: false,
+    });
+
+    expect(result.outcome).toBe('empty');
+    expect(result.nextStep).toBe('manual');
+    expect(result.reason).toContain('that site and those screenshots');
+  });
+
   it('is `partial` below the threshold, and says how many fields it managed', () => {
     const result = analysedResult({
       source: 'screenshot',

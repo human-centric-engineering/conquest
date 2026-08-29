@@ -1,6 +1,6 @@
 # Brand import
 
-> **DEMO-ONLY.** Reads a prospect's branding off their website — or off a screenshot of it — and
+> **DEMO-ONLY.** Reads a prospect's branding off their website, off screenshots of it, or off both — and
 > proposes demo-client theme values. Colours persist nothing; a re-hosted logo writes its column
 > immediately, exactly as an upload does. See [demo-clients.md](./demo-clients.md) for the columns
 > it proposes into and what they render.
@@ -8,22 +8,45 @@
 Branding a demo client by hand is a dozen fields copied out of a brand guideline, and it is the step
 most likely to be skipped. This reads them off the client's own site instead.
 
-Two ways in, and the second exists because of how the first fails:
+Two sources, and the second exists because we cannot render a website server-side — Playwright is a
+dev dependency and Chromium on a serverless function is a size-and-cold-start fight we would lose.
+The admin's browser already has.
 
-| Route           | What it does                                                              | When                                                  |
-| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
-| **Website URL** | Fetches the page, its stylesheets and its logo; parses and measures them. | The default. Also the only route that finds a logo.   |
-| **Screenshot**  | Measures the colours in an image the admin uploaded.                      | When the site blocks us, needs a login, or is all JS. |
+| Source          | Contributes                                                                          |
+| --------------- | ------------------------------------------------------------------------------------ |
+| **Website URL** | The page, its stylesheets and its logo. The **only** source of a logo or a typeface. |
+| **Screenshots** | Painted AREA on the rendered page — up to three frames, measured, nothing else.      |
 
-We cannot render a website server-side — Playwright is a dev dependency and Chromium on a
-serverless function is a size-and-cold-start fight we would lose. The admin's browser already has.
-That single constraint is why the screenshot route exists at all, and why every `blocked` outcome
-points at it.
+They started as alternatives — an address, falling back to a picture when the site blocked us — and
+they are better read as **complementary**, which is why they are now one form, one request and one
+analysis rather than two tabs.
+
+A stylesheet cannot say which of its ninety colours the page is actually drawn in: a count of
+`#f8f2ec` in a CSS file is a count of tokens, not of pixels. A screenshot answers exactly that and
+nothing else — it has no logo file in it and no font name. So the reliable import gives us both, and
+either alone still works, which is what an admin with only an address, or only a picture, has.
+
+Two consequences worth stating:
+
+- A **blocked** harvest is no longer the end of the run. With pictures in hand we analyse those and
+  say the site itself could not be read. `blocked` is now only returned when there was nothing else.
+- A colour that the site **declares** AND a screenshot **measures** is the strongest result this
+  feature produces: two independent sources agreeing, and it is reported as such.
+
+### What each source is trusted for
+
+The two palettes are merged, screenshots weighted `3` against the site's `2` — the screenshot leads
+because it is the only one that measured the rendered page, and the site stays close behind because
+a brand's accent may occupy a few dozen pixels of one frame and still be the colour the company is
+known by. Several screenshots are merged **with each other first**, at equal weight, so that
+uploading more pictures cannot quietly become "outvote the logo".
 
 ## The measurement principle
 
 **The model never invents a hex.** Colours are measured deterministically first; the LLM only
-decides which measured colour plays which role.
+decides which measured colour plays which role. Every screenshot goes into that ONE call: the roles
+are one decision about one brand, and asking per image would produce N answers with nothing to
+arbitrate between them.
 
 That split is the whole design, and both halves are load-bearing:
 
@@ -37,6 +60,18 @@ That split is the whole design, and both halves are load-bearing:
 
 `narrowAssignments` is that guarantee, and it is tested directly rather than only through a mocked
 provider.
+
+### A merged colour is named by its heaviest contributor
+
+Two candidates within `MERGE_DISTANCE` become one, and the surviving hex is the one that the most
+evidence actually is — not whichever source was folded in first. That reads as a detail and is not.
+A logo's white margin and a page's warm paper stock are 39 apart on the redmean scale, so they
+merge; with the logo merged first, a site whose ground is a cream could only ever be proposed
+`#ffffff` — a colour appearing nowhere on it. It cost a real import: Eagle Eye's `#f8f2ec` ground is
+in their stylesheet thirteen times and could not reach the admin. The page's ground is the single
+value this feature most has to get right, and a few hundred pixels of logo margin were overwriting
+it. `extractPalette` already orders its own buckets heaviest-first for this reason; `mergePalettes`
+now applies the same rule across sources.
 
 ## What it proposes
 
@@ -288,6 +323,14 @@ It deliberately does **not** write `fontPairing`. That stays an ordinary form fi
 sit inert until the pairing is `custom` — inert rather than lost, so switching the picker away and
 back does not mean fetching Google again.
 
+It **merges**, and it has to. A POST is routinely partial: the import dialog sends only the families
+still ticked, and the field's own Load button sends only the ones typed. A full replace therefore
+cleared a face the client already had in the slot this request said nothing about — silently, and
+orphaning its stored objects, because nothing deletes the old prefix on POST. So a slot the body
+does not name keeps its family and its files, and the response reports the **merged** state rather
+than only what this call loaded, since the field renders it straight into its "Stored:" line.
+Clearing is what `DELETE` is for.
+
 ### The family name is the security boundary
 
 `isCustomFontFamily` is an allowlist of the charset a real family name uses, not a blocklist of
@@ -344,7 +387,13 @@ unsuccessful one names a next step:
 | `ok`      | Three or more fields proposed                     | none                          |
 | `partial` | One or two fields proposed                        | `manual`                      |
 | `empty`   | We read the source and found nothing brand-like   | `screenshot` (url) / `manual` |
-| `blocked` | We never got the bytes (403, timeout, unsafe URL) | `screenshot` — always         |
+| `blocked` | We never got the bytes, **and had no screenshot** | `screenshot` — always         |
+
+`source` says what actually produced the answer: `url`, `screenshot`, or `combined`. A URL that came
+back blocked is reported as `screenshot`, never `combined` — attributing the answer to a page we
+never read would be a lie about where it came from. A one-sided `partial` names the half it has not
+used yet ("Adding a screenshot usually fills in the rest"); a combined one has nothing left to
+offer, so it does not pretend otherwise.
 
 Three rules hold across all of them:
 
@@ -355,7 +404,7 @@ Three rules hold across all of them:
    ordinary answer with guidance attached. The 4xx cases are only the ones where the _request_ is
    malformed — no file, wrong bytes, a decompression bomb, too small — which the admin fixes by
    sending a different file rather than by trying a different route.
-3. **`blocked` always points at the screenshot.** We cannot render a website server-side (Playwright
+3. **`blocked` always points at the screenshot, and only happens without one.** We cannot render a website server-side (Playwright
    is a dev dependency, and Chromium on a serverless function is a size-and-cold-start fight we
    would lose), but the admin's browser already has. That constraint is why the screenshot route
    exists at all, rather than being a fallback we added later.
@@ -377,14 +426,26 @@ unavailable would throw away the work and leave the admin with nothing.
 
 | File                                                    | Job                                                                                               |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `brand-import/index.ts`                                 | The barrel. What the route and the dialog import; nothing reaches past it.                        |
 | `brand-import/result.ts`                                | The shared contract — outcomes, proposals, the `analysedResult` / `blockedResult` builders. Pure. |
 | `brand-import/color.ts`                                 | Hex ↔ channels, chroma, redmean distance. Pure.                                                   |
+| `brand-import/css-color.ts`                             | Every CSS colour notation → hex. Pure; see [Colour notation](#colour-notation).                   |
 | `brand-import/palette.ts`                               | Buffer → ranked candidates (sharp). Bucket, then merge.                                           |
+| `brand-import/fetch.ts`                                 | The SSRF-guarded fetcher and `HarvestBudget` — every outbound hop goes through it.                |
+| `brand-import/harvest.ts`                               | The URL entry point: page + stylesheets + logo candidates, weighted by the trust ladder.          |
+| `brand-import/verify-logo.ts`                           | The second model call — is that lockup theirs? — plus `judge` and `namesMatch`.                   |
+| `brand-import/ground.ts`                                | Both grounds: light/dark pairs, and whether two are far enough apart to read as different modes.  |
+| `brand-import/font-match.ts`                            | A harvested family → one of the six shipped pairings, or none.                                    |
+| `brand-import/google-fonts.ts`                          | Resolves a family on Google Fonts and pulls one woff2 per weight (`parseFaceUrls`).               |
 | `brand-import/assign-roles.ts`                          | The one model call, plus `narrowAssignments`.                                                     |
 | `brand-import/contrast.ts`                              | Annotates an unreadable canvas/ink pair. Reuses `contrastRatio` / `MIN_CONTRAST_RATIO`.           |
-| `brand-import/analyse.ts`                               | The screenshot entry point; phase 2's URL path reuses everything below the harvest.               |
+| `brand-import/analyse.ts`                               | `analyseBrand` — the one entry point: a URL, screenshots, or both, merged into one analysis.      |
 | `app/api/v1/app/demo-clients/brand-import/route.ts`     | Gate stack + the multipart boundary.                                                              |
+| `app/api/v1/app/demo-clients/_lib/rasterise-svg.ts`     | SVG → PNG, so a vector logo can be re-hosted without ever storing the markup.                     |
+| `app/api/v1/app/demo-clients/[id]/fonts/route.ts`       | Loads (POST) / clears (DELETE) a client's custom faces into storage.                              |
+| `app/api/v1/app/demo-clients/[id]/font/[face]/route.ts` | Serves one stored face same-origin, which is what `font-src 'self'` requires.                     |
 | `components/admin/demo-clients/brand-import-dialog.tsx` | Upload, per-field accept, the palette strip.                                                      |
+| `components/admin/demo-clients/custom-font-field.tsx`   | The two family names, the load action, and what is currently stored.                              |
 
 ### Why buckets, then a merge
 

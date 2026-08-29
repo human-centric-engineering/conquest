@@ -177,6 +177,17 @@ export async function extractPalette(
  * to become a single candidate list before role assignment. `weights` lets a caller say the logo
  * matters more than the favicon: a logo IS the brand, while a favicon is often a flat generic
  * square, so ranking them by raw pixel share would let the wrong image win on area alone.
+ *
+ * ## A bucket is named by its heaviest contributor, not by whoever arrived first
+ *
+ * Two colours within {@link MERGE_DISTANCE} become one candidate, and the surviving hex is the one
+ * the most evidence actually is. Keeping the first-seen hex instead looks like a detail and is not:
+ * a logo's white pixels and a page's warm paper stock are 39 apart on the redmean scale, so they
+ * merge — and with the logo merged first, a site whose ground is a cream could only ever be
+ * proposed `#ffffff`, a colour that appears nowhere on it. The page's own ground is the single
+ * value this feature most has to get right, and it was being overwritten by a few hundred pixels of
+ * logo margin. `extractPalette` already orders its own buckets heaviest-first for exactly this
+ * reason; this is the same rule applied across sources.
  */
 export function mergePalettes(
   sources: { candidates: ColorCandidate[]; weight: number }[],
@@ -185,7 +196,8 @@ export function mergePalettes(
   const totalWeight = sources.reduce((sum, source) => sum + source.weight, 0);
   if (totalWeight <= 0) return [];
 
-  const merged: { rgb: Rgb; hex: string; share: number; neutral: boolean }[] = [];
+  /** `lead` is the largest single contribution to this bucket — what its hex is named for. */
+  const merged: { rgb: Rgb; hex: string; share: number; neutral: boolean; lead: number }[] = [];
 
   for (const source of sources) {
     for (const candidate of source.candidates) {
@@ -196,9 +208,21 @@ export function mergePalettes(
       const near = merged.find((accepted) => distance(accepted.rgb, rgb) < MERGE_DISTANCE);
       if (near) {
         near.share += weighted;
+        if (weighted > near.lead) {
+          near.rgb = rgb;
+          near.hex = candidate.hex;
+          near.neutral = candidate.neutral;
+          near.lead = weighted;
+        }
         continue;
       }
-      merged.push({ rgb, hex: candidate.hex, share: weighted, neutral: candidate.neutral });
+      merged.push({
+        rgb,
+        hex: candidate.hex,
+        share: weighted,
+        neutral: candidate.neutral,
+        lead: weighted,
+      });
     }
   }
 

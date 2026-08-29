@@ -121,13 +121,36 @@ describe('assignRoles', () => {
   it('attaches the image when the resolved model can read one', async () => {
     const result = await assignRoles({
       candidates: CANDIDATES,
-      image: { base64: 'AAAA', mediaType: 'image/png' },
+      images: [{ base64: 'AAAA', mediaType: 'image/png' }],
     });
 
-    expect(result.sawImage).toBe(true);
+    expect(result.sawImages).toBe(true);
     const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
     const parts = messages[1].content as { type: string }[];
     expect(parts.some((part) => part.type === 'image')).toBe(true);
+  });
+
+  it('attaches every screenshot to the same call, and says they are one brand', async () => {
+    const result = await assignRoles({
+      candidates: CANDIDATES,
+      images: [
+        { base64: 'AAAA', mediaType: 'image/png' },
+        { base64: 'BBBB', mediaType: 'image/jpeg' },
+      ],
+    });
+
+    expect(result.sawImages).toBe(true);
+    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
+    const parts = messages[1].content as { type: string; source?: { data: string } }[];
+    expect(parts.filter((part) => part.type === 'image').map((part) => part.source?.data)).toEqual([
+      'AAAA',
+      'BBBB',
+    ]);
+    // Without this the model has been seen to answer per image, which produces two palettes and
+    // nothing to arbitrate between them.
+    const text = parts.find((part) => part.type === 'text') as unknown as { text: string };
+    expect(text.text).toContain('2 screenshots');
+    expect(text.text).toContain('one set of roles');
   });
 
   it('drops the image and still assigns when the model has no vision capability', async () => {
@@ -137,10 +160,10 @@ describe('assignRoles', () => {
 
     const result = await assignRoles({
       candidates: CANDIDATES,
-      image: { base64: 'AAAA', mediaType: 'image/png' },
+      images: [{ base64: 'AAAA', mediaType: 'image/png' }],
     });
 
-    expect(result.sawImage).toBe(false);
+    expect(result.sawImages).toBe(false);
     expect(result.assignments).toHaveLength(2);
     const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
     expect(typeof messages[1].content).toBe('string');
@@ -161,5 +184,77 @@ describe('assignRoles', () => {
   it('throws when the analyst agent is not seeded, so the caller can degrade', async () => {
     prismaMock.aiAgent.findUnique.mockResolvedValue(null);
     await expect(assignRoles({ candidates: CANDIDATES })).rejects.toThrow('not seeded');
+  });
+
+  it('falls back to the module default when the agent row has no maxTokens of its own', async () => {
+    prismaMock.aiAgent.findUnique.mockResolvedValue({
+      id: 'agent-1',
+      provider: '',
+      model: '',
+      fallbackProviders: [],
+      systemInstructions: 'be a brand analyst',
+      temperature: 0.1,
+      maxTokens: 0,
+    });
+
+    await assignRoles({ candidates: CANDIDATES });
+
+    // 0 is falsy, so `agent.maxTokens || MAX_TOKENS` has to fall through to the built-in default
+    // rather than sending the provider a literal 0-token budget.
+    expect(completionMock.runStructuredCompletion.mock.calls[0][0].maxTokens).toBe(700);
+  });
+
+  it('assigns nothing, rather than throwing, when the model omits `roles` entirely', async () => {
+    completionMock.runStructuredCompletion.mockResolvedValue({
+      value: {},
+      tokenUsage: { input: 100, output: 20 },
+      costUsd: 0.001,
+      finishReason: 'stop',
+    });
+
+    const result = await assignRoles({ candidates: CANDIDATES });
+
+    expect(result.assignments).toEqual([]);
+  });
+
+  it('includes what the page declared about itself in the prompt, when there is any', async () => {
+    await assignRoles({
+      candidates: CANDIDATES,
+      hints: ['The page declares theme-color: #5469d4'],
+    });
+
+    const messages = completionMock.runStructuredCompletion.mock.calls[0][0].messages;
+    expect(messages[1].content).toContain('What the page declared about itself');
+    expect(messages[1].content).toContain('The page declares theme-color: #5469d4');
+  });
+
+  describe('the parse callback handed to the structured-completion runner', () => {
+    // `runStructuredCompletion` is mocked above, which means its `parse` option is captured but
+    // never actually invoked by anything in this file. That leaves the glue between the model's
+    // raw text and the validated shape — a real production code path — untested unless it is
+    // called directly here.
+    async function capturedParse(): Promise<(raw: string) => unknown> {
+      await assignRoles({ candidates: CANDIDATES });
+      return completionMock.runStructuredCompletion.mock.calls[0][0].parse;
+    }
+
+    it('parses a well-formed reply into the validated shape', async () => {
+      const parse = await capturedParse();
+      expect(parse('{"roles":{"pageBackground":"#ffffff"}}')).toEqual({
+        roles: { pageBackground: '#ffffff' },
+      });
+    });
+
+    it('returns null for JSON that does not match the expected shape', async () => {
+      const parse = await capturedParse();
+      // `roles` must be a record of string-or-null; a bare string fails the schema even though
+      // the text is valid JSON.
+      expect(parse('{"roles":"not an object"}')).toBeNull();
+    });
+
+    it('returns null for text that is not JSON at all', async () => {
+      const parse = await capturedParse();
+      expect(parse('not json')).toBeNull();
+    });
   });
 });

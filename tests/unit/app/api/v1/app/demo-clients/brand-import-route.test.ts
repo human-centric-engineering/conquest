@@ -34,7 +34,7 @@ vi.mock('@/lib/storage/image', () => imageMock);
 
 vi.mock('@/lib/validations/storage', () => ({ getMaxFileSizeBytes: () => 5 * 1024 * 1024 }));
 
-const analyseMock = vi.hoisted(() => ({ analyseScreenshot: vi.fn(), analyseUrl: vi.fn() }));
+const analyseMock = vi.hoisted(() => ({ analyseBrand: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/brand-import', () => analyseMock);
 
 import { POST } from '@/app/api/v1/app/demo-clients/brand-import/route';
@@ -52,9 +52,11 @@ function jsonRequest(body: unknown): Request {
   });
 }
 
-function request(fields: Record<string, string | File>): Request {
+function request(fields: Record<string, string | File | File[]>): Request {
   const body = new FormData();
-  for (const [key, value] of Object.entries(fields)) body.append(key, value);
+  for (const [key, value] of Object.entries(fields)) {
+    for (const entry of Array.isArray(value) ? value : [value]) body.append(key, entry);
+  }
   return new Request('http://localhost/api/v1/app/demo-clients/brand-import', {
     method: 'POST',
     body,
@@ -80,8 +82,7 @@ beforeEach(() => {
   limiterMock.brandImportLimiter.check.mockReturnValue({ success: true, reset: 0 });
   imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: 'image/png' });
   imageMock.readImageDimensions.mockResolvedValue({ width: 1440, height: 900 });
-  analyseMock.analyseScreenshot.mockResolvedValue(OK_RESULT);
-  analyseMock.analyseUrl.mockResolvedValue({ ...OK_RESULT, source: 'url' });
+  analyseMock.analyseBrand.mockResolvedValue(OK_RESULT);
 });
 
 describe('POST /api/v1/app/demo-clients/brand-import', () => {
@@ -101,15 +102,17 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
 
     await post(request({ file: screenshot() }), SESSION);
 
-    expect(analyseMock.analyseScreenshot).toHaveBeenCalledWith(
-      expect.objectContaining({ mediaType: 'image/webp' })
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        screenshots: [expect.objectContaining({ mediaType: 'image/webp' })],
+      })
     );
   });
 
   it('threads an optional demoClientId through for cost attribution', async () => {
     await post(request({ file: screenshot(), demoClientId: 'dc-1' }), SESSION);
 
-    expect(analyseMock.analyseScreenshot).toHaveBeenCalledWith(
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
       expect.objectContaining({ demoClientId: 'dc-1' })
     );
   });
@@ -117,13 +120,13 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
   it('works with no demoClientId, because the create form has no client yet', async () => {
     await post(request({ file: screenshot() }), SESSION);
 
-    expect(analyseMock.analyseScreenshot).toHaveBeenCalledWith(
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
       expect.objectContaining({ demoClientId: undefined })
     );
   });
 
   it('returns an empty analysis as a 200 with a next step, not an error', async () => {
-    analyseMock.analyseScreenshot.mockResolvedValue({
+    analyseMock.analyseBrand.mockResolvedValue({
       ...OK_RESULT,
       outcome: 'empty',
       fields: {},
@@ -138,8 +141,10 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
     expect(body.data.outcome).toBe('empty');
   });
 
-  it('rejects a request with no file', async () => {
-    await expect(post(request({}), SESSION)).rejects.toThrow('No screenshot provided');
+  it('rejects a multipart request carrying neither an address nor a file', async () => {
+    await expect(post(request({}), SESSION)).rejects.toThrow(
+      'Add a website address or a screenshot'
+    );
   });
 
   it('rejects bytes that are not an image, before anything reads them as one', async () => {
@@ -152,7 +157,18 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
       'Unsupported image format'
     );
     expect(imageMock.readImageDimensions).not.toHaveBeenCalled();
-    expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic message when the magic-byte check gives no reason', async () => {
+    // A detected type of undefined also fails this gate (the type is forwarded to the vision
+    // call and must never be missing) — and neither case guarantees an `error` string.
+    imageMock.validateImageMagicBytes.mockReturnValue({ valid: true, detectedType: undefined });
+
+    await expect(post(request({ file: screenshot() }), SESSION)).rejects.toThrow(
+      'not an image we can read'
+    );
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
   });
 
   it('rejects a file over the byte cap before reading it into memory as a buffer', async () => {
@@ -170,7 +186,7 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
     imageMock.readImageDimensions.mockResolvedValue({ width: 16000, height: 16000 });
 
     await expect(post(request({ file: screenshot() }), SESSION)).rejects.toThrow('too large');
-    expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
   });
 
   it('rejects a screenshot too small to hold a page', async () => {
@@ -187,36 +203,84 @@ describe('POST /api/v1/app/demo-clients/brand-import', () => {
     );
   });
 
+  it('analyses an address and its screenshots in one call', async () => {
+    await post(request({ url: 'acme.example', file: [screenshot(), screenshot()] }), SESSION);
+
+    // The two are complementary evidence about one brand, so they are one analysis: only the site
+    // names a logo, only a picture measures what the page is painted in.
+    expect(analyseMock.analyseBrand).toHaveBeenCalledTimes(1);
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'acme.example',
+        screenshots: [
+          expect.objectContaining({ mediaType: 'image/png' }),
+          expect.objectContaining({ mediaType: 'image/png' }),
+        ],
+      })
+    );
+  });
+
+  it('ignores a blank address field rather than harvesting an empty string', async () => {
+    await post(request({ url: '   ', file: screenshot() }), SESSION);
+
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
+      expect.objectContaining({ url: undefined })
+    );
+  });
+
+  it('states the screenshot cap instead of silently dropping the extras', async () => {
+    // Dropping them would look exactly like an import that ignored what the admin sent.
+    await expect(
+      post(request({ file: [screenshot(), screenshot(), screenshot(), screenshot()] }), SESSION)
+    ).rejects.toThrow('Up to 3 screenshots');
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
+  });
+
+  it('puts every file through the gates, not just the first', async () => {
+    imageMock.validateImageMagicBytes
+      .mockReturnValueOnce({ valid: true, detectedType: 'image/png' })
+      .mockReturnValueOnce({ valid: false, error: 'Unsupported image format' });
+
+    await expect(post(request({ file: [screenshot(), screenshot()] }), SESSION)).rejects.toThrow(
+      'Unsupported image format'
+    );
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
+  });
+
   it('applies the per-admin sub-cap before doing any work', async () => {
     limiterMock.brandImportLimiter.check.mockReturnValue({ success: false, reset: 1 });
 
     const response = await post(request({ file: screenshot() }), SESSION);
 
     expect(response.status).toBe(429);
-    expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
   });
 });
 
 describe('POST /api/v1/app/demo-clients/brand-import (url)', () => {
   it('routes a JSON body to the site harvest', async () => {
+    analyseMock.analyseBrand.mockResolvedValue({ ...OK_RESULT, source: 'url' });
+
     const response = await post(jsonRequest({ url: 'acme.example' }), SESSION);
     const body = (await response.json()) as { data: { source: string } };
 
     expect(response.status).toBe(200);
     expect(body.data.source).toBe('url');
-    expect(analyseMock.analyseUrl).toHaveBeenCalledWith({
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith({
       url: 'acme.example',
       demoClientId: undefined,
     });
     // The two shapes are distinguished by content type, so a JSON body must never be read as
     // multipart — `request.formData()` on a JSON body would throw before any of this ran.
-    expect(analyseMock.analyseScreenshot).not.toHaveBeenCalled();
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith(
+      expect.not.objectContaining({ screenshots: expect.anything() })
+    );
   });
 
   it('passes the client id through when the edit form supplies one', async () => {
     await post(jsonRequest({ url: 'acme.example', demoClientId: 'dc-1' }), SESSION);
 
-    expect(analyseMock.analyseUrl).toHaveBeenCalledWith({
+    expect(analyseMock.analyseBrand).toHaveBeenCalledWith({
       url: 'acme.example',
       demoClientId: 'dc-1',
     });
@@ -225,7 +289,7 @@ describe('POST /api/v1/app/demo-clients/brand-import (url)', () => {
   it('returns a blocked harvest as a 200 carrying its next step', async () => {
     // A bot wall is the single most common outcome of this feature and it is not an error: the
     // admin needs the reason and the screenshot tab, not a 502.
-    analyseMock.analyseUrl.mockResolvedValue({
+    analyseMock.analyseBrand.mockResolvedValue({
       ...OK_RESULT,
       source: 'url',
       outcome: 'blocked',
@@ -246,12 +310,26 @@ describe('POST /api/v1/app/demo-clients/brand-import (url)', () => {
     await expect(post(jsonRequest({}), SESSION)).rejects.toThrow('website address is required');
   });
 
+  it('treats an unparsable JSON body as a missing address, not a crash', async () => {
+    // request.json() rejects on malformed JSON; the `.catch(() => null)` ahead of safeParse must
+    // turn that into the same 400 a missing field gets, never an unhandled rejection reaching
+    // withAdminAuth as a 500.
+    const malformed = new Request('http://localhost/api/v1/app/demo-clients/brand-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not valid json',
+    });
+
+    await expect(post(malformed, SESSION)).rejects.toThrow('website address is required');
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
+  });
+
   it('applies the sub-cap to the url branch too', async () => {
     limiterMock.brandImportLimiter.check.mockReturnValue({ success: false, reset: 1 });
 
     const response = await post(jsonRequest({ url: 'acme.example' }), SESSION);
 
     expect(response.status).toBe(429);
-    expect(analyseMock.analyseUrl).not.toHaveBeenCalled();
+    expect(analyseMock.analyseBrand).not.toHaveBeenCalled();
   });
 });

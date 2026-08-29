@@ -136,7 +136,35 @@ export type BrandImportOutcome = 'ok' | 'partial' | 'blocked' | 'empty';
 /** What the admin should try next. Null when the import went well enough not to need one. */
 export type BrandImportNextStep = 'screenshot' | 'manual';
 
-export type BrandImportSource = 'url' | 'screenshot';
+/**
+ * What the answer was read from.
+ *
+ * `combined` is the reliable case rather than a third route: an address tells us the logo, the
+ * typeface and what the site declares about itself, a screenshot tells us what the page is actually
+ * painted in, and neither can see the other's evidence. A URL that came back blocked is reported as
+ * `screenshot`, not `combined` — we never read the page.
+ */
+export type BrandImportSource = 'url' | 'screenshot' | 'combined';
+
+/** What we read, phrased for the middle of a sentence. */
+const SOURCE_NOUN: Record<BrandImportSource, string> = {
+  url: 'that page',
+  screenshot: 'that screenshot',
+  combined: 'that site and those screenshots',
+};
+
+/**
+ * The other source, when there is one left to try.
+ *
+ * A partial answer from one source has an obvious next move — give us the other one — and naming it
+ * is the difference between guidance and a shrug. A combined run has already used both.
+ */
+const ADD_THE_OTHER: Record<BrandImportSource, string> = {
+  url: ' Adding a screenshot of the page usually fills in the rest.',
+  screenshot:
+    ' Adding the site’s address usually fills in the rest — it is the only way we find a logo.',
+  combined: '',
+};
 
 export interface BrandImportResult {
   outcome: BrandImportOutcome;
@@ -155,6 +183,14 @@ export interface BrandImportResult {
    */
   degraded: boolean;
 }
+
+/** "We looked and there was nothing there", per source. */
+const EMPTY_REASON: Record<BrandImportSource, string> = {
+  url: 'We read that page but could not find anything that looked like a brand — no logo, no brand colours in its stylesheets.',
+  screenshot: 'We could not find anything that looked like a brand in that screenshot.',
+  combined:
+    'We read that site and those screenshots but could not find anything that looked like a brand.',
+};
 
 /** How many proposals we consider a good run. Below this an `ok` run is downgraded to `partial`. */
 const OK_FIELD_THRESHOLD = 3;
@@ -181,12 +217,7 @@ export function analysedResult(params: {
       outcome: 'empty',
       source: params.source,
       fields: {},
-      reason: joinReason(
-        params.source === 'url'
-          ? 'We read that page but could not find anything that looked like a brand — no logo, no brand colours in its stylesheets.'
-          : 'We could not find anything that looked like a brand in that screenshot.',
-        params.note
-      ),
+      reason: joinReason(EMPTY_REASON[params.source] + ADD_THE_OTHER[params.source], params.note),
       nextStep: params.source === 'url' ? 'screenshot' : 'manual',
       candidates: params.candidates,
       degraded: params.degraded,
@@ -199,9 +230,9 @@ export function analysedResult(params: {
       source: params.source,
       fields: params.fields,
       reason: joinReason(
-        `We could only work out ${count === 1 ? 'one field' : `${count} fields`} from that ${
-          params.source === 'url' ? 'page' : 'screenshot'
-        }. Set the rest by hand, or try the other route.`,
+        `We could only work out ${count === 1 ? 'one field' : `${count} fields`} from ${
+          SOURCE_NOUN[params.source]
+        }. Set the rest by hand.${ADD_THE_OTHER[params.source]}`,
         params.note
       ),
       nextStep: 'manual',
