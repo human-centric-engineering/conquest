@@ -71,8 +71,11 @@ A quiet **"Transcript"** dropdown (Themed PDF / Plain text):
 
 - **Lifecycle bar** — in the right cluster beside the [ref chip](./session-lifecycle.md),
   available throughout the conversation once a real exchange exists (`turnCount > 1`).
-- **Completion screen** — beside the F7.4 responses download, always available once submitted
-  (independent of the responses-report config).
+- **Completion screen** — beside the F7.4 responses download, once submitted, independent of the
+  responses-report config — but **only when the questionnaire had a chat surface at all**. A
+  `form`-mode questionnaire (`presentationMode: 'form'`) never opens the chat, so it persists no
+  turns; `SessionWorkspace` passes `hasConversation={showChat}` and the control is withheld rather
+  than handing the respondent a branded PDF of a conversation that never happened.
 
 Both use the `TranscriptDownload` component: each option `fetch`es (so it can send the anonymous
 `X-Session-Token` header — a no-login respondent has no cookie), saves the blob honouring the

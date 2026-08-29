@@ -399,6 +399,10 @@ export function SessionWorkspace({
         // respondent sees their own captured positions echoed back instead of a bare spinner.
         captured={panel.view ?? null}
         glossaryAppendix={glossaryAppendix ?? null}
+        // A `form`-mode questionnaire never opens the chat surface, so it persists no turns and
+        // has no transcript to offer. `showChat` (not `presentationMode` directly) because it is
+        // the same derivation the strip's own transcript control reads — one rule, two surfaces.
+        hasConversation={showChat}
         // Early-finish "Continue answering" (F-early-finish-reopen): server-gated via
         // `lifecycle.view.reopenAvailable`. `reopen()` flips `stream.status`/`lifecycle.view.status`
         // away from `completed`, so this component simply unmounts on success — `phase` falls back

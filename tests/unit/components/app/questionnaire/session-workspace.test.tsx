@@ -179,15 +179,18 @@ vi.mock('@/components/app/questionnaire/lifecycle/session-complete', () => ({
     canReopen,
     onReopen,
     reopenBusy,
+    hasConversation,
   }: {
     canReopen?: boolean;
     onReopen?: () => void;
     reopenBusy?: boolean;
+    hasConversation?: boolean;
   }) => (
     <div
       data-testid="session-complete"
       data-can-reopen={String(Boolean(canReopen))}
       data-reopen-busy={String(Boolean(reopenBusy))}
+      data-has-conversation={String(Boolean(hasConversation))}
     >
       <button type="button" onClick={onReopen}>
         complete-reopen
@@ -1113,6 +1116,38 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(within(complete).getByRole('button', { name: 'complete-reopen' }));
     expect(reopen).toHaveBeenCalledTimes(1);
+  });
+
+  describe('transcript availability on the completion screen', () => {
+    // A `form`-mode questionnaire never opens the chat surface, so it persists no turns. The
+    // completion screen used to offer "Chat Transcript" regardless, handing the respondent a
+    // branded PDF of a conversation that never happened.
+    function completed(presentationMode: 'chat' | 'form' | 'both') {
+      streamHook.mockReturnValue({
+        turns: [],
+        canSend: false,
+        status: 'completed',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(lifecycleReturn({}));
+      render(<SessionWorkspace sessionId="s1" presentationMode={presentationMode} />);
+      return screen.getByTestId('session-complete');
+    }
+
+    it('withholds the transcript in form mode (no chat surface, so no transcript)', () => {
+      expect(completed('form').dataset.hasConversation).toBe('false');
+    });
+
+    it('offers the transcript in chat mode', () => {
+      expect(completed('chat').dataset.hasConversation).toBe('true');
+    });
+
+    it('offers the transcript in both mode', () => {
+      expect(completed('both').dataset.hasConversation).toBe('true');
+    });
   });
 
   it('shows the completion screen for a reopened completed session, not the "not active" chat', () => {
