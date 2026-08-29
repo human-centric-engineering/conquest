@@ -47,6 +47,9 @@ const THEME: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 // Mark the panel and surface the props the drawer forwards, plus a revisit button to fire.

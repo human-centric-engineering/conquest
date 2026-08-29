@@ -49,6 +49,9 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
       bandLogoUrl: null,
       bandLogoDarkUrl: null,
       fontPairing: 'neutral',
+      customFontDisplay: null,
+      customFontBody: null,
+      fontFaceCss: null,
     },
     turns: [
       {

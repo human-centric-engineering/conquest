@@ -52,6 +52,7 @@ import {
 import { BrandImageField } from '@/components/admin/demo-clients/brand-image-field';
 import { BrandColorField } from '@/components/admin/demo-clients/brand-color-field';
 import { BrandImportDialog } from '@/components/admin/demo-clients/brand-import-dialog';
+import { CustomFontField } from '@/components/admin/demo-clients/custom-font-field';
 import type { ImportableField } from '@/lib/app/questionnaire/brand-import/result';
 
 /** True for an empty field, an https URL, or one of our own upload paths — shares the
@@ -237,7 +238,15 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
    * through the same PATCH as every other edit on this form.
    */
   const applyImportedBrand = (values: Partial<Record<ImportableField, string>>) => {
+    let refresh = false;
     for (const [field, value] of Object.entries(values) as [ImportableField, string][]) {
+      // The custom families are not form fields: the import already fetched and stored them
+      // server-side, exactly as it re-hosts a logo. Refresh so the panel below re-reads the row
+      // rather than showing what was there before the import.
+      if (field === 'customFontDisplay' || field === 'customFontBody') {
+        refresh = true;
+        continue;
+      }
       if (field === 'fontPairing') {
         // Forgiving, exactly as the picker is: a family the import names but this build does not
         // ship resolves to the default rather than putting an unrenderable value in the select.
@@ -249,6 +258,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
       }
       setValue(field, value, { shouldDirty: true, shouldValidate: true });
     }
+    if (refresh) router.refresh();
   };
 
   const validHex = (v: string) => (HEX_COLOR_PATTERN.test(v.trim()) ? v.trim() : null);
@@ -764,9 +774,11 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
                   Broadsheet; <strong>Classical</strong> is a formal, high-contrast serif;{' '}
                   <strong>Contemporary</strong> is a grotesque drawn for Horizon; and{' '}
                   <strong>Monospace</strong> sets the whole conversation fixed-width — striking for
-                  an engineering brand, but slower to read once answers run long. Unlike the
-                  colours, this on its own does not make a questionnaire white-label — it is a
-                  design choice, not an identity. The one-line summary below updates as you choose.
+                  an engineering brand, but slower to read once answers run long.{' '}
+                  <strong>Custom</strong> is the escape hatch for a brand with its own face — name
+                  it below and we store the files ourselves. Unlike the colours, this on its own
+                  does not make a questionnaire white-label — it is a design choice, not an
+                  identity. The one-line summary below updates as you choose.
                 </FieldHelp>
               </Label>
               <select
@@ -792,6 +804,18 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
               <FormError message={errors.fontPairing?.message} />
             </div>
           </div>
+
+          {/* Shown only for the Custom pairing: everywhere else the two family boxes would be
+              controls with no effect, which is worse than an option the admin has to reveal. */}
+          {resolveFontPairing(fontPairing) === 'custom' && (
+            <CustomFontField
+              demoClientId={client?.id}
+              uploadEnabled={uploadEnabled}
+              initialDisplay={client?.customFontDisplay ?? null}
+              initialBody={client?.customFontBody ?? null}
+              disabled={isLoading}
+            />
+          )}
 
           <BrandImageField
             id="logoDarkUrl"

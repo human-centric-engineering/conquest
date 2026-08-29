@@ -85,6 +85,9 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
       bandLogoUrl: null,
       bandLogoDarkUrl: null,
       fontPairing: 'neutral',
+      customFontDisplay: null,
+      customFontBody: null,
+      fontFaceCss: null,
     },
     turns: [
       { speaker: 'interviewer', text: 'Hello?', at: '2026-06-01T09:55:00.000Z' },

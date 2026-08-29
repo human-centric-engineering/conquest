@@ -74,6 +74,9 @@ const SENTINEL_THEME: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 // ---------------------------------------------------------------------------

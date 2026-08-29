@@ -41,6 +41,9 @@ describe('resolveTheme', () => {
       bandLogoUrl: null,
       bandLogoDarkUrl: null,
       fontPairing: 'neutral',
+      customFontDisplay: null,
+      customFontBody: null,
+      fontFaceCss: null,
     });
   });
 
@@ -385,6 +388,9 @@ describe('readableTextColor', () => {
       bandLogoUrl: 'https://x/a.png");background:url("https://evil/x.png',
       bandLogoDarkUrl: 'https://x/a.png");background:url("https://evil/x.png',
       fontPairing: 'neutral',
+      customFontDisplay: null,
+      customFontBody: null,
+      fontFaceCss: null,
     });
     const v = vars['--app-logo-src'];
     // The injected closing-quote is escaped, so the value stays a single url("…") token.

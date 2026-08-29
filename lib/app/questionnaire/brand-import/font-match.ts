@@ -20,8 +20,13 @@
 
 import { FONT_PAIRINGS, type FontPairing } from '@/lib/app/questionnaire/theming';
 
-/** The faces each pairing actually loads, as a site would name them in CSS or a Fonts link. */
-const PAIRING_FACES: Record<Exclude<FontPairing, 'neutral'>, string[]> = {
+/**
+ * The faces each SHIPPED pairing loads, as a site would name them in CSS or a Fonts link.
+ *
+ * `neutral` and `custom` are both absent, for opposite reasons: neutral loads nothing, and custom
+ * loads whatever the client named — so neither has a fixed face list to match against.
+ */
+const PAIRING_FACES: Record<Exclude<FontPairing, 'neutral' | 'custom'>, string[]> = {
   editorial: ['instrument serif', 'newsreader'],
   contemporary: ['bricolage grotesque', 'space grotesk'],
   humanist: ['outfit', 'source sans 3', 'source sans pro'],
@@ -36,7 +41,7 @@ const PAIRING_FACES: Record<Exclude<FontPairing, 'neutral'>, string[]> = {
  * and `Roboto Mono` would read as a grotesque. Classical before editorial because a high-contrast
  * display serif is the more specific claim.
  */
-const SHAPE_RULES: { pairing: Exclude<FontPairing, 'neutral'>; pattern: RegExp }[] = [
+const SHAPE_RULES: { pairing: Exclude<FontPairing, 'neutral' | 'custom'>; pattern: RegExp }[] = [
   { pairing: 'monospace', pattern: /\b(?:mono|code|courier|consolas|menlo)\b/i },
   {
     pairing: 'classical',
@@ -76,7 +81,7 @@ export function matchFontPairing(families: string[]): FontMatch | null {
   for (const family of families) {
     const normalised = family.trim().toLowerCase();
     for (const pairing of FONT_PAIRINGS) {
-      if (pairing === 'neutral') continue;
+      if (pairing === 'neutral' || pairing === 'custom') continue;
       if (PAIRING_FACES[pairing].includes(normalised)) {
         return { pairing, family: family.trim(), how: 'exact' };
       }

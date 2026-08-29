@@ -298,6 +298,12 @@ const resolvedThemeSchema = z.object({
   bandLogoUrl: z.string().nullable().catch(null),
   bandLogoDarkUrl: z.string().nullable().catch(null),
   fontPairing: z.enum(FONT_PAIRINGS).catch(DEFAULT_FONT_PAIRING),
+  // Custom type. `.catch(null)` like every field above: a client-booted surface on an older bundle
+  // must lose the custom face alone (falling back to the system stack, which is what the `custom`
+  // pairing's own stack already is) rather than losing every affordance at once.
+  customFontDisplay: z.string().nullable().catch(null),
+  customFontBody: z.string().nullable().catch(null),
+  fontFaceCss: z.string().nullable().catch(null),
 });
 
 /**

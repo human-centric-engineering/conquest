@@ -949,6 +949,12 @@ export const API = {
        * persists nothing.
        */
       brandImport: '/api/v1/app/demo-clients/brand-import',
+      /**
+       * DEMO-ONLY (custom type): load the client's own Google Fonts families (POST) or clear them
+       * (DELETE). Writes the families and the stored files immediately, like an image upload;
+       * `fontPairing` itself stays an ordinary form field.
+       */
+      fonts: (id: string): string => `/api/v1/app/demo-clients/${id}/fonts`,
     },
     /** Cohorts — groups of people (a team) under a demo client. Gated by APP_QUESTIONNAIRES_COHORTS. */
     COHORTS: {

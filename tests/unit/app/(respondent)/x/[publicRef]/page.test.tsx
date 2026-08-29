@@ -193,6 +193,9 @@ const MOCK_THEME: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 const MOCK_SURFACE_OK: RunSurface = {

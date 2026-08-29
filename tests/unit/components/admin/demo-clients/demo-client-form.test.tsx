@@ -97,6 +97,8 @@ const CLIENT: DemoClientView = {
   logoMarkUrl: null,
   logoDarkUrl: null,
   fontPairing: 'editorial',
+  customFontDisplay: null,
+  customFontBody: null,
   questionnaireCount: 3,
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-08-01T00:00:00.000Z',

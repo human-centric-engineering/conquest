@@ -263,13 +263,29 @@ The fragment is guarded at COMPILE time: `DEMO_CLIENT_THEME_SELECT satisfies Rec
 Required<DemoClientTheme>, true>` means a new field on the resolver's contract without a
 matching key is a type error. Add a theme column in one place and the whole product picks it up.
 
-### Filling the theme from a screenshot
+### Custom type
 
-Every field in this section can also be **proposed** rather than typed. `Import from a screenshot`
-in the Brand theming fieldset uploads a picture of the client's website, measures the colours
-actually on the page, and asks an analyst which is the ground, the text, the button and the accent.
-The admin ticks what they want and the ordinary Save writes it — the import route itself persists
-nothing, and the model can only return colours that were measured.
+The six pairings are a picker; `fontPairing = 'custom'` is the escape hatch for a brand with its own
+face. `customFontDisplay` / `customFontBody` name two Google Fonts families and `customFontFiles`
+records the woff2 files we fetched and stored for them.
+
+They are **self-hosted, not linked**: the CSP's `font-src` is `'self' data:` and the only app-owned
+seam is `frame-src`, so a `<link>` to fonts.googleapis.com would need a platform edit. `resolveTheme`
+emits the `@font-face` rules (`ResolvedTheme.fontFaceCss`) pointing at
+`/api/v1/app/demo-clients/:id/font/:face`, which is also why `DemoClientTheme` carries `id` — a
+self-hosted face is an asset, and an asset has to be addressed.
+
+Loading applies immediately (like an image upload); `fontPairing` itself stays an ordinary form
+field, so loaded faces sit inert until the pairing is switched. Full design:
+[brand-import.md](./brand-import.md#custom-type).
+
+### Filling the theme from the client's website
+
+Every field in this section can also be **proposed** rather than typed. `Import from their website`
+in the Brand theming fieldset takes an address (or a screenshot), reads the page, its stylesheets
+and its logo, and proposes colours, a lockup, a mark and a typeface. The admin ticks what they want
+and the ordinary Save writes the colours; images and typefaces are stored immediately, exactly as an
+upload is. The model can only return colours that were actually measured.
 
 Full design, including the four-outcome failure contract and why a field we could not read is
 absent rather than defaulted: [brand-import.md](./brand-import.md).

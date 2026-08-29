@@ -157,7 +157,7 @@ export type FetchOutcome =
 export async function fetchResource(
   url: string,
   budget: HarvestBudget,
-  options: { accept?: string } = {}
+  options: { accept?: string; userAgent?: string } = {}
 ): Promise<FetchOutcome> {
   let current = url;
 
@@ -185,7 +185,11 @@ export async function fetchResource(
         redirect: 'manual',
         signal: AbortSignal.timeout(budget.remainingMs()),
         headers: {
-          'User-Agent': USER_AGENT,
+          // Overridable for exactly one caller: Google Fonts serves a different FORMAT per agent,
+          // and our honest one gets TTF where a browser gets woff2 — several times the bytes on a
+          // file every respondent downloads. That is format negotiation, not an attempt to get
+          // past a site's stated preference about automated readers.
+          'User-Agent': options.userAgent ?? USER_AGENT,
           Accept: options.accept ?? '*/*',
         },
       });

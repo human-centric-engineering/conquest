@@ -51,6 +51,11 @@ export const IMPORTABLE_FIELDS = [
   'logoMarkUrl',
   'logoDarkUrl',
   'fontPairing',
+  // The two custom families. Proposed together with `fontPairing: 'custom'` when the site's own
+  // face is not one we ship — accepting them fetches the files from Google Fonts and stores them,
+  // exactly as accepting a logo re-hosts it.
+  'customFontDisplay',
+  'customFontBody',
 ] as const;
 
 export type ImportableField = (typeof IMPORTABLE_FIELDS)[number];

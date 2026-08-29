@@ -72,6 +72,8 @@ const FIELD_LABELS: Record<ImportableField, string> = {
   logoMarkUrl: 'Mark (square)',
   logoDarkUrl: 'Logo (light-on-dark)',
   fontPairing: 'Type',
+  customFontDisplay: 'Headings typeface',
+  customFontBody: 'Body typeface',
 };
 
 /** The three image fields, and which upload endpoint re-hosts each one. */
@@ -211,9 +213,32 @@ export function BrandImportDialog({
     }
   };
 
+  /**
+   * Fetch and store the proposed families.
+   *
+   * Returns an error message when the fetch fails, and the caller then drops the three type fields
+   * rather than applying them: `fontPairing: 'custom'` with no stored files renders in the system
+   * stack, which would look like the import silently did nothing to the typeface. Better to say the
+   * family was not found and leave the picker alone.
+   */
+  const loadFonts = async (display?: string, body?: string): Promise<string | null> => {
+    try {
+      const response = await fetch(API.APP.DEMO_CLIENTS.fonts(demoClientId as string), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display, body }),
+      });
+      const parsed = await parseApiResponse<unknown>(response);
+      return parsed.success ? null : parsed.error.message;
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Could not load those typefaces.';
+    }
+  };
+
   const applyAccepted = async () => {
     if (!result) return;
     setApplying(true);
+    setError(null);
     try {
       const values: Partial<Record<ImportableField, string>> = {};
       for (const field of accepted) {
@@ -223,9 +248,38 @@ export function BrandImportDialog({
         const kind = IMAGE_FIELD_KINDS[field];
         values[field] = kind && canRehost ? await rehost(kind, proposal.value) : proposal.value;
       }
+
+      // Custom type is the one proposal that needs a server round-trip before it means anything:
+      // the families have to be fetched and stored, and until they are, `custom` is the system
+      // stack. Same immediate-write contract as re-hosting a logo.
+      const wantsCustomType = values.customFontDisplay || values.customFontBody;
+      if (wantsCustomType) {
+        if (!canRehost) {
+          delete values.customFontDisplay;
+          delete values.customFontBody;
+          if (values.fontPairing === 'custom') delete values.fontPairing;
+          setError(
+            demoClientId
+              ? 'File storage is not configured, so custom typefaces could not be stored. Everything else was applied.'
+              : 'Save the client first to store its typefaces. Everything else was applied.'
+          );
+        } else {
+          const failure = await loadFonts(values.customFontDisplay, values.customFontBody);
+          if (failure) {
+            delete values.customFontDisplay;
+            delete values.customFontBody;
+            if (values.fontPairing === 'custom') delete values.fontPairing;
+            setError(`${failure} Everything else was applied — pick a typeface by hand.`);
+          }
+        }
+      }
+
       onApply(values);
-      onOpenChange(false);
-      reset();
+      // Stay open when something needs saying; the admin has to read why the type was skipped.
+      if (!wantsCustomType) {
+        onOpenChange(false);
+        reset();
+      }
     } finally {
       setApplying(false);
     }

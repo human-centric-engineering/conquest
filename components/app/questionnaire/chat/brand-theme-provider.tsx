@@ -212,6 +212,15 @@ export function BrandThemeProvider({
       // that ancestor (it arrives inline, on THIS element), so the surface has to paint it.
       className={cn('bg-background flex h-full flex-col', className)}
     >
+      {/* Self-hosted faces for a `custom` type pairing, served from our own origin so the CSP's
+          `font-src 'self'` covers them with no platform edit. Inline rather than in a stylesheet
+          because the rules are per client, and rendered here — inside the surface — so a fork that
+          strips demo tenancy drops the faces with the provider. `resolveTheme` returns null unless
+          the pairing is `custom` AND files were actually stored, so an unstyled client emits
+          nothing at all. The content is built entirely from validated families and our own route
+          paths; `cssUrl` escapes the src. */}
+      {theme.fontFaceCss && <style dangerouslySetInnerHTML={{ __html: theme.fontFaceCss }} />}
+
       {/* A custom banner REPLACES the band entirely — it is the client's own composition,
           so we neither overlay the title on it (legibility depends on an image we've never
           seen) nor pad around it. The aspect-ratio box matches BRAND_BANNER_SPEC, so the

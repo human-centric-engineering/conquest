@@ -241,18 +241,55 @@ function imageFields(
   return fields;
 }
 
+/**
+ * Propose a typeface.
+ *
+ * Two very different outcomes. An **exact** match means the site uses one of the ten faces we
+ * already ship, so the pairing reproduces the brand and nothing needs fetching. Anything else means
+ * the brand has its own face — and rounding it to "the closest grotesque we happen to load" is
+ * exactly the approximation the custom option exists to avoid. So a shape match proposes `custom`
+ * plus the families themselves, which accepting will fetch and self-host.
+ *
+ * The caveat is not decoration: the families are names read off a page, not entries checked against
+ * a catalogue (there is no offline catalogue to check, and shipping one would go stale immediately).
+ * Whether they exist on Google Fonts is only settled by trying, so the admin is told that up front
+ * rather than discovering it when apply fails.
+ */
 function fontField(families: string[]): Partial<Record<ImportableField, ProposedField>> {
   const match = matchFontPairing(families);
   if (!match) return {};
 
+  if (match.how === 'exact') {
+    return {
+      fontPairing: {
+        value: match.pairing,
+        confidence: 'high',
+        source: `the site sets type in ${match.family}, which is one of our pairings`,
+      },
+    };
+  }
+
+  // Headings and body, when the page named two faces. A site that names only one sets both from
+  // it, which is what a single-typeface brand actually does.
+  const display = families[0];
+  const body = families[1] ?? families[0];
+
   return {
     fontPairing: {
-      value: match.pairing,
-      confidence: match.how === 'exact' ? 'high' : 'low',
-      source:
-        match.how === 'exact'
-          ? `the site sets type in ${match.family}, which is one of our pairings`
-          : `the site sets type in ${match.family} — this is the closest pairing we ship`,
+      value: 'custom',
+      confidence: 'low',
+      source: `the site sets type in ${match.family}, which is not one of our pairings`,
+      caveat: `We will try to load ${display}${body !== display ? ` and ${body}` : ''} from Google Fonts. If they are not there, pick a pairing by hand instead.`,
+    },
+    customFontDisplay: {
+      value: display,
+      confidence: 'low',
+      source: 'the headings typeface named on the site',
+    },
+    customFontBody: {
+      value: body,
+      confidence: 'low',
+      source: 'the body typeface named on the site',
     },
   };
 }

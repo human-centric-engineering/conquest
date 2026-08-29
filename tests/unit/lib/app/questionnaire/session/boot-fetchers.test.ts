@@ -72,6 +72,9 @@ const THEME = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 /** A fully valid surface payload; spread-and-override to corrupt one field at a time. */

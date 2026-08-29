@@ -171,6 +171,41 @@ describe('analyseUrl', () => {
 
     expect(result.fields.fontPairing?.value).toBe('contemporary');
     expect(result.fields.fontPairing?.confidence).toBe('high');
+    // An exact match reproduces the brand with a face we already have — nothing to fetch.
+    expect(result.fields.customFontDisplay).toBeUndefined();
+  });
+
+  it('proposes the site’s own face rather than rounding it to the nearest pairing', async () => {
+    harvestMock.harvestSite.mockResolvedValue(harvested({ fontFamilies: ['Poppins', 'Karla'] }));
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    // Rounding a brand's own face to "the closest grotesque we happen to load" is exactly what the
+    // custom option exists to avoid.
+    expect(result.fields.fontPairing?.value).toBe('custom');
+    expect(result.fields.customFontDisplay?.value).toBe('Poppins');
+    expect(result.fields.customFontBody?.value).toBe('Karla');
+    // The families are names read off a page, not entries checked against a catalogue — the admin
+    // is told that up front rather than discovering it when apply fails.
+    expect(result.fields.fontPairing?.caveat).toContain('Google Fonts');
+  });
+
+  it('sets both slots from one family when the site names only one', async () => {
+    harvestMock.harvestSite.mockResolvedValue(harvested({ fontFamilies: ['Poppins'] }));
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    expect(result.fields.customFontBody?.value).toBe('Poppins');
+  });
+
+  it('proposes no typeface at all when nothing places', async () => {
+    harvestMock.harvestSite.mockResolvedValue(harvested({ fontFamilies: ['Wingdings'] }));
+
+    const result = await analyseUrl({ url: 'https://acme.example/' });
+
+    // `neutral` is a real choice an admin may have made; proposing it as a fallback would
+    // overwrite that with a value we never measured.
+    expect(result.fields.fontPairing).toBeUndefined();
   });
 
   it('marks a declared colour high and an inferred one low', async () => {

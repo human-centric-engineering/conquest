@@ -224,6 +224,9 @@ const MOCK_THEME: ResolvedTheme = {
   bandLogoUrl: null,
   bandLogoDarkUrl: null,
   fontPairing: 'neutral',
+  customFontDisplay: null,
+  customFontBody: null,
+  fontFaceCss: null,
 };
 
 /** Build a minimal DB row for the session. Defaults to owned + active + no prior answers. */

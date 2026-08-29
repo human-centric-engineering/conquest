@@ -265,6 +265,8 @@ function makeDemoClientApiRow(
     logoMarkUrl: null,
     logoDarkUrl: null,
     fontPairing: null,
+    customFontDisplay: null,
+    customFontBody: null,
     logoUrl: null,
     bannerUrl: null,
     welcomeCopy: null,

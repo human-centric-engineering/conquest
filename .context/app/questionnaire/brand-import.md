@@ -41,9 +41,9 @@ provider.
 ## What it proposes
 
 Eight colours (`surfaceColor`, `ctaColor`, `ctaColorEnd`, `accentColor`, `accentColorEnd`,
-`canvasColor`, `inkColor`, `logoBackgroundColor`), three images and the type pairing. Colours come
-from either route; images and type only from the URL route, since a screenshot contains no logo file
-and no font name.
+`canvasColor`, `inkColor`, `logoBackgroundColor`), three images, the type pairing and — when the
+brand's face is not one we ship — the two custom families. Colours come from either route; images
+and type only from the URL route, since a screenshot contains no logo file and no font name.
 
 Two deliberate omissions:
 
@@ -140,14 +140,101 @@ brand spec's box, so `processImage` only ever scales down — and only the raste
 
 ## Typefaces
 
-`font-match.ts` maps discovered families onto one of the six pairings, in two tiers: an **exact**
-match on one of the ten faces we actually load, or a **shape** match from the family's name (a
-Didone, a grotesque, a monospace). Google Fonts links outrank `font-family` stacks, since a loaded
-face is a deliberate choice where a stack is mostly fallbacks.
+`font-match.ts` reads the families a site uses — Google Fonts links outrank `font-family` stacks,
+since a loaded face is a deliberate choice where a stack is mostly fallbacks — and the answer takes
+one of three shapes:
 
-A family that places nowhere resolves to **nothing, not `neutral`**. `neutral` is a real choice an
-admin may have made deliberately, and proposing it as a fallback would overwrite that with a value
-we never measured — the same mistake as defaulting a colour field.
+| Match              | Proposal                        | Why                                                                                                                                |
+| ------------------ | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **Exact face**     | that pairing                    | The site uses one of the ten faces we already load; nothing needs fetching.                                                        |
+| **Anything else**  | `custom` + the two family names | The brand has its own face. Rounding it to the nearest grotesque we happen to ship is exactly what `custom` exists to avoid.       |
+| **Nothing places** | nothing                         | `neutral` is a real choice an admin may have made; proposing it as a fallback would overwrite that with a value we never measured. |
+
+The families are names read off a page, not entries checked against a catalogue — so the proposal
+carries a caveat saying we will _try_ to load them. There is no offline catalogue to check against
+and shipping one would go stale from the day it was written; asking Google whether the family exists
+is both the check and the fetch. When it fails, the dialog drops all three type fields, applies
+everything else, and says which name was not found. `custom` with no stored files renders in the
+system stack, so applying it anyway would look like the import silently ignored the typeface.
+
+## Custom type
+
+The escape hatch from the six pairings, and the reason it is built the way it is comes down to one
+line in the platform: **`font-src` is `'self' data:`**, and `style-src` names no Google origin
+(`lib/security/headers.ts`). The only app-owned CSP seam is `frame-src` (`lib/app/csp.ts`), so a
+`<link>` to fonts.googleapis.com would need a platform edit — which this fork fixes upstream rather
+than patching locally.
+
+So the faces are **self-hosted**: fetched once from Google, stored, and served back from our own
+origin, which needs no CSP change at all and removes a runtime dependency on Google from every
+respondent session.
+
+### What is stored
+
+Three weights (400/600/700), latin only. Body copy, a medium for emphasis and a bold for the
+masthead cover everything the respondent surface sets; the full ramp would triple the download for
+faces nothing renders. A family that does not publish a weight simply yields fewer files and the
+browser synthesises the rest — better than refusing the family.
+
+Google emits one `@font-face` per unicode subset, all at the same weight, so `parseFaceUrls` keeps
+only the first block per weight. Missing that multiplies the download by six for scripts a demo
+questionnaire will not set, and nothing else notices.
+
+The request sends a browser `User-Agent` — the one place this feature does not announce itself.
+Google serves a different FORMAT per agent, and our honest agent gets TTF where a browser gets
+woff2: several times the bytes for the same glyphs, on a file every respondent downloads. That is
+format negotiation, not getting past a stated preference about automated readers.
+
+### The three columns
+
+| Column              | Holds                                                                 |
+| ------------------- | --------------------------------------------------------------------- |
+| `customFontDisplay` | Google family for headings                                            |
+| `customFontBody`    | Google family for running text                                        |
+| `customFontFiles`   | `{ display?: { "400": url, … }, body?: … }` — what we actually stored |
+
+`customFontFiles` holds storage **URLs**, not derived keys: Vercel Blob appends a random suffix to
+every pathname, so a key alone cannot be turned back into something fetchable.
+
+### Rendering
+
+`resolveTheme` builds the `@font-face` rules (`ResolvedTheme.fontFaceCss`) because it is the only
+place holding both the client id and the file map, and every surface that renders a brand already
+takes a `ResolvedTheme` and nothing else. That is also why `DemoClientTheme` now carries `id`: a
+theme is otherwise pure presentation, but a self-hosted face is an **asset**, and an asset has to be
+addressed.
+
+The rules are emitted as an inline `<style>` inside `BrandThemeProvider` — inside the surface, so a
+fork that strips demo tenancy drops the faces with the provider — and `null` unless the pairing is
+`custom` AND a family is set AND files were stored. `font-display: swap`, because a questionnaire
+that renders immediately in the fallback and reflows into the brand's face beats one that renders
+nothing.
+
+`GET /api/v1/app/demo-clients/:id/font/:face` serves them. It is **unauthenticated** — a respondent
+is often not logged in, so the surface's assets cannot be — and exposes a typeface the client chose
+that Google already serves to the whole internet. It proxies the stored object's public URL rather
+than calling `storage.download()`, because **Vercel Blob declares `download: false`**
+(`lib/storage/providers/vercel-blob.ts`) and a download-based route would work in development and
+404 in production. The stored URL still goes through the SSRF guard: the column is Json, and a
+direct write or a restored backup could put anything there.
+
+### Loading is not saving
+
+`POST /api/v1/app/demo-clients/:id/fonts` writes the families and the file map **immediately** —
+the same contract `BrandImageField` has for uploads, and for the same reason: there is no draft
+state for a binary, and the alternative strands orphaned objects for every abandoned edit.
+
+It deliberately does **not** write `fontPairing`. That stays an ordinary form field, so loaded faces
+sit inert until the pairing is `custom` — inert rather than lost, so switching the picker away and
+back does not mean fetching Google again.
+
+### The family name is the security boundary
+
+`isCustomFontFamily` is an allowlist of the charset a real family name uses, not a blocklist of
+dangerous parts, because the value goes into a URL we build server-side. A family has no legitimate
+reason to contain a slash, a colon, an ampersand or a percent, and each is a way to reach a
+different path or smuggle a second query parameter into the request. `resolveCustomFontFamily`
+re-checks on read, since the column is plain text and a seed or a rollback can put anything in it.
 
 ## The failure contract
 
