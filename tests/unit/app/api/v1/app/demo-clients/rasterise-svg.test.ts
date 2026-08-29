@@ -8,7 +8,7 @@
  * vector is converted here and only the raster travels on.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import sharp from 'sharp';
 
 import { rasteriseSvg } from '@/app/api/v1/app/demo-clients/_lib/rasterise-svg';
@@ -70,6 +70,62 @@ describe('rasteriseSvg', () => {
     // check, several steps away from the actual cause.
     await expect(
       rasteriseSvg(broken, 'image/svg+xml', 'https://acme.example/logo.svg')
+    ).rejects.toThrow('Save it as a PNG');
+  });
+
+  it('recognises an SVG that carries an XML prolog ahead of its root element', async () => {
+    // Real exports commonly lead with `<?xml ...?>` before the `<svg>` root — the sniff has to
+    // look past the prolog rather than only matching a bare `<svg` at the very start.
+    const prologued = Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">' +
+        '<circle cx="20" cy="20" r="18" fill="#5469d4"/></svg>'
+    );
+
+    const png = await rasteriseSvg(prologued, null, 'https://acme.example/logo.svg');
+
+    expect(png).not.toBeNull();
+    expect(png?.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+  });
+
+  it('does not mistake a plain XML prolog with no svg root for SVG', async () => {
+    // Same prolog, no `<svg` anywhere in it — the sniff must not fire on the prolog alone.
+    const plainXml = Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8"?><catalog><item/></catalog>'
+    );
+
+    await expect(rasteriseSvg(plainXml, null, 'https://acme.example/data.xml')).resolves.toBeNull();
+  });
+});
+
+describe('rasteriseSvg — malformed error normalisation', () => {
+  afterEach(() => {
+    vi.doUnmock('sharp');
+    vi.resetModules();
+  });
+
+  it('stringifies a non-Error value thrown during rasterisation', async () => {
+    // sharp always throws real Errors in practice, but the catch handles ANY thrown value —
+    // this proves the `error instanceof Error ? error.message : String(error)` fallback runs
+    // rather than crashing on a thrown non-Error.
+    vi.resetModules();
+    vi.doMock('sharp', () => ({
+      default: vi.fn(() => {
+        // Deliberately a non-Error throw — the branch under test is the `instanceof Error`
+        // fallback, which only a non-Error value exercises.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw 'sharp blew up';
+      }),
+    }));
+
+    const { rasteriseSvg: freshRasteriseSvg } =
+      await import('@/app/api/v1/app/demo-clients/_lib/rasterise-svg');
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+
+    await expect(
+      freshRasteriseSvg(svg, 'image/svg+xml', 'https://acme.example/logo.svg')
     ).rejects.toThrow('Save it as a PNG');
   });
 });

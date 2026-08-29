@@ -69,6 +69,69 @@ describe('parseCssColor', () => {
     expect(hex('url(logo.svg)')).toBeNull();
     expect(hex('rgb(84)')).toBeNull();
   });
+
+  it('returns null for a function call that is none of the five notations read', () => {
+    // A function-shaped token with three-plus args reaches the switch itself (unlike `rgb(84)`
+    // above, which is rejected before the switch for having too few) — this is what actually
+    // exercises its `default` arm.
+    expect(hex('cmyk(0, 0, 0, 100)')).toBeNull();
+  });
+
+  it('reads oklab, the rectangular sibling of oklch', () => {
+    // Same endpoints as the oklch pins above, expressed in a and b rather than chroma and hue —
+    // at a=b=0 the two notations describe the same axis.
+    expect(hex('oklab(0 0 0)')).toBe('#000000');
+    expect(hex('oklab(1 0 0)')).toBe('#ffffff');
+  });
+
+  it('rejects an oklab with a channel that is not a number', () => {
+    expect(hex('oklab(none 0.1 0.1)')).toBeNull();
+  });
+
+  it('reads rgb() with percentage channels, not only integer ones', () => {
+    expect(hex('rgb(20%, 40%, 60%)')).toBe('#336699');
+  });
+
+  it('rejects rgb() with a channel that does not parse as a number', () => {
+    expect(hex('rgb(84, banana, 212)')).toBeNull();
+  });
+
+  it('reads oklch with a percentage chroma, per the CSS Color 4 definition', () => {
+    // 0.4 is the reference chroma the percentage is relative to; the exact resulting hue is not
+    // the point here (the oklch pins above already cover the arithmetic) — only that a percentage
+    // chroma is accepted and still produces a real colour rather than being dropped.
+    expect(hex('oklch(50% 50% 260)')).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('rejects hsl() with a channel that does not parse as a number', () => {
+    expect(hex('hsl(not-a-hue, 50%, 50%)')).toBeNull();
+  });
+
+  it('rejects an out-of-range hex length that is not one of the four valid ones', () => {
+    // 5 digits is neither the 3/4-digit short form nor the 6/8-digit long form.
+    expect(hex('#12345')).toBeNull();
+  });
+
+  it('rejects a 3-digit-length hex containing a non-hex character', () => {
+    expect(hex('#abz')).toBeNull();
+  });
+
+  it('rejects a 6-digit-length hex containing a non-hex character', () => {
+    expect(hex('#abcxyz')).toBeNull();
+  });
+
+  it('walks every sector of the hue wheel, not only the ones that land on hp<1', () => {
+    // Every hue above lands in the SAME first branch of the hp cascade (h=0 → hp=0), so between
+    // them the three existing tests never touch hp>=1. These six sit at the midpoint of each
+    // 60°-wide sector so every branch of the cascade — not just its first — gets a real colour
+    // through it, at full saturation and half lightness where the arithmetic is exact.
+    expect(hex('hsl(30, 100%, 50%)')).toBe('#ff8000');
+    expect(hex('hsl(90, 100%, 50%)')).toBe('#80ff00');
+    expect(hex('hsl(150, 100%, 50%)')).toBe('#00ff80');
+    expect(hex('hsl(210, 100%, 50%)')).toBe('#0080ff');
+    expect(hex('hsl(270, 100%, 50%)')).toBe('#8000ff');
+    expect(hex('hsl(330, 100%, 50%)')).toBe('#ff0080');
+  });
 });
 
 describe('extractColorFrequency', () => {
@@ -87,6 +150,13 @@ describe('extractColorFrequency', () => {
 
   it('finds nothing in a stylesheet with no colours', () => {
     expect(extractColorFrequency('.a { display: flex; }')).toEqual([]);
+  });
+
+  it('skips a token that matches the colour pattern but does not parse as one', () => {
+    // `rgb(84)` is shaped like a colour function and matched by the token regex, but it has too
+    // few channels to parse — the loop has to skip it and keep counting the real ones.
+    const css = `.a { color: rgb(84); } .b { color: #5469d4; }`;
+    expect(extractColorFrequency(css)).toEqual([{ hex: '#5469d4', count: 1 }]);
   });
 });
 
@@ -119,5 +189,19 @@ describe('extractDeclaredBrandColors', () => {
   it('reads a brand declared in oklch, not only in hex', () => {
     const css = `:root { --brand-primary: oklch(0.623 0.214 259.815); }`;
     expect(extractDeclaredBrandColors(css)).toEqual([{ name: '--brand-primary', hex: '#2b7fff' }]);
+  });
+
+  it('ignores a brand-named property whose value has no colour token in it at all', () => {
+    // `--brand-primary` names a brand, but "bold" is not a colour of any notation — the property
+    // has to be skipped rather than reported with nothing.
+    const css = `:root { --brand-primary: bold; }`;
+    expect(extractDeclaredBrandColors(css)).toEqual([]);
+  });
+
+  it('ignores a brand-named property whose value looks like a colour but does not parse as one', () => {
+    // #12345 matches the colour-token regex (3–8 hex digits) but is not a valid hex length, so it
+    // has to be dropped rather than reported as a declared brand colour.
+    const css = `:root { --brand-primary: #12345; }`;
+    expect(extractDeclaredBrandColors(css)).toEqual([]);
   });
 });

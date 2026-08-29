@@ -132,8 +132,16 @@ const THIRD_PARTY_CONTAINER =
 /** How many lockup candidates are kept for verification. Beyond four it is all page furniture. */
 const MAX_LOGO_CANDIDATES = 4;
 
-/** A dark-mode lockup, named the way sites actually name them. */
-const DARK_HINT = /(?:^|[-_/])dark|dark[-_.]|inverse|white/i;
+/**
+ * A dark-mode lockup, named the way sites actually name them.
+ *
+ * `white` is anchored the same way `dark` is, and for the same reason the press-badge check exists:
+ * an unanchored `white` matched `whitepaper-logo.png` and `logo-whitelabel.svg`, which are ordinary
+ * light-mode artwork. The dark slot is where a wrong pick does the most damage — the header band
+ * prefers the dark lockup whenever its ground is dark — so a false positive here is worse than a
+ * miss.
+ */
+const DARK_HINT = /(?:^|[-_/])dark|dark[-_.]|inverse|(?:^|[-_/])white(?![a-z])/i;
 
 export async function harvestSite(
   rawUrl: string,
@@ -302,6 +310,23 @@ export function discoverImages(doc: Document, base: string): DiscoveredImages {
 }
 
 /**
+ * The filename part of a `src`, without its directories or query.
+ *
+ * The evidence a `src` carries about WHOSE logo this is lives in the file's own name —
+ * `forbes-logo.svg` names the outlet. The directories above it are the site's build layout and say
+ * nothing about the image, but they are full of words {@link THIRD_PARTY_ROLE} watches for: a
+ * Create React App build serves the site's OWN lockup from `/static/media/`, and Django and Wagtail
+ * from `/media/`. Both match `\bmedia\b` — `/` is a word boundary — so testing the whole path
+ * rejected the real logo on every site built that way, leaving the import with no lockup to propose
+ * for a page that plainly has one.
+ */
+function fileNameOf(src: string | null): string {
+  if (!src) return '';
+  const path = src.split(/[?#]/)[0] ?? '';
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+/**
  * True when an image is plainly somebody else's mark.
  *
  * Reads the image's own attributes AND walks its ancestors, because the two carry different
@@ -316,7 +341,7 @@ export function isThirdPartyLogo(img: Element): boolean {
     img.getAttribute('id'),
     img.getAttribute('alt'),
     img.getAttribute('title'),
-    img.getAttribute('src'),
+    fileNameOf(img.getAttribute('src')),
   ].join(' ');
   if (THIRD_PARTY_NAME.test(own) || THIRD_PARTY_ROLE.test(own)) return true;
 

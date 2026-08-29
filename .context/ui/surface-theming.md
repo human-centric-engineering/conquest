@@ -171,8 +171,8 @@ same demo client light and dark side by side, and two panels on one page cannot 
 and both are load-bearing:
 
 ```css
-.dark [data-surface='respondent']:not([data-scheme='light']),   /* opt OUT of an inherited .dark */
-[data-surface='respondent'][data-scheme='dark'] {               /* opt IN with no .dark ancestor */
+.dark [data-surface='respondent']:not(:where([data-scheme='light'])),  /* opt OUT of an inherited .dark */
+[data-surface='respondent'][data-scheme='dark'] {                      /* opt IN with no .dark ancestor */
 ```
 
 Without the `:not()`, a light-pinned panel inside `<html>.dark` still matches the dark block — at

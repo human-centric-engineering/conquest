@@ -80,6 +80,7 @@ beforeEach(() => {
     name: 'Acme',
     customFontDisplay: null,
     customFontBody: null,
+    customFontFiles: null,
   });
   prismaMock.appDemoClient.update.mockResolvedValue({ id: 'dc-1' });
   fontsMock.fetchGoogleFontFaces.mockResolvedValue({
@@ -115,6 +116,59 @@ describe('POST .../fonts', () => {
     // `fontPairing` stays an ordinary form field — loading faces must not silently change the
     // questionnaire's type, and switching the picker away and back must not re-fetch Google.
     expect(data).not.toHaveProperty('fontPairing');
+  });
+
+  /**
+   * A POST is routinely PARTIAL, so it merges rather than replaces.
+   *
+   * The import dialog sends only the families still ticked, and the field's own Load button sends
+   * only the ones typed. Writing `loaded.body ?? null` therefore cleared a body face the client
+   * already had — silently, and orphaning its stored objects, since nothing deletes the old prefix
+   * on POST. Clearing is what DELETE is for.
+   */
+  it('leaves a slot this request did not name exactly as it was', async () => {
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      id: 'dc-1',
+      name: 'Acme',
+      customFontDisplay: 'Sora',
+      customFontBody: 'Karla',
+      customFontFiles: {
+        display: { '400': 'https://blob.example/old-display-400.woff2' },
+        body: { '400': 'https://blob.example/old-body-400.woff2' },
+      },
+    });
+
+    await post(jsonRequest({ display: 'Poppins' }), SESSION, ctx);
+
+    const data = prismaMock.appDemoClient.update.mock.calls[0][0].data;
+    expect(data.customFontDisplay).toBe('Poppins');
+    expect(data.customFontBody).toBe('Karla');
+    // The untouched slot keeps the files it already had; only `display` is rewritten.
+    expect(data.customFontFiles.body).toEqual({
+      '400': 'https://blob.example/old-body-400.woff2',
+    });
+    expect(data.customFontFiles.display['400']).toBe(
+      'https://blob.example/demo-clients/dc-1/fonts/display-400.woff2'
+    );
+  });
+
+  it('reports the merged state back, not just the slot it loaded', async () => {
+    // The field renders this straight into its "Stored:" line. Echoing only what was loaded would
+    // tell the admin the untouched slot had been cleared when it had not.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      id: 'dc-1',
+      name: 'Acme',
+      customFontDisplay: null,
+      customFontBody: 'Karla',
+      customFontFiles: { body: { '400': 'https://blob.example/old-body-400.woff2' } },
+    });
+
+    const response = await post(jsonRequest({ display: 'Poppins' }), SESSION, ctx);
+    const payload = await response.json();
+
+    expect(payload.data.display).toBe('Poppins');
+    expect(payload.data.body).toBe('Karla');
+    expect(payload.data.weights.body).toEqual([400]);
   });
 
   it('refuses a family name that could reach a different URL', async () => {

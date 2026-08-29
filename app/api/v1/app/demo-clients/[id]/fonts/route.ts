@@ -44,6 +44,7 @@ import {
   type CustomFontFiles,
   type CustomFontSlot,
 } from '@/lib/app/questionnaire/theming';
+import { narrowCustomFontFiles } from '@/lib/app/questionnaire/theming/theme';
 import { fetchGoogleFontFaces } from '@/lib/app/questionnaire/brand-import/google-fonts';
 import { brandImportLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
@@ -76,7 +77,13 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   const client = await prisma.appDemoClient.findUnique({
     where: { id },
-    select: { id: true, name: true, customFontDisplay: true, customFontBody: true },
+    select: {
+      id: true,
+      name: true,
+      customFontDisplay: true,
+      customFontBody: true,
+      customFontFiles: true,
+    },
   });
   if (!client) throw new NotFoundError('Demo client not found');
 
@@ -133,12 +140,24 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     loaded[slot] = family;
   }
 
+  // MERGED, not replaced. A POST names the slots the admin asked us to load, and it is routinely
+  // partial: the import dialog sends only the families that are still ticked, and the field's own
+  // Load button sends only the ones that were typed. Writing `loaded.body ?? null` therefore
+  // cleared a body face the client already had — silently, and orphaning its stored objects, since
+  // nothing deletes the old prefix on POST. Clearing is what DELETE is for.
+  const kept = narrowCustomFontFiles(client.customFontFiles);
+  const merged = {
+    display: loaded.display ?? client.customFontDisplay,
+    body: loaded.body ?? client.customFontBody,
+    files: { ...kept, ...files } satisfies CustomFontFiles,
+  };
+
   await prisma.appDemoClient.update({
     where: { id },
     data: {
-      customFontDisplay: loaded.display ?? null,
-      customFontBody: loaded.body ?? null,
-      customFontFiles: files,
+      customFontDisplay: merged.display,
+      customFontBody: merged.body,
+      customFontFiles: merged.files,
     },
     select: { id: true },
   });
@@ -150,12 +169,12 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     entityId: id,
     entityName: client.name,
     changes: {
-      customFontDisplay: { from: client.customFontDisplay, to: loaded.display ?? null },
-      customFontBody: { from: client.customFontBody, to: loaded.body ?? null },
+      customFontDisplay: { from: client.customFontDisplay, to: merged.display },
+      customFontBody: { from: client.customFontBody, to: merged.body },
     },
     metadata: {
       weights: Object.fromEntries(
-        CUSTOM_FONT_SLOTS.map((slot) => [slot, Object.keys(files[slot] ?? {})])
+        CUSTOM_FONT_SLOTS.map((slot) => [slot, Object.keys(merged.files[slot] ?? {})])
       ),
     },
     clientIp: clientIP,
@@ -163,11 +182,14 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   log.info('Custom fonts loaded', { demoClientId: id, ...loaded });
 
+  // Reports the MERGED state, not just this request's slots — the field renders it straight into
+  // its "Stored:" line, and echoing only what was loaded would tell the admin the untouched slot
+  // had been cleared when it had not.
   return successResponse({
-    display: loaded.display ?? null,
-    body: loaded.body ?? null,
+    display: merged.display,
+    body: merged.body,
     weights: Object.fromEntries(
-      CUSTOM_FONT_SLOTS.map((slot) => [slot, Object.keys(files[slot] ?? {}).map(Number)])
+      CUSTOM_FONT_SLOTS.map((slot) => [slot, Object.keys(merged.files[slot] ?? {}).map(Number)])
     ),
   });
 });
@@ -179,7 +201,13 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const client = await prisma.appDemoClient.findUnique({
     where: { id },
-    select: { id: true, name: true, customFontDisplay: true, customFontBody: true },
+    select: {
+      id: true,
+      name: true,
+      customFontDisplay: true,
+      customFontBody: true,
+      customFontFiles: true,
+    },
   });
   if (!client) throw new NotFoundError('Demo client not found');
 

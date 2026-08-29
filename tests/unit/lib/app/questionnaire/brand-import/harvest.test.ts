@@ -111,6 +111,37 @@ describe('discoverImages', () => {
     );
   });
 
+  it('ignores a published logo the column would not accept, and keeps looking', () => {
+    // schema.org outranks everything, but an http logo is not a legal value for the column — so it
+    // must fall THROUGH to the header image rather than winning and then being dropped.
+    const doc = parse(`
+      <html><head>
+        <script type="application/ld+json">
+          {"@type":"Organization","logo":"http://cdn.acme.example/org.png"}
+        </script>
+      </head><body>
+        <header><img class="logo" src="https://cdn.acme.example/header.png"></header>
+      </body></html>
+    `);
+
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates[0]).toEqual({
+      url: 'https://cdn.acme.example/header.png',
+      via: 'header',
+    });
+  });
+
+  it('ignores an Organization that publishes no usable logo', () => {
+    for (const block of [
+      '{"@type":"Organization"}',
+      '{"@type":"Organization","logo":{"caption":"no url here"}}',
+      '{"@type":"Organization","logo":123}',
+      'not json at all',
+    ]) {
+      const doc = parse(`<script type="application/ld+json">${block}</script>`);
+      expect(discoverImages(doc, 'https://acme.example/').logoCandidates).toEqual([]);
+    }
+  });
+
   it('falls back to a header image whose attributes say logo', () => {
     const doc = parse(`
       <header><img alt="Acme logo" src="/assets/mark-2024.png"></header>
@@ -120,6 +151,16 @@ describe('discoverImages', () => {
       url: 'https://acme.example/assets/mark-2024.png',
       via: 'header',
     });
+  });
+
+  it('keeps only the first four candidates — beyond that it is all page furniture', () => {
+    const imgs = Array.from(
+      { length: 7 },
+      (_unused, i) => `<img class="logo" src="/logo-${i}.svg">`
+    ).join('');
+    const doc = parse(`<header>${imgs}</header>`);
+
+    expect(discoverImages(doc, 'https://acme.example/').logoCandidates).toHaveLength(4);
   });
 
   it('falls back again to any image whose filename says logo', () => {
@@ -163,6 +204,28 @@ describe('discoverImages', () => {
     // The field is one an admin rarely checks, so the wrong artwork there is worse than none.
     const doc = parse(`<header><img class="logo" src="/logo.svg"></header>`);
     expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates).toEqual([]);
+  });
+
+  it('takes a light-ink lockup named `white`', () => {
+    const doc = parse(`<header><img class="logo" src="/logo-white.svg"></header>`);
+    expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates[0]?.url).toBe(
+      'https://acme.example/logo-white.svg'
+    );
+  });
+
+  /**
+   * `white` is anchored, so it cannot match the middle of a longer word.
+   *
+   * Unanchored, it claimed `whitepaper-logo.png` and `logo-whitelabel.svg` — ordinary light-mode
+   * artwork — as the dark lockup. Same class of mistake as the press badge, and it lands in the one
+   * field where a wrong pick does the most damage: the header band prefers the dark lockup whenever
+   * its ground is dark, so the whole branded surface would carry the wrong image.
+   */
+  it('does not read `white` inside a longer word as a dark lockup', () => {
+    for (const src of ['/whitepaper-logo.png', '/logo-whitelabel.svg', '/logo-whiteboard.svg']) {
+      const doc = parse(`<header><img class="logo" src="${src}"></header>`);
+      expect(discoverImages(doc, 'https://acme.example/').logoDarkCandidates).toEqual([]);
+    }
   });
 
   it('drops an http image, because the column will not accept one', () => {
@@ -353,6 +416,34 @@ describe('excluding somebody else’s logo', () => {
         img('<header><img class="site-logo" alt="Eagle Eye" src="/logo.svg"></header>')
       )
     ).toBe(false);
+  });
+
+  /**
+   * The role words are matched against the FILE's name, not the whole path.
+   *
+   * `\bmedia\b` treats `/` as a word boundary, so testing the whole `src` rejected the site's own
+   * lockup on every framework that serves assets from a directory called `media` — Create React App
+   * (`/static/media/`), Django and Wagtail (`/media/`). The import then proposed no logo at all for
+   * a page that plainly had one, which looks like the feature failing rather than a rule firing.
+   */
+  it('reads an image with no src at all off its other attributes', () => {
+    // `getAttribute('src')` is null for a CSS-background or lazy-loaded `<img>`, and the role check
+    // still has `alt`/`class` to go on — it must not throw on the missing filename.
+    expect(isThirdPartyLogo(img('<img alt="Forbes">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img alt="Acme">'))).toBe(false);
+  });
+
+  it('does not read a build directory as a third party’s role', () => {
+    expect(isThirdPartyLogo(img('<img src="/static/media/logo.a1b2c3.svg">'))).toBe(false);
+    expect(isThirdPartyLogo(img('<img src="/media/logo.png">'))).toBe(false);
+    expect(isThirdPartyLogo(img('<img src="/client-assets/logo.svg">'))).toBe(false);
+  });
+
+  it('still reads the role out of the filename itself', () => {
+    // The evidence that survives the change: the name of the FILE, not the folder above it.
+    expect(isThirdPartyLogo(img('<img src="/static/media/press-badge.png">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img src="/media/partner-logo.svg">'))).toBe(true);
+    expect(isThirdPartyLogo(img('<img src="/assets/forbes-logo.svg?v=2">'))).toBe(true);
   });
 
   it('keeps a press badge out of the candidate list entirely', () => {

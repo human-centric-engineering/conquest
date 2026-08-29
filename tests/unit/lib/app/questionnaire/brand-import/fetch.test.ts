@@ -10,7 +10,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { HarvestBudget, fetchResource } from '@/lib/app/questionnaire/brand-import/fetch';
+import * as safeUrlModule from '@/lib/security/safe-url';
+import {
+  HarvestBudget,
+  fetchResource,
+  type BudgetLimits,
+} from '@/lib/app/questionnaire/brand-import/fetch';
 
 const fetchMock = vi.fn();
 
@@ -21,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function ok(body: string, headers: Record<string, string> = {}): Response {
@@ -32,6 +38,33 @@ function redirect(to: string, status = 302): Response {
   // directly so `headers.get('location')` is readable, exactly as it is off the wire.
   return new Response(null, { status, headers: { location: to } });
 }
+
+/**
+ * A response whose body cannot be cleanly cancelled.
+ *
+ * `fetchResource` calls `response.body?.cancel().catch(() => {})` at three separate points, to
+ * release the connection before moving past a response it isn't going to read. Each of those
+ * catch handlers only actually RUNS when cancel() rejects — a normal stream resolves cleanly, so
+ * a response built from a plain string never exercises them. This is what does.
+ */
+function withUncancellableBody(status: number, headers: Record<string, string> = {}): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('x'));
+    },
+    cancel() {
+      return Promise.reject(new Error('this stream refuses to cancel'));
+    },
+  });
+  return new Response(stream, { status, headers });
+}
+
+const SMALL_BUDGET: BudgetLimits = {
+  maxRequests: 10,
+  maxResourceBytes: 1024,
+  maxTotalBytes: 4096,
+  timeoutMs: 10_000,
+};
 
 describe('fetchResource', () => {
   it('returns the bytes and the final URL on a clean fetch', async () => {
@@ -144,6 +177,155 @@ describe('fetchResource', () => {
     if (result.ok) return;
     expect(result.reason).toBe('We could not reach that address.');
   });
+
+  it('never throws when what it catches is not even an Error', async () => {
+    // fetch() itself only ever rejects with an Error, but AbortSignal plumbing and test doubles
+    // can reject with anything — the message-building has to survive a non-Error too.
+    fetchMock.mockRejectedValue('a plain string, not an Error');
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('We could not reach that address.');
+  });
+
+  it('names a timeout specifically, rather than the generic "could not reach"', async () => {
+    const timeoutError = new Error('The operation was aborted due to timeout');
+    timeoutError.name = 'TimeoutError';
+    fetchMock.mockRejectedValue(timeoutError);
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('That site took too long to respond.');
+  });
+
+  it('falls back to a generic refusal message when the safety check gives no reason of its own', async () => {
+    // `checkSafeProviderUrl` always sets `message` on a real rejection today, but the fallback
+    // exists for defense in depth — assert it directly rather than only through the guard's
+    // current implementation.
+    vi.spyOn(safeUrlModule, 'checkSafeProviderUrl').mockReturnValueOnce({ ok: false });
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('it is not a safe target');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic budget message when a budget refuses without recording why', async () => {
+    // HarvestBudget itself always records a reason before refusing, but fetchResource's fallback
+    // is defensive against any object satisfying the budget's shape, so it is exercised directly
+    // with a fake budget rather than only through HarvestBudget's own behaviour.
+    const emptyBudget = {
+      claimRequest: () => false,
+      note: () => null,
+      remainingMs: () => 1000,
+      maxResourceBytes: 1024,
+      spend: () => {},
+    } as unknown as HarvestBudget;
+
+    const result = await fetchResource('https://acme.example/', emptyBudget);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('The import ran out of budget.');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports a redirect that names no Location to follow', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 302 }));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('without saying where');
+  });
+
+  it('reports a redirect Location that cannot be resolved into a URL at all', async () => {
+    // An unterminated IPv6 literal — the one shape `new URL(location, current)` actually throws
+    // on, versus treating it as a relative path the way it does almost everything else.
+    fetchMock
+      .mockResolvedValueOnce(redirect('http://[::1'))
+      .mockResolvedValueOnce(ok('<html></html>'));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('somewhere unreadable');
+  });
+
+  it('releases the connection on a redirect even when the body refuses to cancel cleanly', async () => {
+    fetchMock
+      .mockResolvedValueOnce(withUncancellableBody(302, { location: 'https://www.acme.example/' }))
+      .mockResolvedValueOnce(ok('<html></html>'));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    // The cancel() rejection is swallowed — a hop that will not release cleanly must not stop the
+    // harvest from following the redirect anyway.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.finalUrl).toBe('https://www.acme.example/');
+  });
+
+  it('releases the connection on a refused status even when the body refuses to cancel cleanly', async () => {
+    fetchMock.mockResolvedValue(withUncancellableBody(403));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('block automated readers');
+  });
+
+  it('releases the connection on an over-large declared length even when the body refuses to cancel', async () => {
+    fetchMock.mockResolvedValue(
+      withUncancellableBody(200, {
+        'content-type': 'text/css',
+        'content-length': String(50 * 1024 * 1024),
+      })
+    );
+
+    const result = await fetchResource('https://acme.example/huge.css', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('too large');
+  });
+
+  it('reports null content-type as null rather than as an empty string', async () => {
+    // A string body gets an automatic `text/plain` content-type from the Response constructor;
+    // a binary body does not, which is what actually lets this exercise the missing-header path.
+    fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentType).toBeNull();
+  });
+
+  it.each([
+    [401, 'block automated readers'],
+    [404, 'not found (404)'],
+    [429, 'slow down (429)'],
+    [500, 'returned an error (500)'],
+    [418, 'returned HTTP 418'],
+  ])('describes a %i status in terms an admin can act on', async (status, expected) => {
+    fetchMock.mockResolvedValue(new Response('nope', { status }));
+
+    const result = await fetchResource('https://acme.example/', new HarvestBudget());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain(expected);
+  });
 });
 
 describe('HarvestBudget', () => {
@@ -185,6 +367,22 @@ describe('HarvestBudget', () => {
     const budget = new HarvestBudget();
     expect(budget.truncated).toBe(false);
     expect(budget.note()).toBeNull();
+  });
+
+  it('stops once the total-bytes cap is spent and says so', async () => {
+    // The total-bytes cap is checked at the START of the next claim, against whatever the
+    // previous resource actually spent — not against its own request. So it takes two calls: one
+    // that spends past the cap, and a second that finds it already gone.
+    const budget = new HarvestBudget({ ...SMALL_BUDGET, maxTotalBytes: 5 });
+    fetchMock.mockResolvedValue(ok('this body is well over five bytes long'));
+
+    await fetchResource('https://acme.example/a', budget);
+    const second = await fetchResource('https://acme.example/b', budget);
+
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.reason).toContain('download limit');
+    expect(budget.truncated).toBe(true);
   });
 
   it('refuses once the clock has run out', async () => {
