@@ -89,6 +89,7 @@ import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/pla
 import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
+import { plannedMembers } from '@/lib/app/questionnaire/scope/resolve';
 import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
@@ -359,7 +360,39 @@ async function handleMessage(
     // that turn's `selectionRound`, so this matches exactly once and never repeats.
     const scopeAmendmentNotice: string[] = (scopePlan?.amendments ?? [])
       .filter((a) => a.atTurn === loaded.base.selectionRound)
-      .map(amendmentBriefingLine);
+      .map((amendment) => {
+        // F17.33: how much of the area there is, so the acknowledgement sets an expectation the
+        // interview will actually keep. Counted from what the plan will ASK — depth and any explicit
+        // subset applied — not from everything the topic holds.
+        //
+        // Data slots first when the topic has them, because in data-slot mode THEY are what the
+        // conversation asks about; the questions behind them are filled in the background, and
+        // counting eight of those for a two-slot area would promise a much longer detour than the
+        // respondent is about to get. Weights are not loaded: they only decide which two members a
+        // `light` topic contains, and an amendment is always seated at `full` depth.
+        //
+        // Omitted when the topic no longer resolves (an author may delete one a live plan names):
+        // a missing size means no size claim, never a wrong one.
+        const topic = loaded.scope.topics.find((t) => t.key === amendment.key);
+        const planned = scopePlan?.topics.find((t) => t.key === amendment.key);
+        const itemCount =
+          topic && planned
+            ? plannedMembers(
+                topic.members.dataSlotKeys.length > 0
+                  ? topic.members.dataSlotKeys
+                  : topic.members.questionKeys,
+                topic.members.dataSlotKeys.length > 0
+                  ? planned.members?.dataSlotKeys
+                  : planned.members?.questionKeys,
+                planned.depth,
+                undefined
+              ).length
+            : undefined;
+        return amendmentBriefingLine({
+          amendment,
+          ...(itemCount !== undefined ? { itemCount } : {}),
+        });
+      });
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round

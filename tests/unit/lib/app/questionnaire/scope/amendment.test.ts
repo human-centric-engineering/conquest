@@ -15,11 +15,14 @@ import { describe, it, expect } from 'vitest';
 
 import {
   amendableTopics,
+  amendmentBriefingLine,
   applyAmendment,
   looksLikeTopicRequest,
   matchTopicByLabel,
   isEnglishLocale,
   candidateLabelHits,
+  respondentReasonFor,
+  topicSizeWording,
 } from '@/lib/app/questionnaire/scope/amendment';
 import type { InterviewPlan, Topic } from '@/lib/app/questionnaire/scope/types';
 
@@ -248,5 +251,81 @@ describe('candidateLabelHits — the non-English gate', () => {
 
   it('is empty for a message that names nothing', () => {
     expect(candidateLabelHits('Ja, det stämmer.', topics)).toEqual([]);
+  });
+});
+
+/**
+ * What the respondent is actually told (F17.33).
+ *
+ * An area appearing mid-conversation with no explanation is the moment someone starts wondering
+ * what else is being decided about them, so the acknowledgement has to carry what, how much and
+ * why. The two things pinned hardest are the two that would do harm: a size claim the interview
+ * will not keep, and a reason the planner does not have the evidence to give.
+ */
+describe('topicSizeWording', () => {
+  it('says "a couple" only for what really is a couple', () => {
+    // A `light` topic IS two items. A respondent told "a couple" and then asked nine stops
+    // believing the next thing the interviewer says about how long anything will take.
+    expect(topicSizeWording(1)).toMatch(/couple/);
+    expect(topicSizeWording(2)).toMatch(/couple/);
+    expect(topicSizeWording(3)).not.toMatch(/couple/);
+  });
+
+  it('stays vague at the top end rather than promising a number', () => {
+    // "About fourteen questions" is a commitment the run budget may not keep.
+    expect(topicSizeWording(14)).toBe('a fair bit of ground');
+    expect(topicSizeWording(14)).not.toMatch(/\d/);
+  });
+});
+
+describe('respondentReasonFor', () => {
+  it('gives the respondent their own words back', () => {
+    expect(
+      respondentReasonFor({ source: 'respondent', request: '  can we talk about hiring?  ' })
+    ).toBe('can we talk about hiring?');
+  });
+
+  it('NEVER gives a reason for the blind-spot check', () => {
+    // Its only honest reason is "you did not raise this", which converts a sampling decision into a
+    // claim about what the respondent left out — evidence the planner does not have.
+    expect(respondentReasonFor({ source: 'check', request: 'anything at all' })).toBeNull();
+  });
+
+  it('is null when there are no words to quote', () => {
+    expect(respondentReasonFor({ source: 'llm' })).toBeNull();
+    expect(respondentReasonFor({ source: 'respondent', request: '   ' })).toBeNull();
+  });
+});
+
+describe('amendmentBriefingLine', () => {
+  const amendment = {
+    key: 'talent',
+    label: 'People & capability',
+    request: 'can we cover hiring?',
+    atTurn: 6,
+    at: '2026-08-29T00:00:00.000Z',
+  };
+
+  it('names the area, sizes it, and ties it to what they asked for', () => {
+    const line = amendmentBriefingLine({ amendment, itemCount: 2 });
+
+    expect(line).toContain('People & capability');
+    expect(line).toContain('just a couple of questions');
+    expect(line).toContain('can we cover hiring?');
+  });
+
+  it('makes no size claim when the count is unknown', () => {
+    // A topic an author deleted while a live plan still named it. No size beats a wrong size.
+    const line = amendmentBriefingLine({ amendment });
+    expect(line).toContain('People & capability');
+    expect(line).not.toMatch(/couple|handful|fair bit/);
+  });
+
+  it('keeps the implementation vocabulary off the screen', () => {
+    // The vocabulary ban is what makes giving a reason safe: the interviewer may say what it will
+    // cover and why, and nothing about how the interview decides.
+    const line = amendmentBriefingLine({ amendment, itemCount: 4 });
+    expect(line).toMatch(/do not use the words topic, section, plan, scope or depth/i);
+    expect(line).toMatch(/do not explain how the interview decides/i);
   });
 });

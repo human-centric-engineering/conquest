@@ -2,7 +2,7 @@
 feature: F17.33
 title: Progress, and what the respondent is told, when the interview grows
 phase: P17 — Conditional Topics
-status: phases A + B shipped (2026-08-29); C–D in progress. Decision still needed at §6.3 (announce gating)
+status: phases A + B + C1 shipped (2026-08-29); C2 + D open. §6.3 settled — see below
 owner: TBD
 deps: F17.1 (the plan), F17.6 (respondent amendment), F-progress (milestone banners), F4.5 (completion assessment)
 opened: 2026-08-29
@@ -328,10 +328,20 @@ Bound by the plain-English rule: no "topic", "scope", "plan", "depth", "section 
 
 ### 6.3 Gating
 
-The announcement is gated by `conditionalTopics.announce`. The **amendment acknowledgement is
-currently not** (`messages/route.ts:361` maps the briefing line unconditionally). Decide once and
-apply to both: an admin who turned announcements off should not be given a mid-run one. Recommend
-gating both on `announce`, and saying so in `settings-registry.ts:673`'s help text.
+The announcement is gated by `conditionalTopics.announce`. The **amendment acknowledgement is not**
+(`messages/route.ts` maps the briefing line unconditionally).
+
+**Settled: leave it ungated.** The first draft of this spec recommended gating both, on the tidy
+principle that an admin who turned announcements off should not be given a mid-run one. That reads
+the setting wrongly. `announce` governs telling a respondent about a plan they did not ask about —
+the mechanics of how their interview was chosen. Acknowledging a request they made themselves is
+courtesy, and an interview that silently absorbs "can we talk about hiring?" and then quietly starts
+asking about it reads worse, not more discreet. The two are different speech acts and one setting
+should not decide both.
+
+The same reasoning is why the added vocabulary is safe: what the acknowledgement gained is **what,
+how much and why-in-their-words**, and what it still refuses to say is anything about how the
+interview decides what to ask.
 
 ## 7. Phase D — the settings conflict, kept narrow
 
@@ -402,7 +412,7 @@ answer, not a backfill.
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
 | **A**  | ✅ **Shipped.** `progressQuestions` + `progress.ts` + the `progressFloorPct` column + both orchestrators + the status view + the bar | small–medium — one migration, one pure module |
 | **B**  | ✅ **Shipped.** The re-read: pure target selection, `widening-rescan.ts`, both trigger points, the ledger column                     | medium — §5.4 settled: a dedicated prompt     |
-| **C1** | Amendment acknowledgement gains name, size and the respondent's own reason; `announce` gating settled                                | small — one function, one prompt paragraph    |
+| **C1** | ✅ **Shipped.** Amendment acknowledgement gains name, size and the respondent's own reason; §6.3 settled (ungated)                   | small — one function, one prompt paragraph    |
 | **C2** | Planner emits a per-topic respondent-facing reason (schema + prompt + carriage)                                                      | small–medium, and optional                    |
 | **D**  | `conditional-topics-progress-variance` + threading the figure into `ConfigConflictInput`                                             | small, mechanical, optional                   |
 

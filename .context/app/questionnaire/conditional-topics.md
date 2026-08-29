@@ -282,6 +282,27 @@ The amendment is recorded on the plan (`InterviewPlan.amendments`) _and_ the add
 topic as a good selection would make the planner look better the worse it got. The acknowledgement
 rides the same one-turn briefing seam as the original announcement, matched on `atTurn`.
 
+**What the acknowledgement says (F17.33).** Three things, because an area appearing mid-conversation
+with no explanation is the moment a respondent starts wondering what else is being decided about
+them: **what** (the topic's own label, referred to the way a person would rather than quoted back),
+**how much** (`topicSizeWording`, counted from what the plan will actually ask — the topic's data
+slots when it has them, since those are what the conversation asks about), and **why** — their own
+words, straight off `PlanAmendment.request`, needing no model call and no new field. The line
+previously forbade explaining at all, which read as the interview quietly reorganising itself.
+
+The vocabulary ban is what makes the reason safe to give: the interviewer may say what it will now
+cover and why, and may say nothing about how the interview decides. And
+`respondentReasonFor` refuses a reason outright for `source: 'check'` — the blind-spot check's only
+honest reason is "you did not raise this", which converts a sampling decision into a claim about
+what the respondent left out, and the planner has an absence of signal rather than evidence. Nothing
+announces a check topic per-topic today; the refusal is written where it cannot be forgotten when
+something does.
+
+The acknowledgement is **not** gated on `conditionalTopics.announce`, and that is deliberate. The
+setting governs telling someone about a plan they did not ask about — the mechanics. Acknowledging a
+request they made themselves is courtesy, and an interview that silently absorbs "can we talk about
+hiring?" without a word reads worse, not more discreet.
+
 **Widening has consequences beyond the plan.** The in-scope question set is the progress bar's
 denominator, so an amendment — and, far more often, the plan itself landing at the end of the
 opening — would make the figure the respondent is looking at fall. **It no longer does** (F17.33):
