@@ -127,6 +127,13 @@ describe('the preview declares itself a respondent surface', () => {
     return node as HTMLElement;
   }
 
+  /** The lockup drawn in one panel's header band (the swatch-row thumbnails sit outside both). */
+  function bandLogo(container: HTMLElement, scheme: 'light' | 'dark'): HTMLElement {
+    const node = previewRoot(container, scheme).querySelector('[aria-label="Brand logo"]');
+    expect(node).not.toBeNull();
+    return node as HTMLElement;
+  }
+
   it('marks the miniature as a respondent surface', () => {
     const { container } = render(<DemoClientThemePreview theme={{ ...UNCONFIGURED }} />);
     expect(previewRoot(container).dataset.surface).toBe('respondent');
@@ -170,6 +177,48 @@ describe('the preview declares itself a respondent surface', () => {
 
     expect(previewRoot(container, 'light').dataset.scheme).toBe('light');
     expect(previewRoot(container, 'dark').dataset.scheme).toBe('dark');
+  });
+
+  it('paints each panel’s band with the lockup resolved for THAT panel’s ground', () => {
+    // The regression this exists for: both panels read `bandLogoUrl` — the lockup chosen for the
+    // LIGHT ground — so an admin who supplied a light-on-dark logo saw their dark artwork nowhere
+    // in the preview, and the dark panel showed the dark-ink lockup sunk into a dark canvas.
+    const { container } = render(
+      <DemoClientThemePreview
+        theme={{
+          ...UNCONFIGURED,
+          canvasColor: '#f8f2ec',
+          logoUrl: 'https://example.com/logo.svg',
+          logoDarkUrl: 'https://example.com/logo-light.svg',
+        }}
+      />
+    );
+
+    expect(bandLogo(container, 'light').style.backgroundImage).toBe(
+      'url("https://example.com/logo.svg")'
+    );
+    expect(bandLogo(container, 'dark').style.backgroundImage).toBe(
+      'url("https://example.com/logo-light.svg")'
+    );
+  });
+
+  it('falls back to the standard lockup in dark mode when no dark one is supplied', () => {
+    // A client with one piece of artwork keeps it in both panels — the fallback the resolver
+    // already makes, asserted here so the per-panel choice above cannot regress into "dark panel
+    // shows nothing".
+    const { container } = render(
+      <DemoClientThemePreview
+        theme={{
+          ...UNCONFIGURED,
+          canvasColor: '#f8f2ec',
+          logoUrl: 'https://example.com/logo.svg',
+        }}
+      />
+    );
+
+    expect(bandLogo(container, 'dark').style.backgroundImage).toBe(
+      'url("https://example.com/logo.svg")'
+    );
   });
 
   it('gives both panels the same brand, so only the mode differs between them', () => {
