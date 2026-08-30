@@ -5,6 +5,7 @@ import {
   shouldRunDetection,
   isSurfaceableContradiction,
   SURFACE_CONTRADICTION_CONFIDENCE,
+  applyCompareWindow,
 } from '@/lib/app/questionnaire/contradiction/detection-logic';
 
 import {
@@ -277,5 +278,40 @@ describe('shouldRunDetection', () => {
     expect(
       shouldRunDetection('flag', 4, 'completion-sweep', { everyNTurns: 5, turnIndex: 1 })
     ).toEqual({ run: true, compareWindow: 'all' });
+  });
+});
+
+/**
+ * The look-back window, applied at last. `shouldRunDetection` has returned a `compareWindow` since
+ * the first release and every caller ignored it, so a questionnaire set to "check each new answer
+ * against the last 3" was checking it against all of them — the admin field said one thing and the
+ * detector did another, with a wider comparison surface than anyone had asked for.
+ */
+describe('applyCompareWindow', () => {
+  const answers = ['a1', 'a2', 'a3', 'a4', 'a5'];
+
+  it('keeps the most recent N — callers supply oldest → newest, so that is the tail', () => {
+    expect(applyCompareWindow(answers, 3)).toEqual(['a3', 'a4', 'a5']);
+  });
+
+  it('keeps everything when the window says all', () => {
+    // `'all'` is what the completion sweep gets: the last gate before submit is never narrowed.
+    expect(applyCompareWindow(answers, 'all')).toEqual(answers);
+  });
+
+  it('treats a zero or negative window as no window at all', () => {
+    // 0 is the schema default and means "unset"; a negative would otherwise slice from the front.
+    expect(applyCompareWindow(answers, 0)).toEqual(answers);
+    expect(applyCompareWindow(answers, -2)).toEqual(answers);
+  });
+
+  it('returns everything when the window is wider than the history', () => {
+    expect(applyCompareWindow(answers, 50)).toEqual(answers);
+  });
+
+  it('copies rather than aliasing the list it was given', () => {
+    const result = applyCompareWindow(answers, 'all');
+    result.push('mutated');
+    expect(answers).toHaveLength(5);
   });
 });

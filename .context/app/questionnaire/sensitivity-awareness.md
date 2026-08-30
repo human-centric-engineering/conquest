@@ -51,6 +51,19 @@ The merge runs at **step 1.4**, before the seriousness gate (step 1.5), so the g
 sincerity or struck. Pure hostility/profanity with no harm disclosure ("go fuck yourself") is flagged
 by none of the three, so it correctly falls through to the seriousness gate.
 
+> **The detector call runs CONCURRENTLY with answer extraction (P20 A1), but the gate is still
+> strictly downstream of the merge.** The two calls are independent — neither reads the other's
+> result, and the merge combines them whichever order they land in — so overlapping them removes a
+> model round-trip per answered turn without changing any input, prompt or verdict.
+>
+> The seriousness judge is deliberately **not** in that batch, though it would save another
+> round-trip. The guarantee here is stronger than "a disclosure is never struck": a disclosure is
+> never **sent to the sincerity judge at all**, and whether this turn carries one is unknown until
+> both the extractor and the detector have returned. Adding the judge to the batch fails ten
+> tests, three of them the safeguarding guarantees above — which is the intended alarm, not an
+> obstacle to route around. See [`../planning/turn-latency-plan.md`](../planning/turn-latency-plan.md)
+> §5 for the latency that was left on the table because of it.
+
 **The skip is per-turn, not sticky.** Each turn re-detects from scratch; a disclosure on an earlier
 turn does not suppress the gate on later turns. Both LLM detectors (the dedicated detector and the
 extractor's block) are explicitly **scoped to the current message** — they receive recent

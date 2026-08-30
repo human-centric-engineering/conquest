@@ -143,7 +143,7 @@ export interface TurnState {
   progressQuestions?: QuestionView[];
   /** Distinct questions answered before this turn (coverage view). */
   answered: AnsweredView[];
-  /** Full values of the answers captured so far (refiner view). */
+  /** Every answer captured so far, **oldest → newest** (the contradiction look-back keeps the tail). */
   existingAnswers: ExistingAnswerView[];
   /** Recent transcript, oldest → newest (extraction / adaptive / offer phrasing read it). */
   recentMessages: string[];

@@ -107,6 +107,7 @@ const transcriptMock = vi.hoisted(() => ({ findTurnByIdempotencyKey: vi.fn() }))
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/transcript', () => transcriptMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
+import { TURN_STAGE_LABELS } from '@/lib/app/questionnaire/orchestrator';
 import {
   ABUSE_ABANDON_REASON,
   DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -2515,5 +2516,86 @@ describe('retry dedup-and-replay (F7.x)', () => {
     const res = await POST(req({ message: 'hi', idempotencyKey: 'not-a-uuid' }), ctx);
     expect(res.status).toBe(400);
     expect(transcriptMock.findTurnByIdempotencyKey).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Stage progress over the wire (P20 Phase 2) ───────────────────────────── */
+
+describe('turn stage status frames', () => {
+  /** Just the `status` frames from a drained stream, in order, as their labels. */
+  function statusLabels(frames: Array<{ event: string; data: unknown }>): string[] {
+    return frames
+      .filter((f) => f.event === 'status')
+      .map((f) => (f.data as { message: string }).message);
+  }
+
+  it('streams the real stages of an answered turn, in order, before the reply', async () => {
+    const res = await POST(req({ message: 'we are about forty people' }), ctx);
+    const frames = await drainSse(res);
+
+    expect(statusLabels(frames)).toEqual([
+      TURN_STAGE_LABELS.reading,
+      TURN_STAGE_LABELS.checking,
+      TURN_STAGE_LABELS.choosing,
+      TURN_STAGE_LABELS.composing,
+    ]);
+
+    // Every one of them must precede the first token — the whole point is that they fill the wait
+    // rather than arriving alongside the answer they were meant to explain.
+    const lastStatus = frames.map((f) => f.event).lastIndexOf('status');
+    const firstContent = frames.findIndex((f) => f.event === 'content');
+    expect(firstContent).toBeGreaterThan(lastStatus);
+  });
+
+  it('does not claim to be reading an answer on the opening turn', async () => {
+    const res = await POST(req({ kickoff: true }), ctx);
+
+    // A kickoff carries no respondent message. "Reading your answer…" would be the first thing a
+    // respondent ever sees on the surface, and it would be false.
+    expect(statusLabels(await drainSse(res))).toEqual([
+      TURN_STAGE_LABELS.checking,
+      TURN_STAGE_LABELS.choosing,
+      TURN_STAGE_LABELS.composing,
+    ]);
+  });
+
+  it('still emits the terminal done frame when the pipeline fails mid-stage', async () => {
+    // Draining the channel must not swallow the rejection: the route's catch persists the failure
+    // and emits error + done, which is what unlocks the surface for a retry. A regression here
+    // would hang the composer for the rest of the session.
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      extractAnswers: vi.fn(async () => {
+        throw new Error('extractor exploded');
+      }),
+    });
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+    const events = frames.map((f) => f.event);
+
+    // The stage it had already reached still went out, honestly.
+    expect(statusLabels(frames)).toEqual([TURN_STAGE_LABELS.reading]);
+    expect(events).toContain('error');
+    expect(events.at(-1)).toBe('done');
+  });
+
+  it('sends no stage frames when a retried turn is replayed from its persisted row', async () => {
+    // A replay does no work at all — it re-emits a turn already persisted. Narrating stages over it
+    // would invent a pipeline run that is not happening.
+    transcriptMock.findTurnByIdempotencyKey.mockResolvedValue({
+      agentResponse: 'How large is the team?',
+      warnings: [],
+      reasoning: [],
+    });
+
+    const frames = await drainSse(
+      await POST(
+        req({ message: 'hi', idempotencyKey: '3f1c8c62-1f5e-4a2b-9c7d-2a4b6e8f0a11' }),
+        ctx
+      )
+    );
+
+    expect(statusLabels(frames)).toEqual([]);
+    expect(frames.map((f) => f.event)).toContain('content');
   });
 });

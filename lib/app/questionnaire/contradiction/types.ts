@@ -107,6 +107,32 @@ export interface ContradictionContext {
    */
   currentStatement?: string;
   /**
+   * The question the respondent's LATEST MESSAGE is answering — the one the interviewer asked on
+   * the previous turn.
+   *
+   * Without it the detector is the ONE agent in the turn that does not know what is being asked.
+   * It sees the stored answers with their question text, and then a naked message ("40 hrs"), and
+   * is invited to decide whether that message is incompatible with anything on record. Session
+   * 5GB3M8SS is the case: "How many hours are you actually working?" → 70, then "What would a
+   * sustainable number of weekly hours look like?" → "40 hrs", reported as a contradiction. Both
+   * answers were extracted correctly; only the detector could not tell that the second number
+   * belonged to a different question.
+   *
+   * Absent in data-slot mode (there is no single active question — the respondent answers an open
+   * prompt) and on a kickoff turn.
+   */
+  activeQuestion?: { key: string; prompt: string };
+  /**
+   * A short tail of the conversation before this message, oldest → newest, for INTERPRETATION
+   * only — how the question was actually put, and what the respondent was responding to.
+   *
+   * Deliberately short and NOT governed by `windowN`. The window says how much *evidence* to
+   * compare; this is context for reading one message. Feeding the whole transcript here would hand
+   * the detector pages of prose that were never answers and invite it to find tension in them,
+   * which is the failure mode this whole seam exists to close.
+   */
+  recentMessages?: string[];
+  /**
    * Definitions / glossary (P16): the questionnaire's curated definitions for the terms in play,
    * as `"- <term>: <definition>"` lines.
    *

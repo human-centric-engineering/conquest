@@ -42,7 +42,7 @@ import {
   AUTO_REVEAL_COLLAPSE_MS,
   computeReasoningDwellMs,
 } from '@/components/app/questionnaire/chat/reasoning-trace';
-import { ThinkingIndicator } from '@/components/admin/orchestration/chat/thinking-indicator';
+import { TurnProgress } from '@/components/app/questionnaire/chat/turn-progress';
 import { cn } from '@/lib/utils';
 import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
@@ -118,6 +118,7 @@ export function CurrentExchange({
     animateOpening,
     composerReady,
     isTerminal,
+    stageLabel,
   } = useConversation();
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -224,16 +225,19 @@ export function CurrentExchange({
         );
       })}
 
-      {/* Awaiting a reply — a calm "thinking" indicator. The reply then types itself in once
-          it lands as a committed turn (above). Only shown once the reveal queue has caught up
-          to every committed turn, so it never doubles with an active turn's own beat/typing
-          while earlier opening messages are still revealing. */}
+      {/* Awaiting a reply. The reply then types itself in once it lands as a committed turn
+          (above). Only shown once the reveal queue has caught up to every committed turn, so it
+          never doubles with an active turn's own beat/typing while earlier opening messages are
+          still revealing. */}
       {streaming && revealCursor >= turns.length && (
         <AssistantTurn>
-          {/* A calm "thinking" indicator stands in while the reply composes; the reasoning trace
-              reveals on the settled turn (above), tucking itself away under the "Animated"
-              placement. */}
-          <ThinkingIndicator className="min-h-6" />
+          {/* P20 Phase 2: the stage the server is actually on — paced and faded so a fast sequence
+              is readable (F20.5) — plus an elapsed clock once the wait is long enough to warrant
+              one. This is the one place a respondent watches the whole multi-call wait, so it is
+              the one that gets both. It owns its own row height, which has to stay one row: the
+              accent mark beside it is pinned to the turn's first line. The reasoning trace still
+              reveals on the settled turn (above), tucking itself away under "Animated". */}
+          <TurnProgress label={stageLabel} />
         </AssistantTurn>
       )}
 

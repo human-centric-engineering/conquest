@@ -1488,3 +1488,174 @@ describe('runDataSlotTurn — must-ask hoist (P18)', () => {
     expect(result.response.kind).toBe('question');
   });
 });
+
+/* ── Stage progress (P20 Phase 2) ─────────────────────────────────────────── */
+
+describe('runDataSlotTurn — stage progress reporting', () => {
+  it('reports the same three stages as question mode, in the same order', async () => {
+    // Parity matters: a respondent cannot tell which pipeline their questionnaire runs, so the
+    // account of the wait must not differ between them.
+    const { invokers } = stubInvokers();
+    const seen: string[] = [];
+
+    await runDataSlotTurn(
+      dsState({
+        userMessage: 'we run mostly on referrals',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      }),
+      invokers,
+      (s) => seen.push(s)
+    );
+
+    expect(seen).toEqual(['reading', 'checking', 'choosing']);
+  });
+
+  it('does not claim to be reading an answer on the opening turn', async () => {
+    const { invokers } = stubInvokers();
+    const seen: string[] = [];
+
+    await runDataSlotTurn(
+      dsState({
+        userMessage: '',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      }),
+      invokers,
+      (s) => seen.push(s)
+    );
+
+    expect(seen).not.toContain('reading');
+  });
+
+  it('reaches the same decision whether or not a reporter is supplied', async () => {
+    const build = () =>
+      dsState({
+        userMessage: 'mostly referrals',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      });
+
+    const withReporter = await runDataSlotTurn(build(), stubInvokers().invokers, () => {});
+    const without = await runDataSlotTurn(build(), stubInvokers().invokers);
+
+    expect(withReporter).toEqual(without);
+  });
+});
+
+/* ── Reading the answer: concurrency (P20 Phase 3 / A1) ───────────────────── */
+
+describe('runDataSlotTurn — extraction and sensitivity detection overlap', () => {
+  function withTimeout<T>(p: Promise<T>, ms = 2_000): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('extraction and detection did not overlap')), ms)
+      ),
+    ]);
+  }
+
+  it('runs both calls concurrently, exactly as question mode does', async () => {
+    // Parity is the point: a respondent cannot tell which pipeline their questionnaire runs, so
+    // the saving must not apply to only one of them. Deadlocks if re-serialised.
+    let detectionStarted!: () => void;
+    const detectionHasStarted = new Promise<void>((resolve) => {
+      detectionStarted = resolve;
+    });
+
+    const invokers = {
+      ...stubInvokers().invokers,
+      extractAnswers: async () => {
+        await detectionHasStarted;
+        return { intents: [], costUsd: 0 };
+      },
+      detectSensitivity: async () => {
+        detectionStarted();
+        return { assessment: null, costUsd: 0 };
+      },
+    };
+
+    const result = await withTimeout(
+      runDataSlotTurn(
+        dsState({
+          userMessage: 'mostly referrals',
+          questions: [q({ id: 'q1' })],
+          dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+          config: { sensitivityAwareness: true, abuseThreshold: 0 },
+        }),
+        invokers
+      )
+    );
+
+    expect(result.response.kind).toBe('data_slot');
+  });
+
+  it('still keeps the seriousness judge out of the batch', async () => {
+    const { invokers: base, calls } = stubInvokers({
+      serious: { verdict: { serious: false, reason: 'sounds implausible' } },
+    });
+    const invokers = {
+      ...base,
+      detectSensitivity: async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return {
+          assessment: {
+            detected: true as const,
+            severity: 'high' as const,
+            category: 'harassment',
+            summary: 'discloses harm at work',
+          },
+          costUsd: 0,
+        };
+      },
+    };
+
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'my manager has been making my life hell',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' })],
+        config: { sensitivityAwareness: true, abuseThreshold: 4 },
+      }),
+      invokers
+    );
+
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+    expect(result.sensitivity?.detected).toBe(true);
+  });
+
+  it('preserves the data-slot fills the extraction returned', async () => {
+    // The data-slot pipeline reads a field question mode does not (`dataSlotFills`); moving the
+    // extraction into a batch must not drop it.
+    const invokers = {
+      ...stubInvokers().invokers,
+      extractAnswers: async () => ({
+        intents: [],
+        dataSlotFills: [
+          {
+            dataSlotKey: 'd1',
+            value: 'referrals',
+            paraphrase: 'mostly referrals',
+            provenance: 'direct' as const,
+            confidence: 0.9,
+          },
+        ],
+        costUsd: 0,
+      }),
+    };
+
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'mostly referrals',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+        config: { sensitivityAwareness: true, abuseThreshold: 0 },
+      }),
+      invokers
+    );
+
+    expect(result.sideEffects.dataSlotFills).toHaveLength(1);
+    expect(result.sideEffects.dataSlotFills?.[0]?.dataSlotKey).toBe('d1');
+  });
+});

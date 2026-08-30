@@ -18,6 +18,7 @@ import {
 import {
   applyIntents,
   COMPLETE_MESSAGE,
+  DETECT_SENSITIVITY_TOOL_SLUG,
   NONE_MESSAGE,
   runTurn,
   SELECTION_TOOL_SLUG,
@@ -730,5 +731,288 @@ describe('runTurn — soft cost cap (F6.3)', () => {
     if (result.response.kind === 'offer') {
       expect(result.response.input.costWrapUp).toBeUndefined();
     }
+  });
+});
+
+/* ── Stage progress (P20 Phase 2) ─────────────────────────────────────────── */
+
+describe('runTurn — stage progress reporting', () => {
+  /** Collect the stages a turn reports, in the order it reports them. */
+  function recorder() {
+    const seen: string[] = [];
+    return { seen, onStage: (s: string) => seen.push(s) };
+  }
+
+  it('reports reading → checking → choosing across an ordinary answered turn', async () => {
+    const { invokers } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a', value: 1 })] },
+      select: { decision: { kind: 'ask', questionId: 'q2', rationale: 'next up', costUsd: 0 } },
+    });
+    const { seen, onStage } = recorder();
+
+    await runTurn(
+      state({
+        userMessage: 'we are about forty people',
+        questions: [q({ id: 'q1', key: 'a' }), q({ id: 'q2', key: 'b' })],
+      }),
+      invokers,
+      onStage
+    );
+
+    // The order is the respondent-visible narrative of the turn; getting it wrong would have the
+    // surface claim it is choosing a question before it has read the answer.
+    expect(seen).toEqual(['reading', 'checking', 'choosing']);
+  });
+
+  it('does not claim to be reading an answer on a kickoff turn', async () => {
+    // The opening has no respondent message, so nothing is read. Announcing "Reading your
+    // answer…" there would be a plain falsehood on the very first thing a respondent sees.
+    const { invokers } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    });
+    const { seen, onStage } = recorder();
+
+    await runTurn(
+      state({ userMessage: '', questions: [q({ id: 'q1', key: 'a' })] }),
+      invokers,
+      onStage
+    );
+
+    expect(seen).not.toContain('reading');
+    expect(seen).toEqual(['checking', 'choosing']);
+  });
+
+  it('stops reporting at the point an abusive turn abandons the session', async () => {
+    // The abandon branch returns early with a terminal message and runs no further step. Reporting
+    // "Choosing what to ask next…" after that would promise a question that is never coming.
+    const { invokers } = stubInvokers({
+      serious: { verdict: { serious: false, reason: 'not a genuine attempt' } },
+    });
+    const { seen, onStage } = recorder();
+
+    const result = await runTurn(
+      state({
+        userMessage: 'nonsense',
+        questions: [q({ id: 'q1', key: 'a' })],
+        config: { abuseThreshold: 1 },
+      }),
+      invokers,
+      onStage
+    );
+
+    expect(result.abuse?.abandon).toBe(true);
+    expect(seen).toEqual(['reading']);
+  });
+
+  it('does not report a selection stage on a turn that offers completion instead', async () => {
+    // An offer turn selects nothing — the route composes the wrap-up prose. "Choosing what to ask
+    // next…" would be wrong twice over: there is no choosing, and there is no next question.
+    const { invokers } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    });
+    const { seen, onStage } = recorder();
+
+    const result = await runTurn(
+      state({
+        userMessage: '',
+        questions: [
+          q({ id: 'a', key: 'a', prompt: 'Q A' }),
+          q({ id: 'b', key: 'b', prompt: 'Q B' }),
+        ],
+        answered: [
+          { questionId: 'a', confidence: null },
+          { questionId: 'b', confidence: null },
+        ],
+        config: { minQuestionsAnswered: 2 },
+      }),
+      invokers,
+      onStage
+    );
+
+    expect(result.response.kind).toBe('offer');
+    expect(seen).not.toContain('choosing');
+  });
+
+  it('produces an identical result whether or not a reporter is supplied', async () => {
+    // The purity contract: `onStage` is a side-effect callback, so the decision the core reaches
+    // must not depend on anyone listening.
+    const build = () =>
+      state({
+        userMessage: 'about forty people',
+        questions: [q({ id: 'q1', key: 'a' }), q({ id: 'q2', key: 'b' })],
+      });
+    const cfg = {
+      extract: { intents: [intent({ slotKey: 'a', value: 1 })] },
+      select: {
+        decision: { kind: 'ask' as const, questionId: 'q2', rationale: 'next up', costUsd: 0 },
+      },
+    };
+
+    const withReporter = await runTurn(build(), stubInvokers(cfg).invokers, () => {});
+    const without = await runTurn(build(), stubInvokers(cfg).invokers);
+
+    expect(withReporter).toEqual(without);
+  });
+
+  it('runs unchanged when no reporter is passed at all', async () => {
+    // Every pre-P20 caller and test omits the parameter; it must stay entirely optional.
+    const { invokers } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    });
+
+    const result = await runTurn(state({ questions: [q({ id: 'q1', key: 'a' })] }), invokers);
+
+    expect(result.response.kind).toBe('question');
+  });
+});
+
+/* ── Reading the answer: concurrency (P20 Phase 3 / A1) ───────────────────── */
+
+describe('runTurn — extraction and sensitivity detection overlap', () => {
+  /** Fail rather than hang if the two calls are serialised again. */
+  function withTimeout<T>(p: Promise<T>, ms = 2_000): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('extraction and detection did not overlap')), ms)
+      ),
+    ]);
+  }
+
+  const SENSITIVE_STATE = () =>
+    state({
+      userMessage: 'we are about forty people',
+      questions: [q({ id: 'q1', key: 'a' })],
+      config: { sensitivityAwareness: true, abuseThreshold: 0 },
+    });
+
+  it('runs both calls concurrently rather than one after the other', async () => {
+    // The proof is a deliberate deadlock: extraction cannot finish until detection has STARTED.
+    // Serialised, extraction would wait on a detection that has not been called — and the timeout
+    // above turns that into a failure instead of a hung suite.
+    let detectionStarted!: () => void;
+    const detectionHasStarted = new Promise<void>((resolve) => {
+      detectionStarted = resolve;
+    });
+
+    const base = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    }).invokers;
+
+    const invokers = {
+      ...base,
+      extractAnswers: async () => {
+        await detectionHasStarted;
+        return { intents: [], costUsd: 0 };
+      },
+      detectSensitivity: async () => {
+        detectionStarted();
+        return { assessment: null, costUsd: 0 };
+      },
+    };
+
+    const result = await withTimeout(runTurn(SENSITIVE_STATE(), invokers));
+
+    expect(result.response.kind).toBe('question');
+  });
+
+  it('records the two tool calls in their original order despite finishing out of order', async () => {
+    // `toolCalls` is a read surface (Diagnostics, the persisted turn). Letting the completion order
+    // decide it would make the record non-deterministic from one turn to the next.
+    const base = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    }).invokers;
+
+    const invokers = {
+      ...base,
+      // Detection finishes FIRST here — the opposite of the order they are recorded in.
+      extractAnswers: async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return { intents: [], costUsd: 0 };
+      },
+      detectSensitivity: async () => ({ assessment: null, costUsd: 0 }),
+    };
+
+    const result = await withTimeout(runTurn(SENSITIVE_STATE(), invokers));
+    const order = slugs(result.toolCalls);
+
+    expect(order.indexOf(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG)).toBeLessThan(
+      order.indexOf(DETECT_SENSITIVITY_TOOL_SLUG)
+    );
+  });
+
+  it('sums the cost of both calls regardless of which returned first', async () => {
+    const base = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    }).invokers;
+
+    const invokers = {
+      ...base,
+      extractAnswers: async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return { intents: [], costUsd: 0.004 };
+      },
+      detectSensitivity: async () => ({ assessment: null, costUsd: 0.001 }),
+    };
+
+    const result = await withTimeout(runTurn(SENSITIVE_STATE(), invokers));
+
+    expect(result.costUsd).toBeCloseTo(0.005, 6);
+  });
+
+  it('does not call the detector at all when sensitivity awareness is off', async () => {
+    // The concurrency must not turn an opted-out call into an always-on one.
+    const { invokers, calls } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 } },
+    });
+
+    await runTurn(
+      state({
+        userMessage: 'about forty',
+        questions: [q({ id: 'q1', key: 'a' })],
+        config: { sensitivityAwareness: false, abuseThreshold: 0 },
+      }),
+      invokers
+    );
+
+    expect(calls.sensitivity).toHaveLength(0);
+    expect(calls.extract).toHaveLength(1);
+  });
+
+  it('keeps the seriousness judge OUT of the concurrent batch', async () => {
+    // The load-bearing one. The judge must never SEE a disclosure, and whether this turn is one is
+    // not known until the detector returns — so it cannot join the batch. If it were added, this
+    // slow detector would not have reported its disclosure in time and the judge would have run.
+    const { invokers: base, calls } = stubInvokers({
+      serious: { verdict: { serious: false, reason: 'sounds implausible' } },
+    });
+    const invokers = {
+      ...base,
+      detectSensitivity: async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return {
+          assessment: {
+            detected: true as const,
+            severity: 'high' as const,
+            category: 'harassment',
+            summary: 'discloses harm at work',
+          },
+          costUsd: 0,
+        };
+      },
+    };
+
+    const result = await runTurn(
+      state({
+        userMessage: 'my manager has been making my life hell',
+        questions: [q({ id: 'q1', key: 'a' })],
+        config: { sensitivityAwareness: true, abuseThreshold: 4 },
+      }),
+      invokers
+    );
+
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+    expect(result.sensitivity?.detected).toBe(true);
   });
 });

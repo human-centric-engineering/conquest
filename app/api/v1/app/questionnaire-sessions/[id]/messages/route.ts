@@ -64,6 +64,9 @@ import {
 import {
   runTurn,
   runDataSlotTurn,
+  createStageChannel,
+  streamStageStatus,
+  TURN_STAGE_LABELS,
   DATA_SLOT_FILLED_THRESHOLD,
   type TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
@@ -807,11 +810,20 @@ async function handleMessage(
 
       // Data Slots feature: data-slot mode runs the parallel orchestrator (targets data slots,
       // fills questions in the background); otherwise the question-mode pipeline.
+      //
+      // P20 Phase 2: the pipeline is handed a stage reporter and its promise is DRAINED rather than
+      // plainly awaited, so each stage becomes a `status` frame the moment it is reached. Before
+      // this the respondent watched one static "Thinking…" across four to six sequential model
+      // calls. `streamStageStatus` re-throws the pipeline's own rejection unchanged, so the catch
+      // below — the path that persists the failure and unlocks the surface — is untouched.
+      const stages = createStageChannel();
       const runPipeline = () =>
-        dataSlotMode ? runDataSlotTurn(state, invokers) : runTurn(state, invokers);
+        dataSlotMode
+          ? runDataSlotTurn(state, invokers, stages.emit)
+          : runTurn(state, invokers, stages.emit);
       let result: Awaited<ReturnType<typeof runPipeline>>;
       try {
-        result = await runPipeline();
+        result = yield* streamStageStatus(stages, runPipeline());
       } catch (err) {
         // Diagnostics: the deterministic orchestrator threw — the one path that otherwise leaves a
         // respondent with a dead stream and no record. Persist the error, then emit a graceful
@@ -914,6 +926,11 @@ async function handleMessage(
       // Data Slots feature: the data-slot id this turn targeted (set in the data_slot branch),
       // persisted separately so the per-slot re-ask/park counter is unambiguous.
       let targetedDataSlotId: string | null = null;
+      // P20 Phase 2, the last stage: the pipeline has decided, and what remains is the phrasing call
+      // whose FIRST TOKEN ends the wait. Emitted here rather than from the orchestrator because
+      // composing is the route's own work, and it covers every branch below — including the two
+      // deterministic ones, which resolve fast enough that the frame is simply overtaken by content.
+      yield { type: 'status', message: TURN_STAGE_LABELS.composing };
       if (result.response.kind === 'offer') {
         const offer = yield* streamOfferMessage({
           // House rules govern the wrap-up too — the orchestrator core builds the offer input from

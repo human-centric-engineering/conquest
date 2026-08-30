@@ -21,6 +21,7 @@ import {
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import {
+  applyCompareWindow,
   buildContradictionNoticeMessage,
   buildContradictionProbe,
   contradictionKey,
@@ -253,7 +254,7 @@ export async function runContradictionPhase(
   }
 
   // ── Detect over the PRE-MERGE answers (see `priorAnswers`) + the latest message. ──
-  const priorAnswers = opts.priorAnswers ?? effective.existingAnswers;
+  const allPriorAnswers = opts.priorAnswers ?? effective.existingAnswers;
   const decision = shouldRunDetection(
     effective.config.contradictionMode,
     effective.config.contradictionWindowN,
@@ -263,6 +264,12 @@ export async function runContradictionPhase(
       turnIndex: effective.selectionRound,
     }
   );
+  // The configured look-back, finally applied. `shouldRunDetection` has always returned a
+  // `compareWindow` and every caller has always ignored it, so "check against the last N answers"
+  // silently meant "check against all of them". It sits before the floor so the floor would count
+  // what the detector sees — though as written that ordering is unobservable: `canDetect` requires
+  // `hasMessage`, which pins the floor at 1, and a window never narrows a non-empty list below 1.
+  const priorAnswers = applyCompareWindow(allPriorAnswers, decision.compareWindow);
   // Floor: with a latest message (fed to the detector as `currentStatement`), ONE stored answer is
   // enough — it can contradict the message. Without one, we need ≥2 answers to compare each other.
   const floor = opts.hasMessage ? 1 : MIN_CONTRADICTION_ANSWERS;

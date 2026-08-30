@@ -80,6 +80,7 @@ function makeReturn(
     turns: [],
     streaming: false,
     streamingText: '',
+    stageLabel: null,
     inspectorTurns: [],
     status: 'idle',
     error: null,

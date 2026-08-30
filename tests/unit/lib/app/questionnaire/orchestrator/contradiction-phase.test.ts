@@ -673,6 +673,99 @@ describe('runContradictionPhase — priorAnswers override', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// look-back window
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `contradictionWindowN` was computed and thrown away for the whole life of the feature: the phase
+ * read `decision.run` and never `decision.compareWindow`, so "check each new answer against the
+ * last 3" meant "against all of them". The admin field promised something the detector did not do,
+ * and every extra answer in the comparison is another chance at a false positive.
+ */
+describe('runContradictionPhase — look-back window', () => {
+  const FIVE = [
+    { slotKey: 'a1', value: 1, provenance: 'direct' as const },
+    { slotKey: 'a2', value: 2, provenance: 'direct' as const },
+    { slotKey: 'a3', value: 3, provenance: 'direct' as const },
+    { slotKey: 'a4', value: 4, provenance: 'direct' as const },
+    { slotKey: 'a5', value: 5, provenance: 'direct' as const },
+  ];
+
+  it('shows the detector only the most recent N answers', async () => {
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: 'x',
+      questions: [q({ id: 'a1', key: 'a1' })],
+      config: { contradictionMode: 'flag', contradictionWindowN: 2 },
+      existingAnswers: FIVE,
+    });
+
+    await runPhase(s, inv);
+
+    // `existingAnswers` is oldest → newest, so the window is the tail.
+    expect(inv.calls.detect[0]?.existingAnswers.map((a) => a.slotKey)).toEqual(['a4', 'a5']);
+  });
+
+  it('shows the detector everything when no window is configured', async () => {
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: 'x',
+      questions: [q({ id: 'a1', key: 'a1' })],
+      config: { contradictionMode: 'flag', contradictionWindowN: 0 },
+      existingAnswers: FIVE,
+    });
+
+    await runPhase(s, inv);
+
+    expect(inv.calls.detect[0]?.existingAnswers).toHaveLength(5);
+  });
+
+  it('narrows the priorAnswers override too, not just the effective answers', async () => {
+    // The live turn always passes pre-merge answers, so a window applied only to the default
+    // would be a window that never fired in production.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: 'x',
+      questions: [q({ id: 'a1', key: 'a1' })],
+      config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      existingAnswers: [{ slotKey: 'zz', value: 0, provenance: 'direct' as const }],
+    });
+
+    await runContradictionPhase(s, inv.invokers, {
+      hasMessage: true,
+      disregarded: false,
+      dataMode: false,
+      labels: emptyLabels,
+      priorAnswers: FIVE,
+    });
+
+    expect(inv.calls.detect[0]?.existingAnswers.map((a) => a.slotKey)).toEqual(['a5']);
+  });
+
+  it('does not run the detector on a turn with no message to check', async () => {
+    // Named for what it proves. It was written as "counts the floor against what the detector will
+    // actually see", which it does not: `canDetect` opens with `opts.hasMessage &&`, so on a
+    // no-message turn the window and the floor are never reached — the assertion below holds with
+    // `applyCompareWindow` deleted outright. (The window IS covered, by the two tests above, which
+    // do fail without it.) The floor's answer-vs-answer arm is in fact unreachable today: whenever
+    // it is evaluated `hasMessage` is true, so the floor is 1, and a non-empty answer list can
+    // never be narrowed below 1 by a window. Left as-is rather than "fixed" here — collapsing that
+    // arm changes when the detector runs, which is a product decision, not a test cleanup.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    await runPhase(s, inv, { hasMessage: false });
+
+    expect(inv.calls.detect).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // questionProbeLabels helper
 // ─────────────────────────────────────────────────────────────────────────────
 

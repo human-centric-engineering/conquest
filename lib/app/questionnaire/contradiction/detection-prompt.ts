@@ -26,11 +26,14 @@ import {
 /** Build the system rules. Under `probe` the model is asked for a follow-up
  *  question; under `flag`/`off` it is not (those modes surface passively).
  *  When `withCurrentStatement` is set, the model is also told to weigh the
- *  respondent's latest message against the captured answers (reversal detection). */
+ *  respondent's latest message against the captured answers (reversal detection) —
+ *  and, when `withActiveQuestion` is set, that the message is an answer to a NAMED
+ *  question, which is what stops a new answer being read as a reversal. */
 function systemRules(
   mode: ContradictionContext['mode'],
   withCurrentStatement: boolean,
-  hasGlossary: boolean
+  hasGlossary: boolean,
+  withActiveQuestion: boolean
 ): string {
   const probeLine =
     mode === 'probe'
@@ -66,10 +69,24 @@ report a conflict that survives once the terms are pinned down.`
     : '';
 
   const latestMessageRule = withCurrentStatement
-    ? `\n- ALSO compare the respondent's LATEST MESSAGE (given below) against each recorded answer. \
-When the latest message reverses or is incompatible with a recorded answer — e.g. they now express \
-the opposite sentiment to one recorded earlier — report it against that answer's key, even though \
-only one recorded answer is involved.`
+    ? `\n- ALSO weigh the respondent's LATEST MESSAGE (given below) against the recorded answers, \
+but ONLY where it genuinely revisits THE SAME question — e.g. they now express the opposite \
+sentiment to one recorded earlier, or restate a figure they gave before with a different number. \
+Report that against the recorded answer's key, even though only one recorded answer is involved.`
+    : '';
+
+  // The false positive this rule exists for: session 5GB3M8SS answered "70" to hours actually
+  // worked and "40 hrs" to the sustainable-hours question one turn later, and the second number
+  // was put to the respondent as a contradiction. The detector had the first question's text and
+  // a naked "40 hrs" — from where it sat, the finding was the reasonable reading.
+  const newAnswerRule = withCurrentStatement
+    ? `\n- The LATEST MESSAGE is usually the respondent ANSWERING THE QUESTION THEY WERE JUST \
+ASKED${withActiveQuestion ? ', which is named below' : ''}. An answer to a DIFFERENT question is a \
+NEW ANSWER, never a reversal of an existing one. Questions that ask about different things routinely \
+take different values, and that is not a conflict: what someone does NOW vs what they would PREFER \
+or find sustainable, an actual figure vs a target or an ideal, one period or role or scenario vs \
+another. Before reporting the latest message against a recorded answer, satisfy yourself that both \
+are answers to the SAME question and cannot both be true.`
     : '';
 
   return `You review a respondent's answers in a conversational questionnaire and report only \
@@ -93,7 +110,7 @@ conflict with each other.
 can only say the answers MIGHT differ, they do not contradict — return nothing for them.
 - Never invent a conflict to have something to say. If the answers are consistent, return an empty \
 "contradictions" array.
-- Only reference questions in the provided list, and only ones that have an answer.${glossaryRule}${latestMessageRule}
+- Only reference questions in the provided list, and only ones that have an answer.${glossaryRule}${newAnswerRule}${latestMessageRule}
 
 Output: respond with ONLY a single JSON object: { "contradictions": [ ... ] }. Do not wrap the \
 JSON in prose or code fences.`;
@@ -176,18 +193,48 @@ export function buildContradictionDetectionPrompt(ctx: ContradictionContext): Ll
 
   const glossaryBlock = formatGlossarySection(ctx.glossary ?? []);
 
+  // The question on the table, when there is one. Rendered immediately BEFORE the latest message
+  // so the two read as what they are — a question and its answer — rather than the message
+  // arriving as a free-floating claim to be checked against everything on record.
+  const activeQuestion = hasLatest ? ctx.activeQuestion : undefined;
+  const activeQuestionBlock = activeQuestion
+    ? `The question the respondent was just asked — their LATEST MESSAGE is the answer to THIS ` +
+      `question:\n- key: ${activeQuestion.key}\n  question: ${activeQuestion.prompt}\n\n`
+    : '';
+
+  const transcript =
+    hasLatest && ctx.recentMessages && ctx.recentMessages.length > 0
+      ? `Recent conversation (oldest first), for context only — these lines are NOT answers to ` +
+        `check:\n${ctx.recentMessages.map((m) => `  • ${m}`).join('\n')}\n\n`
+      : '';
+
   const userContent =
     // Definitions first: an answer can only be judged for conflict once its words are pinned down.
     (glossaryBlock.length > 0 ? `${glossaryBlock}\n\n` : '') +
     `Answered questions to check for contradictions:\n${answeredLines.join('\n')}\n\n` +
     (hasLatest
-      ? `The respondent's LATEST MESSAGE:\n"${latestMessage}"\n\n` +
-        `Report genuine logical contradictions between these answers, AND any answer the latest ` +
-        `message reverses or is incompatible with.`
+      ? transcript +
+        activeQuestionBlock +
+        `The respondent's LATEST MESSAGE:\n"${latestMessage}"\n\n` +
+        (activeQuestion
+          ? `Report genuine logical contradictions between the recorded answers, AND — only if the ` +
+            `latest message revisits a question it is NOT the answer to, and cannot both be true ` +
+            `with what is recorded there — that answer too. A different question taking a ` +
+            `different value is a new answer, not a contradiction.`
+          : `Report genuine logical contradictions between these answers, AND any answer the ` +
+            `latest message reverses or is incompatible with.`)
       : `Report only genuine logical contradictions between these answers.`);
 
   return [
-    { role: 'system', content: systemRules(ctx.mode, hasLatest, glossaryBlock.length > 0) },
+    {
+      role: 'system',
+      content: systemRules(
+        ctx.mode,
+        hasLatest,
+        glossaryBlock.length > 0,
+        activeQuestion !== undefined
+      ),
+    },
     { role: 'user', content: userContent },
   ];
 }

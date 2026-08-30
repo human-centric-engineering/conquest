@@ -7,6 +7,13 @@
  * I/O (persistence, cost logging, the turn record, the streamed offer prose) is the
  * route's job; the core only *decides*.
  *
+ * The optional `onStage` reporter (P20 Phase 2) does not weaken that. It is a synchronous
+ * side-effect callback the core invokes as it crosses a stage boundary, so the route can tell
+ * the respondent which of the turn's several model calls is running instead of showing one
+ * static "Thinking…". It performs no I/O, returns nothing, and cannot fail the turn — the
+ * {@link TurnResult} is identical whether or not it is supplied. See
+ * `lib/app/questionnaire/orchestrator/stage-progress.ts`.
+ *
  * Pipeline order (a step is skipped, not failed, when its flag/config is off):
  *   1. Extract answer slots from the message (F4.2) — only with a non-empty message.
  *   2. Merge the extracted intents into an *effective* state (coverage + values) so the
@@ -53,6 +60,7 @@ import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
+import type { StageEmitter } from '@/lib/app/questionnaire/orchestrator/stage-progress';
 import type { ChatEvent } from '@/types/orchestration';
 
 import type {
@@ -166,7 +174,17 @@ function toolCall(
   };
 }
 
-export async function runTurn(state: TurnState, invokers: CapabilityInvokers): Promise<TurnResult> {
+export async function runTurn(
+  state: TurnState,
+  invokers: CapabilityInvokers,
+  /**
+   * Optional progress reporter (P20 Phase 2) — called as the turn crosses a stage boundary so the
+   * route can tell the respondent what is happening instead of one static "Thinking…". Purely a
+   * side-effect callback: it does no I/O, cannot fail the turn, and changing it changes nothing
+   * about the {@link TurnResult}. Omitted by every caller that does not stream.
+   */
+  onStage?: StageEmitter
+): Promise<TurnResult> {
   const events: ChatEvent[] = [];
   const toolCalls: ToolCallRecord[] = [];
   const answerUpserts: AnswerSlotIntent[] = [];
@@ -178,49 +196,72 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
   let extractedSensitivity: SensitivityAssessment | undefined;
 
-  // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
-  //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
-  //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
-  if (hasMessage) {
-    const out = await invokers.extractAnswers(state);
-    costUsd += out.costUsd;
+  // 1 + 1.4 — the two calls that READ what the respondent just said, launched TOGETHER (P20 A1).
+  //
+  //   1.   Extract answer slots. The extractor also emits a `suspectedNonGenuine` hint, but it
+  //        proved an unreliable GATE (an optional flag the model often omits even for blatant
+  //        abuse) — so it is no longer what decides whether the judge runs; see 1.5.
+  //   1.4  Sensitivity detection (safeguarding). Detection is too important to ride solely on the
+  //        extractor's optional `sensitivity` field — it gets dropped non-deterministically on busy
+  //        turns (the same failure the `suspectedNonGenuine` hint showed), so a real disclosure
+  //        ("i'm being abused by my manager") can go unflagged and no support is signposted. When
+  //        the feature is on we ALSO run a dedicated single-purpose detector AND a deterministic
+  //        keyword floor, and merge all three (strongest signal wins).
+  //
+  // These were serial purely by CODE ORDER. The detector takes nothing from the extractor: both
+  // read only `state` and the message, and `mergeSensitivitySignals` combines their results
+  // afterwards regardless of which finished first. Overlapping them removes a whole model
+  // round-trip from every turn of a sensitivity-aware questionnaire, while changing no input, no
+  // prompt and no verdict.
+  //
+  // The seriousness judge (1.5) is deliberately NOT in this batch, though it would save another
+  // round-trip: it must never SEE a disclosure, and whether this turn is one is not known until
+  // both of the above have returned. See the gate's own comment.
+  const runExtraction = hasMessage;
+  const runDetection = hasMessage && state.config.sensitivityAwareness;
+  // One sentence covers steps 1 -> 1.5: extraction, sensitivity detection and the seriousness
+  // judge all read what the respondent just said. See `TURN_STAGES` for why it is not three.
+  if (runExtraction) onStage?.('reading');
+  const [extraction, detection] = await Promise.all([
+    runExtraction ? invokers.extractAnswers(state) : null,
+    runDetection ? invokers.detectSensitivity(state) : null,
+  ]);
+
+  // Recorded in the ORIGINAL sequence, so the persisted `toolCalls` order is unchanged by the
+  // concurrency — it is a read surface (Diagnostics, the turn record) that callers order-match.
+  if (extraction) {
+    costUsd += extraction.costUsd;
     toolCalls.push(
-      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, out.diagnostic === undefined, {
-        ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
-        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
+      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, extraction.diagnostic === undefined, {
+        ...(extraction.diagnostic !== undefined ? { code: extraction.diagnostic } : {}),
+        ...(extraction.latencyMs !== undefined ? { latencyMs: extraction.latencyMs } : {}),
       })
     );
-    answerUpserts.push(...out.intents);
-    extractedSensitivity = out.sensitivity;
-    if (out.diagnostic !== undefined) {
+    answerUpserts.push(...extraction.intents);
+    extractedSensitivity = extraction.sensitivity;
+    if (extraction.diagnostic !== undefined) {
       events.push({
         type: 'warning',
-        code: out.diagnostic,
+        code: extraction.diagnostic,
         message: "I couldn't capture an answer from that — we can revisit it.",
       });
     }
   }
 
-  // 1.4 Sensitivity detection (safeguarding). Detection is too important to ride solely on the
-  //     answer-extractor's optional `sensitivity` field — it gets dropped non-deterministically on
-  //     busy turns (the same failure the seriousness gate's `suspectedNonGenuine` hint showed), so a
-  //     real disclosure ("i'm being abused by my manager") can go unflagged and no support is
-  //     signposted. So when the feature is on we ALSO run a dedicated single-purpose detector AND a
-  //     deterministic keyword floor, and merge all three (strongest signal wins). This runs BEFORE
-  //     the seriousness gate so its `!extractedSensitivity` guard sees the combined result — a
-  //     genuine disclosure must never be judged for sincerity or struck.
-  if (hasMessage && state.config.sensitivityAwareness) {
-    const detected = await invokers.detectSensitivity(state);
-    costUsd += detected.costUsd;
+  // The merge is what makes the concurrency safe: the detector's verdict, the extractor's own
+  // field and the deterministic keyword net are combined here (strongest wins), and the seriousness
+  // gate below reads only the combined result.
+  if (detection) {
+    costUsd += detection.costUsd;
     toolCalls.push(
-      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detected.diagnostic === undefined, {
-        ...(detected.diagnostic !== undefined ? { code: detected.diagnostic } : {}),
-        ...(detected.latencyMs !== undefined ? { latencyMs: detected.latencyMs } : {}),
+      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detection.diagnostic === undefined, {
+        ...(detection.diagnostic !== undefined ? { code: detection.diagnostic } : {}),
+        ...(detection.latencyMs !== undefined ? { latencyMs: detection.latencyMs } : {}),
       })
     );
     extractedSensitivity = mergeSensitivitySignals(
       extractedSensitivity, // the answer-extractor's field (may be undefined)
-      detected.assessment, // the dedicated detector
+      detection.assessment, // the dedicated detector
       keywordSensitivityFloor(state.userMessage) // the deterministic net
     );
   }
@@ -332,6 +373,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //       raised on a prior turn, or detects afresh: under `probe` mode a fresh contradiction DEFERS
   //       (ask a reconciliation question, suppress this turn's writes, park the finding); under `flag`
   //       mode it surfaces the explanation AND refines immediately. See `contradiction-phase.ts`.
+  onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
     disregarded,
@@ -444,6 +486,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     targetedQuestionId = null;
   } else {
     // Not ready to offer — pick the next question.
+    onStage?.('choosing');
     const out = await invokers.selectNext(effective);
     const decision = out.decision;
     if (decision.kind === 'ask') {

@@ -74,6 +74,41 @@ so the respondent surface unlocks for a retry instead of hanging on a dead strea
 - `getInvitationDiagnostics(versionId, invitationId)` — drill-down: lifecycle, every session's
   per-turn telemetry timeline, the full `inspectorCalls` deep-dive, and the captured error log.
   Returns `null` (→ 404) when the invitation isn't on the given version.
+- `getStageLatency(sessionIds, from, to)` — **where a turn's wall-clock goes**, split by pipeline
+  stage. See the section below; also returned inline on `getVersionDiagnostics` as `stageLatency`.
+
+### Where the time goes (stage latency)
+
+A respondent waits through four to six sequential model calls before the first token of the reply
+appears, and there was no way to tell which of them the wait actually was. `getStageLatency` answers
+that from telemetry **already on disk** — no schema change, no migration, nothing new captured.
+
+Two raw queries unnest each turn's `inspectorCalls` jsonb array:
+
+| Figure                 | Meaning                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `stages[].calls`       | how many calls carried this `AgentCallTrace.label` in the window                          |
+| `stages[].avgMs/p95Ms` | latency of a **single call** of that stage                                                |
+| `stages[].perTurnMs`   | what the stage adds to an **average turn** (`totalMs / turns`) — the number to compare on |
+| `residualMs`           | turn wall-clock **not** spent in any model call: database, embedding, persistence         |
+
+Grouping is by the call's own recorded label, not a hard-coded enum, so a stage added later shows up
+without this module changing.
+
+Three things to know before reading the numbers:
+
+1. **Both queries are restricted to turns with a `durationMs`.** That is what makes the stage totals
+   and the residual describe the same population, so `perTurnMs` is a true per-turn figure rather
+   than a total over a different denominator. Pre-telemetry turns have neither a duration nor any
+   calls and drop out of both.
+2. **`perTurnMs` is not the average call.** A stage that runs on half the turns shows a per-turn
+   figure half its own average — which is the point: it is what the stage costs the conversation,
+   not what it costs when it runs.
+3. **The residual is a floor, not a measurement, once stages overlap.** Today every model call in a
+   turn runs strictly one after another, so summed call latency is bounded by the wall-clock and the
+   difference is real overhead. Deliberately overlapping stage-1 calls (P20 Phase 3) lets the summed
+   latency exceed the wall-clock, and `residualMs` clamps to 0. That reads honestly as "the turn was
+   model-bound throughout", but it stops being an overhead measurement.
 
 ### Privacy posture
 
@@ -97,7 +132,10 @@ Admin-only (`withAdminAuth`), version-scoped via `loadScopedVersion`; query para
 - **Tab** — `diagnostics` in `QUESTIONNAIRE_WORKSPACE_TABS`, gated on the `liveSessions` flag
   (diagnostics is meaningless without respondent sessions; error **capture** is always-on regardless).
 - **Version page** — `app/admin/questionnaires/[id]/v/[vid]/diagnostics/page.tsx` → `DiagnosticsView`
-  (stat tiles + per-invitation table, date-window GET filter).
+  (stat tiles, the **Where the time goes** stage-latency panel, and the per-invitation table, with a
+  date-window GET filter). The panel is `StageLatencyPanel`; its last row — _Not in a model call_ —
+  is the one to read first, because if it dominates then shaving model round-trips will not make the
+  conversation feel faster.
 - **Drill-down** — `…/diagnostics/[invitationId]/page.tsx` → `InvitationDiagnosticsView` (lifecycle,
   telemetry tiles, error log with stack/metadata expanders, per-turn table with a read-only inspector
   deep-dive via `DiagnosticsInspectorCalls`).

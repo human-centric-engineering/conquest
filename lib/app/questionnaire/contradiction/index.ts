@@ -49,6 +49,7 @@ export {
 } from '@/lib/app/questionnaire/contradiction/detection-prompt';
 
 export {
+  applyCompareWindow,
   normalizeContradictionFindings,
   shouldRunDetection,
   summarizeFindings,

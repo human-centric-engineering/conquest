@@ -196,6 +196,27 @@ export function shouldRunDetection(
 }
 
 /**
+ * Narrow an answer list to the comparison window a {@link shouldRunDetection} decision returned.
+ *
+ * The window was computed from the first release and then never applied: every caller passed the
+ * full answer list to the detector regardless of `contradictionWindowN`, so a questionnaire
+ * configured to "check each new answer against the last 3" quietly checked it against all of them.
+ * That is not only a lie in the admin UI — a wider comparison is a wider surface for a false
+ * positive, which is what makes it worth fixing rather than deleting.
+ *
+ * `'all'` (window ≤ 0, or the completion sweep, which is never narrowed) returns the list
+ * unchanged. Otherwise the MOST RECENT `n` are kept: callers supply `existingAnswers` oldest →
+ * newest, so that is the tail. Order within the window is preserved.
+ *
+ * @param answers the candidate answers, oldest → newest
+ * @param compareWindow `'all'` or a positive count
+ */
+export function applyCompareWindow<T>(answers: readonly T[], compareWindow: number | 'all'): T[] {
+  if (compareWindow === 'all' || compareWindow <= 0) return [...answers];
+  return answers.slice(-compareWindow);
+}
+
+/**
  * Roll a finding list up into the counts-only {@link FindingsSummary} — the single
  * source of truth for both the preview route's `summary` field and the capability's
  * PII-safe `redactProvenance` preview, so the two can't drift. Carries no

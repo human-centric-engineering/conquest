@@ -35,6 +35,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { formatElapsed } from '@/lib/app/questionnaire/format-elapsed';
 import { cn } from '@/lib/utils';
 
 /** Document upload / extraction wait (the default). */
@@ -124,13 +125,6 @@ function adaptiveHold(index: number, count: number, estimatedMs: number): number
   for (let i = 0; i <= lastPaced; i++) total += triangleWeight(i, count);
   if (total <= 0) return MIN_ADAPTIVE_HOLD_MS;
   return Math.max(MIN_ADAPTIVE_HOLD_MS, (estimatedMs * triangleWeight(index, count)) / total);
-}
-
-/** Format whole seconds as mm:ss (zero-padded). */
-function formatElapsed(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 export interface StatusTickerProps {

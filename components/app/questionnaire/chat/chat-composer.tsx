@@ -121,7 +121,7 @@ export function ChatComposer({
   className,
 }: ChatComposerProps) {
   const { sendMessage } = stream;
-  const { composerReady, composerHint } = useConversation();
+  const { composerReady, composerHint, stageLabel } = useConversation();
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -278,7 +278,10 @@ export function ChatComposer({
       rows={1}
       placeholder={
         !composerReady
-          ? composerHint
+          ? // The live stage when there is one. A placeholder is not announced, so it can change
+            // as often as the server reports without making the a11y tree chatty — which is why
+            // the `role="status"` line below deliberately keeps the stable copy instead.
+            (stageLabel ?? composerHint)
           : voiceInputEnabled && !isMobile
             ? 'Speak your thoughts with the mic, or type…'
             : 'Share your thoughts…'
@@ -320,9 +323,13 @@ export function ChatComposer({
           />
         )}
         {/* Explicit wait cue while the composer is held closed. Shown visually in the disabled
-            input's placeholder (below); this copy is visually hidden (`sr-only`) but stays in
+            input's placeholder (above); this copy is visually hidden (`sr-only`) but stays in
             the a11y tree so its `role="status"` still announces the change to assistive tech (a
-            placeholder isn't announced). Hiding it removes the duplicated on-screen line. */}
+            placeholder isn't announced). Hiding it removes the duplicated on-screen line.
+
+            It announces `composerHint`, NOT the live stage label: the transcript's `TurnProgress`
+            is already a polite live region on the same wait, and pointing both at a label that
+            changes once per stage would have every stage read out twice. */}
         {!composerReady && (
           <div className="sr-only">
             <ThinkingIndicator message={composerHint} />
