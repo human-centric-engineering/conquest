@@ -106,6 +106,25 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates', ()
 const transcriptMock = vi.hoisted(() => ({ findTurnByIdempotencyKey: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/transcript', () => transcriptMock);
 
+// Cohorts & Rounds gate: only reached when a session carries a `roundId` (no fixture does by
+// default), so it's mocked here rather than left to hit real Prisma.
+const roundAccessMock = vi.hoisted(() => ({
+  assertRoundAccess: vi.fn(
+    async (): Promise<
+      { ok: true } | { ok: false; status: number; code: string; message: string }
+    > => ({ ok: true })
+  ),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/round-access', () => roundAccessMock);
+const roundBriefingMock = vi.hoisted(() => ({
+  loadRoundBriefing: vi.fn(() => Promise.resolve(null)),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing', () => roundBriefingMock);
+const peerDigestMock = vi.hoisted(() => ({
+  loadRoundPeerDigest: vi.fn(() => Promise.resolve(null)),
+}));
+vi.mock('@/lib/app/questionnaire/learning/digest', () => peerDigestMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { TURN_STAGE_LABELS } from '@/lib/app/questionnaire/orchestrator';
 import {
@@ -410,6 +429,168 @@ describe('gate order', () => {
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'sess-1', userMessage: '' })
     );
+  });
+});
+
+describe('round gating (Cohorts & Rounds)', () => {
+  function roundScopedContext() {
+    return loadedContext({
+      session: {
+        id: 'sess-1',
+        status: 'active',
+        versionId: 'v1',
+        respondentUserId: USER,
+        roundId: 'round-1',
+        cohortMemberId: 'member-1',
+      },
+    });
+  }
+
+  it('pauses the session and 409s when the round has closed', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: 'ROUND_WINDOW_CLOSED',
+      message: 'Round window has closed',
+    });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('ROUND_WINDOW_CLOSED');
+    expect(sessionsMock.pauseSession).toHaveBeenCalledWith('sess-1', { reason: 'round_closed' });
+  });
+
+  it('refuses without pausing when the member was removed from the round (not a time-window code)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: 'ROUND_MEMBER_REMOVED',
+      message: 'You are no longer part of this round',
+    });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe('ROUND_MEMBER_REMOVED');
+    expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+  });
+
+  it('runs the turn normally for a round-scoped session that is still open', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({ ok: true });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    expect(roundBriefingMock.loadRoundBriefing).toHaveBeenCalledWith('round-1', 'v1');
+    expect(peerDigestMock.loadRoundPeerDigest).toHaveBeenCalledWith('round-1', 'v1');
+    expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('scope amendment notice (P17.6)', () => {
+  const AMENDMENT = {
+    key: 'expansion',
+    label: 'Expansion plans',
+    request: 'Can we also cover expansion?',
+    atTurn: 0,
+    at: '2026-08-01T00:00:00.000Z',
+  };
+
+  /** A plan whose one amendment lands on the CURRENT turn (`selectionRound` is 0 by default). */
+  function amendedContext(opts: {
+    topic?: { dataSlotKeys: string[]; questionKeys: string[] } | null;
+    plannedMembers?: { dataSlotKeys?: string[]; questionKeys?: string[] };
+  }) {
+    const base = loadedContext();
+    return loadedContext({
+      scope: {
+        ...base.scope,
+        topics:
+          opts.topic === null
+            ? []
+            : [
+                {
+                  id: 't1',
+                  key: 'expansion',
+                  label: 'Expansion plans',
+                  description: null,
+                  phase: 'conditional' as const,
+                  criteria: null,
+                  depth: 'full' as const,
+                  members: opts.topic ?? { dataSlotKeys: ['ds1'], questionKeys: [] },
+                  ordinal: 0,
+                  source: 'analyst' as const,
+                  trigger: null,
+                },
+              ],
+        plan: {
+          v: 1 as const,
+          topics:
+            opts.topic === null
+              ? []
+              : [
+                  {
+                    key: 'expansion',
+                    depth: 'full' as const,
+                    source: 'respondent' as const,
+                    rationale: 'The respondent asked for this.',
+                    ...(opts.plannedMembers ? { members: opts.plannedMembers } : {}),
+                  },
+                ],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: '',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+          amendments: [AMENDMENT],
+        },
+      },
+    });
+  }
+
+  it('sizes the acknowledgement from the topic + planned data slots when both resolve', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      amendedContext({
+        topic: { dataSlotKeys: ['ds1', 'ds2'], questionKeys: [] },
+        plannedMembers: { dataSlotKeys: ['ds1', 'ds2'] },
+      })
+    );
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
+  });
+
+  it('falls back to the topic depth (no size claim) when the topic no longer resolves', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(amendedContext({ topic: null }));
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    // Still acknowledged, but with no "there is X on it" size clause (itemCount omitted).
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
+    expect(arg.input.briefing?.some((line) => line.includes('there is'))).toBe(false);
+  });
+
+  it('uses question-key membership when the topic has no data slots', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      amendedContext({
+        topic: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] },
+        plannedMembers: { questionKeys: ['q1', 'q2'] },
+      })
+    );
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
   });
 });
 

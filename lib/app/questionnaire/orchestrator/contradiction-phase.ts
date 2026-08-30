@@ -179,6 +179,17 @@ function pendingAsFinding(pending: PendingContradiction): ContradictionFinding {
 }
 
 /**
+ * An answer arrived this turn WITHOUT a typed message: the respondent used a question's in-chat
+ * answer control and the card persisted the value itself (P18 question fidelity). It is what
+ * separates the two kinds of message-less turn — a tap-to-answer turn, which has a brand-new answer
+ * worth checking, from the opening turn, which has nothing to check. Both orchestrators derive this
+ * from the same `TurnState` field, so it lives here once rather than at each call site.
+ */
+export function answerRecordedFrom(state: Pick<TurnState, 'answeredQuestionKey'>): boolean {
+  return state.answeredQuestionKey !== undefined;
+}
+
+/**
  * Run the contradiction phase over the (post-merge) effective state. `hasMessage` / `answerRecorded` /
  * `disregarded` gate the work; `dataMode` only tweaks the probe's consequence noun;
  * `labels` name the conflicting topics in the probe. The orchestrator passes the same `effective`

@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, configure } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import type { ConfigView } from '@/lib/app/questionnaire/views';
@@ -209,11 +209,14 @@ function selectWithOptions(values: string[]): HTMLSelectElement {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-// The settings groups' fold state persists in localStorage, so a test that folds one would
-// otherwise hide fields from every test that renders after it — file-wide, not per-describe.
-beforeEach(() => {
-  window.localStorage.clear();
-});
+/*
+ * The settings groups are an accordion and every one of them starts shut, so a field's markup is
+ * present but hidden until its group is opened. These tests are about the wiring between a control
+ * and the save payload, not about which group is open — so role queries here look inside shut
+ * groups too. What the admin can actually *reach* is pinned separately, in "the settings
+ * accordion" describe below, which is the file's contract for visibility.
+ */
+configure({ defaultHidden: true });
 
 describe('ConfigEditor', () => {
   beforeEach(() => {
@@ -1875,36 +1878,43 @@ describe('ConfigEditor — interviewer strategy', () => {
     });
   });
 
-  describe('folding the settings groups', () => {
-    // Fifteen groups is more than a screen of headings. Folding is presentation only — the whole
-    // point is that a folded group still saves, so both halves are pinned here.
+  describe('the settings accordion', () => {
+    // Fifteen groups of a dozen fields each; one open at a time, none to begin with. Folding is
+    // presentation only — a shut group still saves — so both halves are pinned here.
 
-    it('folds a single group and leaves the others open', async () => {
-      const { container } = setup();
-      const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /^Collapse Budget & limits$/i }));
-      expect(container.querySelector('#budget-fields')).not.toBeVisible();
-      expect(container.querySelector('#access-fields')).toBeVisible();
-      // The control now offers the way back.
-      expect(screen.getByRole('button', { name: /^Expand Budget & limits$/i })).toBeInTheDocument();
-    });
+    /** The header button that opens/shuts a group (the whole header is the target, not a chevron). */
+    const header = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });
 
-    it('folds every group at once, and unfolds them again', async () => {
+    it('starts with every group shut', () => {
       const { container } = setup();
-      const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /^Collapse all$/i }));
       expect(container.querySelector('#budget-fields')).not.toBeVisible();
       expect(container.querySelector('#access-fields')).not.toBeVisible();
-      await user.click(screen.getByRole('button', { name: /^Expand all$/i }));
-      expect(container.querySelector('#budget-fields')).toBeVisible();
+      expect(header('Budget & limits')).toHaveAttribute('aria-expanded', 'false');
     });
 
-    it('still saves the settings inside a folded group', async () => {
-      const { specs } = setup({ costBudgetUsd: 12 });
+    it('opens a group when its header is clicked, and shuts it again', async () => {
+      const { container } = setup();
       const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /^Collapse all$/i }));
+      await user.click(header('Budget & limits'));
+      expect(container.querySelector('#budget-fields')).toBeVisible();
+      await user.click(header('Budget & limits'));
+      expect(container.querySelector('#budget-fields')).not.toBeVisible();
+    });
+
+    it('shuts the open group when another is opened — only ever one at a time', async () => {
+      const { container } = setup();
+      const user = userEvent.setup();
+      await user.click(header('Budget & limits'));
+      await user.click(header('Access & invitations'));
+      expect(container.querySelector('#access-fields')).toBeVisible();
+      expect(container.querySelector('#budget-fields')).not.toBeVisible();
+    });
+
+    it('still saves the settings inside a shut group', () => {
+      // Every group is shut on load, budget included. Folding hides the fields; it must never
+      // drop them from the payload.
+      const { specs } = setup({ costBudgetUsd: 12 });
       clickSave();
-      // Folding hides the fields; it must never drop them from the payload.
       expect(bodyOf(specs).costBudgetUsd).toBe(12);
     });
   });

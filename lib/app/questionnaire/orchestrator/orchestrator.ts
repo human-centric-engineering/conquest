@@ -40,6 +40,7 @@ import {
 } from '@/lib/app/questionnaire/completion/progress';
 import {
   runContradictionPhase,
+  answerRecordedFrom,
   questionProbeLabels,
   MIN_CONTRADICTION_ANSWERS as MIN_CONTRADICTION_ANSWERS_INTERNAL,
 } from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
@@ -376,9 +377,7 @@ export async function runTurn(
   onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
-    // P18: an answer arrived through a question's answer control — a turn with no typed message but
-    // a brand-new answer to check. Distinguishes it from the opening turn, which has neither.
-    answerRecorded: state.answeredQuestionKey !== undefined,
+    answerRecorded: answerRecordedFrom(state),
     disregarded,
     dataMode: false,
     labels: questionProbeLabels(effective.questions),

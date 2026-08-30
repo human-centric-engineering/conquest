@@ -148,8 +148,8 @@ export const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
 // what it will actually do.
 const CONTRADICTION_MODE_LABELS: Record<ContradictionMode, string> = {
   off: 'Off',
-  flag: 'On — follow up in conversation',
-  probe: 'On — follow up in conversation',
+  flag: 'On — ask the respondent',
+  probe: 'On — ask the respondent',
 };
 
 const ANSWER_FIT_MODE_LABELS: Record<AnswerFitMode, string> = {

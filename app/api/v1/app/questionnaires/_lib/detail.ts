@@ -39,7 +39,6 @@ import {
   type AudienceProvenance,
   type AppQuestionnaireStatus,
   type AudienceShape,
-  type ContradictionMode,
   type FieldProvenance,
   type PresentationMode,
   type RespondentChrome,
@@ -228,15 +227,6 @@ function asSelectionStrategy(value: string): SelectionStrategy {
     : DEFAULT_QUESTIONNAIRE_CONFIG.selectionStrategy;
 }
 
-/**
- * Narrow a stored `contradictionMode` to what the engine should do. This is the read seam for the
- * turn state, the admin config editor and the settings summary alike, so the legacy `flag` is
- * retired here — `resolveContradictionMode` reads it as `probe` — and no stored row needs migrating.
- */
-function asContradictionMode(value: string): ContradictionMode {
-  return resolveContradictionMode(value);
-}
-
 /** Narrow a stored `answerFitMode` to the enum (default when unknown). */
 function asAnswerFitMode(value: string): AnswerFitMode {
   return (ANSWER_FIT_MODES as readonly string[]).includes(value)
@@ -366,7 +356,10 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     maxQuestionsPerSession: row.maxQuestionsPerSession,
     voiceEnabled: row.voiceEnabled,
     attachmentsEnabled: row.attachmentsEnabled,
-    contradictionMode: asContradictionMode(row.contradictionMode),
+    // This is the read seam for the turn state, the admin config editor and the settings summary
+    // alike, so the legacy `flag` is retired here — `resolveContradictionMode` reads it as `probe` —
+    // and no stored row needs migrating.
+    contradictionMode: resolveContradictionMode(row.contradictionMode),
     answerFitMode: asAnswerFitMode(row.answerFitMode),
     extractionPrefilter: row.extractionPrefilter,
     contradictionWindowN: row.contradictionWindowN,
