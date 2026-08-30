@@ -892,13 +892,66 @@ function narrowPlannedMembers(value: unknown): { members?: TopicMembers } {
   return { members };
 }
 
+/**
+ * How many keys one side of a topic's membership may hold.
+ *
+ * Named rather than inlined because the read path and the write path have to agree on it: a writer
+ * that appended past this bound would produce a set the very next {@link narrowTopicMembers} read
+ * silently truncated — which orphans whichever question fell off the end, invisibly.
+ */
+export const TOPIC_MEMBER_LIST_MAX = 500;
+
 /** Project a stored `members` Json onto a complete {@link TopicMembers}. */
 export function narrowTopicMembers(value: unknown): TopicMembers {
   const obj = isRecord(value) ? value : {};
   return {
-    dataSlotKeys: asKeyList(obj.dataSlotKeys, 500),
-    questionKeys: asKeyList(obj.questionKeys, 500),
+    dataSlotKeys: asKeyList(obj.dataSlotKeys, TOPIC_MEMBER_LIST_MAX),
+    questionKeys: asKeyList(obj.questionKeys, TOPIC_MEMBER_LIST_MAX),
   };
+}
+
+/**
+ * Add a question key to a topic's membership.
+ *
+ * Every writer before this hand-built the `{ dataSlotKeys, questionKeys }` object, which is how the
+ * bound above came to be enforced on the read path only.
+ *
+ * **Returns the SAME object identity when nothing changed** — the key is already a member, or the
+ * list is full. That is load-bearing rather than a micro-optimisation: it lets a caller iterating
+ * every topic on a version write `if (next === topic.members) continue` and issue one UPDATE
+ * instead of one per topic. `attachDataSlotsForVersion` skips its no-ops the same way.
+ *
+ * A full list is a no-op rather than an error: 500 members is far past any real topic, and failing
+ * a question's creation because its topic is full would be a worse answer than leaving it
+ * uncovered, which the coherence checker already reports.
+ */
+export function withTopicQuestionKey(members: TopicMembers, questionKey: string): TopicMembers {
+  const key = questionKey.trim().slice(0, MEMBER_KEY_MAX_LENGTH);
+  if (key.length === 0) return members;
+  if (members.questionKeys.includes(key)) return members;
+  if (members.questionKeys.length >= TOPIC_MEMBER_LIST_MAX) return members;
+  return { ...members, questionKeys: [...members.questionKeys, key] };
+}
+
+/**
+ * Remove a question key from a topic's membership — the prune a deleted question needs.
+ *
+ * Same identity contract as {@link withTopicQuestionKey}: unchanged in, unchanged out, so the
+ * caller can skip the write.
+ *
+ * Note what this deliberately does NOT do: drop a topic left with nothing. An empty topic still
+ * carries its label, phase and criteria — an author's work — and `validateConditionalTopics`
+ * already reports it (`empty_topic`). Deleting it here would both destroy that work and remove the
+ * only warning that the topic now asks nothing.
+ */
+export function withoutTopicQuestionKey(members: TopicMembers, questionKey: string): TopicMembers {
+  // Truncated the same way `withTopicQuestionKey` truncates on the way in. Nothing bounds a QUESTION
+  // key at MEMBER_KEY_MAX_LENGTH — `persist.ts` writes an extracted key straight through — so a very
+  // long key is stored clipped, and pruning with the full-length original would match nothing and
+  // leave the dead key behind for ever. The pair has to agree on what "the same key" means.
+  const key = questionKey.trim().slice(0, MEMBER_KEY_MAX_LENGTH);
+  if (!members.questionKeys.includes(key)) return members;
+  return { ...members, questionKeys: members.questionKeys.filter((k) => k !== key) };
 }
 
 /**

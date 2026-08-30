@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { planDataSlotAttachment, planSeededTopics } from '@/lib/app/questionnaire/scope/seed';
+import {
+  inheritTopicForQuestion,
+  planDataSlotAttachment,
+  planSeededTopics,
+} from '@/lib/app/questionnaire/scope/seed';
 
 const sections = [
   { id: 's1', title: 'Growth Strategy', ordinal: 0 },
@@ -241,5 +245,86 @@ describe('planDataSlotAttachment', () => {
         .size
     ).toBe(0);
     expect(planDataSlotAttachment({ topics, dataSlots: [] }).size).toBe(0);
+  });
+});
+
+/**
+ * `inheritTopicForQuestion` (F17.35).
+ *
+ * The rule has to match `planDataSlotAttachment`'s exactly — same majority, same tie-break — or
+ * "which topic does this belong to" quietly has two answers. The tie case is asserted explicitly
+ * for that reason, and because bailing on it would orphan the most ordinary shape there is: a
+ * section split across two topics.
+ */
+describe('inheritTopicForQuestion', () => {
+  const topics = [
+    { key: 'growth', ordinal: 0, members: { questionKeys: ['g1', 'g2'], dataSlotKeys: [] } },
+    { key: 'pipeline', ordinal: 1, members: { questionKeys: ['p1'], dataSlotKeys: [] } },
+  ];
+
+  it('picks the topic owning most of the siblings', () => {
+    expect(inheritTopicForQuestion(topics, ['g1', 'g2', 'p1'])).toBe('growth');
+  });
+
+  it('picks the only owner when the siblings sit in one topic', () => {
+    expect(inheritTopicForQuestion(topics, ['p1'])).toBe('pipeline');
+  });
+
+  it('breaks a tie to the LOWER ordinal, matching planDataSlotAttachment', () => {
+    // 1–1. A section split across two topics ties like this constantly, so this is the ordinary
+    // case: bailing here would orphan exactly the questions this function exists to place.
+    expect(inheritTopicForQuestion(topics, ['g1', 'p1'])).toBe('growth');
+  });
+
+  it('agrees with planDataSlotAttachment on the same tie', () => {
+    // The two rules are one rule. If this ever diverges, one of them was edited alone.
+    const viaSlots = planDataSlotAttachment({
+      topics,
+      dataSlots: [{ key: 'slot', mappedQuestionKeys: ['g1', 'p1'] }],
+    });
+    expect([...viaSlots.keys()]).toEqual([inheritTopicForQuestion(topics, ['g1', 'p1'])]);
+  });
+
+  it('ignores ordinal when the majority is clear', () => {
+    // `pipeline` has the HIGHER ordinal and still wins, 2 members to 1 — which is the only way to
+    // show that ordinal is the tie-break and not the ranking. (An earlier version of this test also
+    // asserted `['g1','p1','p1'] → growth` under the same name; that is a 1–1 tie resolved by
+    // ordinal, so it proved the opposite of what it claimed and duplicated the tie-break test above.)
+    expect(
+      inheritTopicForQuestion(
+        [
+          { key: 'growth', ordinal: 0, members: { questionKeys: ['g1'], dataSlotKeys: [] } },
+          {
+            key: 'pipeline',
+            ordinal: 1,
+            members: { questionKeys: ['p1', 'p2'], dataSlotKeys: [] },
+          },
+        ],
+        ['g1', 'p1', 'p2']
+      )
+    ).toBe('pipeline');
+  });
+
+  it('counts each topic member once, however often a sibling key is repeated', () => {
+    // Weight comes from how many of a TOPIC's members appear among the siblings, not from how many
+    // times a sibling key was listed — so a caller passing duplicates cannot tip the majority.
+    expect(inheritTopicForQuestion(topics, ['g1', 'p1', 'p1', 'p1'])).toBe(
+      inheritTopicForQuestion(topics, ['g1', 'p1'])
+    );
+  });
+
+  it('returns null when no topic owns any sibling — the undecidable case', () => {
+    expect(inheritTopicForQuestion(topics, ['unknown_1', 'unknown_2'])).toBeNull();
+  });
+
+  it('returns null with no topics and with no siblings', () => {
+    expect(inheritTopicForQuestion([], ['g1'])).toBeNull();
+    expect(inheritTopicForQuestion(topics, [])).toBeNull();
+  });
+
+  it('does not mutate the topics it was given', () => {
+    const input = structuredClone(topics);
+    inheritTopicForQuestion(input, ['g1', 'p1']);
+    expect(input).toEqual(topics);
   });
 });

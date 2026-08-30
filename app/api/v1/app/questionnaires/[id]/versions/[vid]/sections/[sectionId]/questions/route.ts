@@ -33,6 +33,10 @@ import {
   resolveForkedId,
   resolveQuestionKey,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import {
+  inheritTopicMembership,
+  sectionQuestionKeys,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-membership';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 type Params = { id: string; vid: string; sectionId: string };
@@ -126,16 +130,45 @@ const handleCreateQuestion = withAdminAuth<Params>(async (request, session, { pa
       select: QUESTION_SELECT,
     });
 
+    // Put it in the topic its section-mates are in. With Conditional Topics on a question no topic
+    // claims is never asked, and nothing at runtime would say so — the launch gate catches it, but
+    // only once the feature is on, which may be long after the question was added. Best-effort by
+    // design: this is not inside the create's transaction, and a failure leaves exactly the orphan
+    // that existed before, which the Topics tab and the launch gate both already report.
+    const inherited = await inheritTopicMembership(
+      prisma,
+      editId,
+      question.key,
+      await sectionQuestionKeys(prisma, parentSectionId)
+    ).catch((err: unknown) => {
+      log.warn('Question created but topic membership could not be inherited', {
+        versionId: editId,
+        questionId: question.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    });
+
     logAdminAction({
       userId: session.user.id,
       action: 'questionnaire_question.create',
       entityType: 'questionnaire_question',
       entityId: question.id,
       entityName: question.key,
-      metadata: { questionnaireId: id, versionId: editId, sectionId: parentSectionId },
+      metadata: {
+        questionnaireId: id,
+        versionId: editId,
+        sectionId: parentSectionId,
+        ...(inherited !== undefined ? { topicKey: inherited } : {}),
+      },
       clientIp,
     });
-    log.info('Questionnaire question created', { versionId: editId, questionId: question.id });
+    log.info('Questionnaire question created', {
+      versionId: editId,
+      questionId: question.id,
+      // `null` means routing is configured and nothing claimed it — the case worth finding in logs.
+      ...(inherited !== undefined ? { topicKey: inherited } : {}),
+    });
 
     return successResponse(question, forkMeta(fork), { status: 201 });
   } catch (err) {

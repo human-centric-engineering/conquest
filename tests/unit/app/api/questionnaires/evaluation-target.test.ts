@@ -43,6 +43,10 @@ describe('resolveFindingTarget — questions', () => {
       position: 2,
       sectionPosition: 1,
       questionType: 'single_choice',
+      // Both null: this fixture has no routing overlay, which is what a version with Conditional
+      // Topics off looks like — the default, and most of the product.
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     });
   });
@@ -152,5 +156,108 @@ describe('resolveFindingTarget — degradation', () => {
       label: 'What is your role?',
       removed: true,
     });
+  });
+});
+
+/**
+ * Routing reach on the review card (F17.34).
+ *
+ * The reviewer's question is "who is actually asked this?", and phase alone does not answer it: a
+ * question can belong to several topics, and if any of them always runs then so does the question.
+ * The gate on `routing.enabled` is the other half — ingest seeds a `core` topic per section on
+ * every questionnaire, so "has topics" would chip every card in the product.
+ */
+describe('resolveFindingTarget — routing reach', () => {
+  function routed(
+    topicsByQuestion: Record<string, string[]>,
+    topics: { key: string; label: string; phase: string }[]
+  ): VersionStructureInput {
+    const base = structure();
+    return {
+      ...base,
+      routing: {
+        enabled: true,
+        maxConditionalTopics: 3,
+        topics: topics.map((t) => ({ ...t, depth: 'full', questionCount: 1 })),
+        conditionalQuestionCount: 1,
+      },
+      sections: base.sections.map((s) => ({
+        ...s,
+        questions: s.questions.map((q) => ({ ...q, topicKeys: topicsByQuestion[q.key] ?? [] })),
+      })),
+    };
+  }
+
+  it('is null on a version with no routing overlay at all', () => {
+    const target = resolveFindingTarget('q_team', structure(), structure());
+    expect(target).toMatchObject({ routingReach: null, topicLabel: null });
+  });
+
+  it('reads "always" for a question in an opening, core or closing topic', () => {
+    for (const phase of ['opening', 'core', 'closing']) {
+      const s = routed({ q_team: ['t'] }, [{ key: 't', label: 'Spine', phase }]);
+      expect(resolveFindingTarget('q_team', s, s)).toMatchObject({
+        routingReach: 'always',
+        topicLabel: 'Spine',
+      });
+    }
+  });
+
+  it('reads "conditional" for a question only a conditional topic claims', () => {
+    const s = routed({ q_team: ['t'] }, [
+      { key: 't', label: 'Talent depth', phase: 'conditional' },
+    ]);
+
+    expect(resolveFindingTarget('q_team', s, s)).toMatchObject({
+      routingReach: 'conditional',
+      topicLabel: 'Talent depth',
+    });
+  });
+
+  it('reads "always" when ANY owning topic always runs, whatever the others say', () => {
+    // The reviewer's question is who is asked it, not what its topics are called. A question in
+    // both a core and a conditional topic is asked of everyone; reporting one topic's phase would
+    // call that "conditional" and invite a delete on a question nobody can skip.
+    const s = routed({ q_team: ['spine', 'depth'] }, [
+      { key: 'spine', label: 'Spine', phase: 'core' },
+      { key: 'depth', label: 'Depth', phase: 'conditional' },
+    ]);
+
+    expect(resolveFindingTarget('q_team', s, s)).toMatchObject({
+      routingReach: 'always',
+      topicLabel: 'Spine, Depth',
+    });
+  });
+
+  it('reads "never" for a question no topic claims', () => {
+    const s = routed({}, [{ key: 't', label: 'Spine', phase: 'core' }]);
+
+    expect(resolveFindingTarget('q_team', s, s)).toMatchObject({
+      routingReach: 'never',
+      topicLabel: null,
+    });
+  });
+
+  it('falls back to the snapshot for a question deleted since the run', () => {
+    // Otherwise a removed question would report as unreachable rather than as removed.
+    const snapshot = routed({ q_team: ['t'] }, [{ key: 't', label: 'Spine', phase: 'core' }]);
+    const live = { ...snapshot, sections: [] };
+
+    expect(resolveFindingTarget('q_team', live, snapshot)).toMatchObject({
+      removed: true,
+      routingReach: 'always',
+      topicLabel: 'Spine',
+    });
+  });
+
+  it('stays null for goal, audience and section targets', () => {
+    const s = routed({ q_team: ['t'] }, [{ key: 't', label: 'Spine', phase: 'core' }]);
+
+    for (const key of ['goal', 'audience', 'section:Background']) {
+      expect(resolveFindingTarget(key, s, s)).toMatchObject({
+        routingReach: null,
+        topicLabel: null,
+      });
+    }
   });
 });

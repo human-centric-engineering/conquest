@@ -231,12 +231,14 @@ const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
           type: 'likert',
           required: true,
           guidelines: '{{ what a good answer looks like }}',
+          topicKeys: ['opening'],
         },
         {
           key: 'q2',
           prompt: '{{ question 2 }}',
           type: 'free_text',
           required: false,
+          topicKeys: ['opening'],
         },
       ],
     },
@@ -248,10 +250,35 @@ const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
           prompt: '{{ question 3 }}',
           type: 'boolean',
           required: false,
+          topicKeys: ['depth_topic'],
         },
       ],
     },
   ],
+  // Shown ON, because the catalogue exists to let an operator read what a judge actually receives —
+  // and the routing block is the half that is easy to forget exists. A version with Conditional
+  // Topics off simply omits it, and the prompt reverts to its pre-F17.34 shape.
+  routing: {
+    enabled: true,
+    maxConditionalTopics: 3,
+    topics: [
+      {
+        key: 'opening',
+        label: '{{ opening topic }}',
+        phase: 'opening',
+        depth: 'full',
+        questionCount: 2,
+      },
+      {
+        key: 'depth_topic',
+        label: '{{ conditional topic }}',
+        phase: 'conditional',
+        depth: 'full',
+        questionCount: 1,
+      },
+    ],
+    conditionalQuestionCount: 1,
+  },
 };
 
 const SAMPLE_DATA_SLOT_STRUCTURE = {
@@ -1272,9 +1299,11 @@ const RECONCILER: PromptAgentCatalogEntry = {
         'Proposes wording that satisfies every judge that flagged one question, and names any concern wording alone cannot fix.',
       build: () =>
         norm(
+          // No `?? null` on either: both fields are already `string | null` / `AudienceShape |
+          // null` on `VersionStructureInput`, so the coalesce could never fire.
           buildReconcilePrompt(SAMPLE_CONTESTED, {
-            goal: SAMPLE_VERSION_STRUCTURE.goal ?? null,
-            audience: SAMPLE_VERSION_STRUCTURE.audience ?? null,
+            goal: SAMPLE_VERSION_STRUCTURE.goal,
+            audience: SAMPLE_VERSION_STRUCTURE.audience,
           })
         ),
     }),

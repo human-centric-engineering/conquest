@@ -272,3 +272,86 @@ describe('deriveFindingState — no snapshot', () => {
     expect(result.applicable).toBe('apply');
   });
 });
+
+/**
+ * The routing overlay must be invisible to staleness (F17.34).
+ *
+ * `isSlotFindingStale` enumerates the compared fields explicitly in every branch, including the
+ * prose-only default — so the DTO can grow without findings going stale for reasons that have
+ * nothing to do with the suggestion. This pins that: an admin reorganising their topics between a
+ * run and its review must not invalidate every pending finding on the version.
+ */
+describe('deriveFindingState — the Conditional Topics overlay', () => {
+  function withTopics(keys: string[]): VersionStructureInput {
+    return {
+      goal: 'Goal',
+      audience: null,
+      sections: [
+        {
+          title: 'S',
+          questions: [
+            { key: 'q_role', prompt: 'Role?', type: 'free_text', required: true, topicKeys: keys },
+          ],
+        },
+      ],
+      routing: {
+        enabled: true,
+        maxConditionalTopics: 3,
+        topics: keys.map((k) => ({
+          key: k,
+          label: k,
+          phase: 'core',
+          depth: 'full',
+          questionCount: 1,
+        })),
+        conditionalQuestionCount: 0,
+      },
+    };
+  }
+
+  it('does not stale a prose-only finding when the question moves topic', () => {
+    const state = deriveFindingState(
+      { targetKey: 'q_role', op: null },
+      withTopics(['was_here']),
+      withTopics(['now_here'])
+    );
+
+    expect(state.stale).toBe(false);
+  });
+
+  it('does not stale a structured op when the question moves topic', () => {
+    const state = deriveFindingState(
+      { targetKey: 'q_role', op: { op: 'replace_prompt', prompt: 'What is your role?' } },
+      withTopics(['was_here']),
+      withTopics(['now_here'])
+    );
+
+    expect(state.stale).toBe(false);
+  });
+
+  it('does not stale a finding when routing is switched on between the run and the review', () => {
+    const before: VersionStructureInput = {
+      goal: 'Goal',
+      audience: null,
+      sections: [
+        {
+          title: 'S',
+          questions: [{ key: 'q_role', prompt: 'Role?', type: 'free_text', required: true }],
+        },
+      ],
+    };
+
+    expect(
+      deriveFindingState({ targetKey: 'q_role', op: null }, before, withTopics(['t'])).stale
+    ).toBe(false);
+  });
+
+  it('still stales on a real content change, overlay or not', () => {
+    const changed = withTopics(['t']);
+    changed.sections[0].questions[0].prompt = 'Something else?';
+
+    expect(
+      deriveFindingState({ targetKey: 'q_role', op: null }, withTopics(['t']), changed).stale
+    ).toBe(true);
+  });
+});

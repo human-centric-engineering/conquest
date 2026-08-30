@@ -23,7 +23,9 @@ export {
   type JudgeFinding,
   type JudgeVerdict,
   type StructureQuestion,
+  type StructureRouting,
   type StructureSection,
+  type StructureTopic,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation/types';
 
@@ -89,9 +91,13 @@ export {
 export {
   MAX_EVAL_SECTIONS,
   MAX_EVAL_QUESTIONS_PER_SECTION,
+  MAX_EVAL_TOPICS,
+  MAX_EVAL_TOPICS_PER_QUESTION,
   audienceShapeSchema,
   structureQuestionSchema,
+  structureRoutingSchema,
   structureSectionSchema,
+  structureTopicSchema,
   versionStructureSchema,
   parseAudienceShape,
 } from '@/lib/app/questionnaire/evaluation/structure-schema';

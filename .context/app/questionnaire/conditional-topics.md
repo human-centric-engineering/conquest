@@ -1408,6 +1408,23 @@ not change.
 These run whether or not `enabled` is set. "What would routing do to my scores" is a question that
 has to be answered before the routing starts.
 
+### Pruning is what makes `empty_topic` fire (F17.35)
+
+`empty_topic` counts a topic's **raw** member keys, and membership is keys — so a topic whose every
+question has been deleted read as non-empty, passed every check here, and resolved to nothing at
+runtime. `resolveScope` skipping a dead key was never the problem; nothing _reporting_ it was.
+
+Since F17.35 every path that deletes a question prunes its key from the topics that held it — the
+judge apply engine, the manual delete route, and extraction review's revert — so a topic emptied by
+deletion now reaches this check as genuinely empty and says so. The emptied topic is deliberately
+left in place rather than removed: it still carries a label, a phase and criteria an author wrote,
+and deleting it would take the warning with it. (`reconcileTopicsForVersion` does delete such topics,
+but only on a wholesale structure rewrite, where the subject really is gone.)
+
+The same commit closed the other half: every path that CREATES a question now puts it in the topic
+its section-mates are in, so `orphaned_questions` stops being something an admin discovers at the
+launch gate weeks later. See [`f17.35.md`](../planning/features/f17.35.md).
+
 ### Duplicate membership
 
 A question claimed by two topics is tolerated at runtime — asked if either is in scope, attributed to
@@ -1438,6 +1455,13 @@ topic that genuinely applies (the [one invariant](#the-one-invariant): hard rule
 in doubt, ask", exclude-beats-include). That is a judgement call, not a rule, so it is a second
 judge panel — sibling to the design-evaluation panel (F5.1–F5.3) that reviews question structure,
 but reading the scope config instead.
+
+> **The design panel reads routing too, since F17.34** — see
+> [`design-evaluation.md`](./design-evaluation.md#what-the-judges-see-when-routing-is-on). Until
+> then it was the only one of the three panels that could not, and its Duplicates judge was
+> proposing to delete depth probes as duplicates of the broad opening questions the planner seats
+> them _because of_. The two panels do not overlap: this one judges the routing config, that one
+> judges the questions, now knowing which respondents each is asked of.
 
 **Structural only, v1.** The four judges read the authored topics, hard rules, planner
 instructions, and budget — the same inputs `validateConditionalTopics` and the cost model read. They do

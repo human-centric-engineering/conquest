@@ -65,11 +65,16 @@ const tx = {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `sec-${String(row.ordinal)}`, ordinal: row.ordinal })))
     ),
+    // Read back by `seedTopicsForVersion`, which runs for a definition file that carried no topics
+    // of its own (F17.35). Empty is the honest default here: these tests assert what the IMPORTER
+    // writes, and a seeder with no sections to read seeds nothing.
+    findMany: vi.fn(async () => []),
   },
   appQuestionSlot: {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `q-${String(row.key)}`, key: row.key })))
     ),
+    findMany: vi.fn(async () => []),
   },
   appQuestionSlotTag: { createMany: vi.fn(async () => ({ count: 0 })) },
   appQuestionnaireConfig: {
@@ -82,9 +87,13 @@ const tx = {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `slot-${String(row.key)}`, key: row.key })))
     ),
+    findMany: vi.fn(async () => []),
   },
   appDataSlotQuestion: { createMany: vi.fn(async () => ({ count: 0 })) },
-  appQuestionnaireTopic: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionnaireTopic: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => []),
+  },
   appScoringSchema: { create: vi.fn(async () => ({ id: 'schema-1' })) },
   appGlossaryTerm: { create: vi.fn(async () => ({ id: 'term-1' })) },
 };
@@ -973,10 +982,30 @@ describe('persistDefinitionImport', () => {
       expect(result.topicCount).toBe(1);
     });
 
-    it('does not call createMany when the envelope has no topics', async () => {
+    it('seeds a topic per section when the envelope carries no topics of its own', async () => {
+      // A definition exported before Conditional Topics existed has no topics, so an import would
+      // land a questionnaire whose every question belongs to nothing — harmless until someone turns
+      // routing on, at which point NO question is asked. F17.35.
+      //
+      // The section/slot reads are stubbed for real here rather than left at `[]`: with an empty
+      // section list `seedTopicsForVersion` short-circuits, and the assertion below would hold
+      // whether or not the importer called it at all.
+      (tx.appQuestionnaireSection.findMany as Mock).mockResolvedValueOnce([
+        { id: 'sec-0', title: 'Background', ordinal: 0 },
+      ]);
+      (tx.appQuestionSlot.findMany as Mock).mockResolvedValueOnce([
+        { key: 'q1', sectionId: 'sec-0' },
+      ]);
+
       await persistDefinitionImport(input());
 
-      expect(tx.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
+      expect(tx.appQuestionnaireTopic.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ label: 'Background', phase: 'core', source: 'seeded' }),
+          ]),
+        })
+      );
     });
 
     it('writes conditionalTopics settings via the same merge helper the Topics tab PATCH uses', async () => {

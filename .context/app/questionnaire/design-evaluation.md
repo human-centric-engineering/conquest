@@ -28,6 +28,9 @@ The dimension → slug/label/summary registry is the single source of truth in
 `lib/app/questionnaire/evaluation/dimensions.ts`, shared by the seed, the prompt
 builder, and the route.
 
+Three of the seven read one more thing when the questionnaire uses Conditional Topics — see
+[What the judges see when routing is on](#what-the-judges-see-when-routing-is-on).
+
 ## Architecture: app-native dispatch, not the eval worker
 
 The judges are dispatched **app-natively** — one structured `runStructuredCompletion`
@@ -103,6 +106,116 @@ overlap (`replace_prompt` narrowing the weaker question to the part the other mi
 it, and Goal-Match prefers a refocus over a deletion where the question can be pointed back at the
 goal. Both keep `delete_question` for the genuinely redundant and the genuinely off-mission — the
 change is which one they reach for first.
+
+Duplicates has a second reason to prefer narrowing, when routing is on: the weaker question may be
+one of only a handful in a conditional topic, and removing it can leave that topic with too little to
+ask. Where the topic is `light`, the apply engine refuses the delete outright rather than relying on
+the judge to have been persuaded — see below.
+
+## What the judges see when routing is on
+
+**F17.34.** ConQuest runs three design-time judge panels, and until F17.34 only two of them read
+Conditional Topics: the scope panel (F17.21) and the policy panel (F18) both carry topic membership,
+and this one carried none at all.
+
+That mattered most to **Duplicates**. It read one flat numbered list in which an `opening`
+signal-gathering question and a `conditional` depth probe sat side by side, unmarked — and its rubric
+told it to flag pairs that ask substantially the same thing across sections and to target the later
+one, which is always the probe, with a one-click `delete_question`.
+
+Backwards, and the product had already written down why. From
+[`conditional-topics.md`](./conditional-topics.md) and F17.33: the opening exists to make a
+respondent talk broadly, and the planner seats topics **because of what they said**, so the overlap
+between the two is the selection criterion rather than redundancy.
+
+Ordering and Goal-Match were wrong for the same reason — one read phase transitions as sequence
+defects, the other read narrow role-specific probes as off-mission because it could not know they
+only run for that role. And worse than any single finding: a panel score was **not comparable**
+between a topics-enabled and a topics-disabled version of the same instrument.
+
+### The overlay
+
+`VersionStructureInput` carries an optional `routing` block (the topic roster, the per-interview cap,
+and a pre-counted conditional-question total) and each question an optional `topicKeys`.
+
+**Absence is the flag.** With Conditional Topics off — the default, and most questionnaires — there
+is no `routing` block, no annotations, and the prompt is byte-identical to its pre-F17.34 form. A
+test pins that for every dimension. An empty `topicKeys` is a different thing and is meaningful:
+routing is on and nothing claims this question, so it can never be asked.
+
+Three smaller shapes, each with a failure behind them:
+
+- **`topicKeys` is an array.** Multi-membership is legal (a `duplicate_membership` warning, not a
+  prevention), and a question in both a `core` and a `conditional` topic is asked of everyone.
+  Collapsing to one owner would let the co-occurrence rule _downgrade a real duplicate_.
+- **`phase` and `depth` are `string`, not the enums.** This DTO is persisted verbatim as a run's
+  `structureSnapshot`, and `parseStructureSnapshot` degrades the whole snapshot to `null` on any
+  parse failure — silently disabling staleness for that run. A `z.enum` would turn one renamed phase
+  into total loss across every historical run.
+- **Loaded on the existing `findFirst`**, through the version's own `config` and `topics` relations.
+  `evaluation-batch-apply` calls `buildEvaluationStructure` once per finding, so separate queries
+  would land on every finding in a batch.
+
+### The rule, and where the attention is spent
+
+Only three dimensions gain a paragraph, and only when routing is configured. An earlier draft keyed a
+rule on every pair of the four phases — a sixteen-cell truth table written as prose, which a model
+collapses to whichever rule it read first. What survives is one principle and the two consequences
+that are not already the status quo:
+
+> **CO-OCCURRENCE.** Two questions are only duplicates if the SAME respondent is asked both.
+>
+> - The opening is deliberately the broad version of what the depth topics probe later. Never
+>   propose `delete_question` for it, keep the finding at `info`, and do not let it lower the score.
+> - Two questions in different "asked-when-it-fits" topics may never both be asked — say so, and drop
+>   the severity a level.
+> - Everything else is a duplicate exactly as it would be without routing.
+
+The scale gains a line saying deliberate opening→depth overlap does not lower the score. Without it a
+judge told to stay quiet still marks down, and the score is what an admin compares across versions.
+
+**The rest of the attention is bought in the structure block, where it is cheap.** Each question is
+annotated in the same plain words the rule uses (`topic=talent/asked-when-it-fits`) so the judge never
+holds a translation in mind; a question in no topic says outright that it is never asked; and the
+ROUTING frame states the proportion as well as the rule, because a judge told "2 of 5 questions are
+conditional" calibrates severity far better than one handed a rule alone. The per-interview cap is
+mentioned only where it can actually bind.
+
+Clarity, Coverage, Type-Fit and Audience-Match are untouched — they judge things routing does not
+change — and a test asserts their prompts are byte-identical with and without the overlay.
+
+### On the review card
+
+`FindingTargetView` carries `routingReach` (`always` / `conditional` / `never` / `null`) and
+`topicLabel`, rendered as a chip beside the answer type: "Always asked · Spine", "Asked when it fits ·
+Talent depth", "Never asked — in no topic".
+
+It reports **reach, not phase**: a question in several topics is asked of everyone if any of them
+always runs, and reporting one topic's phase would label such a question "conditional" and invite the
+delete this whole feature exists to prevent.
+
+And it is gated on `routing.enabled`, **never** on "the version has topics" — ingest seeds one `core`
+topic per section on every questionnaire, so a presence test would chip every finding card in the
+product and teach reviewers to ignore it.
+
+### Applying a finding keeps membership true
+
+**F17.35.** Three ops change the question set, and all three used to leave topic membership stale —
+which, with routing on, means a question that can never be asked, or a topic that resolves to nothing
+while every coherence check reports it as fine. See [`f17.35.md`](../planning/features/f17.35.md);
+the short version:
+
+- `split_question` copies the parent's membership onto the new half.
+- `add_question` inherits from its section-mates (the `planDataSlotAttachment` majority rule), and
+  reports `newQuestionTopicKey: null` when nothing could be inferred — which the outcome panel names,
+  because "applied" otherwise reads as "and it will be asked".
+- `delete_question` prunes the key from every topic, and is **refused** (`topic_sample_too_small`)
+  when its target sits in a `light` topic that would fall below `LIGHT_DEPTH_MEMBER_COUNT`. That
+  guard is code rather than rubric: the judge cannot see depth or member counts, and the apply engine
+  already treats every op as an accelerator rather than a trust boundary.
+
+The review queue also shows a banner when routing is on and the live structure has uncovered
+questions, using the same `uncoveredQuestionKeys` count the Topics tab shows.
 
 ## Cross-judge reconciliation — the step after the panel
 

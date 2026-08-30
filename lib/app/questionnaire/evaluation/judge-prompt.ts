@@ -27,6 +27,8 @@ import { MAX_FINDINGS_PER_JUDGE } from '@/lib/app/questionnaire/evaluation/judge
 import type {
   EvaluationDimension,
   VersionStructureInput,
+  StructureQuestion,
+  StructureRouting,
   StructureSection,
 } from '@/lib/app/questionnaire/evaluation/types';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
@@ -87,6 +89,10 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
   duplicates: {
     focus:
       'Judge whether questions are distinct. Flag pairs (or groups) of questions that ask substantially the same thing, even across different sections or with different wording. For each, target the later/weaker question by its `key` and propose merging or removing it.',
+    // No routing sentence here. The "do not let it lower your score" instruction lives in the
+    // CO-OCCURRENCE block, which is spliced in only when routing is actually configured — a
+    // questionnaire with no topics must not be told about "opening" and "depth" questions it
+    // does not have.
     scale: `- 1.0 — Every question is distinct.
 - 0.7 — One borderline overlap.
 - 0.5 — A clear duplicate pair, or several near-duplicates.
@@ -96,7 +102,7 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
       'Gaps (Coverage), wording (Clarity), and ordering. Score redundancy only — what is REPEATED.',
     editGuidance:
       'Where the two questions only PARTLY overlap — each asks something the other misses — prefer salvaging over deleting: target the weaker/later one and attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<narrowed to the part the other does not cover>" }`, so the distinct half survives. ' +
-      'Attach `"proposedEdit": { "op": "delete_question" }` when the question is genuinely redundant and nothing about it is worth keeping. There is no merge op, so when wording from the deleted question should survive in the one you keep, put that wording in `proposedChange`.',
+      'Attach `"proposedEdit": { "op": "delete_question" }` when the question is genuinely redundant and nothing about it is worth keeping. There is no merge op, so when wording from the deleted question should survive in the one you keep, put that wording in `proposedChange`. ',
   },
   type_fit: {
     focus:
@@ -166,19 +172,81 @@ function renderAudience(audience: AudienceShape | null): string {
   return lines.length > 0 ? lines.join('\n') : '(no audience specified)';
 }
 
+/**
+ * Plain-English names for the four phases, used in BOTH the per-question annotation and the
+ * co-occurrence rule.
+ *
+ * Same words in both places on purpose: a judge that reads `phase=conditional` on a question and
+ * "asked when it fits" in its rubric has to hold a translation in mind while reasoning. Buying that
+ * attention back in the structure block is far cheaper than spending it in the rubric.
+ */
+const PHASE_WORDS: Record<string, string> = {
+  opening: 'opening',
+  core: 'always-asked',
+  conditional: 'asked-when-it-fits',
+  closing: 'closing',
+};
+
+/** How a question's topics read on its line, or `''` when routing is off. */
+function topicAnnotation(
+  question: StructureQuestion,
+  phaseByTopic: Map<string, string> | null
+): string {
+  if (!phaseByTopic || question.topicKeys === undefined) return '';
+  if (question.topicKeys.length === 0) return ', topic=NONE — never asked while routing is on';
+  const parts = question.topicKeys.map((key) => {
+    const phase = phaseByTopic.get(key);
+    return phase ? `${key}/${PHASE_WORDS[phase] ?? phase}` : key;
+  });
+  return `, topic=${parts.join(' + ')}`;
+}
+
 /** Render one section and its questions, numbering questions for a readable flow. */
-function renderSection(section: StructureSection, startIndex: number): string {
+function renderSection(
+  section: StructureSection,
+  startIndex: number,
+  phaseByTopic: Map<string, string> | null
+): string {
   const header = section.description
     ? `## Section: ${section.title}\n${section.description}`
     : `## Section: ${section.title}`;
   const questions = section.questions.map((q, i) => {
     const flags = [`type=${q.type}`, q.required ? 'required' : 'optional'];
     const guide = q.guidelines ? `\n      guidance: ${q.guidelines}` : '';
-    return `  ${startIndex + i + 1}. [key=${q.key}] (${flags.join(', ')}) ${q.prompt}${guide}`;
+    return `  ${startIndex + i + 1}. [key=${q.key}] (${flags.join(', ')}${topicAnnotation(q, phaseByTopic)}) ${q.prompt}${guide}`;
   });
   return questions.length > 0
     ? `${header}\n${questions.join('\n')}`
     : `${header}\n  (no questions)`;
+}
+
+/**
+ * Render the routing frame that sits above the structure.
+ *
+ * States the PROPORTION as well as the rule. A judge told "12 of the 40 questions below are asked
+ * only when they fit" calibrates severity far better than one handed the rule alone — the same
+ * reason `renderCosts` hands the budget judge pre-computed numbers instead of asking it to derive
+ * them.
+ */
+function renderRouting(routing: StructureRouting, totalQuestions: number): string {
+  const conditionalTopics = routing.topics.filter((t) => t.phase === 'conditional');
+  // Only mention the cap where it can actually bind. "At most 3 of them are chosen" alongside a
+  // single conditional topic is not wrong so much as incoherent, and a frame a judge half-disbelieves
+  // is worse than a shorter one it can take at face value.
+  const cap =
+    routing.maxConditionalTopics < conditionalTopics.length
+      ? ` At most ${routing.maxConditionalTopics} of them are chosen for any one respondent.`
+      : '';
+  const lines = [
+    'ROUTING — this questionnaire does not ask all of itself to everyone.',
+    `Questions are grouped into topics. The "opening" topics run first, and their answers are what an agent reads when deciding which of the ${conditionalTopics.length} "asked-when-it-fits" topic(s) apply to this respondent.${cap} "always-asked" and "closing" topics run for everyone.`,
+    `${routing.conditionalQuestionCount} of the ${totalQuestions} question(s) below are in an "asked-when-it-fits" topic, so many respondents will not see them.`,
+  ];
+  const roster = routing.topics.map(
+    (t) =>
+      `  - ${t.label} (${t.key}) — ${PHASE_WORDS[t.phase] ?? t.phase}, ${t.questionCount} question(s)${t.depth === 'light' ? ', and only the most important few are asked' : ''}`
+  );
+  return `${lines.join('\n')}\n\nTOPICS:\n${roster.join('\n')}`;
 }
 
 /** Serialise the whole version structure into the judge's user message. */
@@ -187,10 +255,21 @@ function renderStructure(structure: VersionStructureInput): string {
   sections.push(`GOAL:\n${structure.goal ?? '(no goal specified)'}`);
   sections.push(`AUDIENCE:\n${renderAudience(structure.audience)}`);
 
+  // Absent on every version that does not use Conditional Topics, which is most of them — and the
+  // whole block, annotations included, then renders exactly as it did before F17.34.
+  const routing = structure.routing;
+  const phaseByTopic = routing
+    ? new Map(routing.topics.map((t) => [t.key, t.phase] as const))
+    : null;
+  if (routing) {
+    const totalQuestions = structure.sections.reduce((n, s) => n + s.questions.length, 0);
+    sections.push(renderRouting(routing, totalQuestions));
+  }
+
   let questionIndex = 0;
   const rendered: string[] = [];
   for (const section of structure.sections) {
-    rendered.push(renderSection(section, questionIndex));
+    rendered.push(renderSection(section, questionIndex, phaseByTopic));
     questionIndex += section.questions.length;
   }
   sections.push(
@@ -201,13 +280,42 @@ function renderStructure(structure: VersionStructureInput): string {
   return sections.join('\n\n');
 }
 
+/**
+ * The extra paragraph three dimensions get when Conditional Topics is on.
+ *
+ * Only three, and only when routing is actually configured: a rule that restates the default is
+ * attention spent for nothing, and `systemRules` already carries a focus, a five-anchor scale, an
+ * IGNORE clause, edit guidance and eight FINDINGS bullets.
+ *
+ * The Duplicates entry is deliberately short. An earlier draft keyed a rule on every pair of the
+ * four phases — a sixteen-cell truth table written as prose, which a model collapses to whichever
+ * rule it read first. What survives is one principle and the two consequences that are not already
+ * the status quo; `core` × `core` needs no words because nothing about it changes.
+ */
+const ROUTING_RULES: Partial<Record<EvaluationDimension, string>> = {
+  duplicates: `CO-OCCURRENCE — routing is on for this questionnaire.
+Two questions are only duplicates if the SAME respondent is asked both.
+- The opening is deliberately the broad version of what the depth topics probe later: its answers are what decide which of those topics this respondent gets. Overlap between an opening question and a later one is the design working, not redundancy. Never propose delete_question for it, keep any such finding at "info", and do not let it lower your score.
+- Two questions in different "asked-when-it-fits" topics may never both be asked. Say so in your rationale and drop the severity one level.
+- Everything else is a duplicate exactly as it would be without routing.
+
+Where the weaker question sits in an "asked-when-it-fits" topic, prefer \`replace_prompt\` over deleting it even when the overlap is real: that topic may hold only a handful of questions, and removing one can leave it with too little to ask.`,
+
+  ordering: `ROUTING — the phases ARE the sequence.
+Opening topics run first, "asked-when-it-fits" topics run after them (and only for some respondents), closing topics run last. A question appearing after the opening because its topic is conditional is correctly placed, not out of order. Judge the order WITHIN a topic, and the placement of sensitive questions, rather than the phase boundaries themselves.`,
+
+  goal_match: `ROUTING — a narrow question is not automatically off-mission.
+A question inside an "asked-when-it-fits" topic is asked only of the respondents that topic is for, so judge it against the goal AS IT APPLIES TO THEM. A question that would be irrelevant to most respondents but is exactly right for the ones its topic selects is on-mission. Reserve your findings for questions that serve no respondent the goal describes.`,
+};
+
 /** The shared system frame, with the dimension's rubric spliced in. */
-function systemRules(dimension: EvaluationDimension): string {
+function systemRules(dimension: EvaluationDimension, routingOn: boolean): string {
   const rubric = DIMENSION_RUBRICS[dimension];
+  const routingRule = routingOn ? ROUTING_RULES[dimension] : undefined;
   return `You are a design-time judge reviewing a conversational questionnaire's STRUCTURE before it is launched. You evaluate ONE dimension and propose concrete edits.
 
 YOUR DIMENSION
-${rubric.focus}
+${rubric.focus}${routingRule ? `\n\n${routingRule}` : ''}
 
 SCORING SCALE — continuous 0.0 to 1.0. Use intermediate values (0.4, 0.6, 0.8, …) freely; don't snap to anchors.
 ${rubric.scale}
@@ -247,7 +355,7 @@ export function buildJudgePrompt(
   structure: VersionStructureInput
 ): LlmMessage[] {
   return [
-    { role: 'system', content: systemRules(dimension) },
+    { role: 'system', content: systemRules(dimension, structure.routing !== undefined) },
     {
       role: 'user',
       content: `Evaluate the following questionnaire on your dimension.\n\n${renderStructure(structure)}`,

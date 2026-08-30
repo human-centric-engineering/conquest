@@ -219,6 +219,20 @@ export interface StructureQuestion {
   required: boolean;
   /** Optional author guidelines/help, when present. */
   guidelines?: string;
+  /**
+   * The topics claiming this question, in topic order. Omitted when Conditional Topics is off.
+   *
+   * An ARRAY, not a single key: a question may belong to several topics (the coherence checker
+   * reports that as a `duplicate_membership` warning, but it is legal and it happens). Collapsing
+   * it to one owner would be actively wrong here — a question in both a `core` and a `conditional`
+   * topic is asked of everyone, and labelling it "conditional" would make the co-occurrence rule
+   * *downgrade* a real duplicate. Phase is looked up from {@link StructureRouting.topics}, so a
+   * topic's phase has one definition in this DTO rather than one per question.
+   *
+   * An empty array is meaningful and different from absent: it says routing is on and nothing
+   * claims this question, so it can never be asked.
+   */
+  topicKeys?: string[];
 }
 
 /** One section, flattened for the judge prompt. */
@@ -244,4 +258,60 @@ export interface VersionStructureInput {
   audience: AudienceShape | null;
   /** Sections in presentation order. */
   sections: StructureSection[];
+  /**
+   * How Conditional Topics narrows this interview — see {@link StructureRouting}.
+   *
+   * **Present only when the feature is on.** Absence is the flag: with routing off the loader omits
+   * the block entirely, so the prompt the judges read is byte-identical to what it was before this
+   * existed. A `routing: { enabled: false }` shape would have been the obvious alternative and is
+   * worse — it puts a sentence about a feature into every prompt for the majority of questionnaires
+   * that do not use it.
+   */
+  routing?: StructureRouting;
+}
+
+/**
+ * One topic in the roster the judges read (F17.34).
+ *
+ * `phase` and `depth` are `string`, not {@link TopicPhase} / {@link TopicDepth}, and deliberately so.
+ * This DTO is persisted verbatim as an evaluation run's `structureSnapshot`, and
+ * `parseStructureSnapshot` degrades the WHOLE snapshot to `null` when it fails to parse — which
+ * silently disables staleness derivation for that run. A `z.enum` here would turn one renamed phase
+ * into total data loss on every historical run; a string degrades one field. It is the same call
+ * `FindingTargetView.questionType` already makes, for the same reason.
+ */
+export interface StructureTopic {
+  /** Stable topic key — what a question's `topicKeys` refers to. */
+  key: string;
+  /** Admin- and respondent-facing name ("Pipeline Management"). */
+  label: string;
+  /** `opening` | `core` | `conditional` | `closing`. */
+  phase: string;
+  /** `full` | `light`. */
+  depth: string;
+  /** How many questions this topic claims — what makes "deleting this guts the topic" visible. */
+  questionCount: number;
+}
+
+/**
+ * The routing overlay: what a judge needs to know that a flat list of questions cannot tell it.
+ *
+ * Without this the panel reads an `opening` question and a `conditional` depth probe as two entries
+ * in one list, and the Duplicates judge — correctly, on the evidence it has — proposes deleting the
+ * probe. The opening exists to make a respondent talk broadly and the planner seats topics BECAUSE
+ * of what they said, so that overlap is the selection criterion rather than redundancy.
+ */
+export interface StructureRouting {
+  /** Always `true` when the block is present. Carried explicitly so a reader never has to infer it. */
+  enabled: boolean;
+  /** How many conditional topics one interview may cover. */
+  maxConditionalTopics: number;
+  /** Every topic on the version, in authored order. */
+  topics: StructureTopic[];
+  /**
+   * Questions in at least one `conditional` topic. Pre-computed so the prompt can state a
+   * proportion — a judge told "12 of 40 questions are conditional" calibrates severity far better
+   * than one handed only a rule.
+   */
+  conditionalQuestionCount: number;
 }

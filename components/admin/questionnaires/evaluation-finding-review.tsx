@@ -179,6 +179,26 @@ function targetContext(finding: EvaluationFindingView): string {
 }
 
 /**
+ * Who is actually asked this question, in plain English.
+ *
+ * The vocabulary is deliberately the product's, not the code's — no "conditional", no "phase", no
+ * "topic membership". The topic's own name carries the meaning where there is one; "Never asked"
+ * is the case with no topic to name and the one a reviewer most needs to see.
+ */
+function routingReachLabel(target: NonNullable<EvaluationFindingView['target']>): string {
+  switch (target.routingReach) {
+    case 'always':
+      return target.topicLabel ? `Always asked · ${target.topicLabel}` : 'Always asked';
+    case 'conditional':
+      return target.topicLabel ? `Asked when it fits · ${target.topicLabel}` : 'Asked when it fits';
+    case 'never':
+      return 'Never asked — in no topic';
+    default:
+      return '';
+  }
+}
+
+/**
  * Whether a finding's `sourceQuote` merely repeats the question it is about.
  *
  * Judges routinely quote the prompt verbatim as their evidence, which is useful in a raw payload
@@ -425,9 +445,14 @@ export function FindingReviewCard({
             {/* Out of the prompt rather than trailing it. These are facts *about* the question —
                 the system's voice — and inside the paragraph they were being set in the
                 questionnaire's own serif, which is the one thing that face must never say. */}
-            {(namedTarget.questionType || namedTarget.removed) && (
+            {(namedTarget.questionType || namedTarget.routingReach || namedTarget.removed) && (
               <MetaRow className="mt-1">
                 {namedTarget.questionType ? questionTypeLabel(namedTarget.questionType) : null}
+                {/* Who is actually asked this. A reviewer weighs "delete it" very differently once
+                    they know only some respondents ever see it — and completely differently again
+                    when the answer is nobody. Null whenever Conditional Topics is off, so a
+                    questionnaire that does not route says nothing about routing. */}
+                {namedTarget.routingReach ? routingReachLabel(namedTarget) : null}
                 {namedTarget.removed ? 'removed since this run' : null}
               </MetaRow>
             )}

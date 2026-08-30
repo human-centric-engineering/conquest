@@ -61,6 +61,7 @@ import type {
   EvaluationFindingView,
   EvaluationRunDetail as EvaluationRunDetailView,
 } from '@/lib/app/questionnaire/views';
+import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
 import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
 import {
@@ -104,6 +105,12 @@ interface BatchApplyResponse {
     op: string;
     /** Present only where the reviewer's instruction shaped the change the AI wrote. */
     steer?: { note: string; unhonoured: string | null };
+    /**
+     * Where a newly created question landed in the topic set. Absent when the op created nothing
+     * or the version has no topics; `null` when nothing claims it — which, with Conditional Topics
+     * on, means the question was added and will never be asked.
+     */
+    newQuestionTopicKey?: string | null;
   }[];
   skipped: BatchSkipped[];
   findings: EvaluationFindingView[];
@@ -120,6 +127,8 @@ const SKIP_REASONS: Record<string, string> = {
   stale: 'the question changed since this evaluation ran — re-run it to judge the new wording',
   target_gone: 'the question it was about no longer exists',
   op_invalid: 'the suggested edit does not fit the question as it now stands',
+  topic_sample_too_small:
+    'its topic only samples a couple of questions, and removing this one would leave too few — narrow the question instead of deleting it',
   needs_authoring: 'there is no automatic edit for it — make this one in the editor',
   needs_ai: 'the AI could not rewrite it to follow your instruction — try applying again',
   steer_unsupported:
@@ -142,6 +151,21 @@ interface Props {
   canApply: boolean;
   /** Whether the version has data slots — drives the "slot the new question" checkbox on add_question. */
   dataSlotsAvailable?: boolean;
+  /**
+   * Whether Conditional Topics is ON for this version.
+   *
+   * Passed rather than inferred from "the version has topics", because ingest seeds one `core`
+   * topic per section on EVERY questionnaire — so topics existing says nothing about whether
+   * routing can withhold a question.
+   */
+  conditionalTopicsEnabled?: boolean;
+  /**
+   * Questions belonging to no topic, server-computed by `uncoveredQuestionKeys` — the same
+   * function the `orphaned_questions` finding uses, including its "stay silent when the version
+   * has no topics at all" suppression. Counting client-side would report orphans on a version
+   * whose own issue list is deliberately quiet.
+   */
+  uncoveredQuestionCount?: number;
 }
 
 type ViewMode = 'question' | 'judge';
@@ -199,6 +223,8 @@ export function EvaluationRunDetail({
   versionId,
   canApply,
   dataSlotsAvailable = false,
+  conditionalTopicsEnabled = false,
+  uncoveredQuestionCount = 0,
 }: Props) {
   // The run header changes under a judge retry (status, tallies, per-judge summary), so it is
   // state rather than the prop read directly.
@@ -229,6 +255,16 @@ export function EvaluationRunDetail({
 
   /** The applied changes the reviewer's own instruction shaped — reported apart from the rest. */
   const steered = outcome?.applied.filter((a) => a.steer) ?? [];
+
+  /**
+   * Questions that were created but landed in no topic.
+   *
+   * Reported beside the applied list rather than folded into it, because "applied" otherwise reads
+   * as "and it will be asked" — and with Conditional Topics on, a question no topic claims never
+   * reaches a respondent. `undefined` means there was nothing to decide (no topics on the version);
+   * only an explicit `null` is a question left uncovered.
+   */
+  const uncoveredAdds = outcome?.applied.filter((a) => a.newQuestionTopicKey === null) ?? [];
 
   function handleUpdate(
     next: EvaluationFindingView,
@@ -530,6 +566,38 @@ export function EvaluationRunDetail({
             </p>
           )}
 
+          {/* A question that landed in no topic is applied and unreachable at the same time. Said
+              here rather than left to the launch gate, because this is the moment the reviewer can
+              still remember why they wanted it. */}
+          {uncoveredAdds.length > 0 && (
+            <div className="mt-3">
+              <FieldLabel>
+                {uncoveredAdds.length === 1
+                  ? '1 new question is in no topic'
+                  : `${uncoveredAdds.length} new questions are in no topic`}
+              </FieldLabel>
+              <p className="text-muted-foreground mt-1 max-w-[68ch] text-sm">
+                Nothing else in {uncoveredAdds.length === 1 ? 'its' : 'their'} section belongs to a
+                topic, so there was nothing to go on.{' '}
+                {uncoveredAdds.length === 1 ? 'It will' : 'They will'} not be asked until you put{' '}
+                {uncoveredAdds.length === 1 ? 'it' : 'them'} in one.{' '}
+                <Link
+                  href={`${workspaceVersionBase(questionnaireId, outcome.versionId)}/topics`}
+                  className="underline"
+                >
+                  Conditional topics →
+                </Link>
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {uncoveredAdds.map((item) => (
+                  <li key={item.findingId} className="text-muted-foreground text-sm">
+                    <span className="text-foreground">{item.targetKey}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* What the AI did with the reviewer's own words. `unhonoured` is the load-bearing half:
               a steer that only partly landed has to be visible at the moment it lands, or
               "applied" reads as "all of it applied" and the gap is found later in the
@@ -583,6 +651,27 @@ export function EvaluationRunDetail({
             className="underline"
           >
             Open the draft →
+          </Link>
+        </div>
+      )}
+
+      {/* Questions no topic claims, while routing is on — they can never be asked, and this is the
+          one screen where an admin is actively adding and removing questions. Placed above the
+          queue rather than on a card: it is a fact about the questionnaire, not about any one
+          finding. Silent when routing is off, where an uncovered question is simply asked. */}
+      {conditionalTopicsEnabled && uncoveredQuestionCount > 0 && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-400 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
+        >
+          {uncoveredQuestionCount === 1
+            ? '1 question in this questionnaire belongs to no topic, so it is never asked.'
+            : `${uncoveredQuestionCount} questions in this questionnaire belong to no topic, so they are never asked.`}{' '}
+          <Link
+            href={`${workspaceVersionBase(questionnaireId, versionId)}/topics`}
+            className="underline"
+          >
+            Put {uncoveredQuestionCount === 1 ? 'it' : 'them'} in a topic →
           </Link>
         </div>
       )}

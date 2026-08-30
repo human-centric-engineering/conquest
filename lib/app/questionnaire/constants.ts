@@ -623,7 +623,7 @@ export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinitio
       structure: {
         type: 'object',
         description:
-          'The version structure DTO to judge — { goal, audience, sections[] } with each question carrying its key, prompt, type, and required flag.',
+          'The version structure DTO to judge — { goal, audience, sections[], routing? } with each question carrying its key, prompt, type, required flag, and (when Conditional Topics is on) the topics that claim it.',
         additionalProperties: true,
       },
       versionId: {

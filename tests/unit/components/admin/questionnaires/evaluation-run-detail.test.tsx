@@ -186,6 +186,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -209,6 +211,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -240,6 +244,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: null,
           sectionPosition: 1,
           questionType: null,
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -260,6 +266,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'single_choice',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -281,6 +289,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'free_text',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -301,6 +311,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'free_text',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -321,6 +333,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 1,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: true,
         },
       }),
@@ -346,6 +360,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: null,
           sectionPosition: null,
           questionType: null,
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -696,6 +712,8 @@ function crossJudgeRun(): EvaluationRunDetailView {
         position: 1,
         sectionPosition: 1,
         questionType: 'likert',
+        routingReach: null,
+        topicLabel: null,
         removed: false,
       },
     }),
@@ -713,6 +731,8 @@ function crossJudgeRun(): EvaluationRunDetailView {
         position: 1,
         sectionPosition: 1,
         questionType: 'likert',
+        routingReach: null,
+        topicLabel: null,
         removed: false,
       },
     }),
@@ -810,6 +830,8 @@ function npsTarget() {
     position: 1,
     sectionPosition: 2,
     questionType: 'likert',
+    routingReach: null,
+    topicLabel: null,
     removed: false,
   };
 }
@@ -959,6 +981,8 @@ describe('EvaluationRunDetail by-question view', () => {
       position: 1,
       sectionPosition: 1,
       questionType: 'likert',
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     };
     const contested = run([
@@ -1441,6 +1465,85 @@ describe('EvaluationRunDetail batch apply', () => {
     expect(screen.getByText(/Making it a 1–5 scale/)).toBeInTheDocument();
   });
 
+  it('names a new question that landed in no topic, so "applied" is not read as "asked"', async () => {
+    // With Conditional Topics on, a question no topic claims never reaches a respondent. The
+    // reviewer approved the suggestion; they have to be told it cannot yet do anything.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'goal',
+            op: 'add_question',
+            newQuestionTopicKey: null,
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('1 new question is in no topic')).toBeInTheDocument()
+    );
+    expect(screen.getByText(/will not be asked until you put it in one/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Conditional topics/ })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn1/v/v2/topics'
+    );
+  });
+
+  it('says nothing when the new question DID land in a topic', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'goal',
+            op: 'add_question',
+            newQuestionTopicKey: 'talent_depth',
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/in no topic/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing when the version has no topics to decide between', async () => {
+    // Absent, not null. A questionnaire that does not use Conditional Topics must not be told
+    // about them.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/in no topic/)).not.toBeInTheDocument();
+  });
+
+  it('explains a delete refused because its topic samples too few questions', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [],
+        skipped: [{ findingId: 'f1', targetKey: 'q_1', reason: 'topic_sample_too_small' }],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 not applied')).toBeInTheDocument());
+    expect(screen.getByText(/narrow the question instead of deleting it/)).toBeInTheDocument();
+    // Still accepted: fixing the topic and applying again picks it up without re-triaging.
+    expect(screen.getByText(/\(still accepted\)\./)).toBeInTheDocument();
+  });
+
   it('says nothing about instructions on a batch nobody steered', async () => {
     renderRun(triaged(['accepted', 'declined', 'declined']));
     mockFetchOnce(batchResponse());
@@ -1557,5 +1660,150 @@ describe('EvaluationRunDetail judge retry', () => {
     );
     // The run is untouched — the warning is still true.
     expect(screen.getByText('1 judge did not run')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The routing-reach chip on a finding card (F17.34).
+ *
+ * A reviewer weighs "delete it" very differently once they know only some respondents ever see the
+ * question — and completely differently again when the answer is nobody. The silence case is the
+ * one worth pinning: ingest seeds a `core` topic per section on every questionnaire, so a chip
+ * derived from "has topics" would appear on every card in the product and be learned as noise.
+ */
+describe('EvaluationRunDetail routing-reach chip', () => {
+  async function withTarget(over: Partial<NonNullable<EvaluationFindingView['target']>>) {
+    const result = render(
+      <EvaluationRunDetail
+        run={run([
+          finding({
+            target: {
+              kind: 'question',
+              key: 'q_dupe',
+              label: 'What is hard about hiring?',
+              sectionTitle: 'Talent',
+              position: 1,
+              sectionPosition: 2,
+              questionType: 'free_text',
+              routingReach: null,
+              topicLabel: null,
+              removed: false,
+              ...over,
+            },
+          }),
+        ])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+      />
+    );
+    // The card leads with its target only in the by-judge view; by question, the group heading
+    // already carries the question and the card leads with the judge instead.
+    await switchToJudgeView();
+    return result;
+  }
+
+  it('says nothing about routing when Conditional Topics is off', async () => {
+    await withTarget({});
+
+    expect(screen.queryByText(/Always asked/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Asked when it fits/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Never asked/)).not.toBeInTheDocument();
+  });
+
+  it('names the topic and says everyone is asked it', async () => {
+    await withTarget({ routingReach: 'always', topicLabel: 'Spine' });
+
+    expect(screen.getByText(/Always asked · Spine/)).toBeInTheDocument();
+  });
+
+  it('says a conditional question is asked when it fits, in plain English', async () => {
+    await withTarget({ routingReach: 'conditional', topicLabel: 'Talent depth' });
+
+    const chip = screen.getByText(/Asked when it fits · Talent depth/);
+    expect(chip).toBeInTheDocument();
+    // Never "conditional", never "phase" — the code's vocabulary does not go on screen.
+    expect(chip.textContent).not.toMatch(/conditional|phase|topic membership/i);
+  });
+
+  it('says outright when a question is in no topic and so never asked', async () => {
+    await withTarget({ routingReach: 'never', topicLabel: null });
+
+    expect(screen.getByText(/Never asked — in no topic/)).toBeInTheDocument();
+  });
+
+  it('keeps the answer type beside the reach', async () => {
+    await withTarget({ routingReach: 'conditional', topicLabel: 'Talent depth' });
+
+    expect(screen.getByText(/Free text/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The orphaned-question banner (F17.35).
+ *
+ * A question belonging to no topic can never be asked while Conditional Topics is on, and nothing
+ * else on this screen would say so. The two things worth pinning are both about *silence*: the
+ * banner must not appear when routing is off (where an uncovered question is simply asked), and it
+ * must not appear at zero — ingest seeds a topic per section, so most versions sit at zero and a
+ * banner that renders anyway would be noise on every run.
+ */
+describe('EvaluationRunDetail orphaned-question banner', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderWithTopics(over: {
+    conditionalTopicsEnabled?: boolean;
+    uncoveredQuestionCount?: number;
+  }) {
+    return render(
+      <EvaluationRunDetail
+        run={run([finding()])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        {...over}
+      />
+    );
+  }
+
+  it('names the count and links to the topics tab when routing is on', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 3 });
+
+    expect(
+      screen.getByText(/3 questions in this questionnaire belong to no topic/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Put them in a topic/ })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn1/v/v1/topics'
+    );
+  });
+
+  it('says "it", not "them", for a single orphan', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 1 });
+
+    expect(
+      screen.getByText(/1 question in this questionnaire belongs to no topic/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Put it in a topic/ })).toBeInTheDocument();
+  });
+
+  it('stays silent when Conditional Topics is off, however many questions are uncovered', () => {
+    renderWithTopics({ conditionalTopicsEnabled: false, uncoveredQuestionCount: 9 });
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
+  });
+
+  it('stays silent at zero orphans', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 0 });
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
+  });
+
+  it('stays silent when the caller says nothing about topics at all', () => {
+    renderWithTopics({});
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
   });
 });
