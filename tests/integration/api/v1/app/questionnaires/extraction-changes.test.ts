@@ -39,6 +39,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   appQuestionnaireSection: {
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -53,7 +54,15 @@ const prismaMock = vi.hoisted(() => ({
   },
   // Conditional Topics membership (F17.35): the revert executor keeps topic membership in step as
   // it re-creates and prunes questions.
-  appQuestionnaireTopic: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
+  appQuestionnaireTopic: {
+    findMany: vi.fn(),
+    updateMany: vi.fn(),
+    createMany: vi.fn(),
+    count: vi.fn(),
+  },
+  // Read by `seedTopicsForVersion`, which a create-section revert runs when the version already
+  // has topics — so the section it just restored does not come back uncovered.
+  appDataSlot: { findMany: vi.fn() },
   // The fidelity critic's run for the version, joined onto the list payload.
   appAiRun: { findFirst: vi.fn() },
 }));
@@ -175,7 +184,10 @@ beforeEach(() => {
   // one every membership write must leave completely alone.
   prismaMock.appQuestionSlot.findUnique.mockResolvedValue({ key: 'q_deleted' });
   prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+  prismaMock.appQuestionnaireTopic.createMany.mockResolvedValue({ count: 0 });
   prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
+  prismaMock.appDataSlot.findMany.mockResolvedValue([]);
+  prismaMock.appQuestionnaireSection.findMany.mockResolvedValue([]);
 });
 
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
@@ -711,6 +723,63 @@ describe('POST revert · executor write-path', () => {
     expect(prismaMock.appQuestionnaireSection.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'sec-1' }, data: { title: 'Section' } })
     );
+  });
+
+  it('create-section: re-seeds a topic for the restored section when the version uses topics', async () => {
+    // Restored questions have no siblings in an existing topic to inherit from, so the section would
+    // come back uncovered — and with Conditional Topics on, uncovered means never asked. F17.35.
+    prismaMock.appQuestionnaireExtractionChange.findFirst.mockResolvedValue(
+      changeRow({
+        id: 'chg-1',
+        changeType: 'prune_section',
+        targetEntityType: 'section',
+        targetEntityId: null,
+        beforeJson: { title: 'Demographics', questions: [{ prompt: 'Your age?' }] },
+      })
+    );
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ ordinal: 2 });
+    prismaMock.appQuestionnaireSection.create.mockResolvedValue({ id: 'restored-sec' });
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'restored-q' });
+    // The version already uses topics, and the restored section is claimed by none of them.
+    prismaMock.appQuestionnaireTopic.count.mockResolvedValue(3);
+    prismaMock.appQuestionnaireSection.findMany.mockResolvedValue([
+      { id: 'restored-sec', title: 'Demographics', ordinal: 3 },
+    ]);
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'your_age', sectionId: 'restored-sec' },
+    ]);
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+    const res = await revertPOST(req(), ctx(REVERT_PARAMS));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionnaireTopic.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({ label: 'Demographics' })]),
+      })
+    );
+  });
+
+  it('create-section: seeds nothing when the version has no topics to keep in step', async () => {
+    // A revert must not resurrect a topic set an admin deliberately deleted.
+    prismaMock.appQuestionnaireExtractionChange.findFirst.mockResolvedValue(
+      changeRow({
+        id: 'chg-1',
+        changeType: 'prune_section',
+        targetEntityType: 'section',
+        targetEntityId: null,
+        beforeJson: { title: 'Demographics', questions: [{ prompt: 'Your age?' }] },
+      })
+    );
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ ordinal: 2 });
+    prismaMock.appQuestionnaireSection.create.mockResolvedValue({ id: 'restored-sec' });
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'restored-q' });
+    prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
+
+    const res = await revertPOST(req(), ctx(REVERT_PARAMS));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
   });
 
   it('create-section: re-creates a pruned section with its questions at the append ordinal', async () => {

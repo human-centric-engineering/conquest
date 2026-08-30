@@ -381,6 +381,33 @@ describe('buildJudgePrompt — with the routing overlay', () => {
     );
   });
 
+  it('falls back to the bare key when a question names a topic the roster has lost', () => {
+    // Membership is keys, and a topic can be deleted from under one. Rendering `topic=<key>` with no
+    // phase is the honest answer; the alternative reads as `topic=talent/undefined`.
+    const dangling: VersionStructureInput = {
+      ...ROUTED,
+      sections: [
+        {
+          title: 'Start',
+          questions: [
+            {
+              key: 'q_stale',
+              prompt: 'Still here?',
+              type: 'free_text',
+              required: false,
+              topicKeys: ['a_topic_since_deleted'],
+            },
+          ],
+        },
+      ],
+    };
+
+    const user = buildJudgePrompt('duplicates', dangling)[1].content;
+
+    expect(user).toContain('topic=a_topic_since_deleted)');
+    expect(user).not.toContain('undefined');
+  });
+
   it('says outright that a question in no topic can never be asked', () => {
     const user = buildJudgePrompt('duplicates', ROUTED)[1].content;
 

@@ -982,10 +982,30 @@ describe('persistDefinitionImport', () => {
       expect(result.topicCount).toBe(1);
     });
 
-    it('does not call createMany when the envelope has no topics', async () => {
+    it('seeds a topic per section when the envelope carries no topics of its own', async () => {
+      // A definition exported before Conditional Topics existed has no topics, so an import would
+      // land a questionnaire whose every question belongs to nothing — harmless until someone turns
+      // routing on, at which point NO question is asked. F17.35.
+      //
+      // The section/slot reads are stubbed for real here rather than left at `[]`: with an empty
+      // section list `seedTopicsForVersion` short-circuits, and the assertion below would hold
+      // whether or not the importer called it at all.
+      (tx.appQuestionnaireSection.findMany as Mock).mockResolvedValueOnce([
+        { id: 'sec-0', title: 'Background', ordinal: 0 },
+      ]);
+      (tx.appQuestionSlot.findMany as Mock).mockResolvedValueOnce([
+        { key: 'q1', sectionId: 'sec-0' },
+      ]);
+
       await persistDefinitionImport(input());
 
-      expect(tx.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
+      expect(tx.appQuestionnaireTopic.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ label: 'Background', phase: 'core', source: 'seeded' }),
+          ]),
+        })
+      );
     });
 
     it('writes conditionalTopics settings via the same merge helper the Topics tab PATCH uses', async () => {

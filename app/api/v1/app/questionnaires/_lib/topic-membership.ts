@@ -155,8 +155,27 @@ export async function pruneTopicMembership(
   versionId: string,
   questionKey: string
 ): Promise<void> {
+  await pruneTopicMembershipMany(client, versionId, [questionKey]);
+}
+
+/**
+ * Prune several keys in one pass — one read, and one write per topic that actually changes.
+ *
+ * The caller with more than one key is a section deletion: the cascade takes every question in the
+ * section with it, and looping the single-key version would re-read the whole topic set once per
+ * question and write the same topic once per question, inside the caller's transaction. Same result,
+ * a fraction of the work — and the single-key entry point delegates here so there is one
+ * implementation of what pruning means.
+ */
+export async function pruneTopicMembershipMany(
+  client: DbClient,
+  versionId: string,
+  questionKeys: readonly string[]
+): Promise<void> {
+  if (questionKeys.length === 0) return;
   for (const topic of await loadTopics(client, versionId)) {
-    const next = withoutTopicQuestionKey(topic.members, questionKey);
+    let next = topic.members;
+    for (const key of questionKeys) next = withoutTopicQuestionKey(next, key);
     if (next === topic.members) continue;
     await writeMembers(client, topic.id, next);
   }

@@ -184,10 +184,13 @@ export function inheritTopicForQuestion(
   // `planDataSlotAttachment`'s trick, for the same reason.
   const ordered = [...topics].sort((a, b) => a.ordinal - b.ordinal);
 
+  // A Set, because this is a membership test inside a nested loop: a version may carry 200 topics of
+  // 500 members each, and `Array.includes` would make that quadratic for no reason.
+  const siblings = new Set(siblingQuestionKeys);
   const counts = new Map<string, number>();
   for (const topic of ordered) {
     for (const qKey of topic.members.questionKeys) {
-      if (!siblingQuestionKeys.includes(qKey)) continue;
+      if (!siblings.has(qKey)) continue;
       counts.set(topic.key, (counts.get(topic.key) ?? 0) + 1);
     }
   }

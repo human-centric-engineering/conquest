@@ -945,7 +945,11 @@ export function withTopicQuestionKey(members: TopicMembers, questionKey: string)
  * only warning that the topic now asks nothing.
  */
 export function withoutTopicQuestionKey(members: TopicMembers, questionKey: string): TopicMembers {
-  const key = questionKey.trim();
+  // Truncated the same way `withTopicQuestionKey` truncates on the way in. Nothing bounds a QUESTION
+  // key at MEMBER_KEY_MAX_LENGTH — `persist.ts` writes an extracted key straight through — so a very
+  // long key is stored clipped, and pruning with the full-length original would match nothing and
+  // leave the dead key behind for ever. The pair has to agree on what "the same key" means.
+  const key = questionKey.trim().slice(0, MEMBER_KEY_MAX_LENGTH);
   if (!members.questionKeys.includes(key)) return members;
   return { ...members, questionKeys: members.questionKeys.filter((k) => k !== key) };
 }

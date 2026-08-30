@@ -175,6 +175,11 @@ beforeEach(() => {
   prismaMock.appQuestionnaireTopicDraft.findUnique.mockResolvedValue(null);
   prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
   prismaMock.appQuestionnaireTopic.findFirst.mockResolvedValue(null);
+  // Same reasoning, for the membership delegates (F17.35): a describe that sets a topic fixture
+  // would otherwise leak it into every describe after it in file order — including the pre-existing
+  // question-delete tests, which would then prune against a fixture their author never chose.
+  prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+  prismaMock.appQuestionnaireTopic.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.appAiRun.findFirst.mockResolvedValue(null);
   prismaMock.appAiRun.count.mockResolvedValue(0);
   // countLaunchBlockers defaults: no live invitations / respondent sessions (un-launch allowed).
@@ -828,6 +833,43 @@ describe('question create + delete — topic membership', () => {
 
     expect(res.status).toBe(201);
     expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('still deletes the question when the prune fails', async () => {
+    // The mirror of the create-path case below: the question is already gone by the time the prune
+    // runs, so failing the request would report a delete that DID happen as an error. The stale key
+    // it leaves behind is exactly what the Topics tab's coverage count already reports.
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({
+      id: 'q-1',
+      key: 'q_a',
+      sectionId: 'sec-1',
+    });
+    prismaMock.appQuestionSlot.delete.mockResolvedValue({ id: 'q-1' });
+    prismaMock.appQuestionnaireTopic.findMany.mockRejectedValue(new Error('topic read exploded'));
+
+    const res = await questionDELETE(req(), ctx({ id: 'qn-1', vid: 'v1', questionId: 'q-1' }));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionSlot.delete).toHaveBeenCalledWith({ where: { id: 'q-1' } });
+  });
+
+  it('still creates the question when the membership write fails', async () => {
+    // Best-effort by design: inheritance runs outside the create's transaction, so a failure has to
+    // leave the question in place. The alternative — failing the request — would report a create
+    // that DID happen as an error, and the resulting orphan is already reported by the Topics tab
+    // and the launch gate. This is the branch that was silently swallowing a TypeError before the
+    // mock carried `appQuestionnaireTopic.findMany` at all.
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'q_a' }]);
+    prismaMock.appQuestionnaireTopic.findMany.mockRejectedValue(new Error('topic read exploded'));
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'q-new', key: 'k' });
+
+    const res = await createQuestionPOST(
+      req({ prompt: 'How is it going?', type: 'free_text' }),
+      ctx(QUESTION_PARAMS)
+    );
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalled();
   });
 
   it('prunes a deleted question from every topic that held it', async () => {

@@ -286,8 +286,10 @@ describe('inheritTopicForQuestion', () => {
   });
 
   it('ignores ordinal when the majority is clear', () => {
-    // `pipeline` has the higher ordinal and still wins — ordinal is the tie-break, not the ranking.
-    expect(inheritTopicForQuestion(topics, ['g1', 'p1', 'p1'])).toBe('growth');
+    // `pipeline` has the HIGHER ordinal and still wins, 2 members to 1 — which is the only way to
+    // show that ordinal is the tie-break and not the ranking. (An earlier version of this test also
+    // asserted `['g1','p1','p1'] → growth` under the same name; that is a 1–1 tie resolved by
+    // ordinal, so it proved the opposite of what it claimed and duplicated the tie-break test above.)
     expect(
       inheritTopicForQuestion(
         [
@@ -301,6 +303,14 @@ describe('inheritTopicForQuestion', () => {
         ['g1', 'p1', 'p2']
       )
     ).toBe('pipeline');
+  });
+
+  it('counts each topic member once, however often a sibling key is repeated', () => {
+    // Weight comes from how many of a TOPIC's members appear among the siblings, not from how many
+    // times a sibling key was listed — so a caller passing duplicates cannot tip the majority.
+    expect(inheritTopicForQuestion(topics, ['g1', 'p1', 'p1', 'p1'])).toBe(
+      inheritTopicForQuestion(topics, ['g1', 'p1'])
+    );
   });
 
   it('returns null when no topic owns any sibling — the undecidable case', () => {

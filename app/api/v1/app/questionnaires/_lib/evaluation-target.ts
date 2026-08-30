@@ -47,11 +47,12 @@ function resolveRoutingReach(
   structure: VersionStructureInput | null
 ): Pick<FindingTargetView, 'routingReach' | 'topicLabel'> {
   const routing = structure?.routing;
-  if (!routing?.enabled || question.topicKeys === undefined) {
+  const topicKeys = question.topicKeys;
+  if (!routing?.enabled || topicKeys === undefined) {
     return { routingReach: null, topicLabel: null };
   }
 
-  const owning = routing.topics.filter((t) => question.topicKeys!.includes(t.key));
+  const owning = routing.topics.filter((t) => topicKeys.includes(t.key));
   if (owning.length === 0) return { routingReach: 'never', topicLabel: null };
 
   const alwaysRuns = owning.some((t) => (ALWAYS_PHASES as readonly string[]).includes(t.phase));

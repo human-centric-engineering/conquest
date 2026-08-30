@@ -23,7 +23,9 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(),
   },
   appQuestionnaireSection: { count: vi.fn(), findFirst: vi.fn() },
-  appQuestionnaireTopic: { findMany: vi.fn(), updateMany: vi.fn() },
+  // `update` is stocked deliberately even though the source must never call it: without the key,
+  // the "never uses update" assertion below would be vacuously true and could never fail.
+  appQuestionnaireTopic: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
   $transaction: vi.fn(),
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -869,7 +871,7 @@ describe('applyFinding — topic membership', () => {
       });
 
       expect(prismaMock.appQuestionnaireTopic.updateMany).toHaveBeenCalled();
-      expect(prismaMock.appQuestionnaireTopic).not.toHaveProperty('update.mock.calls.0');
+      expect(prismaMock.appQuestionnaireTopic.update).not.toHaveBeenCalled();
     });
   });
 

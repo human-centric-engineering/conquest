@@ -29,6 +29,7 @@ import { seedTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-
 import {
   inheritTopicMembership,
   pruneTopicMembership,
+  pruneTopicMembershipMany,
   sectionQuestionKeys,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-membership';
 import {
@@ -511,7 +512,13 @@ async function applyOp(tx: Tx, versionId: string, op: RevertOp, taken: Set<strin
         select: { key: true },
       });
       await tx.appQuestionnaireSection.delete({ where: { id: op.sectionId } });
-      for (const q of doomed) await pruneTopicMembership(tx, versionId, q.key);
+      // One pass for the whole section — looping the single-key prune would re-read every topic
+      // once per deleted question, inside this transaction.
+      await pruneTopicMembershipMany(
+        tx,
+        versionId,
+        doomed.map((q) => q.key)
+      );
       return;
     }
   }
