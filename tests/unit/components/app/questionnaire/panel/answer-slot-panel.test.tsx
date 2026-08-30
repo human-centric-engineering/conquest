@@ -164,7 +164,7 @@ describe('AnswerSlotPanel', () => {
     );
     // Captured count over the total number of context areas, paired with confidence — no percentage.
     expect(
-      screen.getByText('1 of 2 context areas captured with 58% confidence')
+      screen.getByText('1 of 2 context areas captured with 58% average confidence')
     ).toBeInTheDocument();
   });
 

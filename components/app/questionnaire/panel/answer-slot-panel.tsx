@@ -153,7 +153,10 @@ function ProgressHeading({ view, insetEnd }: { view: AnswerPanelView; insetEnd?:
   let summary: string;
   if (dataSlotMode) {
     const base = `${capturedCount} of ${totalAreas} context areas captured`;
-    summary = avgConfidence !== null ? `${base} with ${avgConfidence}% confidence` : base;
+    // "average confidence", not "confidence": the number is a mean across every captured area, and
+    // read as a bare percentage it sounds like a verdict on the capture as a whole. The other
+    // branch has always said "avg confidence"; these now agree.
+    summary = avgConfidence !== null ? `${base} with ${avgConfidence}% average confidence` : base;
   } else {
     // Same generalization as the panel builder (`answer-panel.ts`): anything other than
     // full_progress reads as a plain captured count, not an X-of-N. Currently this component
