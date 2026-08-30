@@ -229,6 +229,24 @@ export interface FindingTargetView {
    * type this build no longer knows; the UI falls back to showing the raw value.
    */
   questionType: string | null;
+  /**
+   * Whether routing can withhold this question from a respondent, in the reviewer's terms
+   * (F17.34). `always` — every respondent is asked it; `conditional` — only those its topic
+   * selects; `never` — it belongs to no topic, so with Conditional Topics on it cannot be asked
+   * at all.
+   *
+   * `null` whenever Conditional Topics is OFF for this version, or the structure predates the
+   * routing overlay. **Never derived from the mere presence of topics**: ingest seeds one `core`
+   * topic per section on every questionnaire, so a presence test would stamp "Always asked" on
+   * every finding card in the product and teach reviewers to ignore the chip.
+   *
+   * Derived at read time like the rest of this view, never stored — the same reason
+   * {@link FindingTargetView.questionType} travels here: a reviewer judges a suggestion very
+   * differently once they know most respondents will never see the question it is about.
+   */
+  routingReach: 'always' | 'conditional' | 'never' | null;
+  /** The owning topic(s), joined for display. `null` exactly when {@link routingReach} is. */
+  topicLabel: string | null;
   /** The target exists only in the run's snapshot — it was removed from the live structure since. */
   removed: boolean;
 }

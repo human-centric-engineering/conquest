@@ -28,6 +28,8 @@ function target(over: Partial<FindingTargetView> = {}): FindingTargetView {
     position: 1,
     sectionPosition: 1,
     questionType: 'likert',
+    routingReach: null,
+    topicLabel: null,
     removed: false,
     ...over,
   };

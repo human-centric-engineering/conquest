@@ -39,6 +39,8 @@ function finding(
       position: 1,
       sectionPosition: 1,
       questionType: 'free_text',
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     },
     severity: 'minor',

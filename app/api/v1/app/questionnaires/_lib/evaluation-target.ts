@@ -17,12 +17,49 @@
  * Pure: two {@link VersionStructureInput}s in, a view out. No Prisma.
  */
 
-import type { VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
+import type { StructureQuestion, VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
+import { ALWAYS_PHASES } from '@/lib/app/questionnaire/scope/types';
 import type { FindingTargetView } from '@/lib/app/questionnaire/views';
 import { locateSlot } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
 
 /** The `section:` prefix a `targetKey` uses to address a section by title. */
 const SECTION_PREFIX = 'section:';
+
+/**
+ * Whether routing can withhold this question, and from which topic(s) — the reviewer-facing half of
+ * the F17.34 overlay.
+ *
+ * Two things this gets right that the obvious version does not:
+ *
+ *  - **Gated on `routing.enabled`, not on "the version has topics".** Ingest seeds one `core` topic
+ *    per section on every questionnaire, so with the feature off — the default — nearly every
+ *    version has full topic coverage. A presence test would chip every finding card in the product
+ *    "Always asked", which trains reviewers to ignore the chip.
+ *  - **The answer is reach, not phase.** A question can belong to several topics; if ANY of them
+ *    always runs, so does the question, whatever the others say. Reporting one topic's phase would
+ *    call a question that everyone is asked "conditional".
+ *
+ * Read from whichever structure named the question — live for a live target, the run's snapshot for
+ * one deleted since, so a removed question is not silently reported as unreachable.
+ */
+function resolveRoutingReach(
+  question: StructureQuestion,
+  structure: VersionStructureInput | null
+): Pick<FindingTargetView, 'routingReach' | 'topicLabel'> {
+  const routing = structure?.routing;
+  if (!routing?.enabled || question.topicKeys === undefined) {
+    return { routingReach: null, topicLabel: null };
+  }
+
+  const owning = routing.topics.filter((t) => question.topicKeys!.includes(t.key));
+  if (owning.length === 0) return { routingReach: 'never', topicLabel: null };
+
+  const alwaysRuns = owning.some((t) => (ALWAYS_PHASES as readonly string[]).includes(t.phase));
+  return {
+    routingReach: alwaysRuns ? 'always' : 'conditional',
+    topicLabel: owning.map((t) => t.label).join(', '),
+  };
+}
 
 /** Human labels for the two version-level targets, which have no structure node to name. */
 const GOAL_LABEL = 'Questionnaire goal';
@@ -53,6 +90,8 @@ export function resolveFindingTarget(
       position: null,
       sectionPosition: null,
       questionType: null,
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     };
   }
@@ -65,6 +104,8 @@ export function resolveFindingTarget(
       position: null,
       sectionPosition: null,
       questionType: null,
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     };
   }
@@ -87,6 +128,8 @@ export function resolveFindingTarget(
       position: null,
       sectionPosition: idx !== -1 ? idx + 1 : null,
       questionType: null,
+      routingReach: null,
+      topicLabel: null,
       removed: current !== null && liveIdx === -1,
     };
   }
@@ -104,6 +147,8 @@ export function resolveFindingTarget(
       position: null,
       sectionPosition: null,
       questionType: null,
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     };
   }
@@ -116,6 +161,7 @@ export function resolveFindingTarget(
     position: located.indexInSection + 1,
     sectionPosition: located.sectionIndex + 1,
     questionType: located.question.type,
+    ...resolveRoutingReach(located.question, live ? current : snapshot),
     removed: live === null,
   };
 }

@@ -186,6 +186,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -209,6 +211,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -240,6 +244,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: null,
           sectionPosition: 1,
           questionType: null,
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -260,6 +266,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'single_choice',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -281,6 +289,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'free_text',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -301,6 +311,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 2,
           sectionPosition: 1,
           questionType: 'free_text',
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -321,6 +333,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: 1,
           sectionPosition: 1,
           questionType: 'likert',
+          routingReach: null,
+          topicLabel: null,
           removed: true,
         },
       }),
@@ -346,6 +360,8 @@ describe('EvaluationRunDetail review queue', () => {
           position: null,
           sectionPosition: null,
           questionType: null,
+          routingReach: null,
+          topicLabel: null,
           removed: false,
         },
       }),
@@ -696,6 +712,8 @@ function crossJudgeRun(): EvaluationRunDetailView {
         position: 1,
         sectionPosition: 1,
         questionType: 'likert',
+        routingReach: null,
+        topicLabel: null,
         removed: false,
       },
     }),
@@ -713,6 +731,8 @@ function crossJudgeRun(): EvaluationRunDetailView {
         position: 1,
         sectionPosition: 1,
         questionType: 'likert',
+        routingReach: null,
+        topicLabel: null,
         removed: false,
       },
     }),
@@ -810,6 +830,8 @@ function npsTarget() {
     position: 1,
     sectionPosition: 2,
     questionType: 'likert',
+    routingReach: null,
+    topicLabel: null,
     removed: false,
   };
 }
@@ -959,6 +981,8 @@ describe('EvaluationRunDetail by-question view', () => {
       position: 1,
       sectionPosition: 1,
       questionType: 'likert',
+      routingReach: null,
+      topicLabel: null,
       removed: false,
     };
     const contested = run([
@@ -1636,6 +1660,82 @@ describe('EvaluationRunDetail judge retry', () => {
     );
     // The run is untouched — the warning is still true.
     expect(screen.getByText('1 judge did not run')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The routing-reach chip on a finding card (F17.34).
+ *
+ * A reviewer weighs "delete it" very differently once they know only some respondents ever see the
+ * question — and completely differently again when the answer is nobody. The silence case is the
+ * one worth pinning: ingest seeds a `core` topic per section on every questionnaire, so a chip
+ * derived from "has topics" would appear on every card in the product and be learned as noise.
+ */
+describe('EvaluationRunDetail routing-reach chip', () => {
+  async function withTarget(over: Partial<NonNullable<EvaluationFindingView['target']>>) {
+    const result = render(
+      <EvaluationRunDetail
+        run={run([
+          finding({
+            target: {
+              kind: 'question',
+              key: 'q_dupe',
+              label: 'What is hard about hiring?',
+              sectionTitle: 'Talent',
+              position: 1,
+              sectionPosition: 2,
+              questionType: 'free_text',
+              routingReach: null,
+              topicLabel: null,
+              removed: false,
+              ...over,
+            },
+          }),
+        ])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+      />
+    );
+    // The card leads with its target only in the by-judge view; by question, the group heading
+    // already carries the question and the card leads with the judge instead.
+    await switchToJudgeView();
+    return result;
+  }
+
+  it('says nothing about routing when Conditional Topics is off', async () => {
+    await withTarget({});
+
+    expect(screen.queryByText(/Always asked/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Asked when it fits/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Never asked/)).not.toBeInTheDocument();
+  });
+
+  it('names the topic and says everyone is asked it', async () => {
+    await withTarget({ routingReach: 'always', topicLabel: 'Spine' });
+
+    expect(screen.getByText(/Always asked · Spine/)).toBeInTheDocument();
+  });
+
+  it('says a conditional question is asked when it fits, in plain English', async () => {
+    await withTarget({ routingReach: 'conditional', topicLabel: 'Talent depth' });
+
+    const chip = screen.getByText(/Asked when it fits · Talent depth/);
+    expect(chip).toBeInTheDocument();
+    // Never "conditional", never "phase" — the code's vocabulary does not go on screen.
+    expect(chip.textContent).not.toMatch(/conditional|phase|topic membership/i);
+  });
+
+  it('says outright when a question is in no topic and so never asked', async () => {
+    await withTarget({ routingReach: 'never', topicLabel: null });
+
+    expect(screen.getByText(/Never asked — in no topic/)).toBeInTheDocument();
+  });
+
+  it('keeps the answer type beside the reach', async () => {
+    await withTarget({ routingReach: 'conditional', topicLabel: 'Talent depth' });
+
+    expect(screen.getByText(/Free text/)).toBeInTheDocument();
   });
 });
 
