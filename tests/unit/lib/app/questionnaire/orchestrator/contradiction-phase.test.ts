@@ -742,9 +742,15 @@ describe('runContradictionPhase — look-back window', () => {
     expect(inv.calls.detect[0]?.existingAnswers.map((a) => a.slotKey)).toEqual(['a5']);
   });
 
-  it('counts the floor against what the detector will actually see', async () => {
-    // Two answers on file, a window of 1, and no message: the answer-vs-answer floor is 2, and one
-    // answer cannot contradict itself. Running the detector here would be a wasted model call.
+  it('does not run the detector on a turn with no message to check', async () => {
+    // Named for what it proves. It was written as "counts the floor against what the detector will
+    // actually see", which it does not: `canDetect` opens with `opts.hasMessage &&`, so on a
+    // no-message turn the window and the floor are never reached — the assertion below holds with
+    // `applyCompareWindow` deleted outright. (The window IS covered, by the two tests above, which
+    // do fail without it.) The floor's answer-vs-answer arm is in fact unreachable today: whenever
+    // it is evaluated `hasMessage` is true, so the floor is 1, and a non-empty answer list can
+    // never be narrowed below 1 by a window. Left as-is rather than "fixed" here — collapsing that
+    // arm changes when the detector runs, which is a product decision, not a test cleanup.
     const inv = stubInvokers({ detect: { findings: [] } });
     const s = state({
       userMessage: '',

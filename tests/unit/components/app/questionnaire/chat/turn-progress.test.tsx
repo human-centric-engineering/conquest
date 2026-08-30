@@ -26,7 +26,15 @@ import {
   TURN_PROGRESS_FALLBACK,
 } from '@/components/app/questionnaire/chat/turn-progress';
 
+// The motion preference is an OS setting, so it is the one input here that cannot be driven through
+// props. Held in a mutable box so a single test can flip it without a second `render` harness.
+const motion = vi.hoisted(() => ({ reduced: false }));
+vi.mock('@/lib/hooks/use-prefers-reduced-motion', () => ({
+  usePrefersReducedMotion: () => motion.reduced,
+}));
+
 beforeEach(() => {
+  motion.reduced = false;
   vi.useFakeTimers();
 });
 
@@ -131,6 +139,21 @@ describe('TurnProgress', () => {
       'Choosing what to ask next…'
     );
     expect(screen.getByTestId('turn-progress-label').className).toContain('opacity-100');
+  });
+
+  it('swaps the words outright under reduced motion, with no fade to sit through', () => {
+    // Fading over zero milliseconds is not the same as not fading: the fade path parks the OUTGOING
+    // words at `opacity-0` and waits for a timer before painting the new ones. A reader who has
+    // asked for less motion would get a blank row for that beat, which is worse than the motion.
+    motion.reduced = true;
+    const { rerender } = render(<TurnProgress label="Reading your answer…" />);
+    rerender(<TurnProgress label="Choosing what to ask next…" />);
+
+    // No timer advance — the new label is already on the row, fully opaque.
+    const label = screen.getByTestId('turn-progress-label');
+    expect(label.textContent).toBe('Choosing what to ask next…');
+    expect(label.className).toContain('opacity-100');
+    expect(label.className).not.toContain('opacity-0');
   });
 
   it('keeps a stage change to one row, so the turn mark stays level with the words', () => {

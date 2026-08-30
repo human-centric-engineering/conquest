@@ -12,6 +12,7 @@ import {
   formatCount,
   formatMs,
   formatShare,
+  formatWhen,
   severityVariant,
 } from '@/components/admin/questionnaires/diagnostics/format';
 
@@ -75,6 +76,30 @@ describe('formatShare', () => {
   it('renders a non-finite share as an em dash rather than NaN%', () => {
     expect(formatShare(Number.NaN)).toBe('—');
     expect(formatShare(Number.POSITIVE_INFINITY)).toBe('—');
+  });
+});
+
+describe('formatWhen', () => {
+  it('renders a timestamp down to the minute, without the year', () => {
+    // Midday UTC, so every timezone this is read from still lands on the 15th.
+    const out = formatWhen('2026-03-15T12:00:00.000Z');
+    expect(out).toMatch(/Mar/);
+    expect(out).toMatch(/15/);
+    expect(out).toMatch(/\d{1,2}:\d{2}/);
+    // The window is days wide, so a year would be noise in every cell of the table.
+    expect(out).not.toMatch(/2026/);
+  });
+
+  it('renders a missing timestamp as an em dash', () => {
+    expect(formatWhen(null)).toBe('—');
+    expect(formatWhen(undefined)).toBe('—');
+    expect(formatWhen('')).toBe('—');
+  });
+
+  it('renders an unparseable timestamp as an em dash rather than "Invalid Date"', () => {
+    // These cells are fed straight from stored JSON, so a malformed value is a real input — and
+    // "Invalid Date" in a diagnostics table reads as a finding about the session, not about us.
+    expect(formatWhen('not a date')).toBe('—');
   });
 });
 

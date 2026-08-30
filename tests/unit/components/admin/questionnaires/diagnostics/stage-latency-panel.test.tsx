@@ -135,6 +135,34 @@ describe('StageLatencyPanel', () => {
     expect(within(row).getByText('1.5 s')).toBeTruthy();
   });
 
+  it('leaves every share blank when turns were counted but none recorded a duration', () => {
+    // Reachable: `getStageLatency` COALESCEs the wall-clock sum to 0, so a window whose turns all
+    // predate `durationMs` gives turns > 0 with totalTurnMs === 0. Every share is then a division
+    // by nothing. Rendering that as "0%" would claim each stage took none of the turn, which is the
+    // most misleading answer available — the truth is that the turn was never timed.
+    render(
+      <StageLatencyPanel
+        data={breakdown({
+          turns: 4,
+          totalTurnMs: 0,
+          totalCallMs: 0,
+          residualMs: 0,
+          residualShare: null,
+          stages: [stage('Interviewer phrasing', { totalMs: 3_600, perTurnMs: 900 })],
+        })}
+      />
+    );
+
+    expect(within(rowFor('Interviewer phrasing')).getByText('—')).toBeTruthy();
+    expect(within(rowFor('Not in a model call')).getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.queryByText('0%')).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+
+    // The bar behind an unmeasured share draws nothing rather than filling the track.
+    const bar = rowFor('Interviewer phrasing').querySelector('span[aria-hidden="true"] > span');
+    expect((bar as HTMLElement | null)?.style.width).toBe('0%');
+  });
+
   it('summarises the average turn and how much of it waited on a model', () => {
     render(
       <StageLatencyPanel

@@ -13,6 +13,7 @@
  * too — the hook schedules against an absolute stamp, not a countdown).
  */
 
+import { StrictMode } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
@@ -96,6 +97,29 @@ describe('usePacedStageLabel', () => {
     // Queued twice, the repeat would cost the NEXT stage a whole extra dwell and read as the
     // surface having stalled and restarted on the same sentence.
     advance(STAGE_MIN_DWELL_MS);
+    expect(result.current).toBe('Choosing what to ask next…');
+  });
+
+  it('queues a label once even when the effect runs twice for it', () => {
+    // React 19 StrictMode sets every effect up, tears it down and sets it up again ON MOUNT, so a
+    // provider that mounts mid-turn — with a stage already on the stream — genuinely runs the
+    // effect body twice for one label. That is the case `next === lastSeen.current` exists for.
+    // Without the guard the queue holds the same sentence twice, and the NEXT stage waits a second
+    // dwell behind a repeat of the first, which reads as the surface having stalled and restarted.
+    const { result, rerender } = renderHook(
+      ({ label }: { label: string | null }) => usePacedStageLabel(label),
+      {
+        initialProps: { label: 'Reading your answer…' },
+        wrapper: StrictMode,
+      }
+    );
+    advance(0);
+    expect(result.current).toBe('Reading your answer…');
+
+    rerender({ label: 'Choosing what to ask next…' });
+    advance(STAGE_MIN_DWELL_MS);
+
+    // One dwell, not two: the second stage is up, not stuck behind a duplicate of the first.
     expect(result.current).toBe('Choosing what to ask next…');
   });
 
