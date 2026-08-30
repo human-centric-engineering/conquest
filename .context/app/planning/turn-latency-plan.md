@@ -90,7 +90,10 @@ Recorded so they are not rediscovered from scratch:
 
 - Emit reasoning steps **progressively** rather than as one post-hoc frame. Cheap once Phase 2's
   stage hooks exist — "Captured _your team's size_" the moment extraction returns.
-- Type the status label out per character. `StatusTicker` already does this at 40ms.
+- ~~Type the status label out per character.~~ Superseded by [`F20.5`](./features/f20.5.md), which
+  went at the same problem — a label gone before it can be read — with a 1.1s dwell and a two-row
+  fade-out instead of a typewriter. Per-character typing would have made a fast stage take _longer_
+  to become readable, not shorter.
 - Stall escalation: "Still working on this…" at ~10s, offer retry at ~25s. Retry is already safe —
   `findTurnByIdempotencyKey` (`route.ts:786`) replays a persisted turn rather than re-running it.
 - A greyed question-card skeleton during the wait, so the layout does not jump.
@@ -372,7 +375,7 @@ rather than shaving round-trips that were never the cost.
 | Phase            | Outcome                                                                                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1 — Measure      | Shipped. Turn is model-bound (2.6% residual); phrasing is 46% of it.                                                                                                           |
-| 2 — Honest wait  | Shipped. Four real stage labels + a delayed clock.                                                                                                                             |
+| 2 — Honest wait  | Shipped. Four real stage labels + a delayed clock; paced into a readable hand-off by [`F20.5`](./features/f20.5.md).                                                           |
 | 3 — Round-trips  | **A1 shipped** (~279 ms/turn). **A2 blocked on a values decision** — it cannot be built without relaxing the guarantee that a disclosure is never sent to the sincerity judge. |
 | 4 — Prompt cache | **Audited, not implemented.** The prompt caches nothing, fixing it inverts a safety-relevant precedence hierarchy, and latency barely tracks input size anyway.                |
 

@@ -35,6 +35,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
+import { usePacedStageLabel } from '@/lib/hooks/use-paced-stage-label';
 import { currentExchangeStart } from '@/lib/app/questionnaire/chat/exchange';
 import { isTerminalStatus } from '@/lib/app/questionnaire/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
@@ -76,6 +77,13 @@ export interface ConversationContextValue {
   /**
    * P20 Phase 2: the stream's current stage — "Reading your answer…" — or null before the first
    * one lands and once content starts. Transient; never committed onto a turn.
+   *
+   * **Paced, not raw.** The pipeline crosses its stages at its own pace and can hand over twice
+   * inside a second; `usePacedStageLabel` holds each label on screen long enough to read and
+   * queues whatever arrives during it. Pacing happens HERE rather than in each consumer because
+   * two surfaces read this — the transcript's indicator and the composer's placeholder — and two
+   * independently-paced copies would drift within a turn, one of them naming a stage the other
+   * had not reached.
    */
   stageLabel: string | null;
   /**
@@ -104,7 +112,10 @@ export function ConversationProvider({
   animateOpening = false,
   children,
 }: ConversationProviderProps) {
-  const { turns, streaming, status, canSend, stageLabel } = stream;
+  const { turns, streaming, status, canSend, stageLabel: rawStageLabel } = stream;
+
+  // See `stageLabel` on the context type: paced once, here, so both halves say the same thing.
+  const stageLabel = usePacedStageLabel(rawStageLabel);
 
   // The seeded turns present at mount. On a resumed session (`animateOpening` off) these render
   // instantly and the queue begins just past them.

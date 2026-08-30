@@ -231,11 +231,13 @@ export function CurrentExchange({
           still revealing. */}
       {streaming && revealCursor >= turns.length && (
         <AssistantTurn>
-          {/* P20 Phase 2: the stage the server is actually on, plus an elapsed clock once the wait
-              is long enough to warrant one. This is the one place a respondent watches the whole
-              multi-call wait, so it is the one that gets both. The reasoning trace still reveals on
-              the settled turn (above), tucking itself away under the "Animated" placement. */}
-          <TurnProgress label={stageLabel} className="min-h-6" />
+          {/* P20 Phase 2: the stage the server is actually on — paced and faded so a fast sequence
+              is readable (F20.5) — plus an elapsed clock once the wait is long enough to warrant
+              one. This is the one place a respondent watches the whole multi-call wait, so it is
+              the one that gets both. It owns its own row height, which has to stay one row: the
+              accent mark beside it is pinned to the turn's first line. The reasoning trace still
+              reveals on the settled turn (above), tucking itself away under "Animated". */}
+          <TurnProgress label={stageLabel} />
         </AssistantTurn>
       )}
 

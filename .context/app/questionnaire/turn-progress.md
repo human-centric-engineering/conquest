@@ -89,6 +89,60 @@ clear the indicator mid-wait, which reads as the reply having arrived.
 - **Never committed onto a turn.** A wait cue is not part of the conversation and must not replay on
   resume or scroll-back.
 
+### Pacing: the dwell and the two-row hand-off (F20.5)
+
+Streaming the stages truthfully is not the same as making them readable. The pipeline crosses its
+boundaries at its own pace — `reading` covers three calls and can be gone in a few hundred
+milliseconds, `choosing` → `composing` is often back-to-back — so two or three sentences can flash
+past inside a second. The respondent registers motion and reads none of it, which is arguably worse
+than the one static label this replaced.
+
+Two pieces fix that, and both are presentation-only: **no stage is invented, delayed at the start of
+a turn, re-ordered, or dropped.**
+
+**The dwell.** `usePacedStageLabel` (`lib/hooks/use-paced-stage-label.ts`) holds each label for
+`STAGE_MIN_DWELL_MS` (1.1s — a comfortable read of the longest label, and four of them still fit
+inside a measured ~5s turn). A label that arrives during a dwell **queues** rather than overwriting.
+Three consequences worth knowing:
+
+- **The first label of a turn is never held back.** The dwell exists to stop labels overwriting each
+  other, not to sit on the neutral opener once the server has said what it is doing.
+- **A turn that finishes early simply stops mid-sequence.** The queue is never drained on the way
+  out — the reply arriving is its own progress, and a stage announced after the fact would be the
+  indicator describing finished work.
+- **Null wipes the queue rather than draining it.** The stream clears the label on the first content
+  delta and again in teardown; a queued stage surfacing beside the _next_ turn's wait would be a
+  straightforward lie.
+
+It is applied **once, in `ConversationProvider`**, not in each consumer. Two surfaces read this
+label — the transcript's indicator and the composer's disabled-field placeholder — and two
+independently-started clocks would drift within a turn, one of them naming a stage the other had not
+reached. `useQuestionnaireSessionStream` still exposes the label raw; the provider is where it
+becomes the thing both halves show.
+
+**The fade.** `TurnProgress` keeps **one row**. A label fades out over `LABEL_FADE_MS` (180ms), is
+replaced while invisible, and fades back in — out, then in, never both at once. Details that carry
+it:
+
+- **One row, because the turn's mark is pinned to the first line.** `AssistantTurn` puts the
+  interviewer's accent dot beside the FIRST line of a turn. The first build of this kept the
+  outgoing label above the live one and scrolled it away; the taller box left that dot floating a
+  row above the words, and two lines moving in opposite directions was more going on than a wait cue
+  can carry. The row keeps a `min-h-6` floor so its height never depends on what the label is doing.
+- **Out then in, not a cross-fade.** Two labels at half opacity over each other in one row is a
+  smear. `shown` lags the prop by one fade so the old words are gone before the new ones arrive.
+- **Only the words change.** The dots and the clock hold still — furniture that moves for a change
+  it had no part in is exactly the fidget this is meant to avoid.
+- **A label that has not changed does not fade.** The stream re-renders for reasons unrelated to the
+  stage (a content delta, a turn committing), and fading on every render would flicker continuously.
+- **Reduced motion swaps the words outright**, rather than fading over zero milliseconds.
+
+The animation is deliberately the small half of this feature. What makes a fast sequence readable is
+the dwell; the fade only softens the change the dwell schedules.
+
+The component decides how a change LOOKS; the hook decides WHEN one happens. That split is why the
+component's tests never touch timing and the hook's never touch the DOM.
+
 ### Where it renders
 
 `TurnProgress` (`components/app/questionnaire/chat/turn-progress.tsx`), mounted by `CurrentExchange`

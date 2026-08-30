@@ -3,10 +3,14 @@
 /**
  * Unit tests: `TurnProgress` — the respondent's wait indicator (F20.2).
  *
- * Two behaviours carry the feature and both are easy to break silently: the label must never
+ * Three behaviours carry the feature and all are easy to break silently: the label must never
  * collapse to nothing mid-wait (an empty indicator reads as "the reply arrived and was blank"),
- * and the elapsed clock must stay hidden on a fast turn and appear on a slow one. The clock is
- * driven by a real interval, so these use fake timers.
+ * the elapsed clock must stay hidden on a fast turn and appear on a slow one, and a stage change
+ * must fade OUT before the next one appears rather than swapping under the reader's eye (F20.5).
+ * The clock and the fade are both timer-driven, so these use fake timers.
+ *
+ * The DWELL between labels is not tested here: this component draws a change, it does not decide
+ * when one happens. That is `usePacedStageLabel`, tested next to it.
  *
  * The a11y split is asserted too: exactly ONE live region, announcing the label and not the clock.
  * A screen reader being read a new number every second is noise, not reassurance.
@@ -18,6 +22,7 @@ import { render, screen, act } from '@testing-library/react';
 import {
   TurnProgress,
   ELAPSED_AFTER_MS,
+  LABEL_FADE_MS,
   TURN_PROGRESS_FALLBACK,
 } from '@/components/app/questionnaire/chat/turn-progress';
 
@@ -103,11 +108,51 @@ describe('TurnProgress', () => {
   it('updates the announced label when the stage changes', () => {
     const { rerender } = render(<TurnProgress label="Reading your answer…" />);
     rerender(<TurnProgress label="Choosing what to ask next…" />);
+    advance(LABEL_FADE_MS);
 
     expect(document.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
       'Choosing what to ask next…'
     );
-    expect(screen.queryByText('Reading your answer…')).toBeNull();
+  });
+
+  it('fades the old stage out before the new one appears, never both at once', () => {
+    const { rerender } = render(<TurnProgress label="Reading your answer…" />);
+    rerender(<TurnProgress label="Choosing what to ask next…" />);
+
+    // Mid-hand-off: the outgoing words are still the ones on the row, on their way to transparent.
+    // Painting the new label here instead would be the swap-under-the-eye this replaced, and
+    // painting BOTH would be a smear — there is only one row.
+    const label = screen.getByTestId('turn-progress-label');
+    expect(label.textContent).toBe('Reading your answer…');
+    expect(label.className).toContain('opacity-0');
+
+    advance(LABEL_FADE_MS);
+    expect(screen.getByTestId('turn-progress-label').textContent).toBe(
+      'Choosing what to ask next…'
+    );
+    expect(screen.getByTestId('turn-progress-label').className).toContain('opacity-100');
+  });
+
+  it('keeps a stage change to one row, so the turn mark stays level with the words', () => {
+    // `AssistantTurn` pins the interviewer's accent mark to the FIRST line of the turn. A second
+    // row here — an earlier build scrolled the outgoing label away above the live one — left that
+    // mark floating a row above the text it belongs to.
+    const { container, rerender } = render(<TurnProgress label="Reading your answer…" />);
+    rerender(<TurnProgress label="Choosing what to ask next…" />);
+    advance(LABEL_FADE_MS);
+
+    const row = container.querySelector('[role="status"]');
+    expect(row?.className).toContain('min-h-6');
+    expect(screen.getAllByTestId('turn-progress-label')).toHaveLength(1);
+  });
+
+  it('holds still for a label that has not actually changed', () => {
+    const { rerender } = render(<TurnProgress label="Reading your answer…" />);
+    rerender(<TurnProgress label="Reading your answer…" />);
+
+    // The stream re-renders for reasons that have nothing to do with the stage — a content delta,
+    // a new turn committing. Fading on every render would make the row flicker continuously.
+    expect(screen.getByTestId('turn-progress-label').className).toContain('opacity-100');
   });
 
   it('stops its interval on unmount', () => {
