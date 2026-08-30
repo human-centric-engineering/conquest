@@ -233,14 +233,39 @@ describe('buildJudgeRetryMessage', () => {
  */
 describe('buildJudgePrompt — with no routing overlay', () => {
   it('says nothing about routing, on any dimension', () => {
-    // Asserted on the overlay's own markers, not the bare word "topic": the Coverage rubric has
-    // always said "name the missing topic" in ordinary English, and always should.
+    // Asserted on the overlay's own VOCABULARY, exactly as the prompt spells it — not the bare word
+    // "topic" (the Coverage rubric has always said "name the missing topic" in ordinary English) and
+    // not a paraphrase. An earlier version of this test looked for "asked when it fits" with spaces
+    // while the prompt writes "asked-when-it-fits" with hyphens, and passed over a real leak: the
+    // Duplicates edit-guidance was naming conditional topics on questionnaires that have none.
+    const ROUTING_VOCABULARY = [
+      /CO-OCCURRENCE/,
+      /asked-when-it-fits/i,
+      /always-asked/i,
+      /Deliberate overlap/i,
+      /depth topics/i,
+      /the phases ARE the sequence/i,
+      /routing is on/i,
+    ];
     for (const dimension of EVALUATION_DIMENSIONS) {
       const [system, user] = buildJudgePrompt(dimension, STRUCTURE);
-      expect(system.content).not.toMatch(/CO-OCCURRENCE/);
-      expect(system.content).not.toMatch(/asked when it fits/i);
+      for (const pattern of ROUTING_VOCABULARY) {
+        expect(system.content).not.toMatch(pattern);
+        expect(user.content).not.toMatch(pattern);
+      }
       expect(user.content).not.toMatch(/topic=/);
       expect(user.content).not.toMatch(/^ROUTING/m);
+    }
+  });
+
+  it('is byte-identical to the same prompt built without the overlay field present', () => {
+    // The strongest form of the gate: whatever the rubrics grow, a structure with no `routing` must
+    // render exactly what it rendered before the field existed.
+    const withUndefined: VersionStructureInput = { ...STRUCTURE, routing: undefined };
+    for (const dimension of EVALUATION_DIMENSIONS) {
+      expect(buildJudgePrompt(dimension, withUndefined)).toEqual(
+        buildJudgePrompt(dimension, STRUCTURE)
+      );
     }
   });
 
@@ -362,7 +387,7 @@ describe('buildJudgePrompt — with the routing overlay', () => {
     expect(user).toContain('topic=NONE — never asked while routing is on');
   });
 
-  it('gives the Duplicates judge the co-occurrence rule, and the scale line that protects the score', () => {
+  it('gives the Duplicates judge the co-occurrence rule, including the score protection', () => {
     const system = buildJudgePrompt('duplicates', ROUTED)[0].content;
 
     expect(system).toContain('CO-OCCURRENCE');
@@ -370,7 +395,9 @@ describe('buildJudgePrompt — with the routing overlay', () => {
       'Two questions are only duplicates if the SAME respondent is asked both'
     );
     expect(system).toContain('Never propose delete_question for it');
-    expect(system).toContain('does not lower the score');
+    // The score protection lives inside the gated rule, not on the static scale — a questionnaire
+    // with no topics must not be told about "opening" and "depth" questions it does not have.
+    expect(system).toContain('do not let it lower your score');
   });
 
   it('gives Ordering and Goal-Match their own routing rules', () => {

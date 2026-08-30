@@ -89,21 +89,20 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
   duplicates: {
     focus:
       'Judge whether questions are distinct. Flag pairs (or groups) of questions that ask substantially the same thing, even across different sections or with different wording. For each, target the later/weaker question by its `key` and propose merging or removing it.',
-    // The last line is load-bearing when routing is on: a judge told to stay quiet about deliberate
-    // opening→depth overlap will still mark it down unless the scale says not to, and the score is
-    // what an admin compares between versions.
+    // No routing sentence here. The "do not let it lower your score" instruction lives in the
+    // CO-OCCURRENCE block, which is spliced in only when routing is actually configured — a
+    // questionnaire with no topics must not be told about "opening" and "depth" questions it
+    // does not have.
     scale: `- 1.0 — Every question is distinct.
 - 0.7 — One borderline overlap.
 - 0.5 — A clear duplicate pair, or several near-duplicates.
 - 0.3 — Multiple redundant questions.
-- 0.0 — Pervasive duplication.
-Deliberate overlap between an opening question and a later depth question is not a defect and does not lower the score.`,
+- 0.0 — Pervasive duplication.`,
     ignore:
       'Gaps (Coverage), wording (Clarity), and ordering. Score redundancy only — what is REPEATED.',
     editGuidance:
       'Where the two questions only PARTLY overlap — each asks something the other misses — prefer salvaging over deleting: target the weaker/later one and attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<narrowed to the part the other does not cover>" }`, so the distinct half survives. ' +
-      'Attach `"proposedEdit": { "op": "delete_question" }` when the question is genuinely redundant and nothing about it is worth keeping. There is no merge op, so when wording from the deleted question should survive in the one you keep, put that wording in `proposedChange`. ' +
-      'Where the weaker question sits in an "asked-when-it-fits" topic, prefer `replace_prompt` over deleting it even when the overlap is real: that topic may hold only a handful of questions, and removing one can leave it with too little to ask.',
+      'Attach `"proposedEdit": { "op": "delete_question" }` when the question is genuinely redundant and nothing about it is worth keeping. There is no merge op, so when wording from the deleted question should survive in the one you keep, put that wording in `proposedChange`. ',
   },
   type_fit: {
     focus:
@@ -298,7 +297,9 @@ const ROUTING_RULES: Partial<Record<EvaluationDimension, string>> = {
 Two questions are only duplicates if the SAME respondent is asked both.
 - The opening is deliberately the broad version of what the depth topics probe later: its answers are what decide which of those topics this respondent gets. Overlap between an opening question and a later one is the design working, not redundancy. Never propose delete_question for it, keep any such finding at "info", and do not let it lower your score.
 - Two questions in different "asked-when-it-fits" topics may never both be asked. Say so in your rationale and drop the severity one level.
-- Everything else is a duplicate exactly as it would be without routing.`,
+- Everything else is a duplicate exactly as it would be without routing.
+
+Where the weaker question sits in an "asked-when-it-fits" topic, prefer \`replace_prompt\` over deleting it even when the overlap is real: that topic may hold only a handful of questions, and removing one can leave it with too little to ask.`,
 
   ordering: `ROUTING — the phases ARE the sequence.
 Opening topics run first, "asked-when-it-fits" topics run after them (and only for some respondents), closing topics run last. A question appearing after the opening because its topic is conditional is correctly placed, not out of order. Judge the order WITHIN a topic, and the placement of sensitive questions, rather than the phase boundaries themselves.`,
