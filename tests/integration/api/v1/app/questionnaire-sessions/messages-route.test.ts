@@ -1399,7 +1399,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
     };
   }
 
-  it('shows the explanation (not the probe) as the contradiction notice message under flag mode', async () => {
+  it('shows the explanation (not the probe question) as the contradiction notice message', async () => {
     // Need ≥ MIN_CONTRADICTION_ANSWERS (2) existing answers and contradictionMode ≠ 'off'.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
@@ -1415,7 +1415,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
           config: {
             ...baseCtx.base.config,
             // contradictionMode must be non-'off' for detection to run.
-            contradictionMode: 'flag',
+            contradictionMode: 'probe',
             contradictionEveryNTurns: 1,
           },
         },
@@ -1436,21 +1436,21 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
     expect(data.message).not.toBe('Can you clarify your seniority level?');
     expect(data.detail).toBeUndefined();
 
-    // "Don't nag" ledger: a freshly-surfaced flag-mode conflict is recorded on the session so it is
-    // never re-alerted on a later turn. The route threads the phase's updated ledger to persistTurn.
+    // "Don't nag" ledger: a freshly-surfaced conflict is recorded on the session so it is never
+    // re-alerted on a later turn. The route threads the phase's updated ledger to persistTurn.
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         raisedContradictions: [
-          expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'flagged' }),
+          expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'unresolved' }),
         ],
       })
     );
   });
 
   it('parks the probe and records the ledger (unresolved) when contradictionMode is probe', async () => {
-    // Probe mode DEFERS: the route asks a reconciliation question, suppresses this turn's writes, and
-    // persists BOTH the parked pendingContradiction and the ledger entry. This is the probe-mode
-    // persist path the flag-mode test above never exercises.
+    // Checking DEFERS: the route asks a reconciliation question, suppresses this turn's writes, and
+    // persists BOTH the parked pendingContradiction and the ledger entry. The notice test above
+    // covers the warning frame; this covers the persist path.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -1814,8 +1814,8 @@ describe('warning detail enrichment', () => {
     expect(data.detail).toBe('That answer is not plausible.');
   });
 
-  it('omits detail on a contradiction warning when explanation equals the message (flag mode)', async () => {
-    // In flag mode the explanation IS the warning message — no separate "Why?" detail needed.
+  it('omits detail on a contradiction warning when explanation equals the message', async () => {
+    // The explanation IS the warning message — no separate "Why?" detail needed.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -1828,14 +1828,14 @@ describe('warning detail enrichment', () => {
           ],
           config: {
             ...baseCtx.base.config,
-            contradictionMode: 'flag',
+            contradictionMode: 'probe',
             contradictionEveryNTurns: 1,
           },
         },
       })
     );
 
-    // Invoker whose contradiction explanation IS the warning message (flag mode pattern).
+    // Invoker whose contradiction explanation IS the warning message.
     invokersMock.buildTurnInvokers.mockResolvedValue({
       extractAnswers: vi.fn(async () => ({
         intents: [

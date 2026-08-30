@@ -301,12 +301,12 @@ describe('accept → hold for review (sweep found contradictions)', () => {
   });
 
   it('dispatches the sweep at completion-sweep scope (compareWindow all)', async () => {
-    await POST(req(acceptBody({ mode: 'flag', windowN: 2 })), ctx(PARAMS));
+    await POST(req(acceptBody({ mode: 'probe', windowN: 2 })), ctx(PARAMS));
     const [slug, args] = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0];
     expect(slug).toBe('app_detect_contradictions');
-    // The sweep runs in flag mode; windowN passes through but the completion sweep
-    // compares all answers regardless (asserted via the pure scheduler's behaviour).
-    expect(args.mode).toBe('flag');
+    // windowN passes through but the completion sweep compares all answers regardless
+    // (asserted via the pure scheduler's behaviour).
+    expect(args.mode).toBe('probe');
     expect(args.answers).toHaveLength(2);
   });
 });

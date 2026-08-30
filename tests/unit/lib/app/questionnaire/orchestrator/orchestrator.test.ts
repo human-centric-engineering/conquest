@@ -251,9 +251,10 @@ describe('runTurn — contradiction detection', () => {
 });
 
 describe('runTurn — refinement', () => {
-  it('refines immediately under flag mode when a contradiction is found and refinement is on', async () => {
-    // Flag mode keeps the historical behaviour: surface the explanation AND refine the same turn.
-    // (Probe mode now DEFERS — see the probe-confirm flow tests below.)
+  it('never refines on the detection turn — the respondent is asked first', async () => {
+    // The retired `flag` mode refined the same turn the conflict was found, with no confirmation.
+    // Whatever mode reaches the engine, a fresh contradiction now defers: no refiner call, no
+    // refinement side effect, and this turn's writes held until the respondent answers the probe.
     const { invokers, calls } = stubInvokers({
       detect: { findings: [finding()] },
       refine: { decisions: [decision({ slotKey: 'a' })], costUsd: 0.001 },
@@ -262,15 +263,14 @@ describe('runTurn — refinement', () => {
       state({
         userMessage: 'x',
         questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag' },
+        config: { contradictionMode: 'probe' },
         existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
-    expect(calls.refine).toHaveLength(1);
-    expect(calls.refine[0]?.trigger.contradiction).toBeDefined();
-    expect(result.sideEffects.answerRefinements).toHaveLength(1);
-    expect(slugs(result.toolCalls)).toContain(REFINE_ANSWER_CAPABILITY_SLUG);
+    expect(calls.refine).toHaveLength(0);
+    expect(result.sideEffects.answerRefinements).toHaveLength(0);
+    expect(slugs(result.toolCalls)).not.toContain(REFINE_ANSWER_CAPABILITY_SLUG);
   });
 
   it('does not refine when no contradiction was found', async () => {
@@ -572,23 +572,51 @@ describe('runTurn — selection terminal branches', () => {
 });
 
 describe('runTurn — cost summing', () => {
-  it('sums invoker costs and the selection ask cost', async () => {
+  it('sums extraction, detection and the selection ask cost on a clean turn', async () => {
     const { invokers } = stubInvokers({
       extract: { intents: [intent({ slotKey: 'a' })], costUsd: 0.002 },
-      detect: { findings: [finding()], costUsd: 0.003 },
-      refine: { decisions: [decision({ slotKey: 'a' })], costUsd: 0.001 },
+      detect: { findings: [], costUsd: 0.003 },
       select: { decision: { kind: 'ask', questionId: 'b', rationale: 'next', costUsd: 0.004 } },
     });
     const result = await runTurn(
       state({
         userMessage: 'x',
         questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
-        config: { contradictionMode: 'flag', coverageThreshold: 1, minQuestionsAnswered: 5 },
+        config: { contradictionMode: 'probe', coverageThreshold: 1, minQuestionsAnswered: 5 },
         existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
-    expect(result.costUsd).toBeCloseTo(0.002 + 0.003 + 0.001 + 0.004);
+    expect(result.costUsd).toBeCloseTo(0.002 + 0.003 + 0.004);
+  });
+
+  it('adds the refiner cost on the turn that resolves a probe', async () => {
+    // The refiner is the one invoker that no longer runs on a detection turn — it runs when the
+    // respondent answers the probe — so its cost has to be summed from there.
+    const { invokers } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a' })], costUsd: 0.002 },
+      refine: { decisions: [decision({ slotKey: 'a' })], costUsd: 0.001 },
+      select: { decision: { kind: 'ask', questionId: 'b', rationale: 'next', costUsd: 0.004 } },
+    });
+    const result = await runTurn(
+      {
+        ...state({
+          userMessage: 'the second one is right',
+          questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+          config: { contradictionMode: 'probe', coverageThreshold: 1, minQuestionsAnswered: 5 },
+          existingAnswers: TWO_ANSWERS,
+        }),
+        pendingContradiction: {
+          slotKeys: ['a'],
+          explanation: 'A vs not-A',
+          statement: 'actually the opposite',
+          raisedAtTurnIndex: 0,
+        },
+      },
+      invokers
+    );
+    // No detector on a resolution turn — extraction + refinement + selection only.
+    expect(result.costUsd).toBeCloseTo(0.002 + 0.001 + 0.004);
   });
 });
 

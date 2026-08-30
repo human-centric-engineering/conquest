@@ -17,13 +17,24 @@ will drive.
 
 - **Behaviour — what to do on a hit** (`AppQuestionnaireConfig.contradictionMode`,
   `CONTRADICTION_MODES` in `lib/app/questionnaire/types.ts`):
-  - **`off`** — no detection.
-  - **`flag`** — surface the conflict passively (a quiet informational notice) **and** refine the
-    conflicting answer immediately, same turn.
+  - **`off`** — no detection. The shipped default.
   - **`probe`** — **confirm before overwrite**: nothing is changed on the detection turn. The
     interviewer asks a reconciliation question (stating that confirming will update the earlier
     answer + the linked data), the finding is parked on the session, and the change is applied only
     once the respondent confirms on the next turn. See [Probe-confirm flow](#probe-confirm-flow-probe-mode).
+  - **`flag`** — **retired 2026-08-30**, no longer selectable. It surfaced the conflict passively
+    _and_ let the refiner rewrite the conflicting answer in the same turn — an AI edit to a
+    respondent's answer that they were never asked about and could easily miss. Turning checking on
+    now means asking. The value stays in `CONTRADICTION_MODES` so stored rows and older API/import
+    payloads still parse; **every read funnels through `resolveContradictionMode`, which returns
+    `probe` for it**, so no row was migrated and nothing downstream of that resolver ever sees it.
+    The engine has no passive-refine arm left to reach.
+
+  Why a resolver rather than a backfill: mapping `flag` **before** the enum-membership check is what
+  makes it safe. Dropping the value from the tuple instead would send every stored `flag` row down
+  the unknown-value path to the default — silently turning checking **off** for exactly the
+  questionnaires that had asked for it.
+
 - **Cadence — when to run** (pure `shouldRunDetection`, **no config column**): the
   development-plan prose once listed `every_turn / every_n_turns / sweep_only`, but
   the committed schema has no cadence enum — it has `contradictionWindowN` (a
@@ -53,6 +64,14 @@ will drive.
 The natural high-value default falls out for free: `probe` + a completion sweep
 catches every conflict with one end-of-session LLM call; per-turn detection is the
 opt-in for high-stakes surveys.
+
+**The look-back window** (`contradictionWindowN`) has no stored default — the config's cross-field
+rule pins it to `0` while the mode is `off` — so `DEFAULT_CONTRADICTION_WINDOW_N` (**10**) is what
+the config editor fills in the moment an admin switches checking on. Before that constant existed the
+field was left at the stored `0`, which the save path clamped to `1`: each answer checked against only
+the one before it, which is close to no look-back at all. Ten is wide enough to catch a reversal
+several questions later and tight enough to keep the comparison small — a wider net is a wider surface
+for a false positive, which is the failure that actually costs the respondent's trust.
 
 ## The finding contract (surface, never overwrite)
 
@@ -97,7 +116,7 @@ sessionId }`, all in memory. `AnsweredSlotView` carries the actual `value` (dete
   respondent's latest message — see [Same-slot reversal](#same-slot-reversal-via-the-latest-message).
 - **`normalizeContradictionFindings`** — drop findings referencing unknown or
   _unanswered_ slots; require ≥2 distinct slots; **dedupe symmetric pairs** (`[a,b]`
-  ≡ `[b,a]`, keep highest confidence); clamp severity; mode-shape (`flag` strips any
+  ≡ `[b,a]`, keep highest confidence); clamp severity; mode-shape (the legacy `flag` strips any
   probe; a `probe` finding with a missing/blank probe is _downgrade-kept_ without one,
   not dropped — the conflict still stands).
 - **`shouldRunDetection(mode, windowN, phase, cadence?)`** — the pure scheduler (see
@@ -112,7 +131,7 @@ sessionId }`, all in memory. `AnsweredSlotView` carries the actual `value` (dete
 | `slotKey` known but unanswered             | **drop** (`unanswered slot key(s)`)                                                                                                |
 | fewer than two distinct slots after dedupe | **drop** (`fewer than two distinct slots`) — but ≥1 is enough when `currentStatement` is set (`no slot referenced` only when zero) |
 | same conflict reported twice (symmetric)   | **dedupe** — keep the highest-confidence finding                                                                                   |
-| `flag` mode finding carrying a probe       | **strip** the probe                                                                                                                |
+| legacy `flag` finding carrying a probe     | **strip** the probe                                                                                                                |
 | `probe` mode finding with a blank probe    | **keep** without a probe (conflict still stands)                                                                                   |
 
 ## Same-slot reversal via the latest message
@@ -248,7 +267,7 @@ returns no probe, `buildContradictionProbe` picks a **direct** vs **humble** def
 `CLEAR_CONTRADICTION_CONFIDENCE` (0.8) — the same confidence threshold (so code and prompt agree on the
 switch). The deterministic consequence line is unaffected — it stays exact regardless of tone.
 
-`flag` mode is unchanged: surface the explanation **and** refine immediately. `off` does nothing.
+`off` does nothing. There is no other mode: checking that is on always asks.
 
 The seriousness gate runs BEFORE this phase, so a contradicting answer must survive it to be probed —
 the judge prompt explicitly treats "contradicts an earlier answer" as genuine (see
@@ -268,7 +287,9 @@ already surfaced this session**, keyed by the canonical slot-key set (`contradic
   no user-facing output for a stale conflict. A wholly-stale pass surfaces nothing.
 - **Record.** The phase **acts on every fresh conflict the turn surfaces** and records each one, so a
   conflict is only ledgered once it has genuinely been raised (never noticed-then-silently-suppressed):
-  `probe` mode records each as `unresolved`; `flag` mode records each as `flagged`. When a single turn
+  each is recorded as `unresolved` until the respondent answers the probe. (`flagged` is a legacy
+  ledger value from the retired `flag` mode — still **read** so an older session's dealt-with conflicts
+  stay suppressed, never written.) When a single turn
   turns up **more than one** fresh conflict they are handled **together** — see [Combining several
   conflicts](#combining-several-conflicts-in-one-turn).
 - **Resolve.** On the resolution turn (a parked probe is confirmed/declined), each parked conflict's
@@ -300,12 +321,10 @@ once**, they are handled **together**, not dribbled out over turns:
   turn reconciles them in one refiner pass (a **merged trigger** over the union of their slots). Each
   conflict's ledger entry is stamped by its own outcome (the one whose slot was refined → `resolved`,
   the rest → `kept`).
-- **One refiner pass** (flag mode). The merged trigger reconciles every fresh conflict at once.
-
-Every fresh conflict is recorded in the ledger (so none re-alerts), **and** every one is genuinely
-acted on this turn (so none is silently dropped) — the two guarantees the "don't nag, but do deal with
-new ones" requirement needs. A brand-new conflict on later turns (different slots) is still detected
-and handled normally; only a conflict already in the ledger is suppressed.
+  Every fresh conflict is recorded in the ledger (so none re-alerts), **and** every one is genuinely
+  acted on this turn (so none is silently dropped) — the two guarantees the "don't nag, but do deal with
+  new ones" requirement needs. A brand-new conflict on later turns (different slots) is still detected
+  and handled normally; only a conflict already in the ledger is suppressed.
 
 The same ledger is also consulted by the **submit-time completion sweep** (below), so a conflict dealt
 with mid-conversation never re-nags at the finish line.
@@ -380,8 +399,9 @@ mode?, windowN?, sessionId? }`.
 - **DB seam** — `_lib/contradiction-context.ts` `buildContradictionContext` is the
   only Prisma in the feature: it loads the version's slots **and** its
   `contradictionMode` / `contradictionWindowN` config (so mode/window default from
-  the saved config; the body may override them, so an admin can preview `flag` vs
-  `probe` before committing). Fewer than two answers resolving to real slots is a
+  the saved config; the body may override them, so an admin can preview a different window before
+  committing). Both stored value and body override go through `resolveContradictionMode`, so a
+  preview of the legacy `flag` previews what the questionnaire will actually do — probe. Fewer than two answers resolving to real slots is a
   **400** (`insufficient_answers`); a missing version is a **404**.
 - **Fail-soft** — a capability error returns `200` with `{ findings: [], diagnostic }`,
   never a 5xx: the engine (F4.6) must keep the conversation going rather than crash a
@@ -394,9 +414,8 @@ F4.6 (session state machine) wires persistence + the live loop: it calls
 `shouldRunDetection` per turn / at the completion sweep, then this detection seam,
 and renders findings to the agent. The live per-turn loop runs detection in **both**
 orchestrators via the shared `runContradictionPhase` — question mode (`runTurn`) and **data-slot
-mode** (`runDataSlotTurn`, comparing the background question answers). Under `flag` mode each
-surfaces an informational notice and refines immediately; under `probe` mode each runs the
-[confirm-before-overwrite flow](#probe-confirm-flow-probe-mode). See
+mode** (`runDataSlotTurn`, comparing the background question answers). Each surfaces an informational
+notice and runs the [confirm-before-overwrite flow](#probe-confirm-flow-probe-mode). See
 [`per-turn-orchestrator.md`](./per-turn-orchestrator.md) and [`data-slots.md`](./data-slots.md). **F4.4** (refinement, now shipped — see
 [`answer-refinement.md`](./answer-refinement.md)) acts on a confirmed contradiction:
 its capability takes the finding as a `triggeringContradiction` and writes a `refine`

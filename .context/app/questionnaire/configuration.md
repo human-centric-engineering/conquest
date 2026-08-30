@@ -33,8 +33,8 @@ single JSON column for the profile fields:
 | Cost budget (USD / session)           | `costBudgetUsd`             | Float? (null = no cap) | `null`              |
 | Per-session question cap              | `maxQuestionsPerSession`    | Int? (null = no cap)   | `null`              |
 | Voice input                           | `voiceEnabled`              | Boolean                | `false`             |
-| Contradiction-detection mode          | `contradictionMode`         | String (enum)          | `'off'`             |
-| Contradiction look-back window N      | `contradictionWindowN`      | Int                    | `0`                 |
+| Contradiction checking                | `contradictionMode`         | `'off' \| 'probe'`     | `'off'`             |
+| Contradiction look-back window N      | `contradictionWindowN`      | Int                    | `0` (10 when on)    |
 | Contradiction cadence (every N turns) | `contradictionEveryNTurns`  | Int                    | `1`                 |
 | Answer-fit resolver mode              | `answerFitMode`             | String (enum)          | `'fallback'`        |
 | Anonymous mode (identity axis)        | `anonymousMode`             | Boolean                | `false`             |

@@ -15,6 +15,7 @@ import { generateAndSaveDataSlots } from '@/app/api/v1/app/questionnaires/_lib/g
 import { slugifyDemoClient } from '@/lib/app/questionnaire/demo-clients/slug';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import {
+  DEFAULT_CONTRADICTION_WINDOW_N,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   type AudienceProvenance,
   type AudienceShape,
@@ -278,9 +279,9 @@ const unit: SeedUnit = {
       // defaults, overriding only the demo-relevant knobs:
       //   - anonymousMode: true — lets the admin one-click "Preview as respondent" via the
       //     no-login public surface; collects no profile fields (F8.3).
-      //   - contradictionMode: 'flag' — so the chat's "I noticed something" callout fires
-      //     when a respondent gives inconsistent answers (the most visible sign of the
-      //     agent reasoning about the conversation).
+      //   - contradictionMode: 'probe' — so the chat's "I noticed something" callout fires when a
+      //     respondent gives inconsistent answers, and the agent then asks which answer is right
+      //     (the most visible sign of the agent reasoning about the conversation).
       //   - sensitivityAwareness: true + an authored supportMessage — so a sensitive disclosure
       //     (e.g. "I'm being abused by my boss") softens the agent's tone AND signposts support
       //     once. Without an authored supportMessage the signpost is suppressed, so the demo ships
@@ -296,8 +297,8 @@ const unit: SeedUnit = {
           costBudgetUsd: DEFAULT_QUESTIONNAIRE_CONFIG.costBudgetUsd,
           maxQuestionsPerSession: DEFAULT_QUESTIONNAIRE_CONFIG.maxQuestionsPerSession,
           voiceEnabled: DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled,
-          contradictionMode: 'flag',
-          contradictionWindowN: 4,
+          contradictionMode: 'probe',
+          contradictionWindowN: DEFAULT_CONTRADICTION_WINDOW_N,
           contradictionEveryNTurns: 1,
           anonymousMode: true,
           // Safeguarding: detect + remember a sensitive disclosure, soften later phrasing, and

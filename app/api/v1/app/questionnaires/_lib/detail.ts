@@ -20,7 +20,6 @@ import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CAPTURE_MODES,
-  CONTRADICTION_MODES,
   DEFAULT_MILESTONE_THRESHOLDS,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   ACCESS_MODES,
@@ -32,6 +31,7 @@ import {
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   narrowQuestionFidelity,
+  resolveContradictionMode,
   type AccessMode,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
@@ -228,11 +228,13 @@ function asSelectionStrategy(value: string): SelectionStrategy {
     : DEFAULT_QUESTIONNAIRE_CONFIG.selectionStrategy;
 }
 
-/** Narrow a stored `contradictionMode` to the enum (default when unknown). */
+/**
+ * Narrow a stored `contradictionMode` to what the engine should do. This is the read seam for the
+ * turn state, the admin config editor and the settings summary alike, so the legacy `flag` is
+ * retired here — `resolveContradictionMode` reads it as `probe` — and no stored row needs migrating.
+ */
 function asContradictionMode(value: string): ContradictionMode {
-  return (CONTRADICTION_MODES as readonly string[]).includes(value)
-    ? (value as ContradictionMode)
-    : DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode;
+  return resolveContradictionMode(value);
 }
 
 /** Narrow a stored `answerFitMode` to the enum (default when unknown). */

@@ -309,8 +309,8 @@ mode) via the shared `runContradictionPhase`: gated by the questionnaire's `cont
 `contradictionEveryNTurns` cadence, with a ≥1-stored-answer floor (a single
 answer can contradict the latest message; ≥2 only when there's no message). They compare the **background question answers** — and, crucially, the respondent's
 **latest message** (`currentStatement`) — so a _same-slot reversal_ across turns ("I hate the job"
-→ "I love my job") is caught even when extraction didn't overwrite the stored answer. Under `flag`
-mode it surfaces an informational notice and refines immediately; under `probe` mode it runs the
+→ "I love my job") is caught even when extraction didn't overwrite the stored answer. It surfaces an
+informational notice and runs the
 [confirm-before-overwrite flow](./contradiction-detection.md#probe-confirm-flow-probe-mode) — the
 interviewer asks a reconciliation question and **suppresses this turn's data-slot fills + answers**
 until the respondent confirms next turn (the parked finding lives on

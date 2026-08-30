@@ -5,7 +5,7 @@
  *   body: {
  *     answers: { key: string; value: unknown; confidence?: number | null;
  *                provenance?: AnswerProvenance; turnIndex?: number }[]   // ≥2
- *     mode?:    'off' | 'flag' | 'probe'   // defaults to the version's config
+ *     mode?:    'off' | 'probe'            // defaults to the version's config ('flag' reads as 'probe')
  *     windowN?: number                     // defaults to the version's config
  *     sessionId?: string
  *   }
@@ -15,7 +15,7 @@
  *   contradict, why, a severity, and (under `probe` mode) a follow-up question. A
  *   read-only *preview*: it persists nothing and overwrites nothing (resolution is
  *   F4.4, persistence F4.6). Its purpose is twofold — let admins sanity-check
- *   detection (and compare `flag` vs `probe`) before launch, and give the engine
+ *   detection before launch, and give the engine
  *   (P6) a proven detection seam to call.
  *
  *   404 when the version is absent. The call spends an LLM call per pass, so it

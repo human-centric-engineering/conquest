@@ -7,11 +7,14 @@
  *     raised on a PRIOR turn), THIS turn's message is the answer to it: run the refiner against the
  *     parked finding (apply the change on confirm, keep otherwise) and clear the pending state. No
  *     fresh detection runs while resolving.
- *   - **Detect** — otherwise, run the detector (gated by mode/cadence/≥2-answers). On a hit:
- *       - `probe` mode → **defer**: raise a reconciliation question (`contradiction_probe` response),
- *         suppress this turn's writes (nothing is overwritten before the respondent confirms), and
- *         park the finding as a `PendingContradiction`. The blue notice shows the EXPLANATION only.
- *       - `flag` mode → surface the explanation passively AND refine immediately (unchanged).
+ *   - **Detect** — otherwise, run the detector (gated by mode/cadence/answer floor). On a hit it
+ *     **defers**: raise a reconciliation question (`contradiction_probe` response), suppress this
+ *     turn's writes (nothing is overwritten before the respondent confirms), and park the finding as
+ *     a `PendingContradiction`. The blue notice shows the EXPLANATION only.
+ *
+ * Checking being on therefore always means ASKING. The retired `flag` mode surfaced the conflict and
+ * let the refiner rewrite the answer immediately, without the respondent's say-so; the read path now
+ * resolves it to `probe` (see `resolveContradictionMode`) and that arm is gone.
  *
  * Pure relative to its injected invokers; the orchestrator folds the result into its turn output.
  */
@@ -161,26 +164,6 @@ function resolvePendingInLedger(
   return next;
 }
 
-/**
- * Merge several fresh findings into one trigger for the refiner: the union of their slot keys plus a
- * combined explanation, so `flag` mode reconciles every conflict from the turn in a single pass. A
- * single finding passes through unchanged.
- */
-function mergeFindings(findings: ContradictionFinding[]): ContradictionFinding {
-  if (findings.length === 1) return findings[0];
-  const first = findings[0];
-  const probe = findings.find(
-    (f) => typeof f.suggestedProbe === 'string' && f.suggestedProbe.trim().length > 0
-  )?.suggestedProbe;
-  return {
-    slotKeys: [...new Set(findings.flatMap((f) => f.slotKeys))],
-    explanation: findings.map((f) => f.explanation).join(' '),
-    severity: first.severity,
-    confidence: Math.max(...findings.map((f) => f.confidence)),
-    ...(probe !== undefined ? { suggestedProbe: probe } : {}),
-  };
-}
-
 /** Build the {@link RefinementTrigger} finding shape from a parked pending contradiction. */
 function pendingAsFinding(pending: PendingContradiction): ContradictionFinding {
   return {
@@ -303,50 +286,36 @@ export async function runContradictionPhase(
 
   // ONE informational notice for the whole turn — a single finding shows its explanation; several
   // fresh conflicts are combined into one "I noticed…" box. We ACT ON ALL fresh conflicts this turn
-  // (a combined probe, or refine them together) and record EACH in the ledger, so every conflict is
-  // genuinely reconciled — not noticed-then-suppressed — and none is ever re-raised once dealt with.
+  // (one combined probe) and record EACH in the ledger, so every conflict is genuinely reconciled —
+  // not noticed-then-suppressed — and none is ever re-raised once dealt with.
   base.events.push({
     type: 'warning',
     code: 'contradiction',
     message: buildContradictionNoticeMessage(fresh),
   });
 
-  const mode = effective.config.contradictionMode;
-  if (mode === 'probe') {
-    // Defer: ask ONE reconciliation question that raises every fresh conflict as a point to clarify,
-    // suppress this turn's writes, park them all, and record each in the ledger (unresolved until the
-    // respondent confirms next turn).
-    const { text, pending: parked } = buildContradictionProbe({
-      findings: fresh,
-      statement: effective.userMessage,
-      raisedAtTurnIndex: effective.selectionRound,
-      labels: opts.labels,
-      dataMode: opts.dataMode,
-    });
-    base.probe = { text, slotKeys: parked.slotKeys };
-    base.suppressWrites = true;
-    base.pendingContradiction = parked;
-    base.raisedContradictions = [
-      ...ledger,
-      ...fresh.map((f) => raisedEntry(f, 'unresolved', effective.selectionRound)),
-    ];
-    return base;
-  }
-
-  // `flag` mode: surface passively AND refine immediately. Reconcile ALL fresh conflicts in one refine
-  // pass (a merged trigger over the union of their slots), and record each so none re-alerts.
-  const refine = await invokers.refineAnswer(effective, { contradiction: mergeFindings(fresh) });
-  base.costUsd += refine.costUsd;
-  base.toolCalls.push(
-    toolCall(REFINE_ANSWER_CAPABILITY_SLUG, refine.diagnostic === undefined, {
-      ...(refine.diagnostic !== undefined ? { code: refine.diagnostic } : {}),
-      ...(refine.latencyMs !== undefined ? { latencyMs: refine.latencyMs } : {}),
-    })
-  );
-  base.answerRefinements = refine.decisions;
+  // Ask. Detection running at all means the mode is `probe` (the read path resolves the legacy
+  // `flag` to it, and `off` never gets here), so there is one thing to do with a fresh conflict:
+  // raise ONE reconciliation question covering every point, suppress this turn's writes, park them
+  // all, and record each in the ledger as `unresolved` until the respondent answers next turn.
+  //
+  // There is deliberately no passive arm any more. `flag` mode used to surface the explanation and
+  // let the refiner rewrite the answer in the same breath — an edit the respondent was never asked
+  // about and could easily miss. If the detector is confident enough to interrupt, it is the
+  // respondent who settles which answer stands, not the model.
+  const { text, pending: parked } = buildContradictionProbe({
+    findings: fresh,
+    statement: effective.userMessage,
+    raisedAtTurnIndex: effective.selectionRound,
+    labels: opts.labels,
+    dataMode: opts.dataMode,
+  });
+  base.probe = { text, slotKeys: parked.slotKeys };
+  base.suppressWrites = true;
+  base.pendingContradiction = parked;
   base.raisedContradictions = [
     ...ledger,
-    ...fresh.map((f) => raisedEntry(f, 'flagged', effective.selectionRound)),
+    ...fresh.map((f) => raisedEntry(f, 'unresolved', effective.selectionRound)),
   ];
   return base;
 }

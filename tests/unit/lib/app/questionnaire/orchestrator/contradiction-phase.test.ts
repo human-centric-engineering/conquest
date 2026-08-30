@@ -551,11 +551,16 @@ describe('runContradictionPhase — probe mode (deferred reconciliation)', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Detection hit — flag mode
+// Retired `flag` mode — checking that is on always ASKS
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('runContradictionPhase — flag mode (immediate refine)', () => {
-  it('combines several conflicts into ONE notice and refines them together when refinement is on', async () => {
+describe('runContradictionPhase — the retired flag mode never refines silently', () => {
+  it('asks instead of rewriting when a legacy `flag` config reaches the engine', async () => {
+    // `flag` used to surface the conflict AND let the refiner rewrite the answer the same turn,
+    // without the respondent's say-so. The read path now resolves it to `probe`
+    // (`resolveContradictionMode`), so the engine should never see this value — but a raw config
+    // that bypassed that path must still not produce a silent edit. The passive arm is gone, so
+    // any mode that isn't `off` lands on the probe.
     const inv = stubInvokers({
       detect: {
         findings: [
@@ -567,51 +572,30 @@ describe('runContradictionPhase — flag mode (immediate refine)', () => {
     });
     const s = state({
       userMessage: 'x',
-      questions: [q({ id: 'a', key: 'a' })],
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
       config: { contradictionMode: 'flag' },
       existingAnswers: TWO_ANSWERS,
     });
 
     const result = await runPhase(s, inv);
 
-    // ONE combined notice box carrying both explanations (not one event per finding).
+    // The answer is NOT touched: no refiner call, and this turn's writes are held.
+    expect(inv.calls.refine).toHaveLength(0);
+    expect(result.answerRefinements).toHaveLength(0);
+    expect(result.suppressWrites).toBe(true);
+    // The respondent is asked instead — one combined probe covering both conflicts.
+    expect(result.probe?.text).toBeTruthy();
+    expect(result.probe?.slotKeys).toEqual(['a', 'b']);
+    // Recorded as awaiting the respondent, never as `flagged`.
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+      { key: 'b', slotKeys: ['b'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+    ]);
+    // Still ONE combined notice box carrying both explanations.
     expect(result.events).toHaveLength(1);
-    expect(result.events[0]).toMatchObject({ type: 'warning', code: 'contradiction' });
     const message = (result.events[0] as { message: string }).message;
     expect(message).toContain('A conflict');
     expect(message).toContain('B conflict');
-    // Refiner called once — a merged trigger reconciles both conflicts in one pass.
-    expect(inv.calls.refine).toHaveLength(1);
-    expect(inv.calls.refine[0]?.trigger.contradiction?.slotKeys).toEqual(['a', 'b']); // union
-    expect(result.answerRefinements).toHaveLength(1);
-    expect(result.costUsd).toBeGreaterThan(0);
-    // Both conflicts recorded (so neither re-alerts), and no probe — flag mode surfaces passively.
-    expect(result.raisedContradictions).toEqual([
-      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 0 },
-      { key: 'b', slotKeys: ['b'], resolution: 'flagged', raisedAtTurnIndex: 0 },
-    ]);
-    expect(result.probe).toBeUndefined();
-    expect(result.suppressWrites).toBe(false);
-  });
-
-  it('records a failed refine tool-call with diagnostic code and latencyMs in flag mode', async () => {
-    const inv = stubInvokers({
-      detect: { findings: [finding()] },
-      refine: { decisions: [], diagnostic: 'REFINE_FAIL', latencyMs: 99 },
-    });
-    const s = state({
-      userMessage: 'x',
-      questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-    });
-
-    const result = await runPhase(s, inv);
-
-    const refineRecord = result.toolCalls.find((c) => c.slug === REFINE_ANSWER_CAPABILITY_SLUG);
-    expect(refineRecord?.success).toBe(false);
-    expect(refineRecord?.code).toBe('REFINE_FAIL');
-    expect(refineRecord?.latencyMs).toBe(99);
   });
 });
 
@@ -847,7 +831,10 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     expect(inv.calls.refine).toHaveLength(0);
   });
 
-  it('suppresses a flag-mode finding already in the ledger — no alert, no immediate refine', async () => {
+  it('suppresses a conflict a pre-retirement session ledgered as `flagged`', async () => {
+    // `flagged` is only written by the retired `flag` mode, but sessions that ran under it still
+    // carry those entries. They must keep suppressing, or an in-flight respondent gets re-asked
+    // about a conflict the old behaviour already dealt with.
     const inv = stubInvokers({
       detect: { findings: [finding({ slotKeys: ['a'], explanation: 'A conflict' })] },
       refine: { decisions: [decision({ slotKey: 'a' })] },
@@ -856,7 +843,7 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
       ...state({
         userMessage: 'x',
         questions: [q({ id: 'a', key: 'a' })],
-        config: { contradictionMode: 'flag' },
+        config: { contradictionMode: 'probe' },
         existingAnswers: TWO_ANSWERS,
       }),
       raisedContradictions: [raised(['a'], 'flagged')],
@@ -912,26 +899,6 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     expect(result.probe).toBeDefined();
     expect(result.raisedContradictions).toEqual([
       { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 4 },
-    ]);
-  });
-
-  it('records a fresh flag-mode finding as flagged in the returned ledger', async () => {
-    const inv = stubInvokers({
-      detect: { findings: [finding({ slotKeys: ['a'], explanation: 'new' })] },
-      refine: { decisions: [decision({ slotKey: 'a' })] },
-    });
-    const s = state({
-      userMessage: 'contradicts',
-      questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-      selectionRound: 2,
-    });
-
-    const result = await runPhase(s, inv);
-
-    expect(result.raisedContradictions).toEqual([
-      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 2 },
     ]);
   });
 
