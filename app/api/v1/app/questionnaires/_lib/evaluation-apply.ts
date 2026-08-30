@@ -40,11 +40,13 @@ import type {
   FieldProvenance,
 } from '@/lib/app/questionnaire/types';
 import {
+  LIGHT_DEPTH_MEMBER_COUNT,
   narrowTopicMembers,
   withTopicQuestionKey,
   withoutTopicQuestionKey,
   type TopicMembers,
 } from '@/lib/app/questionnaire/scope/types';
+import { inheritTopicForQuestion } from '@/lib/app/questionnaire/scope/seed';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -119,15 +121,70 @@ async function validateOpAgainst(
     if (matches === 0) return 'target_gone';
     if (matches > 1) return 'op_invalid';
   }
+  if (op.op === 'delete_question' && (await guttingALightTopic(versionId, targetKey))) {
+    return 'topic_sample_too_small';
+  }
   return null;
 }
 
-/** Why an apply couldn't proceed (each maps to a 409 with a UI-actionable message). */
-export type UnapplicableReason = 'stale' | 'target_gone' | 'op_invalid' | 'needs_authoring';
+/**
+ * Would deleting this question leave a `light` topic with too little to sample?
+ *
+ * A `light` topic contributes only its {@link LIGHT_DEPTH_MEMBER_COUNT} highest-weight members —
+ * it is the "ask about one area they did NOT raise" blind-spot check, whose whole value is that it
+ * is a sample of something. Take a question out of a topic already at that floor and the check
+ * still runs, still reports, and is quietly measuring half of what it claims to.
+ *
+ * Enforced here rather than in the Duplicates judge's rubric, deliberately. The judge cannot see
+ * depth or member counts, and prompt guidance is persuasion; `applyFinding` already treats every op
+ * as an accelerator rather than a trust boundary, so this is the layer that can actually hold the
+ * line. The finding is not lost — it comes back as `topic_sample_too_small`, which the review queue
+ * renders with its own reason and leaves accepted, so narrowing the question with `replace_prompt`
+ * (or giving the topic more to sample) and applying again picks it up without re-triaging.
+ */
+async function guttingALightTopic(versionId: string, questionKey: string): Promise<boolean> {
+  const topics = await prisma.appQuestionnaireTopic.findMany({
+    where: { versionId, depth: 'light' },
+    select: { members: true },
+  });
+  return topics.some((topic) => {
+    const keys = narrowTopicMembers(topic.members).questionKeys;
+    if (!keys.includes(questionKey)) return false;
+    return keys.length - 1 < LIGHT_DEPTH_MEMBER_COUNT;
+  });
+}
+
+/**
+ * Why an apply couldn't proceed (each maps to a 409 with a UI-actionable message).
+ *
+ * `topic_sample_too_small` is its own value rather than another `op_invalid` because the two need
+ * opposite responses: `op_invalid` means the edit no longer fits the question, and the reviewer
+ * should re-run; this one means the edit fits fine and would quietly degrade a blind-spot check, and
+ * the reviewer should narrow the question instead of deleting it. One message cannot say both.
+ */
+export type UnapplicableReason =
+  'stale' | 'target_gone' | 'op_invalid' | 'needs_authoring' | 'topic_sample_too_small';
 
 /** The outcome of an apply attempt. */
 export type ApplyOutcome =
-  | { status: 'applied'; appliedToVersionId: string; forked: boolean; versionNumber: number }
+  | {
+      status: 'applied';
+      appliedToVersionId: string;
+      forked: boolean;
+      versionNumber: number;
+      /**
+       * Where a newly CREATED question landed in the topic set, when Conditional Topics is
+       * configured on this version.
+       *
+       * A tri-state, because the three cases need different words on screen:
+       *  - absent — nothing to say (the op created no question, or the version has no topics);
+       *  - a key — the question inherited that topic and will be asked with it;
+       *  - `null` — a question was created that no topic claims, so with Conditional Topics on it
+       *    is never asked. That is the case worth saying out loud: the admin approved a suggestion
+       *    and got a question that cannot reach a respondent.
+       */
+      newQuestionTopicKey?: string | null;
+    }
   | { status: 'unapplicable'; reason: UnapplicableReason; detail?: string };
 
 /** Resolve the op to apply — the admin's edited override wins over the judge's draft. */
@@ -334,6 +391,44 @@ async function copyTopicMembership(
 }
 
 /**
+ * Put a newly created question in the topic its section-mates are in.
+ *
+ * Returns the topic key it joined, `null` when no topic claims any of its siblings (so nothing
+ * could be inferred and the question is uncovered), or `undefined` when the version has no topics
+ * at all — three states, because "we could not decide" and "there was nothing to decide" read very
+ * differently to an admin.
+ *
+ * The rule is `inheritTopicForQuestion`, which is `planDataSlotAttachment`'s majority-with-lowest-
+ * ordinal-tie-break applied to a question. Guessing is the right default here: with Conditional
+ * Topics on, the alternative to a guess is a question that can never be asked and that only the
+ * coherence checker mentions.
+ */
+async function inheritTopicMembership(
+  tx: Prisma.TransactionClient,
+  versionId: string,
+  questionKey: string,
+  siblingKeys: readonly string[]
+): Promise<string | null | undefined> {
+  const topics = await loadTopicsForMembership(tx, versionId);
+  if (topics.length === 0) return undefined;
+
+  const topicKey = inheritTopicForQuestion(topics, siblingKeys);
+  if (!topicKey) return null;
+
+  const topic = topics.find((t) => t.key === topicKey);
+  if (!topic) return null;
+
+  const next = withTopicQuestionKey(topic.members, questionKey);
+  if (next === topic.members) return topicKey;
+
+  await tx.appQuestionnaireTopic.updateMany({
+    where: { id: topic.id },
+    data: { members: jsonInput(next) },
+  });
+  return topicKey;
+}
+
+/**
  * Remove a deleted question's key from every topic that claimed it.
  *
  * Without this the key lingers. Nothing crashes — `resolveScope` skips a key that resolves to no
@@ -459,7 +554,7 @@ async function applyAddQuestion(args: {
   // admin-chosen explicit key, so we disambiguate rather than 409 on clash.
   const existingKeys = await prisma.appQuestionSlot.findMany({
     where: { versionId: editVersionId },
-    select: { key: true },
+    select: { key: true, sectionId: true },
   });
   const key = nextAvailableKey(
     slugifyKey(op.key ?? op.prompt),
@@ -468,6 +563,11 @@ async function applyAddQuestion(args: {
   const ordinal = await prisma.appQuestionSlot.count({ where: { sectionId: section.id } });
   const typeConfigData = tc.value == null ? Prisma.JsonNull : jsonInput(tc.value);
 
+  // The questions the new one will sit beside — what its topic is inferred from. Section-scoped,
+  // because a section is the only grouping the judge's draft actually named.
+  const siblingKeys = existingKeys.filter((e) => e.sectionId === section.id).map((e) => e.key);
+
+  let newQuestionTopicKey: string | null | undefined;
   await prisma.$transaction(async (tx) => {
     await tx.appQuestionSlot.create({
       data: {
@@ -483,6 +583,9 @@ async function applyAddQuestion(args: {
         ...(op.guidelines != null ? { guidelines: op.guidelines } : {}),
       },
     });
+    // Put it in a topic, or record that nothing could. `key` here is the collision-suffixed one
+    // actually written — inheriting against `op.key` would name a question that does not exist.
+    newQuestionTopicKey = await inheritTopicMembership(tx, editVersionId, key, siblingKeys);
     await tx.appQuestionnaireEvaluationFinding.update({
       where: { id: finding.id },
       data: {
@@ -514,6 +617,7 @@ async function applyAddQuestion(args: {
     appliedToVersionId: editVersionId,
     forked,
     versionNumber: editVersionNumber,
+    ...(newQuestionTopicKey !== undefined ? { newQuestionTopicKey } : {}),
   };
 }
 

@@ -103,6 +103,13 @@ export interface BatchAppliedItem {
    * "applied" as "all of it applied".
    */
   steer?: { note: string; unhonoured: string | null };
+  /**
+   * Where a newly created question landed in the topic set — see `ApplyOutcome`. Absent when the
+   * op created nothing or the version has no topics; `null` when a question was created that no
+   * topic claims, which with Conditional Topics on means it is never asked. The outcome panel says
+   * so, because "applied" otherwise reads as "and it will be asked".
+   */
+  newQuestionTopicKey?: string | null;
 }
 
 export interface BatchSkippedItem {
@@ -426,6 +433,9 @@ export async function applyAcceptedFindings(args: {
         op: op ? op.op : 'replace_prompt',
         ...(steer?.kind === 'edit'
           ? { steer: { note: steer.note, unhonoured: steer.unhonoured } }
+          : {}),
+        ...(outcome.newQuestionTopicKey !== undefined
+          ? { newQuestionTopicKey: outcome.newQuestionTopicKey }
           : {}),
       });
       versionId = outcome.appliedToVersionId;

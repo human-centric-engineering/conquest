@@ -105,6 +105,12 @@ interface BatchApplyResponse {
     op: string;
     /** Present only where the reviewer's instruction shaped the change the AI wrote. */
     steer?: { note: string; unhonoured: string | null };
+    /**
+     * Where a newly created question landed in the topic set. Absent when the op created nothing
+     * or the version has no topics; `null` when nothing claims it — which, with Conditional Topics
+     * on, means the question was added and will never be asked.
+     */
+    newQuestionTopicKey?: string | null;
   }[];
   skipped: BatchSkipped[];
   findings: EvaluationFindingView[];
@@ -121,6 +127,8 @@ const SKIP_REASONS: Record<string, string> = {
   stale: 'the question changed since this evaluation ran — re-run it to judge the new wording',
   target_gone: 'the question it was about no longer exists',
   op_invalid: 'the suggested edit does not fit the question as it now stands',
+  topic_sample_too_small:
+    'its topic only samples a couple of questions, and removing this one would leave too few — narrow the question instead of deleting it',
   needs_authoring: 'there is no automatic edit for it — make this one in the editor',
   needs_ai: 'the AI could not rewrite it to follow your instruction — try applying again',
   steer_unsupported:
@@ -247,6 +255,16 @@ export function EvaluationRunDetail({
 
   /** The applied changes the reviewer's own instruction shaped — reported apart from the rest. */
   const steered = outcome?.applied.filter((a) => a.steer) ?? [];
+
+  /**
+   * Questions that were created but landed in no topic.
+   *
+   * Reported beside the applied list rather than folded into it, because "applied" otherwise reads
+   * as "and it will be asked" — and with Conditional Topics on, a question no topic claims never
+   * reaches a respondent. `undefined` means there was nothing to decide (no topics on the version);
+   * only an explicit `null` is a question left uncovered.
+   */
+  const uncoveredAdds = outcome?.applied.filter((a) => a.newQuestionTopicKey === null) ?? [];
 
   function handleUpdate(
     next: EvaluationFindingView,
@@ -546,6 +564,38 @@ export function EvaluationRunDetail({
                 Open v{outcome.versionNumber} in Build →
               </Link>
             </p>
+          )}
+
+          {/* A question that landed in no topic is applied and unreachable at the same time. Said
+              here rather than left to the launch gate, because this is the moment the reviewer can
+              still remember why they wanted it. */}
+          {uncoveredAdds.length > 0 && (
+            <div className="mt-3">
+              <FieldLabel>
+                {uncoveredAdds.length === 1
+                  ? '1 new question is in no topic'
+                  : `${uncoveredAdds.length} new questions are in no topic`}
+              </FieldLabel>
+              <p className="text-muted-foreground mt-1 max-w-[68ch] text-sm">
+                Nothing else in {uncoveredAdds.length === 1 ? 'its' : 'their'} section belongs to a
+                topic, so there was nothing to go on.{' '}
+                {uncoveredAdds.length === 1 ? 'It will' : 'They will'} not be asked until you put{' '}
+                {uncoveredAdds.length === 1 ? 'it' : 'them'} in one.{' '}
+                <Link
+                  href={`${workspaceVersionBase(questionnaireId, outcome.versionId)}/topics`}
+                  className="underline"
+                >
+                  Conditional topics →
+                </Link>
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {uncoveredAdds.map((item) => (
+                  <li key={item.findingId} className="text-muted-foreground text-sm">
+                    <span className="text-foreground">{item.targetKey}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/* What the AI did with the reviewer's own words. `unhonoured` is the load-bearing half:

@@ -83,6 +83,31 @@ beforeEach(() => {
   prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
 });
 
+/**
+ * Stand the topic table up so it honours the `depth` filter.
+ *
+ * The membership writers read every topic; the light-topic delete guard reads only
+ * `depth: 'light'`. A flat `mockResolvedValue` answers both with the same rows, which would let a
+ * `full` topic trip the guard and hide the bug this exists to catch.
+ */
+interface TopicRow {
+  id: string;
+  key: string;
+  ordinal: number;
+  members: { questionKeys: string[]; dataSlotKeys: string[] };
+  /** Omitted means `full` — the schema default, and what an un-authored topic carries. */
+  depth?: string;
+}
+
+function withTopics(rows: TopicRow[]) {
+  prismaMock.appQuestionnaireTopic.findMany.mockImplementation(
+    async (args?: { where?: { depth?: string } }) => {
+      const depth = args?.where?.depth;
+      return depth ? rows.filter((r) => (r.depth ?? 'full') === depth) : rows;
+    }
+  );
+}
+
 describe('applyFinding — early returns', () => {
   it('is needs_authoring for a prose-only finding (no op)', async () => {
     const res = await applyFinding({
@@ -741,7 +766,7 @@ describe('applyFinding — topic membership', () => {
   describe('delete_question prunes the key', () => {
     beforeEach(() => {
       prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
-      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+      withTopics(TOPICS);
     });
 
     it('removes the deleted key from every topic that claimed it, and no others', async () => {
@@ -816,7 +841,7 @@ describe('applyFinding — topic membership', () => {
     });
 
     it('writes nothing when the version has no topics', async () => {
-      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+      withTopics([]);
 
       const res = await applyFinding({
         finding: finding({ proposedEdit: { op: 'delete_question' } }),
@@ -869,7 +894,7 @@ describe('applyFinding — topic membership', () => {
         guidelines: null,
       });
       prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'q_role' }]);
-      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+      withTopics(TOPICS);
     });
 
     async function applySplit() {
@@ -924,7 +949,7 @@ describe('applyFinding — topic membership', () => {
     });
 
     it('writes nothing when the version has no topics', async () => {
-      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+      withTopics([]);
 
       const res = await applySplit();
 
@@ -943,7 +968,7 @@ describe('applyFinding — topic membership', () => {
       versionNumber: 2,
     });
     prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-on-v2' });
-    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+    withTopics(TOPICS);
 
     await applyFinding({
       finding: finding({ proposedEdit: { op: 'delete_question' } }),
@@ -957,5 +982,268 @@ describe('applyFinding — topic membership', () => {
     expect(prismaMock.appQuestionnaireTopic.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { versionId: 'v2' } })
     );
+  });
+});
+
+/**
+ * `add_question` topic inheritance, and the light-topic delete guard (F17.35, second half).
+ *
+ * These are the two places the engine exercises judgement rather than mechanics: which topic a
+ * brand-new question belongs to, and when a delete costs more than the finding is worth.
+ */
+describe('applyFinding — add_question topic inheritance', () => {
+  const ADD = {
+    op: 'add_question' as const,
+    prompt: 'How big is your team?',
+    type: 'free_text' as const,
+    sectionKey: 'Background',
+    key: 'team_size',
+  };
+
+  function addFinding() {
+    return finding({ targetKey: 'section:Background', proposedEdit: ADD });
+  }
+
+  async function applyAdd() {
+    return applyFinding({
+      finding: addFinding(),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+  }
+
+  function topicUpdates() {
+    return (prismaMock.appQuestionnaireTopic.updateMany as Mock).mock.calls.map(
+      (c: unknown[]) =>
+        c[0] as { where: { id: string }; data: { members: { questionKeys: string[] } } }
+    );
+  }
+
+  beforeEach(() => {
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+    prismaMock.appQuestionSlot.count.mockResolvedValue(0);
+    // Two questions already in the target section, one in another.
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q_a', sectionId: 'sec-1' },
+      { key: 'q_b', sectionId: 'sec-1' },
+      { key: 'q_elsewhere', sectionId: 'sec-2' },
+    ]);
+  });
+
+  it('joins the topic that owns most of its section-mates', async () => {
+    withTopics([
+      {
+        id: 't-minor',
+        key: 'minor',
+        ordinal: 0,
+        members: { questionKeys: ['q_a'], dataSlotKeys: [] },
+      },
+      {
+        id: 't-major',
+        key: 'major',
+        ordinal: 1,
+        members: { questionKeys: ['q_a', 'q_b'], dataSlotKeys: [] },
+      },
+    ]);
+
+    const res = await applyAdd();
+
+    expect(res).toMatchObject({ status: 'applied', newQuestionTopicKey: 'major' });
+    const updates = topicUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].where.id).toBe('t-major');
+    expect(updates[0].data.members.questionKeys).toEqual(['q_a', 'q_b', 'team_size']);
+  });
+
+  it('breaks a tie to the lower ordinal, so a split section is still placed', async () => {
+    withTopics([
+      {
+        id: 't-first',
+        key: 'first',
+        ordinal: 0,
+        members: { questionKeys: ['q_a'], dataSlotKeys: [] },
+      },
+      {
+        id: 't-second',
+        key: 'second',
+        ordinal: 1,
+        members: { questionKeys: ['q_b'], dataSlotKeys: [] },
+      },
+    ]);
+
+    const res = await applyAdd();
+
+    expect(res).toMatchObject({ newQuestionTopicKey: 'first' });
+    expect(topicUpdates()[0].where.id).toBe('t-first');
+  });
+
+  it('ignores questions outside the target section when inferring', async () => {
+    // `q_elsewhere` is in another section; a topic that owns only it must not win.
+    withTopics([
+      {
+        id: 't-other-section',
+        key: 'other',
+        ordinal: 0,
+        members: { questionKeys: ['q_elsewhere'], dataSlotKeys: [] },
+      },
+      {
+        id: 't-mine',
+        key: 'mine',
+        ordinal: 1,
+        members: { questionKeys: ['q_a'], dataSlotKeys: [] },
+      },
+    ]);
+
+    const res = await applyAdd();
+
+    expect(res).toMatchObject({ newQuestionTopicKey: 'mine' });
+  });
+
+  it('reports null — not silence — when no topic owns any section-mate', async () => {
+    // The question is created and, with Conditional Topics on, can never be asked. "Applied" alone
+    // would read as "and it will be asked", so the outcome has to carry the difference.
+    withTopics([
+      {
+        id: 't-far',
+        key: 'far',
+        ordinal: 0,
+        members: { questionKeys: ['q_elsewhere'], dataSlotKeys: [] },
+      },
+    ]);
+
+    const res = await applyAdd();
+
+    expect(res).toMatchObject({ status: 'applied', newQuestionTopicKey: null });
+    expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('says nothing at all when the version has no topics', async () => {
+    // Absent, not null: "there was nothing to decide" and "we could not decide" read differently.
+    withTopics([]);
+
+    const res = await applyAdd();
+
+    expect(res.status).toBe('applied');
+    expect(res).not.toHaveProperty('newQuestionTopicKey');
+  });
+
+  it('writes the collision-suffixed key, not the judge’s proposed one', async () => {
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q_a', sectionId: 'sec-1' },
+      { key: 'team_size', sectionId: 'sec-1' },
+    ]);
+    withTopics([
+      { id: 't-1', key: 'only', ordinal: 0, members: { questionKeys: ['q_a'], dataSlotKeys: [] } },
+    ]);
+
+    await applyAdd();
+
+    const created = (prismaMock.appQuestionSlot.create as Mock).mock.calls[0][0].data.key;
+    expect(created).not.toBe('team_size');
+    expect(topicUpdates()[0].data.members.questionKeys).toEqual(['q_a', created]);
+  });
+
+  it('inherits on the FORKED version, never the launched one', async () => {
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    withTopics([
+      { id: 't-1', key: 'only', ordinal: 0, members: { questionKeys: ['q_a'], dataSlotKeys: [] } },
+    ]);
+
+    await applyAdd();
+
+    expect(prismaMock.appQuestionnaireTopic.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { versionId: 'v2' } })
+    );
+  });
+});
+
+describe('applyFinding — the light-topic delete guard', () => {
+  beforeEach(() => {
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
+  });
+
+  async function applyDelete() {
+    return applyFinding({
+      finding: finding({ proposedEdit: { op: 'delete_question' } }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+  }
+
+  it('refuses a delete that would drop a light topic below its sample size', async () => {
+    // A `light` topic contributes only its two highest-weight members. Taking one from a topic
+    // already at that floor leaves the blind-spot check reporting on half of what it claims.
+    withTopics([
+      {
+        id: 't-light',
+        key: 'blind_spot',
+        ordinal: 0,
+        depth: 'light',
+        members: { questionKeys: ['q_role', 'q_other'], dataSlotKeys: [] },
+      },
+    ]);
+
+    const res = await applyDelete();
+
+    expect(res.status).toBe('unapplicable');
+    if (res.status === 'unapplicable') expect(res.reason).toBe('topic_sample_too_small');
+    // Refused BEFORE the fork, so a doomed op never strands an orphan draft.
+    expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+    expect(prismaMock.appQuestionSlot.delete).not.toHaveBeenCalled();
+  });
+
+  it('allows the delete when the light topic has members to spare', async () => {
+    withTopics([
+      {
+        id: 't-light',
+        key: 'blind_spot',
+        ordinal: 0,
+        depth: 'light',
+        members: { questionKeys: ['q_role', 'q_b', 'q_c'], dataSlotKeys: [] },
+      },
+    ]);
+
+    expect((await applyDelete()).status).toBe('applied');
+  });
+
+  it('does not guard a FULL topic, however few members it has', async () => {
+    // A full topic asks everything it holds; removing one question removes one question. Only the
+    // sampling promise a `light` topic makes is worth blocking a reviewer's decision over.
+    withTopics([
+      {
+        id: 't-full',
+        key: 'spine',
+        ordinal: 0,
+        depth: 'full',
+        members: { questionKeys: ['q_role'], dataSlotKeys: [] },
+      },
+    ]);
+
+    expect((await applyDelete()).status).toBe('applied');
+  });
+
+  it('does not guard a light topic that never claimed this question', async () => {
+    withTopics([
+      {
+        id: 't-light',
+        key: 'blind_spot',
+        ordinal: 0,
+        depth: 'light',
+        members: { questionKeys: ['q_x', 'q_y'], dataSlotKeys: [] },
+      },
+    ]);
+
+    expect((await applyDelete()).status).toBe('applied');
   });
 });

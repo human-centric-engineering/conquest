@@ -1441,6 +1441,85 @@ describe('EvaluationRunDetail batch apply', () => {
     expect(screen.getByText(/Making it a 1–5 scale/)).toBeInTheDocument();
   });
 
+  it('names a new question that landed in no topic, so "applied" is not read as "asked"', async () => {
+    // With Conditional Topics on, a question no topic claims never reaches a respondent. The
+    // reviewer approved the suggestion; they have to be told it cannot yet do anything.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'goal',
+            op: 'add_question',
+            newQuestionTopicKey: null,
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('1 new question is in no topic')).toBeInTheDocument()
+    );
+    expect(screen.getByText(/will not be asked until you put it in one/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Conditional topics/ })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn1/v/v2/topics'
+    );
+  });
+
+  it('says nothing when the new question DID land in a topic', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [
+          {
+            findingId: 'f1',
+            targetKey: 'goal',
+            op: 'add_question',
+            newQuestionTopicKey: 'talent_depth',
+          },
+        ],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/in no topic/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing when the version has no topics to decide between', async () => {
+    // Absent, not null. A questionnaire that does not use Conditional Topics must not be told
+    // about them.
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(batchResponse());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 change applied to v2')).toBeInTheDocument());
+    expect(screen.queryByText(/in no topic/)).not.toBeInTheDocument();
+  });
+
+  it('explains a delete refused because its topic samples too few questions', async () => {
+    renderRun(triaged(['accepted', 'declined', 'declined']));
+    mockFetchOnce(
+      batchResponse({
+        applied: [],
+        skipped: [{ findingId: 'f1', targetKey: 'q_1', reason: 'topic_sample_too_small' }],
+      })
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    await waitFor(() => expect(screen.getByText('1 not applied')).toBeInTheDocument());
+    expect(screen.getByText(/narrow the question instead of deleting it/)).toBeInTheDocument();
+    // Still accepted: fixing the topic and applying again picks it up without re-triaging.
+    expect(screen.getByText(/\(still accepted\)\./)).toBeInTheDocument();
+  });
+
   it('says nothing about instructions on a batch nobody steered', async () => {
     renderRun(triaged(['accepted', 'declined', 'declined']));
     mockFetchOnce(batchResponse());
