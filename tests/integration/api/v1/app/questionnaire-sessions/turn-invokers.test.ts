@@ -129,7 +129,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       maxQuestionsPerSession: null,
       voiceEnabled: false,
       attachmentsEnabled: false,
-      contradictionMode: 'flag',
+      contradictionMode: 'probe',
       contradictionWindowN: 3,
       contradictionEveryNTurns: 1,
       answerFitMode: 'fallback',
@@ -395,7 +395,7 @@ describe('detectContradictions', () => {
     expect(out.findings).toHaveLength(1);
     const [slug, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
     expect(slug).toBe(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
-    expect(args).toMatchObject({ mode: 'flag', windowN: 3, sessionId: 'sess-1' });
+    expect(args).toMatchObject({ mode: 'probe', windowN: 3, sessionId: 'sess-1' });
     expect(args.answers[0]).toMatchObject({
       slotKey: 'role',
       value: 'marketing',

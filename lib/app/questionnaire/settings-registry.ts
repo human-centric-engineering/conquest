@@ -143,10 +143,13 @@ export const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
   both: 'Both (respondent can toggle)',
 };
 
+// `flag` is retired and unreachable through the read path (see `resolveContradictionMode`), but the
+// map stays total over the stored vocabulary so a raw config that skipped that path still reads as
+// what it will actually do.
 const CONTRADICTION_MODE_LABELS: Record<ContradictionMode, string> = {
   off: 'Off',
-  flag: 'Flag contradictions',
-  probe: 'Follow up in conversation',
+  flag: 'On — ask the respondent',
+  probe: 'On — ask the respondent',
 };
 
 const ANSWER_FIT_MODE_LABELS: Record<AnswerFitMode, string> = {

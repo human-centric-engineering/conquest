@@ -23,8 +23,8 @@ import {
   type ContradictionSlotView,
 } from '@/lib/app/questionnaire/contradiction/types';
 
-/** Build the system rules. Under `probe` the model is asked for a follow-up
- *  question; under `flag`/`off` it is not (those modes surface passively).
+/** Build the system rules. Under `probe` — the only mode that reaches the detector now — the model
+ *  is asked for a follow-up question; the retired `flag` and `off` do not ask for one.
  *  When `withCurrentStatement` is set, the model is also told to weigh the
  *  respondent's latest message against the captured answers (reversal detection) —
  *  and, when `withActiveQuestion` is set, that the message is an answer to a NAMED

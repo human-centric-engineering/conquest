@@ -18,8 +18,8 @@
 
 import { prisma } from '@/lib/db/client';
 import {
-  CONTRADICTION_MODES,
   QUESTION_TYPES,
+  resolveContradictionMode,
   type AnswerProvenance,
   type ContradictionMode,
   type QuestionType,
@@ -70,13 +70,6 @@ function asQuestionType(value: string): QuestionType {
   return (QUESTION_TYPES as readonly string[]).includes(value)
     ? (value as QuestionType)
     : 'free_text';
-}
-
-/** Narrow a stored `contradictionMode` string to the enum, defaulting to `off`. */
-function asContradictionMode(value: string | undefined): ContradictionMode {
-  return value !== undefined && (CONTRADICTION_MODES as readonly string[]).includes(value)
-    ? (value as ContradictionMode)
-    : 'off';
 }
 
 /**
@@ -146,8 +139,10 @@ export async function buildContradictionContext(
     }));
   if (answers.length < 2) return { ok: false, reason: 'insufficient_answers' };
 
-  // Mode/window: caller override wins, else the version's saved config, else off/0.
-  const mode = input.mode ?? asContradictionMode(version.config?.contradictionMode);
+  // Mode/window: caller override wins, else the version's saved config, else off/0. Both go through
+  // `resolveContradictionMode`, so a preview of the legacy `flag` — from a stored row or a body
+  // override — previews what the questionnaire will actually do now, which is probe.
+  const mode = resolveContradictionMode(input.mode ?? version.config?.contradictionMode);
   const windowN = input.windowN ?? version.config?.contradictionWindowN ?? 0;
 
   const context: ContradictionContext = {

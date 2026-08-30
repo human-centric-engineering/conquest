@@ -13,10 +13,13 @@
  *       - Require ≥2 distinct slots after de-duplicating the key list — else drop.
  *       - Clamp severity defensively (the schema enums it; this guards direct/CLI
  *         callers that bypass Zod).
- *       - Mode-shape: `flag` strips any probe (it surfaces passively); `probe`
- *         keeps the probe, but a missing/blank probe *downgrade-keeps* the finding
- *         without one rather than dropping it — the conflict is still real (the
- *         analogue of F4.2 downgrading a quote-less `direct` to `inferred`).
+ *       - Mode-shape: `probe` keeps the probe, but a missing/blank probe
+ *         *downgrade-keeps* the finding without one rather than dropping it — the
+ *         conflict is still real (the analogue of F4.2 downgrading a quote-less
+ *         `direct` to `inferred`). The retired `flag` strips it; it no longer
+ *         reaches here (see `resolveContradictionMode`) but the shaping stays, so a
+ *         direct capability call with the legacy value can't produce a probe the
+ *         engine would then have nothing to do with.
  *       - De-duplicate symmetric findings: `[a,b]` and `[b,a]` are the same
  *         conflict; key on the sorted slot-key set, keep the highest confidence.
  *
@@ -127,9 +130,9 @@ export function normalizeContradictionFindings(
       confidence: c.confidence,
     };
 
-    // Mode shaping. `flag` surfaces passively → never carries a probe. `probe`
-    // carries a reconciliation question, but a missing/blank one doesn't drop the
-    // finding (the conflict stands) — it's kept without a probe.
+    // Mode shaping. `probe` carries a reconciliation question, but a missing/blank one doesn't drop
+    // the finding (the conflict stands) — it's kept without a probe. The legacy `flag` never carries
+    // one; it cannot arrive through the read path, only a direct capability call.
     if (ctx.mode === 'probe') {
       const probe = typeof c.suggestedProbe === 'string' ? c.suggestedProbe.trim() : '';
       if (probe.length > 0) finding.suggestedProbe = probe;

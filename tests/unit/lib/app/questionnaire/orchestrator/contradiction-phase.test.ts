@@ -48,6 +48,7 @@ const TWO_ANSWERS = [
 
 type PhaseOpts = {
   hasMessage?: boolean;
+  answerRecorded?: boolean;
   disregarded?: boolean;
   dataMode?: boolean;
 };
@@ -59,6 +60,7 @@ async function runPhase(
 ) {
   return runContradictionPhase(s, inv.invokers, {
     hasMessage: opts.hasMessage ?? true,
+    answerRecorded: opts.answerRecorded ?? false,
     disregarded: opts.disregarded ?? false,
     dataMode: opts.dataMode ?? false,
     labels: emptyLabels,
@@ -551,11 +553,16 @@ describe('runContradictionPhase — probe mode (deferred reconciliation)', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Detection hit — flag mode
+// Retired `flag` mode — checking that is on always ASKS
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('runContradictionPhase — flag mode (immediate refine)', () => {
-  it('combines several conflicts into ONE notice and refines them together when refinement is on', async () => {
+describe('runContradictionPhase — the retired flag mode never refines silently', () => {
+  it('asks instead of rewriting when a legacy `flag` config reaches the engine', async () => {
+    // `flag` used to surface the conflict AND let the refiner rewrite the answer the same turn,
+    // without the respondent's say-so. The read path now resolves it to `probe`
+    // (`resolveContradictionMode`), so the engine should never see this value — but a raw config
+    // that bypassed that path must still not produce a silent edit. The passive arm is gone, so
+    // any mode that isn't `off` lands on the probe.
     const inv = stubInvokers({
       detect: {
         findings: [
@@ -567,51 +574,30 @@ describe('runContradictionPhase — flag mode (immediate refine)', () => {
     });
     const s = state({
       userMessage: 'x',
-      questions: [q({ id: 'a', key: 'a' })],
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
       config: { contradictionMode: 'flag' },
       existingAnswers: TWO_ANSWERS,
     });
 
     const result = await runPhase(s, inv);
 
-    // ONE combined notice box carrying both explanations (not one event per finding).
+    // The answer is NOT touched: no refiner call, and this turn's writes are held.
+    expect(inv.calls.refine).toHaveLength(0);
+    expect(result.answerRefinements).toHaveLength(0);
+    expect(result.suppressWrites).toBe(true);
+    // The respondent is asked instead — one combined probe covering both conflicts.
+    expect(result.probe?.text).toBeTruthy();
+    expect(result.probe?.slotKeys).toEqual(['a', 'b']);
+    // Recorded as awaiting the respondent, never as `flagged`.
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+      { key: 'b', slotKeys: ['b'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+    ]);
+    // Still ONE combined notice box carrying both explanations.
     expect(result.events).toHaveLength(1);
-    expect(result.events[0]).toMatchObject({ type: 'warning', code: 'contradiction' });
     const message = (result.events[0] as { message: string }).message;
     expect(message).toContain('A conflict');
     expect(message).toContain('B conflict');
-    // Refiner called once — a merged trigger reconciles both conflicts in one pass.
-    expect(inv.calls.refine).toHaveLength(1);
-    expect(inv.calls.refine[0]?.trigger.contradiction?.slotKeys).toEqual(['a', 'b']); // union
-    expect(result.answerRefinements).toHaveLength(1);
-    expect(result.costUsd).toBeGreaterThan(0);
-    // Both conflicts recorded (so neither re-alerts), and no probe — flag mode surfaces passively.
-    expect(result.raisedContradictions).toEqual([
-      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 0 },
-      { key: 'b', slotKeys: ['b'], resolution: 'flagged', raisedAtTurnIndex: 0 },
-    ]);
-    expect(result.probe).toBeUndefined();
-    expect(result.suppressWrites).toBe(false);
-  });
-
-  it('records a failed refine tool-call with diagnostic code and latencyMs in flag mode', async () => {
-    const inv = stubInvokers({
-      detect: { findings: [finding()] },
-      refine: { decisions: [], diagnostic: 'REFINE_FAIL', latencyMs: 99 },
-    });
-    const s = state({
-      userMessage: 'x',
-      questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-    });
-
-    const result = await runPhase(s, inv);
-
-    const refineRecord = result.toolCalls.find((c) => c.slug === REFINE_ANSWER_CAPABILITY_SLUG);
-    expect(refineRecord?.success).toBe(false);
-    expect(refineRecord?.code).toBe('REFINE_FAIL');
-    expect(refineRecord?.latencyMs).toBe(99);
   });
 });
 
@@ -637,6 +623,7 @@ describe('runContradictionPhase — priorAnswers override', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -660,6 +647,7 @@ describe('runContradictionPhase — priorAnswers override', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -733,6 +721,7 @@ describe('runContradictionPhase — look-back window', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -742,26 +731,111 @@ describe('runContradictionPhase — look-back window', () => {
     expect(inv.calls.detect[0]?.existingAnswers.map((a) => a.slotKey)).toEqual(['a5']);
   });
 
-  it('does not run the detector on a turn with no message to check', async () => {
-    // Named for what it proves. It was written as "counts the floor against what the detector will
-    // actually see", which it does not: `canDetect` opens with `opts.hasMessage &&`, so on a
-    // no-message turn the window and the floor are never reached — the assertion below holds with
-    // `applyCompareWindow` deleted outright. (The window IS covered, by the two tests above, which
-    // do fail without it.) The floor's answer-vs-answer arm is in fact unreachable today: whenever
-    // it is evaluated `hasMessage` is true, so the floor is 1, and a non-empty answer list can
-    // never be narrowed below 1 by a window. Left as-is rather than "fixed" here — collapsing that
-    // arm changes when the detector runs, which is a product decision, not a test cleanup.
+  it('does not run the detector on the opening turn — nothing arrived to check', async () => {
+    // The other message-less turn. A form-first session can reach it with answers already stored, so
+    // "no message" alone is not what excludes it — `answerRecorded` being false is. Opening the
+    // interview by challenging the respondent is not how it should start.
     const inv = stubInvokers({ detect: { findings: [] } });
     const s = state({
       userMessage: '',
       questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
       existingAnswers: TWO_ANSWERS,
     });
 
-    await runPhase(s, inv, { hasMessage: false });
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: false });
 
     expect(inv.calls.detect).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tap-to-answer turns (P18 answer cards) — checking is about the answers, not the keyboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runContradictionPhase — a turn answered by tapping, not typing', () => {
+  it('checks the stored answers against each other when an answer arrived without a message', async () => {
+    // The respondent used a question's answer control: the value is already persisted and there is
+    // no message, so the detector compares answer against answer (no `currentStatement`).
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a', 'b'], explanation: 'A vs B' })] },
+    });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    const result = await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(1);
+    expect(result.probe?.text).toBeTruthy();
+    expect(result.pendingContradiction).toMatchObject({ slotKeys: ['a', 'b'] });
+  });
+
+  it('needs TWO stored answers with no message — one has nothing to contradict', async () => {
+    // The floor's answer-vs-answer arm. With a message, one stored answer is enough (the message is
+    // the other party); without one, a lone answer can only be compared to itself.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+      existingAnswers: [{ slotKey: 'a', value: 1, provenance: 'direct' as const }],
+    });
+
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+  });
+
+  it('counts the floor against what the window leaves, not the full answer list', async () => {
+    // Why `applyCompareWindow` runs BEFORE the floor. Two stored answers, but a look-back of 1 hands
+    // the detector a single answer — nothing to compare it against, so the pass is skipped rather
+    // than dispatched with an input that cannot produce a finding.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+  });
+
+  it('does not stack a second question on a probe the respondent has not answered', async () => {
+    // A probe is parked and this turn is a card tap, which cannot be its answer. Asking again about
+    // something else on top of it is the nagging the ledger exists to prevent — and parking the new
+    // finding would overwrite the one still waiting.
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['c'], explanation: 'C conflict' })] },
+    });
+    const s = {
+      ...state({
+        userMessage: '',
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'c', key: 'c' })],
+        config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'A vs not-A',
+        statement: 'earlier statement',
+        raisedAtTurnIndex: 0,
+      },
+    };
+
+    const result = await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+    expect(inv.calls.refine).toHaveLength(0);
+    // The parked probe is left exactly as it was — not cleared, not replaced.
+    expect(result.pendingContradiction).toBeUndefined();
+    expect(result.raisedContradictions).toBeUndefined();
   });
 });
 
@@ -847,7 +921,10 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     expect(inv.calls.refine).toHaveLength(0);
   });
 
-  it('suppresses a flag-mode finding already in the ledger — no alert, no immediate refine', async () => {
+  it('suppresses a conflict a pre-retirement session ledgered as `flagged`', async () => {
+    // `flagged` is only written by the retired `flag` mode, but sessions that ran under it still
+    // carry those entries. They must keep suppressing, or an in-flight respondent gets re-asked
+    // about a conflict the old behaviour already dealt with.
     const inv = stubInvokers({
       detect: { findings: [finding({ slotKeys: ['a'], explanation: 'A conflict' })] },
       refine: { decisions: [decision({ slotKey: 'a' })] },
@@ -856,7 +933,7 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
       ...state({
         userMessage: 'x',
         questions: [q({ id: 'a', key: 'a' })],
-        config: { contradictionMode: 'flag' },
+        config: { contradictionMode: 'probe' },
         existingAnswers: TWO_ANSWERS,
       }),
       raisedContradictions: [raised(['a'], 'flagged')],
@@ -912,26 +989,6 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     expect(result.probe).toBeDefined();
     expect(result.raisedContradictions).toEqual([
       { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 4 },
-    ]);
-  });
-
-  it('records a fresh flag-mode finding as flagged in the returned ledger', async () => {
-    const inv = stubInvokers({
-      detect: { findings: [finding({ slotKeys: ['a'], explanation: 'new' })] },
-      refine: { decisions: [decision({ slotKey: 'a' })] },
-    });
-    const s = state({
-      userMessage: 'contradicts',
-      questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-      selectionRound: 2,
-    });
-
-    const result = await runPhase(s, inv);
-
-    expect(result.raisedContradictions).toEqual([
-      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 2 },
     ]);
   });
 

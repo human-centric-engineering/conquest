@@ -7,11 +7,17 @@
  *     raised on a PRIOR turn), THIS turn's message is the answer to it: run the refiner against the
  *     parked finding (apply the change on confirm, keep otherwise) and clear the pending state. No
  *     fresh detection runs while resolving.
- *   - **Detect** — otherwise, run the detector (gated by mode/cadence/≥2-answers). On a hit:
- *       - `probe` mode → **defer**: raise a reconciliation question (`contradiction_probe` response),
- *         suppress this turn's writes (nothing is overwritten before the respondent confirms), and
- *         park the finding as a `PendingContradiction`. The blue notice shows the EXPLANATION only.
- *       - `flag` mode → surface the explanation passively AND refine immediately (unchanged).
+ *   - **Detect** — otherwise, run the detector (gated by mode/cadence/answer floor). This covers a
+ *     turn the respondent TYPED and a turn they answered by tapping a question's answer control:
+ *     checking is about the answers, not the keyboard. The opening turn has neither and is skipped.
+ *     On a hit it
+ *     **defers**: raise a reconciliation question (`contradiction_probe` response), suppress this
+ *     turn's writes (nothing is overwritten before the respondent confirms), and park the finding as
+ *     a `PendingContradiction`. The blue notice shows the EXPLANATION only.
+ *
+ * Checking being on therefore always means ASKING. The retired `flag` mode surfaced the conflict and
+ * let the refiner rewrite the answer immediately, without the respondent's say-so; the read path now
+ * resolves it to `probe` (see `resolveContradictionMode`) and that arm is gone.
  *
  * Pure relative to its injected invokers; the orchestrator folds the result into its turn output.
  */
@@ -161,26 +167,6 @@ function resolvePendingInLedger(
   return next;
 }
 
-/**
- * Merge several fresh findings into one trigger for the refiner: the union of their slot keys plus a
- * combined explanation, so `flag` mode reconciles every conflict from the turn in a single pass. A
- * single finding passes through unchanged.
- */
-function mergeFindings(findings: ContradictionFinding[]): ContradictionFinding {
-  if (findings.length === 1) return findings[0];
-  const first = findings[0];
-  const probe = findings.find(
-    (f) => typeof f.suggestedProbe === 'string' && f.suggestedProbe.trim().length > 0
-  )?.suggestedProbe;
-  return {
-    slotKeys: [...new Set(findings.flatMap((f) => f.slotKeys))],
-    explanation: findings.map((f) => f.explanation).join(' '),
-    severity: first.severity,
-    confidence: Math.max(...findings.map((f) => f.confidence)),
-    ...(probe !== undefined ? { suggestedProbe: probe } : {}),
-  };
-}
-
 /** Build the {@link RefinementTrigger} finding shape from a parked pending contradiction. */
 function pendingAsFinding(pending: PendingContradiction): ContradictionFinding {
   return {
@@ -193,8 +179,19 @@ function pendingAsFinding(pending: PendingContradiction): ContradictionFinding {
 }
 
 /**
- * Run the contradiction phase over the (post-merge) effective state. `hasMessage` / `disregarded`
- * gate the work as in the rest of the pipeline; `dataMode` only tweaks the probe's consequence noun;
+ * An answer arrived this turn WITHOUT a typed message: the respondent used a question's in-chat
+ * answer control and the card persisted the value itself (P18 question fidelity). It is what
+ * separates the two kinds of message-less turn — a tap-to-answer turn, which has a brand-new answer
+ * worth checking, from the opening turn, which has nothing to check. Both orchestrators derive this
+ * from the same `TurnState` field, so it lives here once rather than at each call site.
+ */
+export function answerRecordedFrom(state: Pick<TurnState, 'answeredQuestionKey'>): boolean {
+  return state.answeredQuestionKey !== undefined;
+}
+
+/**
+ * Run the contradiction phase over the (post-merge) effective state. `hasMessage` / `answerRecorded` /
+ * `disregarded` gate the work; `dataMode` only tweaks the probe's consequence noun;
  * `labels` name the conflicting topics in the probe. The orchestrator passes the same `effective`
  * state it uses for completion + selection.
  */
@@ -203,6 +200,13 @@ export async function runContradictionPhase(
   invokers: CapabilityInvokers,
   opts: {
     hasMessage: boolean;
+    /**
+     * An answer arrived this turn WITHOUT a typed message: the respondent used a question's in-chat
+     * answer control and the card persisted the value itself (P18 question fidelity). It is what
+     * separates the two kinds of message-less turn — a tap-to-answer turn, which has a brand-new
+     * answer worth checking, from the opening turn, which has nothing to check.
+     */
+    answerRecorded: boolean;
     disregarded: boolean;
     dataMode: boolean;
     labels: ContradictionProbeLabels;
@@ -253,6 +257,13 @@ export async function runContradictionPhase(
     return base;
   }
 
+  // A probe is parked but THIS turn can't answer it — the respondent tapped a card, or the turn was
+  // disregarded. Don't detect: stacking a second reconciliation question on top of one they haven't
+  // replied to yet is the nagging the ledger exists to prevent, and parking the new finding would
+  // overwrite the old one. The parked conflict keeps its `unresolved` ledger entry, so the
+  // completion sweep still raises it if the conversation ends without an answer.
+  if (pending) return base;
+
   // ── Detect over the PRE-MERGE answers (see `priorAnswers`) + the latest message. ──
   const allPriorAnswers = opts.priorAnswers ?? effective.existingAnswers;
   const decision = shouldRunDetection(
@@ -264,17 +275,25 @@ export async function runContradictionPhase(
       turnIndex: effective.selectionRound,
     }
   );
-  // The configured look-back, finally applied. `shouldRunDetection` has always returned a
-  // `compareWindow` and every caller has always ignored it, so "check against the last N answers"
-  // silently meant "check against all of them". It sits before the floor so the floor would count
-  // what the detector sees — though as written that ordering is unobservable: `canDetect` requires
-  // `hasMessage`, which pins the floor at 1, and a window never narrows a non-empty list below 1.
+  // The configured look-back, applied before the floor so the floor counts what the detector will
+  // actually be given. (`shouldRunDetection` returned a `compareWindow` from the first release and
+  // every caller ignored it, so "check against the last N answers" silently meant "check against all
+  // of them" until 2026-08-30.) The ordering is load-bearing on an answer-vs-answer pass: a window of
+  // 1 leaves a single answer with nothing to compare it to, and the floor is what stops that pass.
   const priorAnswers = applyCompareWindow(allPriorAnswers, decision.compareWindow);
   // Floor: with a latest message (fed to the detector as `currentStatement`), ONE stored answer is
   // enough — it can contradict the message. Without one, we need ≥2 answers to compare each other.
   const floor = opts.hasMessage ? 1 : MIN_CONTRADICTION_ANSWERS;
+  // What the turn brought: something the respondent typed, or an answer they tapped in. Checking is
+  // about the ANSWERS, not about whether they used the keyboard — a respondent working through a
+  // questionnaire on answer cards contradicts an earlier answer just as readily as one who types,
+  // and gating on the message alone let those sessions through unchecked to the submit-time sweep.
+  // The opening turn has neither and is excluded by the same condition, which is what it wants: a
+  // form-first session can reach it with answers already stored, and opening the interview by
+  // challenging the respondent is not how it should start.
+  const somethingToCheck = opts.hasMessage || opts.answerRecorded;
   const canDetect =
-    opts.hasMessage && !opts.disregarded && decision.run && priorAnswers.length >= floor;
+    somethingToCheck && !opts.disregarded && decision.run && priorAnswers.length >= floor;
   if (!canDetect) return base;
 
   // Detect against the pre-merge answers so the conflicting OLD value (which this turn's extraction
@@ -303,50 +322,36 @@ export async function runContradictionPhase(
 
   // ONE informational notice for the whole turn — a single finding shows its explanation; several
   // fresh conflicts are combined into one "I noticed…" box. We ACT ON ALL fresh conflicts this turn
-  // (a combined probe, or refine them together) and record EACH in the ledger, so every conflict is
-  // genuinely reconciled — not noticed-then-suppressed — and none is ever re-raised once dealt with.
+  // (one combined probe) and record EACH in the ledger, so every conflict is genuinely reconciled —
+  // not noticed-then-suppressed — and none is ever re-raised once dealt with.
   base.events.push({
     type: 'warning',
     code: 'contradiction',
     message: buildContradictionNoticeMessage(fresh),
   });
 
-  const mode = effective.config.contradictionMode;
-  if (mode === 'probe') {
-    // Defer: ask ONE reconciliation question that raises every fresh conflict as a point to clarify,
-    // suppress this turn's writes, park them all, and record each in the ledger (unresolved until the
-    // respondent confirms next turn).
-    const { text, pending: parked } = buildContradictionProbe({
-      findings: fresh,
-      statement: effective.userMessage,
-      raisedAtTurnIndex: effective.selectionRound,
-      labels: opts.labels,
-      dataMode: opts.dataMode,
-    });
-    base.probe = { text, slotKeys: parked.slotKeys };
-    base.suppressWrites = true;
-    base.pendingContradiction = parked;
-    base.raisedContradictions = [
-      ...ledger,
-      ...fresh.map((f) => raisedEntry(f, 'unresolved', effective.selectionRound)),
-    ];
-    return base;
-  }
-
-  // `flag` mode: surface passively AND refine immediately. Reconcile ALL fresh conflicts in one refine
-  // pass (a merged trigger over the union of their slots), and record each so none re-alerts.
-  const refine = await invokers.refineAnswer(effective, { contradiction: mergeFindings(fresh) });
-  base.costUsd += refine.costUsd;
-  base.toolCalls.push(
-    toolCall(REFINE_ANSWER_CAPABILITY_SLUG, refine.diagnostic === undefined, {
-      ...(refine.diagnostic !== undefined ? { code: refine.diagnostic } : {}),
-      ...(refine.latencyMs !== undefined ? { latencyMs: refine.latencyMs } : {}),
-    })
-  );
-  base.answerRefinements = refine.decisions;
+  // Ask. Detection running at all means the mode is `probe` (the read path resolves the legacy
+  // `flag` to it, and `off` never gets here), so there is one thing to do with a fresh conflict:
+  // raise ONE reconciliation question covering every point, suppress this turn's writes, park them
+  // all, and record each in the ledger as `unresolved` until the respondent answers next turn.
+  //
+  // There is deliberately no passive arm any more. `flag` mode used to surface the explanation and
+  // let the refiner rewrite the answer in the same breath — an edit the respondent was never asked
+  // about and could easily miss. If the detector is confident enough to interrupt, it is the
+  // respondent who settles which answer stands, not the model.
+  const { text, pending: parked } = buildContradictionProbe({
+    findings: fresh,
+    statement: effective.userMessage,
+    raisedAtTurnIndex: effective.selectionRound,
+    labels: opts.labels,
+    dataMode: opts.dataMode,
+  });
+  base.probe = { text, slotKeys: parked.slotKeys };
+  base.suppressWrites = true;
+  base.pendingContradiction = parked;
   base.raisedContradictions = [
     ...ledger,
-    ...fresh.map((f) => raisedEntry(f, 'flagged', effective.selectionRound)),
+    ...fresh.map((f) => raisedEntry(f, 'unresolved', effective.selectionRound)),
   ];
   return base;
 }

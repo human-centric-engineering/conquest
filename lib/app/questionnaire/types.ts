@@ -242,10 +242,47 @@ export type TagColor = (typeof TAG_COLORS)[number];
 export const SELECTION_STRATEGIES = ['sequential', 'random', 'weighted', 'adaptive'] as const;
 export type SelectionStrategy = (typeof SELECTION_STRATEGIES)[number];
 
-/** Contradiction-detection mode (consumed by F4.3). `off` disables it; `flag`
- *  surfaces contradictions; `probe` follows up in-conversation. */
+/**
+ * Contradiction-detection mode, as STORED (and as accepted on the wire). `off` disables it; `probe`
+ * follows the conflict up in conversation and changes nothing until the respondent answers.
+ *
+ * `flag` is **legacy** and no longer selectable. It surfaced the conflict passively AND let the
+ * refiner rewrite the answer immediately — an AI edit to a respondent's answer that they were never
+ * asked about, which is the wrong thing for a research instrument to do quietly. The value stays in
+ * this tuple only so stored rows and older API/import payloads still parse; every read funnels
+ * through {@link resolveContradictionMode}, which turns it into `probe`. Nothing downstream of that
+ * resolver ever sees `flag`, so the engine has no passive-refine path left.
+ */
 export const CONTRADICTION_MODES = ['off', 'flag', 'probe'] as const;
 export type ContradictionMode = (typeof CONTRADICTION_MODES)[number];
+
+/**
+ * The look-back window proposed when an admin first turns contradiction checking ON — how many prior
+ * answers each new answer is checked against.
+ *
+ * Not the stored default: the config's cross-field rule pins the window to 0 while the mode is `off`
+ * (see `authoring/config-schema.ts`), so the shipped default stays 0 and this is what the editor
+ * fills in at the moment checking is switched on. Ten is wide enough to catch a real reversal several
+ * questions later, and tight enough to keep the detector's comparison small — a wider net is a wider
+ * surface for a false positive, which is the failure that actually costs the respondent's trust.
+ */
+export const DEFAULT_CONTRADICTION_WINDOW_N = 10;
+
+/**
+ * Resolve a stored / wire `contradictionMode` to what the engine should actually do.
+ *
+ * The single funnel for every read: it maps the legacy `flag` to `probe` (see
+ * {@link CONTRADICTION_MODES}), passes `off` / `probe` through, and falls back to the shipped default
+ * for anything unrecognised. Mapping `flag` BEFORE the enum check is the whole point — letting an
+ * unknown value fall through to the default would silently turn checking OFF for every questionnaire
+ * that had it on, which is the one failure mode this must not have.
+ */
+export function resolveContradictionMode(value: unknown): ContradictionMode {
+  if (value === 'flag') return 'probe';
+  return (CONTRADICTION_MODES as readonly unknown[]).includes(value)
+    ? (value as ContradictionMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode;
+}
 
 /** Semantic answer-fit resolver mode. A second, focused extraction pass that maps a clearly-given
  *  free-form answer onto a choice/likert question's options/scale when the primary extractor

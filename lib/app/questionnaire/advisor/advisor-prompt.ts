@@ -32,8 +32,11 @@ const SETTINGS_REFERENCE = `Reference — how key settings shape the respondent 
   invitee fields, or with anonymousMode off, is a friction/trust conflict.
 - anonymousMode: when on, identifying answers shouldn't be required; pair with sensitivityAwareness
   for sensitive topics.
-- contradictionMode: off|flag|probe. 'probe' spends turns re-asking; with a low maxQuestionsPerSession
-  it eats the budget meant for coverage. contradictionWindowN must be > 0 when mode is not 'off'.
+- contradictionMode: off|probe. 'probe' watches for an answer that contradicts an earlier one and asks
+  the respondent which is right — it costs a model call per checked turn and spends a turn resolving a
+  conflict, so with a low maxQuestionsPerSession it eats the budget meant for coverage. Never propose
+  'flag': it is retired and reads as 'probe'. contradictionWindowN must be > 0 when mode is not 'off'
+  (10 is the recommended look-back; a much wider one invites false positives).
 - answerFitMode: off|fallback|always. 'always' re-maps every answer (slower, costlier) and is overkill
   for short questionnaires.
 - presentationMode: chat|form|both. 'form' makes the conversational features (tone, reasoning stream,

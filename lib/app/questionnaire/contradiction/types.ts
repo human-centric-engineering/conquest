@@ -88,8 +88,9 @@ export interface ContradictionContext {
   slots: ContradictionSlotView[];
   /** The answers captured so far that the detector compares against each other. */
   answers: AnsweredSlotView[];
-  /** Behaviour on a hit: `off` / `flag` (surface) / `probe` (follow up). Shapes
-   *  the prompt (probe requested only under `probe`) and the normaliser output. */
+  /** Behaviour on a hit: `off` or `probe` (ask the respondent). Shapes the prompt (a follow-up is
+   *  requested only under `probe`) and the normaliser output. The legacy `flag` still type-checks
+   *  here, but every caller resolves it to `probe` first — see `resolveContradictionMode`. */
   mode: ContradictionMode;
   /** How many prior answers to compare against; `0` = compare all. Mirrors the
    *  config's `contradictionWindowN`. */
@@ -177,7 +178,7 @@ export interface ContradictionFinding {
   /** The detector's certainty the conflict is real, 0–1. */
   confidence: number;
   /** A single neutral follow-up question that lets the respondent reconcile the
-   *  answers — present **only** under `probe` mode; absent for `flag`. */
+   *  answers — present under `probe`, which is the only mode that surfaces anything. */
   suggestedProbe?: string;
 }
 

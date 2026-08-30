@@ -106,6 +106,25 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates', ()
 const transcriptMock = vi.hoisted(() => ({ findTurnByIdempotencyKey: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/transcript', () => transcriptMock);
 
+// Cohorts & Rounds gate: only reached when a session carries a `roundId` (no fixture does by
+// default), so it's mocked here rather than left to hit real Prisma.
+const roundAccessMock = vi.hoisted(() => ({
+  assertRoundAccess: vi.fn(
+    async (): Promise<
+      { ok: true } | { ok: false; status: number; code: string; message: string }
+    > => ({ ok: true })
+  ),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/round-access', () => roundAccessMock);
+const roundBriefingMock = vi.hoisted(() => ({
+  loadRoundBriefing: vi.fn(() => Promise.resolve(null)),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing', () => roundBriefingMock);
+const peerDigestMock = vi.hoisted(() => ({
+  loadRoundPeerDigest: vi.fn(() => Promise.resolve(null)),
+}));
+vi.mock('@/lib/app/questionnaire/learning/digest', () => peerDigestMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { TURN_STAGE_LABELS } from '@/lib/app/questionnaire/orchestrator';
 import {
@@ -410,6 +429,168 @@ describe('gate order', () => {
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'sess-1', userMessage: '' })
     );
+  });
+});
+
+describe('round gating (Cohorts & Rounds)', () => {
+  function roundScopedContext() {
+    return loadedContext({
+      session: {
+        id: 'sess-1',
+        status: 'active',
+        versionId: 'v1',
+        respondentUserId: USER,
+        roundId: 'round-1',
+        cohortMemberId: 'member-1',
+      },
+    });
+  }
+
+  it('pauses the session and 409s when the round has closed', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: 'ROUND_WINDOW_CLOSED',
+      message: 'Round window has closed',
+    });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('ROUND_WINDOW_CLOSED');
+    expect(sessionsMock.pauseSession).toHaveBeenCalledWith('sess-1', { reason: 'round_closed' });
+  });
+
+  it('refuses without pausing when the member was removed from the round (not a time-window code)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: 'ROUND_MEMBER_REMOVED',
+      message: 'You are no longer part of this round',
+    });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe('ROUND_MEMBER_REMOVED');
+    expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+  });
+
+  it('runs the turn normally for a round-scoped session that is still open', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(roundScopedContext());
+    roundAccessMock.assertRoundAccess.mockResolvedValue({ ok: true });
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    expect(roundBriefingMock.loadRoundBriefing).toHaveBeenCalledWith('round-1', 'v1');
+    expect(peerDigestMock.loadRoundPeerDigest).toHaveBeenCalledWith('round-1', 'v1');
+    expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('scope amendment notice (P17.6)', () => {
+  const AMENDMENT = {
+    key: 'expansion',
+    label: 'Expansion plans',
+    request: 'Can we also cover expansion?',
+    atTurn: 0,
+    at: '2026-08-01T00:00:00.000Z',
+  };
+
+  /** A plan whose one amendment lands on the CURRENT turn (`selectionRound` is 0 by default). */
+  function amendedContext(opts: {
+    topic?: { dataSlotKeys: string[]; questionKeys: string[] } | null;
+    plannedMembers?: { dataSlotKeys?: string[]; questionKeys?: string[] };
+  }) {
+    const base = loadedContext();
+    return loadedContext({
+      scope: {
+        ...base.scope,
+        topics:
+          opts.topic === null
+            ? []
+            : [
+                {
+                  id: 't1',
+                  key: 'expansion',
+                  label: 'Expansion plans',
+                  description: null,
+                  phase: 'conditional' as const,
+                  criteria: null,
+                  depth: 'full' as const,
+                  members: opts.topic ?? { dataSlotKeys: ['ds1'], questionKeys: [] },
+                  ordinal: 0,
+                  source: 'analyst' as const,
+                  trigger: null,
+                },
+              ],
+        plan: {
+          v: 1 as const,
+          topics:
+            opts.topic === null
+              ? []
+              : [
+                  {
+                    key: 'expansion',
+                    depth: 'full' as const,
+                    source: 'respondent' as const,
+                    rationale: 'The respondent asked for this.',
+                    ...(opts.plannedMembers ? { members: opts.plannedMembers } : {}),
+                  },
+                ],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: '',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+          amendments: [AMENDMENT],
+        },
+      },
+    });
+  }
+
+  it('sizes the acknowledgement from the topic + planned data slots when both resolve', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      amendedContext({
+        topic: { dataSlotKeys: ['ds1', 'ds2'], questionKeys: [] },
+        plannedMembers: { dataSlotKeys: ['ds1', 'ds2'] },
+      })
+    );
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
+  });
+
+  it('falls back to the topic depth (no size claim) when the topic no longer resolves', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(amendedContext({ topic: null }));
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    // Still acknowledged, but with no "there is X on it" size clause (itemCount omitted).
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
+    expect(arg.input.briefing?.some((line) => line.includes('there is'))).toBe(false);
+  });
+
+  it('uses question-key membership when the topic has no data slots', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      amendedContext({
+        topic: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] },
+        plannedMembers: { questionKeys: ['q1', 'q2'] },
+      })
+    );
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    expect(arg.input.briefing?.some((line) => line.includes('Expansion plans'))).toBe(true);
   });
 });
 
@@ -1347,13 +1528,13 @@ describe('reasoning stream (F9.9)', () => {
   });
 });
 
-describe('contradiction notice — explanation is the message (flag mode)', () => {
+describe('contradiction notice — the explanation is the message', () => {
   /**
-   * Invokers that trigger a flag-mode contradiction warning. The finding carries BOTH an
-   * `explanation` and a `suggestedProbe`. The contradiction phase always sets the notice
-   * `message` to `finding.explanation` (in both flag and probe mode — the probe question is asked
-   * as the interviewer turn, never as the notice), so the route surfaces the explanation as the
-   * warning message and adds NO `detail` (the enrichment fires only when detail ≠ message).
+   * Invokers that trigger a contradiction warning. The finding carries BOTH an `explanation` and a
+   * `suggestedProbe`. The contradiction phase always sets the notice `message` to
+   * `finding.explanation` — the probe question is asked as the interviewer turn, never as the
+   * notice — so the route surfaces the explanation as the warning message and adds NO `detail`
+   * (the enrichment fires only when detail ≠ message).
    */
   function contradictionInvokers() {
     return {
@@ -1379,7 +1560,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
             severity: 'medium' as const,
             confidence: 0.8,
             // A probe is present, but the blue notice is INFORMATIONAL — it shows the explanation,
-            // never the question (under `probe` mode the question is asked as the interviewer turn).
+            // never the question (the question is asked as the interviewer turn).
             suggestedProbe: 'Can you clarify your seniority level?',
           },
         ],
@@ -1399,7 +1580,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
     };
   }
 
-  it('shows the explanation (not the probe) as the contradiction notice message under flag mode', async () => {
+  it('shows the explanation (not the probe question) as the contradiction notice message', async () => {
     // Need ≥ MIN_CONTRADICTION_ANSWERS (2) existing answers and contradictionMode ≠ 'off'.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
@@ -1415,7 +1596,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
           config: {
             ...baseCtx.base.config,
             // contradictionMode must be non-'off' for detection to run.
-            contradictionMode: 'flag',
+            contradictionMode: 'probe',
             contradictionEveryNTurns: 1,
           },
         },
@@ -1436,21 +1617,63 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
     expect(data.message).not.toBe('Can you clarify your seniority level?');
     expect(data.detail).toBeUndefined();
 
-    // "Don't nag" ledger: a freshly-surfaced flag-mode conflict is recorded on the session so it is
-    // never re-alerted on a later turn. The route threads the phase's updated ledger to persistTurn.
+    // "Don't nag" ledger: a freshly-surfaced conflict is recorded on the session so it is never
+    // re-alerted on a later turn. The route threads the phase's updated ledger to persistTurn.
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         raisedContradictions: [
-          expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'flagged' }),
+          expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'unresolved' }),
         ],
       })
     );
   });
 
+  it('checks a card-answer turn, which carries no message at all', async () => {
+    // P18: the respondent answered through the question's answer control. The card already persisted
+    // the value, so the request carries `answeredQuestionKey` and no `message`. The route must put
+    // that on the TurnState — without it the core cannot tell this turn from the opening one, and a
+    // whole tap-to-answer session goes unchecked until the submit sweep.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          existingAnswers: [
+            { slotKey: 'q1', value: 'junior', provenance: 'direct' as const, confidence: 0.7 },
+            { slotKey: 'role', value: 'engineer', provenance: 'direct' as const, confidence: 0.8 },
+          ],
+          config: {
+            ...baseCtx.base.config,
+            contradictionMode: 'probe',
+            contradictionWindowN: 4,
+            contradictionEveryNTurns: 1,
+          },
+        },
+      })
+    );
+    const invokers = contradictionInvokers();
+    invokersMock.buildTurnInvokers.mockResolvedValue(invokers);
+
+    const frames = await drainSse(await POST(req({ answeredQuestionKey: 'q1' }), ctx));
+
+    expect(invokers.detectContradictions).toHaveBeenCalledTimes(1);
+    const contradictionFrame = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
+    );
+    expect(contradictionFrame).toBeDefined();
+    // Parked for the respondent to answer, exactly as on a typed turn.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingContradiction: expect.objectContaining({ slotKeys: ['q1'] }),
+      })
+    );
+  });
+
   it('parks the probe and records the ledger (unresolved) when contradictionMode is probe', async () => {
-    // Probe mode DEFERS: the route asks a reconciliation question, suppresses this turn's writes, and
-    // persists BOTH the parked pendingContradiction and the ledger entry. This is the probe-mode
-    // persist path the flag-mode test above never exercises.
+    // Checking DEFERS: the route asks a reconciliation question, suppresses this turn's writes, and
+    // persists BOTH the parked pendingContradiction and the ledger entry. The notice test above
+    // covers the warning frame; this covers the persist path.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -1814,8 +2037,8 @@ describe('warning detail enrichment', () => {
     expect(data.detail).toBe('That answer is not plausible.');
   });
 
-  it('omits detail on a contradiction warning when explanation equals the message (flag mode)', async () => {
-    // In flag mode the explanation IS the warning message — no separate "Why?" detail needed.
+  it('omits detail on a contradiction warning when explanation equals the message', async () => {
+    // The explanation IS the warning message — no separate "Why?" detail needed.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -1828,14 +2051,14 @@ describe('warning detail enrichment', () => {
           ],
           config: {
             ...baseCtx.base.config,
-            contradictionMode: 'flag',
+            contradictionMode: 'probe',
             contradictionEveryNTurns: 1,
           },
         },
       })
     );
 
-    // Invoker whose contradiction explanation IS the warning message (flag mode pattern).
+    // Invoker whose contradiction explanation IS the warning message.
     invokersMock.buildTurnInvokers.mockResolvedValue({
       extractAnswers: vi.fn(async () => ({
         intents: [

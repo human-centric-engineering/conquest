@@ -22,12 +22,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, configure } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import type { MutationSpec } from '@/components/admin/questionnaires/version-editor-types';
 import {
+  DEFAULT_CONTRADICTION_WINDOW_N,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   DEFAULT_INVITEE_FIELDS,
   type HouseRule,
@@ -207,6 +208,15 @@ function selectWithOptions(values: string[]): HTMLSelectElement {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+/*
+ * The settings groups are an accordion and every one of them starts shut, so a field's markup is
+ * present but hidden until its group is opened. These tests are about the wiring between a control
+ * and the save payload, not about which group is open — so role queries here look inside shut
+ * groups too. What the admin can actually *reach* is pinned separately, in "the settings
+ * accordion" describe below, which is the file's contract for visibility.
+ */
+configure({ defaultHidden: true });
 
 describe('ConfigEditor', () => {
   beforeEach(() => {
@@ -707,28 +717,41 @@ describe('ConfigEditor', () => {
     expect(screen.queryByText(/detection cadence/i)).not.toBeInTheDocument();
   });
 
-  it('shows contradiction sub-fields when mode is "flag"', async () => {
-    setup({ contradictionMode: 'off' });
+  it('shows contradiction sub-fields, pre-filled with a usable window, when switched on', async () => {
+    // Switching on from `off` carries a stored window of 0, which the save path would clamp to 1 —
+    // each answer checked against only the one before it. The editor proposes the real default.
+    setup({ contradictionMode: 'off', contradictionWindowN: 0 });
     const user = userEvent.setup();
     const selects = screen.getAllByRole('combobox');
     const contradictionSelect = selects.find(
       (s) => (s as HTMLSelectElement).value === 'off'
     ) as HTMLSelectElement;
-    await user.selectOptions(contradictionSelect, 'flag');
+    await user.selectOptions(contradictionSelect, 'probe');
     expect(screen.getByText(/look-back window/i)).toBeInTheDocument();
     expect(screen.getByText(/detection cadence/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(String(DEFAULT_CONTRADICTION_WINDOW_N))).toBeInTheDocument();
+  });
+
+  it('offers only Off and On — the retired flag mode is not selectable', () => {
+    setup({ contradictionMode: 'off' });
+    const contradictionSelect = screen
+      .getAllByRole('combobox')
+      .find((s) => (s as HTMLSelectElement).value === 'off') as HTMLSelectElement;
+    const values = [...contradictionSelect.options].map((o) => o.value);
+    expect(values).toEqual(['off', 'probe']);
+  });
+
+  it('keeps an admin-chosen window when switching on, rather than overwriting it', () => {
+    // The proposal is a fill-in for an unusable value, not a reset of a deliberate one.
+    const { specs } = setup({ contradictionMode: 'probe', contradictionWindowN: 3 });
+    clickSave();
+    expect(bodyOf(specs).contradictionWindowN).toBe(3);
   });
 
   it('sends contradictionWindowN:0 when mode is "off", regardless of the input value', () => {
     const { specs } = setup({ contradictionMode: 'off', contradictionWindowN: 5 });
     clickSave();
     expect(bodyOf(specs).contradictionWindowN).toBe(0);
-  });
-
-  it('sends the contradictionWindowN value when mode is not "off"', () => {
-    const { specs } = setup({ contradictionMode: 'flag', contradictionWindowN: 3 });
-    clickSave();
-    expect(bodyOf(specs).contradictionWindowN).toBe(3);
   });
 
   // ── Budget & limits ──────────────────────────────────────────────────────────
@@ -1852,6 +1875,47 @@ describe('ConfigEditor — interviewer strategy', () => {
       fireEvent.change(input, { target: { value: '8' } });
       clickSave();
       expect(bodyOf(specs).earlyFinishMinQuestions).toBe(8);
+    });
+  });
+
+  describe('the settings accordion', () => {
+    // Fifteen groups of a dozen fields each; one open at a time, none to begin with. Folding is
+    // presentation only — a shut group still saves — so both halves are pinned here.
+
+    /** The header button that opens/shuts a group (the whole header is the target, not a chevron). */
+    const header = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });
+
+    it('starts with every group shut', () => {
+      const { container } = setup();
+      expect(container.querySelector('#budget-fields')).not.toBeVisible();
+      expect(container.querySelector('#access-fields')).not.toBeVisible();
+      expect(header('Budget & limits')).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('opens a group when its header is clicked, and shuts it again', async () => {
+      const { container } = setup();
+      const user = userEvent.setup();
+      await user.click(header('Budget & limits'));
+      expect(container.querySelector('#budget-fields')).toBeVisible();
+      await user.click(header('Budget & limits'));
+      expect(container.querySelector('#budget-fields')).not.toBeVisible();
+    });
+
+    it('shuts the open group when another is opened — only ever one at a time', async () => {
+      const { container } = setup();
+      const user = userEvent.setup();
+      await user.click(header('Budget & limits'));
+      await user.click(header('Access & invitations'));
+      expect(container.querySelector('#access-fields')).toBeVisible();
+      expect(container.querySelector('#budget-fields')).not.toBeVisible();
+    });
+
+    it('still saves the settings inside a shut group', () => {
+      // Every group is shut on load, budget included. Folding hides the fields; it must never
+      // drop them from the payload.
+      const { specs } = setup({ costBudgetUsd: 12 });
+      clickSave();
+      expect(bodyOf(specs).costBudgetUsd).toBe(12);
     });
   });
 

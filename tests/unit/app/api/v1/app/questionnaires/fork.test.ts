@@ -549,6 +549,8 @@ describe('forkVersionIfLaunched — fork', () => {
         costBudgetUsd: 2.5,
         maxQuestionsPerSession: 20,
         voiceEnabled: true,
+        // A pre-retirement row. The fork is a verbatim column copy — resolution to `probe` happens
+        // on READ (`resolveContradictionMode`), so the fork must not quietly rewrite the value.
         contradictionMode: 'flag',
         contradictionWindowN: 5,
         anonymousMode: false,

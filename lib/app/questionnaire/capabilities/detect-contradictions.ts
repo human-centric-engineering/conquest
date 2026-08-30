@@ -7,7 +7,7 @@
  * structured LLM call via `runStructuredCompletion` (call → parse →
  * retry-once-at-temp-0 → cost-sum), validates the output against the F4.3 Zod
  * contract, normalises into coherent {@link ContradictionFinding}s (drop unknown/
- * unanswered slots, dedupe symmetric pairs, mode-shape probe vs flag), logs cost,
+ * unanswered slots, dedupe symmetric pairs, mode-shape the probe), logs cost,
  * and returns them. It does **not** persist or resolve anything — resolution is
  * F4.4, persistence is F4.6. Storage-agnostic and unit-testable by `dispatch()`
  * with a mocked provider.
@@ -137,7 +137,8 @@ const argsSchema = z.object({
    * The ≥2-distinct-slots rule (when there's no `currentStatement`) is the normaliser's, not Zod's.
    */
   answers: z.array(answerSchema).min(1).max(MAX_CONTRADICTION_ANSWERS),
-  /** Behaviour on a hit: off | flag | probe. */
+  /** Behaviour on a hit: `off` or `probe`. The legacy `flag` still parses (stored rows, older
+   *  payloads) but callers resolve it to `probe` before dispatch — see `resolveContradictionMode`. */
   mode: z.enum(CONTRADICTION_MODES),
   /** How many prior answers to compare against; 0 = all. */
   windowN: z.number().int().min(0).default(0),

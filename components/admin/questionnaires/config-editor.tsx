@@ -18,12 +18,13 @@
  * flight, and the parent resyncs on refetch.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   BookMarked,
   Brain,
   ClipboardList,
+  ChevronDown,
   ChevronRight,
   Compass,
   Flag,
@@ -104,7 +105,7 @@ import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CAPTURE_MODES,
-  CONTRADICTION_MODES,
+  DEFAULT_CONTRADICTION_WINDOW_N,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
@@ -168,11 +169,17 @@ const SELECTION_STRATEGY_ORDER: SelectionStrategy[] = [
   'weighted',
 ];
 
+// Two choices, not three. `flag` is retired — it let the AI rewrite a respondent's answer without
+// asking — and the read path resolves it to `probe`, so an older questionnaire lands on "On" here and
+// saves as `probe` the next time the admin touches this form. See `resolveContradictionMode`.
 const CONTRADICTION_MODE_LABELS: Record<ContradictionMode, string> = {
   off: 'Off',
-  flag: 'Flag contradictions',
-  probe: 'Probe (follow up in conversation)',
+  flag: 'On — ask the respondent',
+  probe: 'On — ask the respondent',
 };
+
+/** What the picker offers. The stored vocabulary still has three values; only these are selectable. */
+const SELECTABLE_CONTRADICTION_MODES: readonly ContradictionMode[] = ['off', 'probe'];
 
 const ANSWER_FIT_MODE_LABELS: Record<AnswerFitMode, string> = {
   off: 'Off',
@@ -425,9 +432,32 @@ function fractionFromPct(value: string, fallbackFraction: number): number {
 }
 
 /**
+ * Fold state for the settings groups, owned by the editor and handed to every `SettingsGroup`.
+ *
+ * An accordion: at most one group is open, and the tab opens with all of them shut. Fifteen
+ * groups of a dozen fields each is a scroll nobody can hold in their head — closed, the tab is a
+ * one-screen index of what a questionnaire can be told to do, and the rail beside it stays a
+ * fixed, reachable list instead of a column that outruns the viewport.
+ *
+ * Opening is driven from outside too — jumping to a section (from the rail, or from a conflict's
+ * `#anchor`) has to be able to open it. Omitted → the group renders permanently open, which keeps
+ * `SettingsGroup` usable on its own.
+ */
+interface SettingsCollapseApi {
+  /** The one section currently open, or `null` when every group is shut. */
+  openId: string | null;
+  /** Open this section (closing whichever was open), or shut it if it is the open one. */
+  toggle: (id: string) => void;
+  /** Open this section — used when something outside the header navigates to it. */
+  open: (id: string) => void;
+}
+
+/**
  * A titled, icon-led group of related settings — the unit of organisation on the Settings tab.
- * Purely presentational: a card with a tinted icon chip, a one-line description, and the fields as
- * children. Grouping + ordering (most-used first) is what makes the long config scannable.
+ * A card with a tinted icon chip, a one-line description, and the fields as children. Grouping +
+ * ordering (most-used first) is what makes the long config scannable; folding is what keeps
+ * fifteen of them navigable — a folded group keeps its fields mounted (so nothing is lost, and
+ * Save still sees every value), it just hides them.
  */
 function SettingsGroup({
   id,
@@ -437,6 +467,7 @@ function SettingsGroup({
   description,
   headerAction,
   conflicts,
+  collapse: collapseApi,
   children,
 }: {
   /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
@@ -450,8 +481,33 @@ function SettingsGroup({
   headerAction?: React.ReactNode;
   /** Active config conflicts anchored to this section — rendered as inline alerts atop the body. */
   conflicts?: ConfigConflict[];
+  /** Fold state for the whole tab; omitted → the group renders permanently open. */
+  collapse?: SettingsCollapseApi;
   children: React.ReactNode;
 }) {
+  const open = collapseApi ? collapseApi.openId === id : true;
+
+  /* The whole header is the toggle, not just the chevron — a 40px target on a card the width of
+     the page is a mean thing to ask for fifteen times. `headerAction` (the group's on/off switch)
+     stays OUTSIDE the button: nesting it would make one control that both flips a setting and
+     folds the card, and would be invalid markup besides. */
+  const header = (
+    <>
+      <span
+        className={cn(
+          'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+          accent
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1 space-y-0.5">
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+        <CardDescription className="text-xs leading-relaxed">{description}</CardDescription>
+      </span>
+    </>
+  );
+
   return (
     <Card
       id={id}
@@ -459,22 +515,37 @@ function SettingsGroup({
       data-section-label={title}
       className="scroll-mt-24 overflow-hidden shadow-sm"
     >
-      <CardHeader className="bg-muted/30 flex-row items-start gap-3 space-y-0 border-b p-4">
-        <span
-          className={cn(
-            'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-            accent
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <CardTitle className="text-sm font-semibold">{title}</CardTitle>
-          <CardDescription className="text-xs leading-relaxed">{description}</CardDescription>
-        </div>
+      <CardHeader
+        className={cn(
+          'bg-muted/30 flex-row items-start gap-3 space-y-0 p-4',
+          open ? 'border-b' : 'border-b-0'
+        )}
+      >
+        {collapseApi ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={`${id}-fields`}
+            onClick={() => collapseApi.toggle(id)}
+            className="hover:text-foreground -m-1 flex min-w-0 flex-1 items-start gap-3 rounded-md p-1 text-left"
+          >
+            {header}
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                'text-muted-foreground mt-1 h-4 w-4 shrink-0 transition-transform',
+                open ? '' : '-rotate-90'
+              )}
+            />
+          </button>
+        ) : (
+          header
+        )}
         {headerAction && <div className="mt-0.5 shrink-0">{headerAction}</div>}
       </CardHeader>
-      <CardContent className="space-y-4 p-4">
+      {/* Hidden, never unmounted: a folded group's fields keep their state and stay in the form —
+          the save payload is built from state, and the rail's filter still reads their labels. */}
+      <CardContent id={`${id}-fields`} hidden={!open} className="space-y-4 p-4">
         {conflicts && conflicts.length > 0 && <SectionConflicts conflicts={conflicts} />}
         {children}
       </CardContent>
@@ -962,6 +1033,34 @@ export function ConfigEditor({
   );
   const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);
 
+  /* ── Which settings group is open ───────────────────────────────────────────────────────────
+     One at a time, none to begin with: see {@link SettingsCollapseApi}. State, not storage — the
+     tab always opens as the same one-screen index rather than wherever the last visit left it. */
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  const toggleSection = useCallback(
+    (id: string) => setOpenSection((prev) => (prev === id ? null : id)),
+    []
+  );
+  const openSectionById = useCallback((id: string) => setOpenSection(id), []);
+  const collapseApi = useMemo(
+    () => ({ openId: openSection, toggle: toggleSection, open: openSectionById }),
+    [openSection, toggleSection, openSectionById]
+  );
+
+  // A conflict row (or any pasted link) navigating to `#some-section` must unfold it — landing on a
+  // shut card would look like the setting had vanished. One listener for every group rather than one
+  // per `SettingsGroup`: `openSectionById` is unconditional, so targeting an id nothing renders is a
+  // harmless no-op (no group's `openId === id` matches). Covers the load-with-hash case too.
+  useEffect(() => {
+    const openIfTargeted = () => {
+      const id = window.location.hash.slice(1);
+      if (id) openSectionById(id);
+    };
+    openIfTargeted();
+    window.addEventListener('hashchange', openIfTargeted);
+    return () => window.removeEventListener('hashchange', openIfTargeted);
+  }, [openSectionById]);
+
   const save = () =>
     run(() => [
       'PATCH',
@@ -1178,6 +1277,7 @@ export function ConfigEditor({
           targetId="settings-sections"
           ariaLabel="Settings sections"
           className="top-24 hidden self-start lg:sticky lg:block"
+          onJump={openSectionById}
         />
 
         <div id="settings-sections" className="min-w-0 space-y-4 lg:col-start-2">
@@ -1188,6 +1288,7 @@ export function ConfigEditor({
           {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
              session is allowed to finish. Most-used knobs, so they lead. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={ListChecks}
             accent="bg-blue-500/10 text-blue-600 dark:text-blue-400"
             id="questions"
@@ -1485,6 +1586,7 @@ export function ConfigEditor({
              switch. Only the switch is here; the topics and their conditions stay where the
              surface that explains them is. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Route}
             accent="bg-teal-500/10 text-teal-600 dark:text-teal-400"
             id="conditional-topics"
@@ -1540,6 +1642,7 @@ export function ConfigEditor({
           {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
              they see, whether they're identified). ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={MessageSquareText}
             accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
             id="experience"
@@ -1827,6 +1930,7 @@ export function ConfigEditor({
              configured completeness threshold. Independent of "Show percent completed" above —
              that's the progress bar's own numeric label; this is a conversational nudge. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Flag}
             accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             id="milestones"
@@ -1959,6 +2063,7 @@ export function ConfigEditor({
              from the presentation mode + respondent-report settings — only the background and button
              label are authored here. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={PanelTop}
             accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
             id="intro"
@@ -2049,6 +2154,7 @@ export function ConfigEditor({
              experience (it's a respondent-facing surface) but in its own group so the marquee toggle
              and its placement/persistence options are discoverable. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Brain}
             accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
             id="reasoning"
@@ -2174,6 +2280,7 @@ export function ConfigEditor({
              previewing as a respondent, never to a real respondent. Server-enforced via the preview
              session marker, so this toggle can't leak telemetry to live sessions. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={ScanSearch}
             accent="bg-[var(--cq-accent-muted)] text-[color:var(--cq-accent)]"
             id="preview-tools"
@@ -2206,6 +2313,7 @@ export function ConfigEditor({
              `personaSelection.enabled` and only the chosen mode's editor renders, so an admin can
              never configure both at once (the built-in persona would silently win at runtime). ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={SlidersHorizontal}
             accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
             id="tone"
@@ -2309,6 +2417,7 @@ export function ConfigEditor({
 
           {/* ── Interviewer strategy — overrides the default questioning approach when enabled. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Compass}
             accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
             id="interviewer-strategy"
@@ -2327,6 +2436,7 @@ export function ConfigEditor({
 
           {/* ── Interviewer house rules — what the interviewer may and may not do, per client. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Gavel}
             accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
             id="house-rules"
@@ -2345,6 +2455,7 @@ export function ConfigEditor({
 
           {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Mail}
             accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
             id="access"
@@ -2479,6 +2590,7 @@ export function ConfigEditor({
           {/* ── 4. Answer quality & safeguarding — protective / data-integrity features: sensitive
              disclosures, the seriousness gate, and contradiction detection. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={ShieldCheck}
             accent="bg-rose-500/10 text-rose-600 dark:text-rose-400"
             id="safeguarding"
@@ -2568,22 +2680,35 @@ export function ConfigEditor({
             <div className="space-y-4">
               <div className="space-y-1.5 sm:max-w-sm">
                 <Label className="text-sm font-medium">
-                  Contradiction detection{' '}
-                  <FieldHelp title="Contradiction detection">
-                    Whether the agent watches for answers that contradict earlier ones — off, flag
-                    them, or probe with a follow-up.
+                  Contradiction checking{' '}
+                  <FieldHelp title="Contradiction checking">
+                    Whether the agent watches for an answer that contradicts an earlier one. When it
+                    is <strong>on</strong> and the agent is confident it has found one, it says so
+                    and asks the respondent which answer is right —{' '}
+                    <strong>nothing is changed until they reply</strong>. Costs one extra model call
+                    per checked turn, and a conflict spends a turn resolving it, so it eats into a
+                    tight question budget.
                   </FieldHelp>
                 </Label>
                 <Select
                   value={contradictionMode}
-                  onValueChange={(v) => setContradictionMode(v as ContradictionMode)}
+                  onValueChange={(v) => {
+                    const next = v as ContradictionMode;
+                    setContradictionMode(next);
+                    // Switching it on with no usable window (the stored 0 an `off` config carries)
+                    // would otherwise save as 1 — each answer checked against only the one before
+                    // it. Propose a real look-back instead; the admin can still change it.
+                    if (next !== 'off' && Number(contradictionWindowN) < 1) {
+                      setContradictionWindowN(String(DEFAULT_CONTRADICTION_WINDOW_N));
+                    }
+                  }}
                   disabled={busy}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CONTRADICTION_MODES.map((m) => (
+                    {SELECTABLE_CONTRADICTION_MODES.map((m) => (
                       <SelectItem key={m} value={m}>
                         {CONTRADICTION_MODE_LABELS[m]}
                       </SelectItem>
@@ -2597,8 +2722,10 @@ export function ConfigEditor({
                     <Label className="text-sm font-medium">
                       Look-back window (N){' '}
                       <FieldHelp title="Look-back window">
-                        How many prior answers to check each new answer against. Must be at least 1
-                        when detection is on.
+                        How many prior answers to check each new answer against. Must be at least 1.
+                        A wider window catches a reversal further back in the conversation, but
+                        gives the agent more chances to read two compatible answers as a conflict —
+                        the default of {DEFAULT_CONTRADICTION_WINDOW_N} is the balance we recommend.
                       </FieldHelp>
                     </Label>
                     <Input
@@ -2684,6 +2811,7 @@ export function ConfigEditor({
 
           {/* ── Definitions / glossary — how curated terms reach agents and respondents. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={BookMarked}
             accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
             id="glossary"
@@ -2749,6 +2877,7 @@ export function ConfigEditor({
 
           {/* ── 4. Budget & limits — cost control and hard caps, with the pre-launch estimate. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={Gauge}
             accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             id="budget"
@@ -2807,6 +2936,7 @@ export function ConfigEditor({
           {/* ── 5. Respondent profile fields — what to collect from the respondent, and how.
              Last: optional, set-up-once metadata rather than run-time behaviour. ── */}
           <SettingsGroup
+            collapse={collapseApi}
             icon={ClipboardList}
             accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
             id="profile-fields"

@@ -267,10 +267,19 @@ describe('detection wiring', () => {
   });
 
   it('lets the request body override the config mode/window', async () => {
-    await POST(req({ ...VALID_BODY, mode: 'flag', windowN: 0 }), ctx(PARAMS));
+    await POST(req({ ...VALID_BODY, mode: 'off', windowN: 0 }), ctx(PARAMS));
     const args = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0][1];
-    expect(args.mode).toBe('flag');
+    expect(args.mode).toBe('off');
     expect(args.windowN).toBe(0);
+  });
+
+  it('previews the retired `flag` as what it now does — probe', async () => {
+    // An admin (or a saved preview payload) can still send `flag`; the preview must show the
+    // behaviour the questionnaire will actually run, not the one that was retired.
+    await POST(req({ ...VALID_BODY, mode: 'flag', windowN: 2 }), ctx(PARAMS));
+    const args = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0][1];
+    expect(args.mode).toBe('probe');
+    expect(args.windowN).toBe(2);
   });
 
   it('defaults mode to off and windowN to 0 when the version has no saved config', async () => {

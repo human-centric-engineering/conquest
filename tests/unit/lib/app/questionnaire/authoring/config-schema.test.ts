@@ -137,7 +137,7 @@ describe('updateConfigSchema', () => {
   describe('contradiction mode / N coherence', () => {
     it('rejects a non-off mode with N = 0', () => {
       const res = updateConfigSchema.safeParse({
-        contradictionMode: 'flag',
+        contradictionMode: 'probe',
         contradictionWindowN: 0,
       });
       expect(res.success).toBe(false);
@@ -151,6 +151,15 @@ describe('updateConfigSchema', () => {
     });
 
     it('accepts a non-off mode with N >= 1', () => {
+      expect(
+        updateConfigSchema.safeParse({ contradictionMode: 'probe', contradictionWindowN: 1 })
+          .success
+      ).toBe(true);
+    });
+
+    it('still parses the retired `flag` — older payloads and stored rows must not 400', () => {
+      // `flag` is unselectable in the admin UI and resolves to `probe` on read, but it stays a valid
+      // wire value: a config import or an API client written before the retirement must not break.
       expect(
         updateConfigSchema.safeParse({ contradictionMode: 'flag', contradictionWindowN: 1 }).success
       ).toBe(true);

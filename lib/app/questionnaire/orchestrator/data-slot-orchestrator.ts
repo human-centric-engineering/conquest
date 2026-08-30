@@ -33,6 +33,7 @@ import {
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 import {
   runContradictionPhase,
+  answerRecordedFrom,
   questionProbeLabels,
 } from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
 import {
@@ -514,13 +515,14 @@ export async function runDataSlotTurn(
   // 2.6 Contradiction phase (F4.3 detect + F4.4 refine + the probe-confirm flow), shared verbatim
   //     with question mode (`runTurn`). It compares the BACKGROUND question answers — and the
   //     respondent's latest message — so a same-slot reversal ("I hate the job" → "I love my job")
-  //     is caught even when extraction didn't overwrite the stored answer. Under `probe` mode a fresh
-  //     contradiction DEFERS: ask a reconciliation question, suppress this turn's writes (including
-  //     the data-slot fills), and park the finding; the next turn resolves it. Under `flag` mode it
-  //     surfaces the explanation and refines immediately.
+  //     is caught even when extraction didn't overwrite the stored answer. A fresh contradiction
+  //     DEFERS: ask a reconciliation question, suppress this turn's writes (including the data-slot
+  //     fills), and park the finding; the next turn resolves it. `off` does nothing — checking that is
+  //     on always asks.
   onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
+    answerRecorded: answerRecordedFrom(state),
     disregarded,
     dataMode: true,
     labels: questionProbeLabels(effective.questions),

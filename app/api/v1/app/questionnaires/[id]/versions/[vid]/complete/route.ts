@@ -6,7 +6,7 @@
  *     action: 'accept' | 'hold'
  *     answers: { key: string; value: unknown; confidence?: number | null;
  *                provenance?: AnswerProvenance; turnIndex?: number }[]
- *     mode?:    'off' | 'flag' | 'probe'   // completion-sweep override; default = config
+ *     mode?:    'off' | 'probe'            // sweep override; default = config ('flag' reads as 'probe')
  *     windowN?: number
  *     sessionId?: string
  *   }
