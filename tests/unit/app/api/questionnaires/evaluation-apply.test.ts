@@ -23,6 +23,7 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(),
   },
   appQuestionnaireSection: { count: vi.fn(), findFirst: vi.fn() },
+  appQuestionnaireTopic: { findMany: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -78,6 +79,8 @@ beforeEach(() => {
     forked: false,
     versionNumber: 1,
   });
+  // No topics by default — the overwhelmingly common shape, and the one that must stay a no-op.
+  prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
 });
 
 describe('applyFinding — early returns', () => {
@@ -686,6 +689,273 @@ describe('applyFinding — which version, and whose op', () => {
     );
     expect(prismaMock.appQuestionSlot.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'slot-on-v2' } })
+    );
+  });
+});
+
+/**
+ * Topic membership (Conditional Topics, F17.35).
+ *
+ * With Conditional Topics on, a question belonging to no topic is never asked — `isQuestionInScope`
+ * is `!scope.active || scope.questionKeys.has(key)` — and nothing in the runtime reports it. So the
+ * apply engine has to keep membership true as it adds and removes questions.
+ *
+ * These are asserted at the `updateMany` boundary rather than through a round-trip, because the
+ * choice of `updateMany` over `update` IS the behaviour under test: a concurrent Topics-tab save
+ * (`replaceTopics` = deleteMany + createMany) can remove the row between the read and the write,
+ * and a P2025 inside a Postgres transaction would poison it and roll back the question too.
+ */
+describe('applyFinding — topic membership', () => {
+  const TOPICS = [
+    {
+      id: 'topic-open',
+      key: 'opening',
+      ordinal: 0,
+      members: { questionKeys: ['q_role'], dataSlotKeys: ['slot_a'] },
+    },
+    {
+      id: 'topic-depth',
+      key: 'talent_depth',
+      ordinal: 1,
+      members: { questionKeys: ['q_role', 'q_other'], dataSlotKeys: [] },
+    },
+    {
+      id: 'topic-untouched',
+      key: 'closing',
+      ordinal: 2,
+      members: { questionKeys: ['q_wrap'], dataSlotKeys: [] },
+    },
+  ];
+
+  interface TopicUpdate {
+    where: { id: string };
+    data: { members: { questionKeys: string[]; dataSlotKeys: string[] } };
+  }
+
+  function topicUpdates(): TopicUpdate[] {
+    return (prismaMock.appQuestionnaireTopic.updateMany as Mock).mock.calls.map(
+      (c: unknown[]) => c[0] as TopicUpdate
+    );
+  }
+
+  describe('delete_question prunes the key', () => {
+    beforeEach(() => {
+      prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
+      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+    });
+
+    it('removes the deleted key from every topic that claimed it, and no others', async () => {
+      const res = await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      expect(res.status).toBe('applied');
+      const updates = topicUpdates();
+      expect(updates).toHaveLength(2);
+      expect(updates.map((u) => u.where.id)).toEqual(['topic-open', 'topic-depth']);
+      // The untouched topic never claimed q_role, so it is never written — that skip is what the
+      // helpers' same-identity return exists to make possible.
+      expect(updates.map((u) => u.where.id)).not.toContain('topic-untouched');
+    });
+
+    it('leaves the emptied topic in place, present and empty', async () => {
+      // An empty topic still carries a label, a phase and criteria an author wrote, and
+      // `empty_topic` is the warning that says it now asks nothing. Pruning is what MAKES that
+      // warning fire; deleting the topic would destroy the work and the warning together.
+      await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      const opening = topicUpdates().find((u) => u.where.id === 'topic-open');
+      expect(opening?.data.members).toEqual({ questionKeys: [], dataSlotKeys: ['slot_a'] });
+      expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ deletedAt: expect.anything() }) })
+      );
+    });
+
+    it('keeps the data slots untouched while pruning the question key', async () => {
+      await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      const opening = topicUpdates().find((u) => u.where.id === 'topic-open');
+      expect(opening?.data.members).toMatchObject({ dataSlotKeys: ['slot_a'] });
+    });
+
+    it('never stamps source, so a seeded topic stays seeded', async () => {
+      // `isEligibleForScopeCandidacy` and the launch readiness check both gate on
+      // `source: { not: 'seeded' }`. Flipping it here would silently suppress the Routing Analyst
+      // candidacy check for the version — and the admin approved a question change, not a topic one.
+      await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      for (const update of topicUpdates()) {
+        expect(update.data).not.toHaveProperty('source');
+      }
+    });
+
+    it('writes nothing when the version has no topics', async () => {
+      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+      const res = await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      expect(res.status).toBe('applied');
+      expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('uses updateMany, so a row removed by a concurrent save is not a P2025', async () => {
+      // `update` would throw, and a thrown query inside a Postgres transaction aborts it — the
+      // finding stamp would then fail and the question deletion would roll back with it.
+      await applyFinding({
+        finding: finding({ proposedEdit: { op: 'delete_question' } }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+
+      expect(prismaMock.appQuestionnaireTopic.updateMany).toHaveBeenCalled();
+      expect(prismaMock.appQuestionnaireTopic).not.toHaveProperty('update.mock.calls.0');
+    });
+  });
+
+  describe('split_question copies the parent’s membership', () => {
+    const SPLIT = {
+      op: 'split_question' as const,
+      prompt: 'Who is the designated safeguarding lead?',
+      secondPrompt: 'When did they last train?',
+      secondKey: 'lead_last_training',
+    };
+
+    beforeEach(() => {
+      prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-1' });
+      prismaMock.appQuestionSlot.findUniqueOrThrow.mockResolvedValue({
+        sectionId: 'sec-1',
+        ordinal: 2,
+        type: 'free_text',
+        typeConfig: null,
+        required: true,
+        weight: 0.75,
+        fidelity: 1,
+        guidelines: null,
+      });
+      prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'q_role' }]);
+      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+    });
+
+    async function applySplit() {
+      return applyFinding({
+        finding: finding({ proposedEdit: SPLIT }),
+        runId: 'run-1',
+        scoped,
+        snapshot: structure(),
+        current: structure(),
+        audit,
+      });
+    }
+
+    it('adds the new half to every topic the parent belonged to', async () => {
+      // A split is one question reshaped, so whatever the original was part of, both halves are.
+      const res = await applySplit();
+
+      expect(res.status).toBe('applied');
+      const updates = topicUpdates();
+      expect(updates.map((u) => u.where.id)).toEqual(['topic-open', 'topic-depth']);
+      expect(updates[0]?.data.members).toEqual({
+        questionKeys: ['q_role', 'lead_last_training'],
+        dataSlotKeys: ['slot_a'],
+      });
+      expect(updates[1]?.data.members).toEqual({
+        questionKeys: ['q_role', 'q_other', 'lead_last_training'],
+        dataSlotKeys: [],
+      });
+    });
+
+    it('does not touch a topic the parent was never in', async () => {
+      await applySplit();
+
+      expect(topicUpdates().map((u) => u.where.id)).not.toContain('topic-untouched');
+    });
+
+    it('writes the collision-suffixed key, not the proposed one', async () => {
+      // The second half's key goes through `nextAvailableKey`; membership must carry whatever that
+      // produced, or the topic names a question that does not exist.
+      prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+        { key: 'q_role' },
+        { key: 'lead_last_training' },
+      ]);
+
+      await applySplit();
+
+      const created = (prismaMock.appQuestionSlot.create as Mock).mock.calls[0][0].data.key;
+      expect(created).not.toBe('lead_last_training');
+      expect(topicUpdates()[0]?.data.members).toMatchObject({
+        questionKeys: ['q_role', created],
+      });
+    });
+
+    it('writes nothing when the version has no topics', async () => {
+      prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+      const res = await applySplit();
+
+      expect(res.status).toBe('applied');
+      expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  it('reads and writes topics on the FORKED version, never the launched one', async () => {
+    // `scoped.id` is in hand and is the natural thing to reach for — and writing there would mutate
+    // a launched version's topic rows. Keys survive a fork 1:1, so the finding's targetKey is still
+    // the right handle on the draft.
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({ id: 'slot-on-v2' });
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+
+    await applyFinding({
+      finding: finding({ proposedEdit: { op: 'delete_question' } }),
+      runId: 'run-1',
+      scoped: { ...scoped, status: 'launched' as const },
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+
+    expect(prismaMock.appQuestionnaireTopic.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { versionId: 'v2' } })
     );
   });
 });

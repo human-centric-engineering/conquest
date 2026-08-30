@@ -39,6 +39,12 @@ import type {
   AudienceShape,
   FieldProvenance,
 } from '@/lib/app/questionnaire/types';
+import {
+  narrowTopicMembers,
+  withTopicQuestionKey,
+  withoutTopicQuestionKey,
+  type TopicMembers,
+} from '@/lib/app/questionnaire/scope/types';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -215,7 +221,7 @@ export async function applyFinding(args: {
 
   // 5. Execute the op + stamp the finding applied, in one transaction.
   await prisma.$transaction(async (tx) => {
-    await writeOp(tx, op, { editVersionId, editSlotId });
+    await writeOp(tx, op, { editVersionId, editSlotId, targetKey: finding.targetKey });
     await tx.appQuestionnaireEvaluationFinding.update({
       where: { id: finding.id },
       data: {
@@ -248,6 +254,112 @@ export async function applyFinding(args: {
     forked,
     versionNumber: editVersionNumber,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Topic membership (Conditional Topics, F17.35)                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Why every write in here is `updateMany` rather than `update`.
+ *
+ * These writes are a *side effect* of a question write, not the op the admin approved. The Topics
+ * tab saves with `replaceTopics`, which is a `deleteMany` + `createMany` — so a concurrent save can
+ * remove the row this is about between the read below and the write. With `update` that is a P2025,
+ * and a thrown query inside a Postgres transaction aborts it: the catch would not save us, because
+ * every following statement — including the finding stamp — fails on the poisoned transaction, and
+ * the question write rolls back with it. Losing the question because its membership lost a race is
+ * strictly worse than the orphan we are trying to prevent.
+ *
+ * `updateMany` matching zero rows is not an error. So the race degrades to exactly what happens
+ * today (a question in no topic), the transaction stays healthy, and the review queue's orphan
+ * banner is what surfaces it.
+ *
+ * `members` is a plain `Json` column with no version stamp, so a concurrent Topics-tab save can
+ * still overwrite a membership written here. Accepted: an etag on a JSON blob is a lot of machinery
+ * for a race between one admin's two open tabs, and the banner already reports the outcome.
+ *
+ * ## `source` is deliberately never stamped
+ *
+ * `scope-evaluation-apply.ts` stamps `source: 'manual'` on its topic writes, so copying it here
+ * would look right. It is not. `isEligibleForScopeCandidacy` and `launchability.ts` both gate on
+ * `source: { not: 'seeded' }` to decide whether a version is untouched by Conditional Topics — so
+ * flipping a seeded topic because a question landed in it would silently suppress the Routing
+ * Analyst candidacy check for that version. There the admin approved a change to the topic's own
+ * configuration; here they approved a change to a *question*, and whether the topic is still an
+ * untouched auto-seed is not something that decides.
+ */
+
+/** A version's topics, as the membership writers read them. */
+async function loadTopicsForMembership(
+  tx: Prisma.TransactionClient,
+  versionId: string
+): Promise<{ id: string; key: string; ordinal: number; members: TopicMembers }[]> {
+  const rows = await tx.appQuestionnaireTopic.findMany({
+    where: { versionId },
+    orderBy: { ordinal: 'asc' },
+    select: { id: true, key: true, ordinal: true, members: true },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    key: row.key,
+    ordinal: row.ordinal,
+    members: narrowTopicMembers(row.members),
+  }));
+}
+
+/**
+ * Give `newKey` the membership of `sourceKey` — every topic that claimed the source claims the copy.
+ *
+ * For `split_question`, where the two halves are one question reshaped: whatever the original was
+ * part of, both halves are part of. The slot already inherits type, config, `required`, `weight`,
+ * `fidelity` and guidelines from its parent for the same reason.
+ */
+async function copyTopicMembership(
+  tx: Prisma.TransactionClient,
+  versionId: string,
+  sourceKey: string,
+  newKey: string
+): Promise<void> {
+  const topics = await loadTopicsForMembership(tx, versionId);
+  for (const topic of topics) {
+    if (!topic.members.questionKeys.includes(sourceKey)) continue;
+    const next = withTopicQuestionKey(topic.members, newKey);
+    if (next === topic.members) continue;
+    await tx.appQuestionnaireTopic.updateMany({
+      where: { id: topic.id },
+      data: { members: jsonInput(next) },
+    });
+  }
+}
+
+/**
+ * Remove a deleted question's key from every topic that claimed it.
+ *
+ * Without this the key lingers. Nothing crashes — `resolveScope` skips a key that resolves to no
+ * question — but `empty_topic` counts RAW member keys, so a conditional topic whose members have
+ * all been deleted reads as non-empty, passes every coherence check, and resolves to nothing at
+ * runtime. Pruning is what makes that warning fire.
+ *
+ * The emptied topic is left in place: it still carries a label, a phase and criteria an author
+ * wrote, and `empty_topic` is the warning that says it now asks nothing. `reconcileTopicsForVersion`
+ * does delete such topics, but it runs on a wholesale structure rewrite, where the topic's subject
+ * is genuinely gone — not on a one-click apply of one judge's finding.
+ */
+async function pruneTopicMembership(
+  tx: Prisma.TransactionClient,
+  versionId: string,
+  questionKey: string
+): Promise<void> {
+  const topics = await loadTopicsForMembership(tx, versionId);
+  for (const topic of topics) {
+    const next = withoutTopicQuestionKey(topic.members, questionKey);
+    if (next === topic.members) continue;
+    await tx.appQuestionnaireTopic.updateMany({
+      where: { id: topic.id },
+      data: { members: jsonInput(next) },
+    });
+  }
 }
 
 /** The `section:` prefix a finding's `targetKey` uses to address a section by title. */
@@ -409,7 +521,11 @@ async function applyAddQuestion(args: {
 async function writeOp(
   tx: Prisma.TransactionClient,
   op: Exclude<ProposedEdit, { op: 'add_question' }>,
-  ctx: { editVersionId: string; editSlotId: string | null }
+  // `targetKey` alongside `editSlotId` because topic membership addresses a question by KEY, never
+  // by row id — that is what lets a topic survive a version fork untouched (`copyVersionGraph`
+  // re-keys nothing). Keys are preserved 1:1 across a fork, so the finding's own targetKey is the
+  // right handle on the editable version too.
+  ctx: { editVersionId: string; editSlotId: string | null; targetKey: string }
 ): Promise<void> {
   switch (op.op) {
     case 'replace_prompt':
@@ -478,6 +594,12 @@ async function writeOp(
           ...(target.guidelines != null ? { guidelines: target.guidelines } : {}),
         },
       });
+
+      // ...and the parent's topic membership, for the same reason as everything above it. A split
+      // is one question reshaped, so whatever the original was part of, both halves are part of.
+      // Without this the second half belongs to no topic and, with Conditional Topics on, is never
+      // asked — a silent half-loss of the split the admin just approved.
+      await copyTopicMembership(tx, ctx.editVersionId, ctx.targetKey, key);
       return;
     }
     case 'edit_guidelines':
@@ -499,6 +621,10 @@ async function writeOp(
     }
     case 'delete_question':
       await tx.appQuestionSlot.delete({ where: { id: ctx.editSlotId! } });
+      // Take the key out of every topic that claimed it. A dead key left behind is not a crash —
+      // `resolveScope` skips it — but `empty_topic` counts raw member keys, so a topic emptied by
+      // deletions would read as non-empty and warn about nothing.
+      await pruneTopicMembership(tx, ctx.editVersionId, ctx.targetKey);
       return;
     case 'reorder': {
       const data: Prisma.AppQuestionSlotUpdateInput = { ordinal: op.ordinal };
