@@ -67,11 +67,18 @@ function Swatch({ color, label, compact }: { color: string; label?: string; comp
 
 function LogoThumb({
   logoUrl,
+  image,
   backdrop,
   compact,
   size = 'default',
 }: {
   logoUrl: string;
+  /**
+   * A ready-made CSS `background-image` to paint instead of escaping `logoUrl` — the one caller
+   * that needs it is the mode-following miniature, which defers the light/dark choice to the
+   * stylesheet's `--app-logo-url` instead of picking here.
+   */
+  image?: string;
   /** Optional solid colour painted behind the logo (resolved logo backdrop). */
   backdrop?: string | null;
   compact?: boolean;
@@ -90,7 +97,7 @@ function LogoThumb({
         backdrop && 'rounded px-2'
       )}
       style={{
-        backgroundImage: cssUrl(logoUrl),
+        backgroundImage: image ?? cssUrl(logoUrl),
         ...(backdrop ? { backgroundColor: backdrop } : {}),
       }}
     />
@@ -129,6 +136,14 @@ function ChromePreview({
   //    because the real block is scoped to a surface the preview was not.
   const canvas = 'var(--app-canvas-color)';
   const ink = 'var(--app-on-canvas)';
+  // Which lockup THIS panel's band draws. Both panels share one resolved theme but not one
+  // ground: the dark panel paints the derived dark canvas, so it must take the lockup the
+  // resolver already chose for that ground (`bandLogoDarkUrl`) — reading `bandLogoUrl` for
+  // both is what made a configured light-on-dark logo invisible in the dark panel, the one
+  // place it exists to be seen. Unpinned (no `scheme`), the panel follows the admin's own
+  // mode, so it paints from `--app-logo-url` — the variable app/brand-theme.css publishes per
+  // mode and the real band reads — rather than freezing one of the two here.
+  const bandLogo = scheme === 'dark' ? resolved.bandLogoDarkUrl : resolved.bandLogoUrl;
   return (
     <div
       data-surface="respondent"
@@ -153,9 +168,10 @@ function ChromePreview({
         className="flex items-center gap-3 px-4 py-3.5"
         style={{ backgroundColor: resolved.surfaceColor ?? 'var(--color-muted)', color: onBand }}
       >
-        {resolved.bandLogoUrl && (
+        {bandLogo && (
           <LogoThumb
-            logoUrl={resolved.bandLogoUrl}
+            logoUrl={bandLogo}
+            image={scheme ? undefined : 'var(--app-logo-url)'}
             backdrop={resolved.logoBackgroundColor}
             size="band"
           />
