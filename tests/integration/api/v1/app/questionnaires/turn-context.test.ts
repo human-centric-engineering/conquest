@@ -830,6 +830,100 @@ describe('buildTurnContext — Conditional Topics (P17)', () => {
       expect(loaded!.base.questions.map((q) => q.key)).toEqual(['role', 'team']);
       expect(loaded!.scope.scope.active).toBe(false);
     });
+
+    it('leaves the progress denominator identical to the gate’s for a version that never opted in', async () => {
+      // F17.33's inert half: `progressQuestions` is the bar's denominator, and on every version
+      // that never opted in it must be the SAME LIST the gate reads — not a copy that could drift.
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.progressQuestions).toBe(loaded!.base.questions);
+    });
+  });
+
+  /**
+   * F17.33. The gate measures the interview as it is; the bar measures what could still be asked
+   * until the plan settles it. The whole reason for the split is that a plan landing must move the
+   * bar UP (topics were excluded) rather than down (topics added to a total that ignored them).
+   */
+  describe('the progress denominator', () => {
+    it('counts every candidate question while the plan is still undecided', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({ version: { ...baseVersion(), config: scopedConfig() } })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role']),
+        topicRow('later', 'conditional', ['team']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      // The interview so far is the always-run half...
+      expect(loaded!.base.questions.map((q) => q.key)).toEqual(['role']);
+      // ...but the bar is measured against everything still possible, so seating `later` cannot
+      // make the figure fall.
+      expect(loaded!.base.progressQuestions.map((q) => q.key)).toEqual(['role', 'team']);
+    });
+
+    it('collapses onto the interview once the plan exists', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({
+          version: { ...baseVersion(), config: scopedConfig() },
+          interviewPlan: {
+            v: 1,
+            topics: [{ key: 'later', depth: 'full', source: 'llm', rationale: 'r' }],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.9,
+            source: 'llm',
+            respondentMessage: '',
+            decidedAtTurn: 1,
+            decidedAt: '2026-08-13T00:00:00.000Z',
+          },
+        })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role']),
+        topicRow('later', 'conditional', ['team']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      // Decided: the interview IS the scope, so the two denominators are the same thing again.
+      expect(loaded!.base.progressQuestions.map((q) => q.key)).toEqual(
+        loaded!.base.questions.map((q) => q.key)
+      );
+    });
+
+    it('narrows the denominator when the plan excludes a topic — the bar steps UP', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({
+          version: { ...baseVersion(), config: scopedConfig() },
+          interviewPlan: {
+            v: 1,
+            topics: [],
+            excluded: [{ key: 'later', source: 'llm', rationale: 'not relevant' }],
+            checkTopicKey: null,
+            confidence: 0.9,
+            source: 'llm',
+            respondentMessage: '',
+            decidedAtTurn: 1,
+            decidedAt: '2026-08-13T00:00:00.000Z',
+          },
+        })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role']),
+        topicRow('later', 'conditional', ['team']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      // Pre-plan the bar was measured against two questions; now it is measured against one, so an
+      // unchanged answer count reads HIGHER than it did a turn ago.
+      expect(loaded!.base.progressQuestions.map((q) => q.key)).toEqual(['role']);
+    });
   });
 
   /**

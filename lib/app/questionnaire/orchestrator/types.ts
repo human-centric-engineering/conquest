@@ -134,6 +134,13 @@ export interface TurnState {
   config: QuestionnaireConfigShape;
   /** Every question slot in the version. `prompt` must be populated for the live path. */
   questions: QuestionView[];
+  /**
+   * F17.33: the denominator for the PROGRESS FIGURE only, never a gate. Equals {@link questions}
+   * except on a Conditional Topics session before its plan is decided, where it is the full
+   * candidate set so the plan cannot make the bar fall. Absent = use `questions` (today's
+   * behaviour, and the only behaviour on a version that never opted in).
+   */
+  progressQuestions?: QuestionView[];
   /** Distinct questions answered before this turn (coverage view). */
   answered: AnsweredView[];
   /** Full values of the answers captured so far (refiner view). */
@@ -185,6 +192,13 @@ export interface TurnState {
    * that has raised none.
    */
   raisedMilestones?: number[];
+  /**
+   * F17.33: the highest progress figure this session has already displayed, loaded from
+   * `AppQuestionnaireSession.progressFloorPct`. The turn banks a higher one via
+   * `sideEffects.progressFloorPct`; the read path is what actually applies it to the bar. Absent =
+   * 0, i.e. nothing to hold.
+   */
+  progressFloorPct?: number;
   /**
    * Data Slots feature: present in data-slot mode. `dataSlots` is the version's data slots
    * (theme-ordered for topic-local targeting); `dataSlotAnswered` is the filled set; the
@@ -496,6 +510,12 @@ export interface TurnResult {
      * default) = unchanged this turn, leave it as-is. Always the FULL list (overwrites the column).
      */
     raisedMilestones?: number[];
+    /**
+     * F17.33: the new progress floor to persist to `AppQuestionnaireSession.progressFloorPct`, when
+     * this turn displayed a higher figure than the session ever has. `undefined` (the default) = it
+     * did not move, leave the column alone. Presentation state — nothing analytic reads it.
+     */
+    progressFloorPct?: number;
   };
   /** Side-band frames to stream (warnings/status) — NOT the main content. */
   events: ChatEvent[];

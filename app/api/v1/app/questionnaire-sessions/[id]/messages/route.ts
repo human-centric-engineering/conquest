@@ -86,8 +86,10 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
+import { plannedMembers } from '@/lib/app/questionnaire/scope/resolve';
 import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
@@ -358,7 +360,39 @@ async function handleMessage(
     // that turn's `selectionRound`, so this matches exactly once and never repeats.
     const scopeAmendmentNotice: string[] = (scopePlan?.amendments ?? [])
       .filter((a) => a.atTurn === loaded.base.selectionRound)
-      .map(amendmentBriefingLine);
+      .map((amendment) => {
+        // F17.33: how much of the area there is, so the acknowledgement sets an expectation the
+        // interview will actually keep. Counted from what the plan will ASK — depth and any explicit
+        // subset applied — not from everything the topic holds.
+        //
+        // Data slots first when the topic has them, because in data-slot mode THEY are what the
+        // conversation asks about; the questions behind them are filled in the background, and
+        // counting eight of those for a two-slot area would promise a much longer detour than the
+        // respondent is about to get. Weights are not loaded: they only decide which two members a
+        // `light` topic contains, and an amendment is always seated at `full` depth.
+        //
+        // Omitted when the topic no longer resolves (an author may delete one a live plan names):
+        // a missing size means no size claim, never a wrong one.
+        const topic = loaded.scope.topics.find((t) => t.key === amendment.key);
+        const planned = scopePlan?.topics.find((t) => t.key === amendment.key);
+        const itemCount =
+          topic && planned
+            ? plannedMembers(
+                topic.members.dataSlotKeys.length > 0
+                  ? topic.members.dataSlotKeys
+                  : topic.members.questionKeys,
+                topic.members.dataSlotKeys.length > 0
+                  ? planned.members?.dataSlotKeys
+                  : planned.members?.questionKeys,
+                planned.depth,
+                undefined
+              ).length
+            : undefined;
+        return amendmentBriefingLine({
+          amendment,
+          ...(itemCount !== undefined ? { itemCount } : {}),
+        });
+      });
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -1153,6 +1187,11 @@ async function handleMessage(
           ...(result.sideEffects.raisedMilestones !== undefined
             ? { raisedMilestones: result.sideEffects.raisedMilestones }
             : {}),
+          // F17.33: persist a risen progress floor so the bar cannot reverse when scope widens
+          // (undefined = it did not move this turn).
+          ...(result.sideEffects.progressFloorPct !== undefined
+            ? { progressFloorPct: result.sideEffects.progressFloorPct }
+            : {}),
           keyToSlotId,
           // Retry dedup (F7.x): stamp this attempt's key so a later retry re-sending it replays
           // this turn instead of minting a duplicate.
@@ -1220,6 +1259,15 @@ async function handleMessage(
           topicKey: amended.amendment.key,
         });
       }
+
+      // F17.33: a topic that has only just come into scope may already have been answered — the
+      // extractor never saw the question, because it was not a candidate on the turn the respondent
+      // answered it. Re-read the transcript for whatever this widening (the plan above, or the
+      // amendment above that) just brought in. STARTED here, AWAITED after `done`, for the same
+      // reason as the capture extraction below: a multi-second call must not extend the composer
+      // lock on a respondent who has already waited for the planner. Never throws, and skips at one
+      // small query on every session that is not conditional-topics or has nothing outstanding.
+      const wideningRescan = maybeRescanAfterWidening(sessionId);
 
       // Conversational profile capture (F-capture): once the turn is persisted, best-effort extract
       // the gathered profile details from the transcript and persist them once complete. Fully
@@ -1337,6 +1385,18 @@ async function handleMessage(
       // already unlocked, but the generator keeps running until it returns, so the snapshot write still
       // completes within this request. Non-fatal — it can never reject.
       if (captureExtraction) await captureExtraction;
+
+      // F17.33: likewise the transcript re-read (started above). Its answers land before the
+      // generator returns, so the next status poll shows them.
+      const rescanned = await wideningRescan;
+      if (rescanned.kind === 'rescanned') {
+        log.info('Re-read the conversation for newly in-scope topics', {
+          sessionId,
+          topicKeys: rescanned.topicKeys,
+          answersWritten: rescanned.answersWritten,
+          dataSlotsWritten: rescanned.dataSlotsWritten,
+        });
+      }
     }
 
     return sseResponse(drive(), { signal: request.signal });

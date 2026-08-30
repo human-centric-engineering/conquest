@@ -44,9 +44,36 @@ function input(over: Partial<SessionStatusInput> = {}): SessionStatusInput {
     ref: null,
     experience: null,
     reopenAvailable: false,
+    progressFloorPct: 0,
     ...over,
   };
 }
+
+describe('buildSessionStatusView — the drawn progress figure (F17.33)', () => {
+  it('draws the computed figure when nothing higher has been shown', () => {
+    const view = buildSessionStatusView(
+      input({ assessment: assessment({ displayCoverage: 0.42 }), progressFloorPct: 0 })
+    );
+    expect(view.completion.progressPct).toBe(42);
+  });
+
+  it('holds the floor when the interview widened under the respondent', () => {
+    // Conditional Topics seated three topics, so the honest figure fell from 29% to 13%.
+    const view = buildSessionStatusView(
+      input({ assessment: assessment({ displayCoverage: 0.13 }), progressFloorPct: 29 })
+    );
+    expect(view.completion.progressPct).toBe(29);
+    // The un-ratcheted truth stays on the view for everything that is not a bar.
+    expect(view.completion.displayCoverage).toBeCloseTo(0.13);
+  });
+
+  it('never draws 100 off the floor alone', () => {
+    const view = buildSessionStatusView(
+      input({ assessment: assessment({ displayCoverage: 0.6 }), progressFloorPct: 100 })
+    );
+    expect(view.completion.progressPct).toBe(99);
+  });
+});
 
 describe('buildSessionStatusView', () => {
   it('passes the support reference through (null when absent)', () => {
@@ -72,6 +99,8 @@ describe('buildSessionStatusView', () => {
       kind: 'not_ready',
       coverage: 0.5,
       displayCoverage: 0.65,
+      // F17.33: the drawn figure — `displayCoverage` as a whole percent, with nothing to hold it.
+      progressPct: 65,
       answeredCount: 2,
       requiredUnansweredKeys: ['role'],
       capReached: false,

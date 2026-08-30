@@ -20,6 +20,7 @@ import type {
   InterviewerOpeningMode,
   PresentationMode,
 } from '@/lib/app/questionnaire/types';
+import type { TopicPhase } from '@/lib/app/questionnaire/scope/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
@@ -79,6 +80,17 @@ export interface ConfigConflictInput {
   limitOpeningProbes: boolean;
   /** The allowance, when capped. `0` means the planner may never ask a clarifying follow-up. */
   maxOpeningProbes: number;
+  /** Whether the respondent gets "you're N% through" banners at configured thresholds. */
+  milestoneBannerEnabled: boolean;
+  /**
+   * How many of the version's questions belong to a CONDITIONAL topic — the questions some
+   * respondents are asked and others are not.
+   *
+   * `null` where the surface cannot know: topics live on their own tab and are not part of
+   * `ConfigView`, so a caller with no topics loaded says so rather than passing `0`, which would
+   * silently read as "no variance" and quietly retire check 21 wherever someone forgot to thread it.
+   */
+  conditionalQuestionCount: number | null;
 }
 
 /**
@@ -95,7 +107,9 @@ export interface ConfigConflictInput {
  */
 export function configConflictInputFromConfig(
   config: ConfigView,
-  questionCount: number
+  questionCount: number,
+  /** See {@link ConfigConflictInput.conditionalQuestionCount} — `null` when this surface has no topics loaded. */
+  conditionalQuestionCount: number | null
 ): ConfigConflictInput {
   return {
     anonymousMode: config.anonymousMode,
@@ -122,7 +136,37 @@ export function configConflictInputFromConfig(
     conditionalTopicsEnabled: config.conditionalTopics.enabled,
     limitOpeningProbes: config.conditionalTopics.limitOpeningProbes,
     maxOpeningProbes: config.conditionalTopics.maxOpeningProbes,
+    milestoneBannerEnabled: config.milestoneBannerEnabled,
+    conditionalQuestionCount,
   };
+}
+
+/**
+ * How much of an instrument has to be conditional before a progress percentage is worth a note
+ * (check 21). Two fifths is the point at which the shortest and longest interviews of the same
+ * questionnaire stop being recognisably the same length — below it the variance is real but not
+ * something an admin would act on, and a note nobody acts on is a note that teaches them to skim.
+ */
+const CONDITIONAL_SHARE_FOR_VARIANCE_NOTE = 0.4;
+
+/**
+ * How many DISTINCT questions belong to a conditional topic — the value check 21 reads.
+ *
+ * Shared rather than derived per surface, because three of them compute it (the version overview,
+ * the Settings editor's live input, the policy panel's structure summary) and a rule whose input
+ * meant three slightly different things on three screens would be worse than no rule. Distinct
+ * keys: two conditional topics may name the same question, and counting it twice would report a
+ * questionnaire as more variable than it is.
+ */
+export function conditionalQuestionCountOf(
+  topics: ReadonlyArray<{ phase: TopicPhase; members: { questionKeys: readonly string[] } }>
+): number {
+  const keys = new Set<string>();
+  for (const topic of topics) {
+    if (topic.phase !== 'conditional') continue;
+    for (const key of topic.members.questionKeys) keys.add(key);
+  }
+  return keys.size;
 }
 
 /* ── House-rule text matching ─────────────────────────────────────────────────
@@ -615,6 +659,43 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
           'Conditional topics reads the opening answers to decide which topics to cover, so your ' +
           'example openings shape more than the tone — they shape what the interview becomes. ' +
           'Check they invite the kind of answer the topic criteria are written against.',
+      });
+    }
+
+    // 21 — Progress milestones on an instrument whose LENGTH varies a lot between respondents.
+    //
+    //      Not the obvious rule, and deliberately so. "Conditional topics is on and milestones are
+    //      on" would fire on the DEFAULT configuration of a mainstream feature — `enabled` is the
+    //      only thing the admin opted into and milestone banners default on — and the only advice it
+    //      could give is "turn off your progress signal", which makes the experience worse on
+    //      exactly the longest interviews. F17.33 fixed the underlying defect instead: the bar is
+    //      measured against every question that could still be asked until the plan settles it, and
+    //      it is held so a widening can never walk it backwards.
+    //
+    //      What remains, and what this says, is about VARIANCE rather than the combination: when
+    //      most of the instrument is conditional, two respondents' interviews are such different
+    //      lengths that a single percentage is a weak signal however honestly it is computed. That
+    //      is something an admin cannot see from either tab, and it has a real response — fewer
+    //      thresholds, later ones, or a narrower conditional set. `info`, never a warning: nothing
+    //      here is misconfigured.
+    if (
+      input.milestoneBannerEnabled &&
+      input.conditionalQuestionCount !== null &&
+      input.questionCount > 0 &&
+      input.conditionalQuestionCount / input.questionCount > CONDITIONAL_SHARE_FOR_VARIANCE_NOTE
+    ) {
+      const share = Math.round((input.conditionalQuestionCount / input.questionCount) * 100);
+      conflicts.push({
+        id: 'conditional-topics-progress-variance',
+        severity: 'info',
+        sectionId: 'milestones',
+        title: 'Progress will mean different things to different respondents',
+        message:
+          `About ${share}% of this questionnaire's questions are only asked to some respondents, so ` +
+          'two people can be given interviews of very different lengths. Progress is measured ' +
+          'against the interview each person actually gets, and never runs backwards — but a ' +
+          'percentage is a weaker signal here than on a fixed questionnaire. Consider fewer ' +
+          'milestone thresholds, or later ones.',
       });
     }
   }

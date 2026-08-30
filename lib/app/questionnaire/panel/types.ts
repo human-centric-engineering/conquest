@@ -39,6 +39,12 @@ export interface PanelSlotView {
   prompt: string;
   type: QuestionType;
   /**
+   * Why this question is in the respondent's interview (F17.33) — see
+   * {@link DataSlotPanelSlot.addedReason}. Present only on a slot that Conditional Topics added,
+   * and rendered only when its section has no shared line.
+   */
+  addedReason?: string | null;
+  /**
    * The slot's stored `typeConfig` (choices, likert bounds, numeric range, …) or
    * `null`. Carried so the raw form surface (P-presentation) can render the right
    * input control; the chat-side panel ignores it. Opaque JSON — read it via the
@@ -85,6 +91,12 @@ export interface PanelSectionView {
   sectionId: string;
   title: string;
   slots: PanelSlotView[];
+  /**
+   * Why this section is in the respondent's interview (F17.33) — the question-mode twin of
+   * {@link DataSlotPanelGroup.addedReason}, and set under the same rule: only when every slot in
+   * the section arrived from one conditional topic. Absent on an ordinary questionnaire.
+   */
+  addedReason?: string | null;
 }
 
 /**
@@ -118,6 +130,17 @@ export interface DataSlotPanelSlot {
   key: string;
   name: string;
   description: string;
+  /**
+   * Why this area is in the respondent's interview (F17.33), in plain words addressed to them.
+   *
+   * Present only on a row that arrived because Conditional Topics chose it — which is to say, only
+   * on the rows that APPEARED partway through, after the respondent had already started answering.
+   * Those are the ones that need explaining; the rest were there from the first turn.
+   *
+   * Rendered on the row only when its group has no shared line (see
+   * {@link DataSlotPanelGroup.addedReason}), so the same sentence is never printed six times.
+   */
+  addedReason?: string | null;
   /** The agent's restatement of the respondent's position, or null when not yet filled. */
   paraphrase: string | null;
   /**
@@ -221,6 +244,13 @@ export interface DataSlotCoverage {
 export interface DataSlotPanelGroup {
   theme: string;
   slots: DataSlotPanelSlot[];
+  /**
+   * Why this whole group is in the respondent's interview (F17.33) — shown as one line under the
+   * heading. Present only when the group came in as a unit from a conditional topic AND every row
+   * in it shares the same reason; a mixed group says nothing about itself and its rows caption
+   * themselves instead. Absent on every group of an ordinary questionnaire.
+   */
+  addedReason?: string | null;
 }
 
 /** The full panel state for a session. */

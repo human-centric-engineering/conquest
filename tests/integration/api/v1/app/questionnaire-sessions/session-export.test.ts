@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     appQuestionnaireSession: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
+    // Conditional Topics (P17): `buildSessionScope` runs for real in this file — it is the seam's
+    // own responsibility, not a collaborator worth faking. It reads these three tables (the latter
+    // two only when a `light`-depth topic is in play, which the fixtures below avoid).
+    appQuestionnaireTopic: { findMany: vi.fn() },
+    appQuestionSlot: { findMany: vi.fn() },
+    appDataSlot: { findMany: vi.fn() },
   },
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -42,6 +48,7 @@ import {
 type Mock = ReturnType<typeof vi.fn>;
 const findSession = mocks.prisma.appQuestionnaireSession.findUnique as Mock;
 const findUser = mocks.prisma.user.findUnique as Mock;
+const findTopics = mocks.prisma.appQuestionnaireTopic.findMany as Mock;
 
 /** A findUnique row matching the seam's `select`, with overridable parts. */
 function row(over: Record<string, unknown> = {}) {
@@ -108,6 +115,11 @@ function rowWithVersion(versionOver: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   findUser.mockResolvedValue({ name: 'Ada Lovelace' });
+  // No topics is the default for every fixture in this file: scope resolves inert, exactly as it
+  // does for a version that never opted into Conditional Topics.
+  findTopics.mockResolvedValue([]);
+  (mocks.prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([]);
+  (mocks.prisma.appDataSlot.findMany as Mock).mockResolvedValue([]);
 });
 
 describe('loadSessionExport', () => {
@@ -370,6 +382,169 @@ describe('loadSessionExport', () => {
     });
   });
 
+  /**
+   * Conditional Topics (P17). The claim the whole report chain rests on: what this loader returns is
+   * the interview the respondent ACTUALLY had, not the questionnaire as authored. Everything
+   * downstream — the Q&A transcript, the unanswered-questions block, the completion percentage, the
+   * reconciliation — is derived from `sections`, so if the filter here were wrong, a report would
+   * discuss (or scold the respondent for skipping) questions that were never put to them.
+   *
+   * Scope resolution runs for real here; only the topic rows are faked.
+   */
+  describe('conditional topics scope', () => {
+    /** A topic row in `TOPIC_SELECT` shape. */
+    function topic(over: Record<string, unknown>) {
+      return {
+        id: 'top-x',
+        key: 'x',
+        label: 'X',
+        description: null,
+        phase: 'conditional',
+        criteria: null,
+        depth: 'full',
+        members: { questionKeys: [], dataSlotKeys: [] },
+        ordinal: 0,
+        source: 'manual',
+        trigger: null,
+        ...over,
+      };
+    }
+
+    /** Three topics: one always-run, one conditional the plan seated, one it left out. */
+    function threeTopics() {
+      return [
+        topic({
+          id: 'top-1',
+          key: 'basics',
+          label: 'Basics',
+          phase: 'core',
+          members: { questionKeys: ['name'], dataSlotKeys: [] },
+          ordinal: 0,
+        }),
+        topic({
+          id: 'top-2',
+          key: 'colour-pref',
+          label: 'Colour preference',
+          members: { questionKeys: ['colour'], dataSlotKeys: [] },
+          ordinal: 1,
+        }),
+        topic({
+          id: 'top-3',
+          key: 'pricing',
+          label: 'Pricing',
+          members: { questionKeys: ['budget'], dataSlotKeys: [] },
+          ordinal: 2,
+        }),
+      ];
+    }
+
+    /** A plan that seats `colour-pref` and leaves `pricing` out. */
+    const PLAN = {
+      v: 1,
+      topics: [
+        { key: 'colour-pref', depth: 'full', source: 'llm', rationale: 'They mentioned colours.' },
+      ],
+      excluded: [{ key: 'pricing', source: 'llm', rationale: 'Not a buyer.' }],
+      checkTopicKey: null,
+      confidence: 0.8,
+      source: 'llm',
+      respondentMessage: '',
+      decidedAtTurn: 1,
+      decidedAt: '2026-06-02T09:05:00.000Z',
+    };
+
+    /** The three-topic version, with a third question so `pricing` has a member to drop. */
+    function adaptiveRow(over: Record<string, unknown> = {}) {
+      const base = row();
+      return {
+        ...base,
+        interviewPlan: PLAN,
+        version: {
+          ...base.version,
+          config: { anonymousMode: false, conditionalTopics: { enabled: true } },
+          sections: [
+            {
+              id: 'sec-1',
+              title: 'About you',
+              questions: [
+                { key: 'name', prompt: 'Your name?', type: 'free_text', required: true },
+                {
+                  key: 'colour',
+                  prompt: 'Favourite colour?',
+                  type: 'single_choice',
+                  required: false,
+                },
+                {
+                  key: 'budget',
+                  prompt: 'What is your budget?',
+                  type: 'free_text',
+                  required: true,
+                },
+              ],
+            },
+          ],
+        },
+        ...over,
+      };
+    }
+
+    beforeEach(() => {
+      findTopics.mockResolvedValue(threeTopics());
+      findSession.mockResolvedValue(adaptiveRow());
+    });
+
+    it('drops questions the interview never asked from the exported sections', async () => {
+      const loaded = await loadSessionExport('sess-1');
+      // `budget` belongs to the topic the plan left out — it must not reach the report at all,
+      // neither as material nor as an unanswered question the respondent could be judged on.
+      expect(loaded?.sections[0].slots.map((s) => s.slotKey)).toEqual(['name', 'colour']);
+    });
+
+    it('names the untriggered topic as not-assessed, never as unanswered', async () => {
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.notAssessed).toEqual([
+        { key: 'pricing', label: 'Pricing', questionCount: 1, partial: false },
+      ]);
+    });
+
+    it('reports the topics covered in full, seated and always-run alike', async () => {
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.assessedTopicLabels).toEqual(['Basics', 'Colour preference']);
+    });
+
+    it('marks a sampled topic partial rather than skipped', async () => {
+      // `light` depth takes the two highest-weight members, so the third is left out — the topic is
+      // in scope AND contributed an unasked question, which is exactly what `partial` means.
+      findTopics.mockResolvedValue([
+        topic({
+          id: 'top-1',
+          key: 'basics',
+          label: 'Basics',
+          phase: 'core',
+          depth: 'light',
+          members: { questionKeys: ['name', 'colour', 'budget'], dataSlotKeys: [] },
+          ordinal: 0,
+        }),
+      ]);
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.notAssessed).toEqual([
+        { key: 'basics', label: 'Basics', questionCount: 1, partial: true },
+      ]);
+      // A sampled topic was NOT covered in full, so it must not suppress a merge downstream.
+      expect(loaded?.assessedTopicLabels).toEqual([]);
+    });
+
+    it('leaves both records empty for a version that never opted in', async () => {
+      findTopics.mockResolvedValue([]);
+      findSession.mockResolvedValue(row());
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.notAssessed).toEqual([]);
+      expect(loaded?.assessedTopicLabels).toEqual([]);
+      // Inert scope means the pre-P17 behaviour: every authored question still exported.
+      expect(loaded?.sections[0].slots.map((s) => s.slotKey)).toEqual(['name', 'colour']);
+    });
+  });
+
   describe('completion timestamp', () => {
     it('uses the latest completed event when present', async () => {
       findSession.mockResolvedValue(row());
@@ -441,6 +616,7 @@ describe('buildSessionExportPdfModel', () => {
       ],
       dataSlotGroups: [],
       notAssessed: [],
+      assessedTopicLabels: [],
       ...over,
     };
   }

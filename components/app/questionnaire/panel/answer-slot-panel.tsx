@@ -317,6 +317,13 @@ function DataSlotRow({
             )}
             <SlotHistoryDialog slot={slot} />
           </div>
+          {/* F17.33: why this single row is here, for a row Conditional Topics added into a theme
+              that was already on screen. A theme that arrived whole says it once under its heading
+              instead (`DataSlotPanelGroup.addedReason`), which is why this is usually absent — the
+              same sentence on six rows reads as a warning rather than an explanation. */}
+          {slot.addedReason ? (
+            <p className="text-muted-foreground mt-0.5 text-xs italic">{slot.addedReason}</p>
+          ) : null}
           {editing && correction ? (
             <div className="mt-2">
               <InlineAnswerEditor
@@ -684,6 +691,17 @@ export function AnswerSlotPanel({
                         <h3 className="text-muted-foreground mb-1.5 px-1 text-xs font-medium tracking-wide uppercase">
                           {group.theme}
                         </h3>
+                        {/* F17.33: why this whole area is here. Conditional Topics can add areas
+                            partway through, so a respondent watches new groups appear minutes after
+                            they started answering — the interviewer says why once, in a message
+                            that scrolls away, and this is what is still on screen afterwards.
+                            Rendered in the same quiet register as the theme label above it: an
+                            explanation, not an alert. */}
+                        {group.addedReason ? (
+                          <p className="text-muted-foreground mb-1.5 px-1 text-xs italic">
+                            {group.addedReason}
+                          </p>
+                        ) : null}
                         <ul className="space-y-2">
                           {group.slots.map((slot) => (
                             <DataSlotRow
@@ -717,6 +735,14 @@ export function AnswerSlotPanel({
                       <h3 className="text-muted-foreground mb-1.5 px-1 text-xs font-medium tracking-wide uppercase">
                         {section.title}
                       </h3>
+                      {/* F17.33: the question-mode twin of the data-slot group's line — why this
+                          section is part of this respondent's interview, for a section Conditional
+                          Topics added after they had already started. */}
+                      {section.addedReason ? (
+                        <p className="text-muted-foreground mb-1.5 px-1 text-xs italic">
+                          {section.addedReason}
+                        </p>
+                      ) : null}
                       <ul className="space-y-2">
                         {section.slots.map((slot) => (
                           <AnswerSlotItem

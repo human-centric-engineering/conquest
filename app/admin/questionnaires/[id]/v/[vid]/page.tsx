@@ -28,6 +28,7 @@ import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { QuestionnaireVersionSummary } from '@/lib/app/questionnaire/views';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 import {
+  conditionalQuestionCountOf,
   configConflictInputFromConfig,
   detectConfigConflicts,
 } from '@/lib/app/questionnaire/authoring/config-conflicts';
@@ -123,7 +124,16 @@ export default async function OverviewTab({ params }: PageProps) {
   // banner reacts as an admin types; this one has to describe the version as it stands).
   const configConflicts =
     isDraft && graph
-      ? detectConfigConflicts(configConflictInputFromConfig(graph.config, selected.questionCount))
+      ? detectConfigConflicts(
+          configConflictInputFromConfig(
+            graph.config,
+            selected.questionCount,
+            // F17.33 check 21 reads how much of the instrument is conditional. The topics are
+            // already loaded above for the launch checklist, so this costs nothing; `null` would
+            // mean "this surface cannot know", which here would be untrue.
+            scope === null ? null : conditionalQuestionCountOf(scope.topics)
+          )
+        )
       : [];
 
   // Preview is available for a launched version OR a launchable draft (passes the same readiness

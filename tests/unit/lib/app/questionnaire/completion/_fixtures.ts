@@ -17,12 +17,15 @@ export { q };
 /** Build a `CompletionContext`, merging config over the resolved defaults. */
 export function cctx(input: {
   questions: CompletionContext['questions'];
+  /** F17.33: the progress denominator, when it differs from `questions`. Omitted = they are the same. */
+  progressQuestions?: CompletionContext['questions'];
   answered?: AnsweredView[];
   config?: Partial<QuestionnaireConfigShape>;
   sessionId?: string;
 }): CompletionContext {
   return {
     questions: input.questions,
+    ...(input.progressQuestions ? { progressQuestions: input.progressQuestions } : {}),
     answered: input.answered ?? [],
     config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...input.config },
     sessionId: input.sessionId ?? 'sess-1',

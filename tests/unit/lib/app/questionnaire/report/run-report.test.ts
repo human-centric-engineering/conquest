@@ -62,6 +62,8 @@ beforeEach(() => {
       questionnaireTitle: sessionId === 'sess_a' ? 'Opening' : 'Deep dive',
       goal: sessionId === 'sess_a' ? 'understand the team' : 'go deeper',
       audience: {},
+      notAssessed: [],
+      assessedTopicLabels: [],
     })
   );
   panelMock.buildAnswerPanelView.mockReturnValue({
@@ -168,6 +170,133 @@ describe('generateRunReport', () => {
     expect(transcript).not.toContain('Part 2');
     // Coverage reflects only what was actually readable.
     expect(coverage).toMatchObject({ answered: 3, total: 5 });
+  });
+
+  /**
+   * Conditional Topics (P17) across a journey. The per-leg transcripts are already narrowed to the
+   * questions each leg actually asked, so this block adds no material — it tells the writer WHY an
+   * area is absent, which is what stops the report reading a deliberately-skipped area as a
+   * respondent who declined, or telling them to go and "complete" something they were told did not
+   * apply to them.
+   */
+  describe('not-assessed topics', () => {
+    /** Give each leg its own Conditional Topics record. */
+    function legScopes(
+      byLeg: Record<string, { notAssessed?: unknown[]; assessedTopicLabels?: string[] }>
+    ) {
+      exportMock.loadSessionExport.mockImplementation((sessionId: string) =>
+        Promise.resolve({
+          status: 'completed',
+          sections: [],
+          answers: [],
+          dataSlotGroups: [],
+          questionnaireTitle: sessionId === 'sess_a' ? 'Opening' : 'Deep dive',
+          goal: 'g',
+          audience: {},
+          notAssessed: byLeg[sessionId]?.notAssessed ?? [],
+          assessedTopicLabels: byLeg[sessionId]?.assessedTopicLabels ?? [],
+        })
+      );
+    }
+
+    const PRICING = { key: 'pricing', label: 'Pricing', questionCount: 4, partial: false };
+
+    it('carries a leg’s skipped topics through to the generation core', async () => {
+      legScopes({ sess_b: { notAssessed: [PRICING] } });
+      await generateRunReport(RUN_ID);
+      expect(inputs().notAssessed).toEqual([PRICING]);
+    });
+
+    it('omits the key entirely when no leg skipped anything', async () => {
+      await generateRunReport(RUN_ID);
+      // Absent, not an empty array: `generateReportFromInputs` gates the whole prompt section on
+      // presence, and a non-adaptive journey must produce exactly the prompt it did before P17.
+      expect(inputs()).not.toHaveProperty('notAssessed');
+    });
+
+    it('sums the question count when both legs skipped the same area', async () => {
+      legScopes({
+        sess_a: { notAssessed: [PRICING] },
+        sess_b: { notAssessed: [{ ...PRICING, key: 'price', questionCount: 3 }] },
+      });
+      await generateRunReport(RUN_ID);
+      // Matched by LABEL — keys are version-scoped, so two legs describing the same area rarely
+      // share one.
+      expect(inputs().notAssessed).toEqual([{ ...PRICING, questionCount: 7 }]);
+    });
+
+    it('matches labels regardless of case and surrounding space', async () => {
+      legScopes({
+        sess_a: { notAssessed: [PRICING] },
+        sess_b: { notAssessed: [{ ...PRICING, label: '  pricing ', questionCount: 1 }] },
+      });
+      await generateRunReport(RUN_ID);
+      expect(inputs().notAssessed).toEqual([{ ...PRICING, questionCount: 5 }]);
+    });
+
+    it('drops a topic another leg assessed in full', async () => {
+      legScopes({
+        sess_a: { assessedTopicLabels: ['Pricing'] },
+        sess_b: { notAssessed: [PRICING] },
+      });
+      await generateRunReport(RUN_ID);
+      // The prompt's fence reads "you know nothing whatsoever about this respondent in these areas
+      // — do not write about them". Applying that to an area Part 1 measured properly would
+      // suppress the journey's best material and contradict its own transcript.
+      expect(inputs()).not.toHaveProperty('notAssessed');
+    });
+
+    it('drops it whichever leg assessed it — order must not decide', async () => {
+      legScopes({
+        sess_a: { notAssessed: [PRICING] },
+        sess_b: { assessedTopicLabels: ['Pricing'] },
+      });
+      await generateRunReport(RUN_ID);
+      expect(inputs()).not.toHaveProperty('notAssessed');
+    });
+
+    it('treats an area as sampled when any leg sampled it', async () => {
+      legScopes({
+        sess_a: { notAssessed: [{ ...PRICING, partial: true, questionCount: 2 }] },
+        sess_b: { notAssessed: [PRICING] },
+      });
+      await generateRunReport(RUN_ID);
+      // Part 1 DID put some pricing questions to them and their answers are in the transcript.
+      // Calling the area never-asked would be false; sampled is the honest description.
+      expect(inputs().notAssessed).toEqual([{ ...PRICING, partial: true, questionCount: 6 }]);
+    });
+
+    it('keeps distinct areas apart, in journey order', async () => {
+      legScopes({
+        sess_a: { notAssessed: [{ ...PRICING, label: 'Talent', key: 'talent' }] },
+        sess_b: { notAssessed: [PRICING] },
+      });
+      await generateRunReport(RUN_ID);
+      expect(inputs().notAssessed.map((t: { label: string }) => t.label)).toEqual([
+        'Talent',
+        'Pricing',
+      ]);
+    });
+
+    it('ignores a leg whose export could not be read', async () => {
+      exportMock.loadSessionExport.mockImplementation((sessionId: string) =>
+        sessionId === 'sess_b'
+          ? Promise.resolve(null)
+          : Promise.resolve({
+              status: 'completed',
+              sections: [],
+              answers: [],
+              dataSlotGroups: [],
+              questionnaireTitle: 'Opening',
+              goal: 'g',
+              audience: {},
+              notAssessed: [PRICING],
+              assessedTopicLabels: [],
+            })
+      );
+      await generateRunReport(RUN_ID);
+      expect(inputs().notAssessed).toEqual([PRICING]);
+    });
   });
 
   it('throws when the run is unknown', async () => {

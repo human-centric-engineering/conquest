@@ -19,6 +19,10 @@
  * known to the panel, not authoring detail.
  */
 
+import {
+  progressPctFromCoverage,
+  resolveDisplayedProgress,
+} from '@/lib/app/questionnaire/completion/progress';
 import type { CostCapTier } from '@/lib/app/questionnaire/session/cost-cap';
 import type { SessionExperienceContext } from '@/lib/app/questionnaire/experiences/run/types';
 import type {
@@ -39,6 +43,21 @@ export interface StatusCompletionView {
    * Display-only — the submit gate reads `kind`, never this.
    */
   displayCoverage: number;
+  /**
+   * F17.33: the whole-percent figure the progress bar actually DRAWS — {@link displayCoverage}
+   * expressed as a percentage and held at the highest figure this session has already shown.
+   *
+   * Separate from `displayCoverage`, which stays the un-ratcheted truth, because the two answer
+   * different questions: "how far through is this respondent" and "what have we already told them".
+   * Conditional Topics can widen an interview mid-session (the plan landing, a respondent
+   * amendment), which grows the denominator and would otherwise walk the bar backwards. The floor
+   * makes that a stall instead of a reversal, and never reaches 100 on its own — only a genuinely
+   * complete interview shows that.
+   *
+   * Display only, and the ONLY thing the bar should read. Anything measuring progress — analytics,
+   * reports, the reasoning trace's "X% covered so far" — reads `displayCoverage`.
+   */
+  progressPct: number;
   /** Distinct questions answered this session. */
   answeredCount: number;
   /** Keys of unanswered required questions (empty unless `kind === 'blocked_on_required'`). */
@@ -98,6 +117,13 @@ export interface SessionStatusInput {
   capped: boolean;
   /** True for a no-login session (`respondentUserId === null`). */
   anonymous: boolean;
+  /**
+   * F17.33: the session's stored `progressFloorPct` — the highest progress figure already shown.
+   * The builder APPLIES it; it never banks a new one, because this projection is reached from a GET
+   * and a read path must not write. The turn path does the banking (`runTurn` / `runDataSlotTurn`),
+   * and since nothing moves the coverage between turns, the floor read here is always current.
+   */
+  progressFloorPct: number;
   /** The session's raw support reference, or null for a row predating the column. */
   ref: string | null;
   /** Experience-run membership, already resolved by the route seam. Null when standalone. */
@@ -117,6 +143,11 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
       kind: input.assessment.kind,
       coverage: input.assessment.coverage,
       displayCoverage: input.assessment.displayCoverage,
+      // Apply, never bank — see `SessionStatusInput.progressFloorPct`.
+      progressPct: resolveDisplayedProgress(
+        progressPctFromCoverage(input.assessment.displayCoverage),
+        input.progressFloorPct
+      ).pct,
       answeredCount: input.assessment.answeredCount,
       requiredUnansweredKeys: input.assessment.requiredUnansweredKeys,
       capReached: input.assessment.capReached,

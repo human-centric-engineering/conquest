@@ -3,11 +3,17 @@
 /**
  * SessionProgressBar — a slim weighted-coverage bar for the respondent surface (F7.3).
  *
- * Drives off the F4.5 completion assessment's graded `displayCoverage` (0–1) — full credit for
- * confirmed answers, half for below-floor tentative captures — already projected onto
- * {@link SessionStatusView} and fetched by `useSessionLifecycle`. Graded (not the strict gate
- * `coverage`) so a session mid-capture reads real momentum instead of a flat 0%; the submit gate
- * stays strict and reads `completion.kind`, never this. A quiet "we're getting somewhere" signal —
+ * Drives off the F4.5 completion assessment's graded coverage — full credit for confirmed answers,
+ * half for below-floor tentative captures — already projected onto {@link SessionStatusView} and
+ * fetched by `useSessionLifecycle`. Graded (not the strict gate `coverage`) so a session mid-capture
+ * reads real momentum instead of a flat 0%; the submit gate stays strict and reads
+ * `completion.kind`, never this.
+ *
+ * Both call sites pass `completion.progressPct` rather than `completion.displayCoverage` (F17.33):
+ * Conditional Topics can widen an interview mid-session, which grows the coverage denominator, so
+ * the drawn figure is held at the highest one already shown. This component stays a dumb renderer
+ * of whatever fraction it is handed — the ratchet lives in
+ * `lib/app/questionnaire/completion/progress.ts`. A quiet "we're getting somewhere" signal —
  * rendered both in the lifecycle strip and (because the answer panel is hidden below `lg`) in the
  * chat header so narrow viewports keep it.
  *

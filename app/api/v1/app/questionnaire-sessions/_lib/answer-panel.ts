@@ -17,6 +17,7 @@
 import { prisma } from '@/lib/db/client';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
+import { respondentReasons, sharedReason } from '@/lib/app/questionnaire/scope/reasons';
 import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import {
   ANSWER_PROVENANCES,
@@ -127,6 +128,9 @@ export async function loadAnswerPanelState(
               name: true,
               description: true,
               theme: true,
+              // Conditional Topics (P17): a `light` topic contributes its two HIGHEST-weight data
+              // slots, so scope and the F17.33 reason join both need this to agree about which two.
+              weight: true,
               questions: { select: { questionSlot: { select: { key: true } } } },
             },
           },
@@ -188,13 +192,34 @@ export async function loadAnswerPanelState(
   // Conditional Topics (P17): narrow the structure to what this respondent is actually being asked.
   // Applied to the SECTIONS the panel renders and to the data-slot groups below, so progress,
   // the required-count and the breadth meter all measure the real interview.
+  // Shared by the scope resolution and the reason join below, which MUST agree about which two
+  // members a `light` topic contributes. Handing BOTH maps to both callers is the point: given only
+  // the question weights, `buildSessionScope` loads the data-slot ones itself while
+  // `respondentReasons` falls back to the first two AUTHORED — so the panel would show one pair of
+  // areas and caption the other. That is the F17.13 shape exactly: two surfaces that agree by
+  // construction until one of them is given different inputs.
+  const weightByQuestionKey = new Map(
+    row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
+  );
+  const weightByDataSlotKey = new Map(row.version.dataSlots.map((d) => [d.key, d.weight] as const));
+
   const scoped = await buildSessionScope(prisma, {
     versionId: row.versionId,
     settings: narrowConditionalTopicsSettings(row.version.config?.conditionalTopics),
     interviewPlan: row.interviewPlan,
-    weightByQuestionKey: new Map(
-      row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
-    ),
+    weightByQuestionKey,
+    weightByDataSlotKey,
+  });
+
+  // F17.33: why each area the plan ADDED is here, in words for the respondent. The panel is where
+  // someone notices their interview changing — the interviewer's announcement is said once and
+  // scrolls away, while these rows are still on screen an hour later. Empty on every ordinary
+  // session (no plan ⇒ no map), so this costs a branch and nothing else.
+  const reasons = respondentReasons({
+    plan: scoped.plan,
+    topics: scoped.topics,
+    weightByQuestionKey,
+    weightByDataSlotKey,
   });
 
   // Map turn id → 1-based ordinal so an answer's lastUpdatedTurnId becomes a turn index.
@@ -212,6 +237,9 @@ export async function loadAnswerPanelState(
           type: q.type,
           typeConfig: q.typeConfig,
           required: q.required,
+          ...(reasons.byQuestionKey.has(q.key)
+            ? { addedReason: reasons.byQuestionKey.get(q.key)! }
+            : {}),
         })),
     }))
     // A section left with nothing is not "empty" to the respondent — it was never part of their
@@ -337,6 +365,11 @@ export async function loadAnswerPanelState(
         key: ds.key,
         name: ds.name,
         description: ds.description,
+        // F17.33: the caption that explains an area appearing partway through. Absorbed into the
+        // group heading below when every row in the theme shares it.
+        ...(reasons.byDataSlotKey.has(ds.key)
+          ? { addedReason: reasons.byDataSlotKey.get(ds.key)! }
+          : {}),
         paraphrase: fill?.paraphrase ?? null,
         provenance: fill?.provenance ?? null,
         confidence: fill?.confidence ?? null,
@@ -355,6 +388,17 @@ export async function loadAnswerPanelState(
         coverage,
       });
     }
+    // F17.33: hoist a reason the whole theme shares onto the heading, and drop it from the rows —
+    // the same sentence printed six times reads as a warning rather than an explanation. A theme
+    // that MIXES always-asked rows with added ones keeps its per-row captions, because there is no
+    // single true thing to say about the group.
+    for (const group of groups) {
+      const shared = sharedReason(group.slots.map((slot) => slot.addedReason ?? null));
+      if (!shared) continue;
+      group.addedReason = shared;
+      for (const slot of group.slots) delete slot.addedReason;
+    }
+
     view.dataSlotGroups = groups;
     view.showSlotQuestions = showSlotQuestions;
     // Average confidence in data-slot mode is the mean over the data-slot FILLS the respondent sees

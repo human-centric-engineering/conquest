@@ -32,6 +32,7 @@ const SECTION_LABELS: Record<string, string> = {
   safeguarding: 'Answer quality & safeguarding',
   budget: 'Budget & limits',
   'profile-fields': 'Respondent profile fields',
+  milestones: 'Progress milestones',
 };
 
 const SEVERITY_STYLES: Record<

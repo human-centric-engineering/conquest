@@ -26,7 +26,12 @@
  * `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`.
  */
 
-import type { InterviewPlan, PlanAmendment, Topic } from '@/lib/app/questionnaire/scope/types';
+import type {
+  InterviewPlan,
+  PlanAmendment,
+  ScopeDecisionSource,
+  Topic,
+} from '@/lib/app/questionnaire/scope/types';
 
 /** How much of a respondent message is worth scanning. Requests come early, not in paragraph nine. */
 export const AMENDMENT_SCAN_CHARS = 600;
@@ -196,7 +201,11 @@ export function applyAmendment(
           key: topic.key,
           depth: 'full',
           source: 'respondent',
-          rationale: `The respondent asked for this: "${amendment.request.slice(0, 200)}"`,
+          rationale: `The respondent asked for this: "${quoteRespondent(amendment.request)}"`,
+          // F17.33: what the panel shows beside the area once it appears. The interviewer's
+          // acknowledgement is said once and scrolls away; this is still there an hour later, when
+          // they are looking at an area they may no longer remember asking for.
+          respondentReason: 'You asked to cover this.',
         },
       ],
       excluded: plan.excluded.filter((t) => t.key !== topic.key),
@@ -206,17 +215,125 @@ export function applyAmendment(
 }
 
 /**
+ * How much of a newly-added area there is, in words a respondent would use (F17.33).
+ *
+ * The count is the number of items the interview will ACTUALLY ask about — `plannedMembers` after
+ * depth and any explicit subset — not everything the topic holds. A `light` topic really is two
+ * items, so "just a couple of questions" is a true statement rather than a softener; a respondent
+ * told that and then asked nine would rightly stop believing the next thing the interviewer says
+ * about how long this will take.
+ *
+ * Deliberately vague at the top end. "About fourteen questions" is a number nobody asked for and a
+ * commitment the run budget may not keep; "a fair bit of ground" sets the same expectation without
+ * promising an amount.
+ */
+export function topicSizeWording(itemCount: number): string {
+  if (itemCount <= 0) return 'not much';
+  if (itemCount <= 2) return 'just a couple of questions';
+  if (itemCount <= 5) return 'a handful of questions';
+  return 'a fair bit of ground';
+}
+
+/**
+ * The most of a respondent's own words any surface quotes back at them.
+ *
+ * One constant for both surfaces on purpose. The admin-facing `rationale` and the interviewer
+ * briefing are quoting the SAME sentence for two readers, and a cap that differed between them was
+ * not a considered trade — it was the storage cap (`applyAmendment` keeps 1,000 chars) leaking into
+ * a prompt because nobody re-capped it there. The briefing is the surface that matters: its quote
+ * lands in the INSTRUCTION position of the interviewer's prompt, so an unbounded run of the
+ * respondent's own text sits where the interviewer's own rules live.
+ *
+ * 200 is not a limit on what they may ask for — the full request is still stored, and the amendment
+ * is still honoured in full. It is a limit on how much of it is read back, and an amendment request
+ * is a sentence ("can we cover hiring?"); a respondent who writes three paragraphs is identified by
+ * the first one just as well.
+ */
+const RESPONDENT_QUOTE_CHARS = 200;
+
+/**
+ * Trim a respondent's words to {@link RESPONDENT_QUOTE_CHARS} at a WORD boundary.
+ *
+ * The word boundary is the whole point of not writing `.slice(0, 200)` twice. A hard cut lands
+ * mid-word, and the briefing then asks the interviewer to tie its acknowledgement to a severed
+ * clause — which it will do, out loud, to the person who wrote it. An ellipsis says "there was
+ * more" in a way a truncated word does not.
+ *
+ * Falls back to the hard cut for text with no space in the first 200 characters, which is not prose
+ * and has no boundary to find.
+ */
+function quoteRespondent(request: string): string {
+  const text = request.trim();
+  if (text.length <= RESPONDENT_QUOTE_CHARS) return text;
+  const cut = text.slice(0, RESPONDENT_QUOTE_CHARS);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+/**
+ * The reason a respondent may be told for an area being added — or `null` when there is none that
+ * can honestly be given.
+ *
+ * **The blind-spot check must never carry a reason.** Its honest reason is "you did not raise this",
+ * and `chooseCheckTopic` has an ABSENCE of signal, not evidence about the respondent: saying it out
+ * loud converts a sampling decision into a claim about what they left out. The whole three-way
+ * naming split in `conditional-topics.md` exists to stop that claim being made on any surface, and
+ * this is the surface where it would be made to the person themselves.
+ *
+ * A respondent-requested area is the opposite case, and the easiest reason in the product: they
+ * said it, in their own words, and those words are already on the record.
+ */
+export function respondentReasonFor(input: {
+  source: ScopeDecisionSource;
+  /** The respondent's own words, for an area they asked for. */
+  request?: string;
+}): string | null {
+  if (input.source === 'check') return null;
+  const request = input.request?.trim();
+  return request ? quoteRespondent(request) : null;
+}
+
+/**
  * The line the interviewer is asked to weave in on the turn after an amendment.
  *
  * A briefing instruction rather than a fixed sentence, for the same reason the original
  * announcement is: an acknowledgement in the interviewer's own voice reads as the same person still
  * listening, where a canned "Topic added." reads as a form that took an input.
+ *
+ * It carries three things (F17.33), because an area appearing mid-conversation with no explanation
+ * is the moment a respondent starts wondering what else is being decided about them:
+ *
+ *  - **What** — the area's own label, in the instrument's own language.
+ *  - **How much** — {@link topicSizeWording}, so several new questions arriving is something they
+ *    were told about rather than something that happened to them.
+ *  - **Why** — their own words, capped by `quoteRespondent`. This is the one case where the reason
+ *    needs no model call and no new field: `PlanAmendment.request` is already on the record. The
+ *    earlier version of this line forbade explaining at all, which read as the interview quietly
+ *    reorganising itself. The cap is not editorial — the quote lands in the instruction position of
+ *    the prompt, so the run of untrusted text sitting there is bounded to a sentence.
+ *
+ * The vocabulary ban stays, and it is what makes giving a reason safe: the interviewer may say what
+ * it will now cover and why, and may not say anything about how the interview decides.
  */
-export function amendmentBriefingLine(amendment: PlanAmendment): string {
-  return (
-    'The respondent just asked you to cover something you had not planned to, and you have agreed. ' +
-    `Before your next question, acknowledge that briefly and warmly in your own words — you will now ` +
-    `also cover ${amendment.label}. Do not apologise, do not explain how the interview decides what ` +
-    'to ask, and do not mention plans, topics, or scope.'
-  );
+export function amendmentBriefingLine(input: {
+  amendment: PlanAmendment;
+  /** How many items the added area will actually contribute. Omitted ⇒ no size claim is made. */
+  itemCount?: number;
+}): string {
+  const { amendment } = input;
+  const reason = respondentReasonFor({ source: 'respondent', request: amendment.request });
+  const size = input.itemCount === undefined ? null : topicSizeWording(input.itemCount);
+
+  return [
+    'On the previous turn the respondent asked you to cover something you had not been going to, ' +
+      'and you have agreed.',
+    'Before your next question, acknowledge that briefly and warmly in your own words: say that ' +
+      `you will now cover ${amendment.label}` +
+      (size ? `, that there is ${size} on it` : '') +
+      (reason ? `, and tie it to what they actually asked for — they said: "${reason}"` : '') +
+      '.',
+    'Refer to it the way a person would, not by quoting a label back at them.',
+    'Do not apologise, do not explain how the interview decides what to ask, and do not use the ' +
+      'words topic, section, plan, scope or depth.',
+  ].join(' ');
 }

@@ -75,6 +75,10 @@ vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
     conditionalTopicsConditionalCount?: number;
     conditionalTopicsDraftTopicCount?: number;
     conditionalTopicsDetectedUnreviewed?: boolean;
+    // Rating-scale readiness: both are derived on the page from the version graph, and both are
+    // launch BLOCKERS, so a page that miscounts them lets a broken scale reach a respondent.
+    unlabelledLikertCount?: number;
+    misconfiguredMatrixCount?: number;
   }) => (
     <div
       data-testid="launch-checklist"
@@ -82,6 +86,8 @@ vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
       data-scope-conditionals={props.conditionalTopicsConditionalCount}
       data-scope-draft-topics={props.conditionalTopicsDraftTopicCount}
       data-scope-unreviewed={String(props.conditionalTopicsDetectedUnreviewed)}
+      data-unlabelled-likert={props.unlabelledLikertCount}
+      data-misconfigured-matrix={props.misconfiguredMatrixCount}
     >
       launch v{props.versionNumber}
     </div>
@@ -133,7 +139,12 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
 }
 
 function makeGraph(
-  over: { anonymousMode?: boolean; saved?: boolean; audience?: VersionGraphView['audience'] } = {}
+  over: {
+    anonymousMode?: boolean;
+    saved?: boolean;
+    audience?: VersionGraphView['audience'];
+    sections?: VersionGraphView['sections'];
+  } = {}
 ): VersionGraphView {
   return {
     id: 'ver-1',
@@ -144,7 +155,7 @@ function makeGraph(
     audience: over.audience ?? null,
     goalProvenance: null,
     audienceProvenance: null,
-    sections: [],
+    sections: over.sections ?? [],
     tags: [],
     config: {
       ...DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -152,6 +163,35 @@ function makeGraph(
       anonymousMode: over.anonymousMode ?? true,
     },
   };
+}
+
+/** One question in the version graph, for the rating-scale readiness counts. */
+function makeQuestion(
+  over: Partial<VersionGraphView['sections'][number]['questions'][number]> = {}
+): VersionGraphView['sections'][number]['questions'][number] {
+  return {
+    id: 'q-1',
+    ordinal: 0,
+    key: 'q_1',
+    prompt: 'How satisfied are you?',
+    guidelines: null,
+    rationale: null,
+    type: 'free_text',
+    typeConfig: null,
+    required: true,
+    weight: 1,
+    fidelity: 3,
+    extractionConfidence: null,
+    tags: [],
+    ...over,
+  };
+}
+
+/** A section wrapping the given questions. */
+function makeSection(
+  questions: VersionGraphView['sections'][number]['questions']
+): VersionGraphView['sections'][number] {
+  return { id: 'sec-1', ordinal: 0, title: 'Experience', description: null, questions };
 }
 
 /** A draft that passes every launch-readiness check — so the pre-launch preview is offered. */
@@ -269,9 +309,11 @@ describe('OverviewTab', () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
       workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
         topics: [
-          { key: 'a', phase: 'conditional' },
-          { key: 'b', phase: 'core' },
-          { key: 'c', phase: 'conditional' },
+          // `members` is read by the settings-conflict check that measures how much of the
+          // instrument is conditional (F17.33), so a topic fixture without it is not a topic.
+          { key: 'a', phase: 'conditional', members: { questionKeys: ['q1'], dataSlotKeys: [] } },
+          { key: 'b', phase: 'core', members: { questionKeys: ['q2'], dataSlotKeys: [] } },
+          { key: 'c', phase: 'conditional', members: { questionKeys: ['q3'], dataSlotKeys: [] } },
         ],
         settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
         issues: [{ severity: 'error' }, { severity: 'warning' }],
@@ -482,5 +524,135 @@ describe('OverviewTab', () => {
       render(await renderPage());
       expect(screen.getByText(/3 data slots/)).toBeInTheDocument();
     });
+  });
+});
+
+describe('OverviewTab — rating-scale readiness counts', () => {
+  // Both counts are derived HERE, on the page, from the version graph, and both are launch
+  // blockers. An undercount ships an unlabelled scale to a respondent, who is then asked to pick a
+  // number with nothing telling them which end is good.
+  beforeEach(() => {
+    launchReadyDraft();
+  });
+
+  it('counts a likert scale with no labels at either end', async () => {
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({
+        audience: { description: 'Prospective customers' },
+        sections: [
+          makeSection([
+            makeQuestion({
+              id: 'q-a',
+              key: 'bare',
+              type: 'likert',
+              typeConfig: { min: 1, max: 5 },
+            }),
+            makeQuestion({
+              id: 'q-b',
+              key: 'anchored',
+              type: 'likert',
+              typeConfig: { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' },
+            }),
+          ]),
+        ],
+      })
+    );
+
+    render(await renderPage());
+
+    // Endpoint-anchored is a FAITHFUL scale, not a defect — only the bare one counts.
+    expect(screen.getByTestId('launch-checklist')).toHaveAttribute('data-unlabelled-likert', '1');
+  });
+
+  it('counts a matrix whose shared scale is unlabelled, alongside the likert count', async () => {
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({
+        audience: { description: 'Prospective customers' },
+        sections: [
+          makeSection([
+            makeQuestion({
+              id: 'q-m',
+              key: 'grid',
+              type: 'matrix',
+              typeConfig: { rows: [{ key: 'r1', label: 'Speed' }], scale: { min: 1, max: 5 } },
+            }),
+          ]),
+        ],
+      })
+    );
+
+    render(await renderPage());
+
+    const checklist = screen.getByTestId('launch-checklist');
+    expect(checklist).toHaveAttribute('data-misconfigured-matrix', '1');
+    // A matrix is not a likert: counting it in both would double-report one defect.
+    expect(checklist).toHaveAttribute('data-unlabelled-likert', '0');
+  });
+
+  it('counts neither when every rating scale is properly labelled', async () => {
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({
+        audience: { description: 'Prospective customers' },
+        sections: [
+          makeSection([
+            makeQuestion({
+              id: 'q-m',
+              key: 'grid',
+              type: 'matrix',
+              typeConfig: {
+                rows: [{ key: 'r1', label: 'Speed' }],
+                scale: { min: 1, max: 5, minLabel: 'Poor', maxLabel: 'Great' },
+              },
+            }),
+            makeQuestion({ id: 'q-t', key: 'open', type: 'free_text', typeConfig: null }),
+          ]),
+        ],
+      })
+    );
+
+    render(await renderPage());
+
+    const checklist = screen.getByTestId('launch-checklist');
+    expect(checklist).toHaveAttribute('data-misconfigured-matrix', '0');
+    expect(checklist).toHaveAttribute('data-unlabelled-likert', '0');
+  });
+});
+
+describe('OverviewTab — the archived versions block', () => {
+  it('is absent entirely when nothing is archived', async () => {
+    workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+      makeDetail({ versions: [makeVersion({ id: 'ver-1' })] })
+    );
+
+    render(await renderPage());
+
+    expect(screen.queryByText(/Archived versions/)).not.toBeInTheDocument();
+  });
+
+  it('collapses archived versions behind a count, out of the live picker', async () => {
+    // Archived versions are hidden from the picker but must stay RESTORABLE — an admin who
+    // archived the wrong version has nowhere else to undo it.
+    workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+      makeDetail({
+        versions: [
+          makeVersion({ id: 'ver-1', versionNumber: 3 }),
+          makeVersion({ id: 'ver-old', versionNumber: 2, archivedAt: '2026-02-01T00:00:00.000Z' }),
+          makeVersion({
+            id: 'ver-older',
+            versionNumber: 1,
+            archivedAt: '2026-01-15T00:00:00.000Z',
+          }),
+        ],
+      })
+    );
+
+    render(await renderPage());
+
+    expect(screen.getByText('Archived versions (2)')).toBeInTheDocument();
+    // Each archived row gets its own Restore control...
+    expect(screen.getByTestId('version-archive-ver-old')).toHaveTextContent('Restore');
+    expect(screen.getByTestId('version-archive-ver-older')).toHaveTextContent('Restore');
+    // ...and the live one is still Archive, in the picker above.
+    expect(screen.getByTestId('version-archive-ver-1')).toHaveTextContent('Archive');
   });
 });

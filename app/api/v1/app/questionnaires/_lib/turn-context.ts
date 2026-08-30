@@ -150,7 +150,16 @@ export interface CapabilitySlotView {
 }
 
 /** The structural half of a turn — everything but the per-turn `userMessage` + `flags`. */
-export type TurnContextBase = Omit<TurnState, 'userMessage' | 'flags'>;
+export type TurnContextBase = Omit<TurnState, 'userMessage' | 'flags' | 'progressQuestions'> & {
+  /**
+   * F17.33. Optional on {@link TurnState} — a hand-built state (a unit test, the preview harness)
+   * may leave it out and get today's behaviour — but this loader ALWAYS computes it, so every
+   * consumer downstream of a real session can read it without a fallback. Narrowing it here rather
+   * than making it required upstream keeps the "omitted = `questions`" contract where the pure
+   * layer needs it, and removes the `?? questions` dance where it cannot arise.
+   */
+  progressQuestions: QuestionView[];
+};
 
 /** Audience calibration the interviewer uses to set tone + language (subset of `AudienceShape`). */
 export interface TurnAudience {
@@ -265,6 +274,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // "Don't nag" ledger for completeness milestones: percent-complete thresholds already
       // banner-shown this session (number[]). Empty list on a session that has raised none.
       raisedMilestones: true,
+      // F17.33: the highest progress figure this session has ever displayed, so a scope widening
+      // cannot make the bar run backwards. Presentation state only — no gate reads it.
+      progressFloorPct: true,
       // Conditional Topics (P17): the frozen decision about which topics this interview covers.
       // Null on every ordinary session, and before the planner has run on an adaptive one —
       // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
@@ -520,6 +532,18 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
     : dataSlots;
 
+  // F17.33: the denominator for the PROGRESS FIGURE — deliberately NOT the same list as the gate's.
+  //
+  // `plan === null` on an enabled version is the pre-planner state: the always-run phases are in
+  // scope and the conditional ones are not, and the planner will seat some of them the moment the
+  // opening completes. Measuring progress against that narrow set states a total that is about to
+  // GROW, so the respondent watches the bar fall in the same beat as the interviewer announcing
+  // what it will now cover. Measuring against every question that could still be asked states a
+  // total that can only shrink: the plan narrowing the interview moves the bar UP.
+  //
+  // Once the plan exists the two lists are the same thing, because the interview IS the scope.
+  const progressQuestions = scope.scope.active && scope.plan === null ? questions : scopedQuestions;
+
   // ── The opening's follow-up allowance (G03) ───────────────────────────────────────────────
   // Resolved only while it can actually bite: the version opted in, the plan is not yet decided
   // (afterwards there is no opening left to ration), and an opening topic names data slots that
@@ -621,6 +645,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       raisedContradictions,
       // "Don't nag" ledger for completeness milestones: thresholds already banner-shown this session.
       raisedMilestones,
+      // F17.33: the progress denominator + the floor that stops the bar reversing. Both are read
+      // by the display path only; every gate above uses `questions` / `scopedQuestions`.
+      progressQuestions,
+      progressFloorPct: session.progressFloorPct,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

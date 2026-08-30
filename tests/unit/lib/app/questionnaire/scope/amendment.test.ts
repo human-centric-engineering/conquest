@@ -15,11 +15,14 @@ import { describe, it, expect } from 'vitest';
 
 import {
   amendableTopics,
+  amendmentBriefingLine,
   applyAmendment,
   looksLikeTopicRequest,
   matchTopicByLabel,
   isEnglishLocale,
   candidateLabelHits,
+  respondentReasonFor,
+  topicSizeWording,
 } from '@/lib/app/questionnaire/scope/amendment';
 import type { InterviewPlan, Topic } from '@/lib/app/questionnaire/scope/types';
 
@@ -248,5 +251,126 @@ describe('candidateLabelHits — the non-English gate', () => {
 
   it('is empty for a message that names nothing', () => {
     expect(candidateLabelHits('Ja, det stämmer.', topics)).toEqual([]);
+  });
+});
+
+/**
+ * What the respondent is actually told (F17.33).
+ *
+ * An area appearing mid-conversation with no explanation is the moment someone starts wondering
+ * what else is being decided about them, so the acknowledgement has to carry what, how much and
+ * why. The two things pinned hardest are the two that would do harm: a size claim the interview
+ * will not keep, and a reason the planner does not have the evidence to give.
+ */
+describe('topicSizeWording', () => {
+  it('claims nothing for a topic that resolves to no items', () => {
+    // Reachable when a plan names a topic whose members were all deleted, or narrowed away. The
+    // interviewer must not promise "a couple of questions" it has none of.
+    expect(topicSizeWording(0)).toBe('not much');
+    expect(topicSizeWording(-1)).toBe('not much');
+  });
+
+  it('says "a couple" only for what really is a couple', () => {
+    // A `light` topic IS two items. A respondent told "a couple" and then asked nine stops
+    // believing the next thing the interviewer says about how long anything will take.
+    expect(topicSizeWording(1)).toMatch(/couple/);
+    expect(topicSizeWording(2)).toMatch(/couple/);
+    expect(topicSizeWording(3)).not.toMatch(/couple/);
+  });
+
+  it('stays vague at the top end rather than promising a number', () => {
+    // "About fourteen questions" is a commitment the run budget may not keep.
+    expect(topicSizeWording(14)).toBe('a fair bit of ground');
+    expect(topicSizeWording(14)).not.toMatch(/\d/);
+  });
+});
+
+describe('respondentReasonFor', () => {
+  it('gives the respondent their own words back', () => {
+    expect(
+      respondentReasonFor({ source: 'respondent', request: '  can we talk about hiring?  ' })
+    ).toBe('can we talk about hiring?');
+  });
+
+  it('NEVER gives a reason for the blind-spot check', () => {
+    // Its only honest reason is "you did not raise this", which converts a sampling decision into a
+    // claim about what the respondent left out — evidence the planner does not have.
+    expect(respondentReasonFor({ source: 'check', request: 'anything at all' })).toBeNull();
+  });
+
+  it('is null when there are no words to quote', () => {
+    expect(respondentReasonFor({ source: 'llm' })).toBeNull();
+    expect(respondentReasonFor({ source: 'respondent', request: '   ' })).toBeNull();
+  });
+
+  it('caps a long request at 200 characters, on a word boundary', () => {
+    // The quote lands in the INSTRUCTION position of the interviewer prompt, so the run of the
+    // respondent's own text sitting there is bounded — `applyAmendment` stores up to 1,000.
+    const request = `${'hiring and retention '.repeat(40)}please`;
+    const reason = respondentReasonFor({ source: 'respondent', request });
+
+    expect(reason).not.toBeNull();
+    expect(reason!.length).toBeLessThanOrEqual(201); // 200 + the ellipsis
+    expect(reason!.endsWith('…')).toBe(true);
+    // Word boundary: the character before the ellipsis is never a mid-word cut.
+    expect(reason!.slice(0, -1)).toBe(reason!.slice(0, -1).trimEnd());
+    expect(request.startsWith(reason!.slice(0, -1))).toBe(true);
+  });
+
+  it('leaves a request that already fits exactly as written', () => {
+    // No ellipsis on the ordinary case — an amendment request is a sentence.
+    expect(respondentReasonFor({ source: 'respondent', request: 'can we cover hiring?' })).toBe(
+      'can we cover hiring?'
+    );
+  });
+
+  it('falls back to a hard cut for 200 characters with no space to break on', () => {
+    // Not prose, so there is no boundary to find. Better a hard cut than the whole run.
+    const reason = respondentReasonFor({ source: 'respondent', request: 'x'.repeat(500) });
+    expect(reason).toBe(`${'x'.repeat(200)}…`);
+  });
+});
+
+describe('amendmentBriefingLine', () => {
+  const amendment = {
+    key: 'talent',
+    label: 'People & capability',
+    request: 'can we cover hiring?',
+    atTurn: 6,
+    at: '2026-08-29T00:00:00.000Z',
+  };
+
+  it('names the area, sizes it, and ties it to what they asked for', () => {
+    const line = amendmentBriefingLine({ amendment, itemCount: 2 });
+
+    expect(line).toContain('People & capability');
+    expect(line).toContain('just a couple of questions');
+    expect(line).toContain('can we cover hiring?');
+  });
+
+  it('makes no size claim when the count is unknown', () => {
+    // A topic an author deleted while a live plan still named it. No size beats a wrong size.
+    const line = amendmentBriefingLine({ amendment });
+    expect(line).toContain('People & capability');
+    expect(line).not.toMatch(/couple|handful|fair bit/);
+  });
+
+  it('quotes only the capped request, never the stored 1,000 characters', () => {
+    // `applyAmendment` stores up to 1,000 chars; the briefing must not read all of them back into
+    // the prompt's instruction position.
+    const long = { ...amendment, request: `${'hiring and retention '.repeat(40)}please` };
+    const line = amendmentBriefingLine({ amendment: long, itemCount: 2 });
+
+    expect(line).toContain('…');
+    expect(line).not.toContain(long.request);
+    expect(line.length).toBeLessThan(long.request.length);
+  });
+
+  it('keeps the implementation vocabulary off the screen', () => {
+    // The vocabulary ban is what makes giving a reason safe: the interviewer may say what it will
+    // cover and why, and nothing about how the interview decides.
+    const line = amendmentBriefingLine({ amendment, itemCount: 4 });
+    expect(line).toMatch(/do not use the words topic, section, plan, scope or depth/i);
+    expect(line).toMatch(/do not explain how the interview decides/i);
   });
 });

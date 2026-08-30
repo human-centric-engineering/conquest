@@ -43,6 +43,8 @@ function input(over: Partial<ConfigConflictInput> = {}): ConfigConflictInput {
     conditionalTopicsEnabled: false,
     limitOpeningProbes: false,
     maxOpeningProbes: 1,
+    milestoneBannerEnabled: false,
+    conditionalQuestionCount: null,
     ...over,
   };
 }
@@ -642,14 +644,22 @@ describe('configConflictInputFromConfig', () => {
     ...over,
   });
 
+  it('reads how much of the instrument is conditional from the caller, not the config', () => {
+    // Topics live on their own tab and are not part of `ConfigView`, so the figure has to be
+    // threaded. Passing it through the builder is what keeps the launch checklist and the Settings
+    // tab reporting the same thing about one version.
+    expect(configConflictInputFromConfig(view(), 10, 7).conditionalQuestionCount).toBe(7);
+    expect(configConflictInputFromConfig(view(), 10, null).conditionalQuestionCount).toBeNull();
+  });
+
   it('finds nothing on a default questionnaire', () => {
-    expect(detectConfigConflicts(configConflictInputFromConfig(view(), 10))).toEqual([]);
+    expect(detectConfigConflicts(configConflictInputFromConfig(view(), 10, 0))).toEqual([]);
   });
 
   it('derives captureEnabled the way the editor does, from the field list', () => {
     // There is no `captureEnabled` column. If the two builders disagreed about what "capture is on"
     // means, the checklist and the Settings tab would report different conflicts for one version.
-    expect(configConflictInputFromConfig(view(), 10).captureEnabled).toBe(false);
+    expect(configConflictInputFromConfig(view(), 10, 0).captureEnabled).toBe(false);
     expect(
       configConflictInputFromConfig(
         view({
@@ -663,7 +673,8 @@ describe('configConflictInputFromConfig', () => {
             },
           ],
         }),
-        10
+        10,
+        0
       ).captureEnabled
     ).toBe(true);
   });
@@ -678,7 +689,8 @@ describe('configConflictInputFromConfig', () => {
           maxOpeningProbes: 0,
         },
       }),
-      10
+      10,
+      0
     );
     expect(input.conditionalTopicsEnabled).toBe(true);
     expect(detectConfigConflicts(input).map((c) => c.id)).toContain('conditional-topics-no-probes');
@@ -702,10 +714,71 @@ describe('configConflictInputFromConfig', () => {
           ],
         },
       }),
-      10
+      10,
+      0
     );
     expect(detectConfigConflicts(input).map((c) => c.id)).toContain(
       'house-rules-overpromise-anonymity'
     );
+  });
+});
+
+/**
+ * Check 21 — progress under an instrument that varies in length (F17.33).
+ *
+ * The rule this file has to protect is what it does NOT do: fire on the plain combination of
+ * conditional topics and milestone banners. Both are common, one is on by default, and the only
+ * advice such a warning could give ("turn off your progress signal") makes the experience worse on
+ * exactly the longest interviews. The underlying defect was fixed in the figure itself; what is
+ * left is a note about variance, which is a different claim.
+ */
+describe('conditional topics + progress milestones', () => {
+  const variable = {
+    conditionalTopicsEnabled: true,
+    milestoneBannerEnabled: true,
+    questionCount: 20,
+    conditionalQuestionCount: 12,
+  } as const;
+
+  it('notes the variance when most of the instrument is conditional', () => {
+    const found = detectConfigConflicts(input(variable));
+    const note = found.find((c) => c.id === 'conditional-topics-progress-variance');
+    expect(note?.severity).toBe('info');
+    expect(note?.sectionId).toBe('milestones');
+    expect(note?.message).toContain('60%');
+  });
+
+  it('stays quiet when only a little of the instrument is conditional', () => {
+    expect(
+      detectConfigConflicts(input({ ...variable, conditionalQuestionCount: 4 })).map((c) => c.id)
+    ).not.toContain('conditional-topics-progress-variance');
+  });
+
+  it('stays quiet when the respondent gets no milestone banners', () => {
+    expect(
+      detectConfigConflicts(input({ ...variable, milestoneBannerEnabled: false })).map((c) => c.id)
+    ).not.toContain('conditional-topics-progress-variance');
+  });
+
+  it('stays quiet when the caller could not know how much is conditional', () => {
+    // `null` is "not known here", and a wrong reassurance is worse than a missing note — but so is
+    // a note computed from a figure nobody supplied.
+    expect(
+      detectConfigConflicts(input({ ...variable, conditionalQuestionCount: null })).map((c) => c.id)
+    ).not.toContain('conditional-topics-progress-variance');
+  });
+
+  it('never fires on the plain combination — that is the point', () => {
+    // Conditional topics on, milestones on, and a questionnaire whose conditional part is small.
+    // A rule that fired here would fire on most of the product's default configuration.
+    const found = detectConfigConflicts(
+      input({
+        conditionalTopicsEnabled: true,
+        milestoneBannerEnabled: true,
+        questionCount: 20,
+        conditionalQuestionCount: 2,
+      })
+    );
+    expect(found.map((c) => c.id)).not.toContain('conditional-topics-progress-variance');
   });
 });

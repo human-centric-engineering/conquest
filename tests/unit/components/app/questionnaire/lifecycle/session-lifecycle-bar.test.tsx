@@ -20,6 +20,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
       kind: 'offer',
       coverage: 0.9,
       displayCoverage: 0.9,
+      progressPct: 90,
       answeredCount: 3,
       requiredUnansweredKeys: [],
       capReached: false,
@@ -78,13 +79,32 @@ describe('SessionLifecycleBar', () => {
     );
   });
 
-  it('drives the bar off the graded displayCoverage, not the strict gate coverage', () => {
-    // A session mid-capture: strict gate at 0% but graded display shows tentative momentum.
+  it('drives the bar off the drawn progress figure, not the strict gate coverage', () => {
+    // A session mid-capture: strict gate at 0% but the drawn figure shows tentative momentum.
     renderBar({
-      view: view({ completion: { ...view().completion, coverage: 0, displayCoverage: 0.4 } }),
+      view: view({
+        completion: { ...view().completion, coverage: 0, displayCoverage: 0.4, progressPct: 40 },
+      }),
     });
     const bar = screen.getByRole('progressbar', { name: /questionnaire progress/i });
     expect(bar).toHaveAttribute('aria-valuenow', '40');
+  });
+
+  it('draws the held figure when Conditional Topics widened the interview (F17.33)', () => {
+    // The plan seated three topics, so the honest coverage fell from 29% to 13%. The bar shows the
+    // figure the respondent has already been given — a stall, never a reversal.
+    renderBar({
+      view: view({
+        completion: {
+          ...view().completion,
+          coverage: 0.13,
+          displayCoverage: 0.13,
+          progressPct: 29,
+        },
+      }),
+    });
+    const bar = screen.getByRole('progressbar', { name: /questionnaire progress/i });
+    expect(bar).toHaveAttribute('aria-valuenow', '29');
   });
 
   // The anonymity notice moved to the brand band above the conversation (under the questionnaire

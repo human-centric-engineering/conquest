@@ -110,6 +110,9 @@ function ctx(
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...over.config },
       abuseStrikes: 0,
       questions: resolvedQuestions,
+      // F17.33: the progress denominator. Same list here — the fixture is not a Conditional Topics
+      // session, which is where the two lists diverge.
+      progressQuestions: resolvedQuestions,
       answered: over.answered ?? [{ questionId: 'q1', confidence: 0.9 }],
       existingAnswers: [],
       recentMessages: [],

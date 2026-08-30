@@ -53,6 +53,10 @@ vi.mock('next/navigation', () => ({
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  // F17.33: the page reads the version's topics so the settings-conflict check can tell how much of
+  // the instrument is conditional. Defaults to a version with none, which is the shape of every
+  // case in this file.
+  getVersionTopicsCached: vi.fn<() => Promise<{ topics: unknown[] } | null>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -60,6 +64,26 @@ vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
 vi.mock('@/components/admin/questionnaires/advisor/advisor-panel', () => ({
   AdvisorPanel: () => <div data-testid="advisor-panel" />,
+}));
+
+// ─── Stub PolicyEvaluationCard — also a client component ───────────────────────
+// The two lookup maps it receives are built HERE, on the page, and they are what let the judges'
+// findings name a rule and a question instead of printing an opaque id or slot key. Rendering them
+// as data attributes is the only way to assert the page derived them, rather than the card.
+
+vi.mock('@/components/admin/questionnaires/policy-evaluation-card', () => ({
+  PolicyEvaluationCard: (props: {
+    ruleTextById: Record<string, string>;
+    questionPromptByKey: Record<string, string>;
+    formOnly: boolean;
+  }) => (
+    <div
+      data-testid="policy-evaluation-card"
+      data-rules={JSON.stringify(props.ruleTextById)}
+      data-questions={JSON.stringify(props.questionPromptByKey)}
+      data-form-only={String(props.formOnly)}
+    />
+  ),
 }));
 
 // ─── server-fetch mock ────────────────────────────────────────────────────────
@@ -287,6 +311,23 @@ function makeDemoClientApiRow(
 import SettingsTab from '@/app/admin/questionnaires/[id]/v/[vid]/settings/page';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
+/** A question in the version graph — only `key` and `prompt` matter to the maps under test. */
+const QUESTION_STUB: VersionGraphView['sections'][number]['questions'][number] = {
+  id: 'q-0',
+  ordinal: 0,
+  key: 'q_0',
+  prompt: '',
+  guidelines: null,
+  rationale: null,
+  type: 'free_text',
+  typeConfig: null,
+  required: true,
+  weight: 1,
+  fidelity: 3,
+  extractionConfidence: null,
+  tags: [],
+};
+
 function renderPage(opts: { id?: string; vid?: string } = {}) {
   return SettingsTab({
     params: Promise.resolve({ id: opts.id ?? 'qn-1', vid: opts.vid ?? 'ver-1' }),
@@ -299,6 +340,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+  workspaceDataMock.getVersionTopicsCached.mockResolvedValue({ topics: [] });
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: [] });
 });
@@ -482,5 +524,91 @@ describe('SettingsTab', () => {
       // Demo-client settings still render — a missing graph doesn't break the tab.
       expect(screen.getByTestId('demo-client-assign')).toBeInTheDocument();
     });
+  });
+});
+
+describe('SettingsTab — the lookup maps the policy panel is given', () => {
+  // Both maps are derived on the PAGE, not in the card. They exist so a judge finding can name the
+  // rule and the question it is about; without them the panel prints an opaque rule id and a slot
+  // key, which is the F18.8 finding the maps were added to fix.
+
+  it('maps every house rule id to its text, enabled or not', async () => {
+    // A disabled rule is still judged: it is in the editor, and an admin turning it on wants the
+    // review to already have covered it.
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({
+        config: {
+          ...makeGraph().config,
+          houseRules: {
+            enabled: true,
+            rules: [
+              { id: 'r1', kind: 'always', enabled: true, text: 'Confirm the spelling of names.' },
+              { id: 'r2', kind: 'never', enabled: false, text: 'Never quote a price.' },
+            ],
+          },
+        },
+      })
+    );
+
+    render(await renderPage());
+
+    const card = screen.getByTestId('policy-evaluation-card');
+    expect(JSON.parse(card.getAttribute('data-rules') ?? '{}')).toEqual({
+      r1: 'Confirm the spelling of names.',
+      r2: 'Never quote a price.',
+    });
+  });
+
+  it('flattens every section’s questions into one key → prompt map', async () => {
+    // Flattened across sections on purpose: a finding names a question, and the judge has no
+    // section to disambiguate with.
+    const base = makeGraph();
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({
+        sections: [
+          {
+            ...base.sections[0],
+            id: 'sec-1',
+            questions: [{ ...QUESTION_STUB, id: 'q-1', key: 'role', prompt: 'What is your role?' }],
+          },
+          {
+            ...base.sections[0],
+            id: 'sec-2',
+            title: 'Budget',
+            questions: [
+              { ...QUESTION_STUB, id: 'q-2', key: 'budget', prompt: 'What is your budget?' },
+            ],
+          },
+        ],
+      })
+    );
+
+    render(await renderPage());
+
+    const card = screen.getByTestId('policy-evaluation-card');
+    expect(JSON.parse(card.getAttribute('data-questions') ?? '{}')).toEqual({
+      role: 'What is your role?',
+      budget: 'What is your budget?',
+    });
+  });
+
+  it('hands over empty maps for a version with no rules and no questions', async () => {
+    render(await renderPage());
+
+    const card = screen.getByTestId('policy-evaluation-card');
+    expect(JSON.parse(card.getAttribute('data-rules') ?? 'null')).toEqual({});
+    expect(JSON.parse(card.getAttribute('data-questions') ?? 'null')).toEqual({});
+  });
+
+  it('tells the panel when the version never conducts an interview at all', async () => {
+    // Form mode: three of the four judges are about how the interviewer BEHAVES, and there is no
+    // interviewer. The panel needs to say so rather than score an arc nobody runs.
+    workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+      makeGraph({ config: { ...makeGraph().config, presentationMode: 'form' } })
+    );
+
+    render(await renderPage());
+
+    expect(screen.getByTestId('policy-evaluation-card')).toHaveAttribute('data-form-only', 'true');
   });
 });

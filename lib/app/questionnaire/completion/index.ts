@@ -46,3 +46,10 @@ export {
   milestoneMessage,
   type MilestoneOutcome,
 } from '@/lib/app/questionnaire/completion/milestones';
+
+export {
+  resolveDisplayedProgress,
+  progressPctFromCoverage,
+  PROGRESS_RATCHET_CEILING,
+  type ProgressOutcome,
+} from '@/lib/app/questionnaire/completion/progress';

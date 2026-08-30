@@ -94,6 +94,16 @@ export interface LoadedSessionExport {
    */
   notAssessed: NotAssessedTopic[];
   /**
+   * Conditional Topics (P17): the topics this interview covered IN FULL — in scope, with no member
+   * question left out. Empty for every non-adaptive session, and for a topic that was only sampled.
+   *
+   * The counterpart to {@link notAssessed}, and needed only by the run-level report (F15.4b), which
+   * merges several legs into one record. A topic one leg skipped may be a topic another leg assessed
+   * properly; fencing the writer off from it ("you know nothing whatsoever about this area") while
+   * the journey transcript is full of answers about it is worse than saying nothing at all.
+   */
+  assessedTopicLabels: string[];
+  /**
    * Conditional Topics (P17): which topic PHASE each in-scope key belongs to — `opening`, `core`,
    * `conditional` or `closing`. Empty for a version with no topics authored.
    *
@@ -274,6 +284,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
   // adaptive instrument's record: a report that silently omits what it skipped is a report that
   // implies it looked everywhere.
   const notAssessed: NotAssessedTopic[] = [];
+  const assessedTopicLabels: string[] = [];
   if (scoped.scope.active) {
     const countByTopic = new Map<string, number>();
     for (const section of row.version.sections) {
@@ -286,7 +297,13 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     }
     for (const topic of scoped.topics) {
       const questionCount = countByTopic.get(topic.key);
-      if (!questionCount) continue;
+      if (!questionCount) {
+        // Nothing left out AND in scope: this interview covered the topic in full. A topic that is
+        // out of scope entirely contributes no out-of-scope questions only when it has no members,
+        // so the `topicKeys` check is what keeps an empty topic out of the assessed list.
+        if (scoped.scope.topicKeys.has(topic.key)) assessedTopicLabels.push(topic.label);
+        continue;
+      }
       notAssessed.push({
         key: topic.key,
         label: topic.label,
@@ -372,6 +389,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     answers,
     dataSlotGroups,
     notAssessed,
+    assessedTopicLabels,
     phaseByQuestionKey,
     phaseByDataSlotKey,
     versionId: row.versionId,

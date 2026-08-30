@@ -27,6 +27,7 @@ import type {
   SessionStatus,
 } from '@/lib/app/questionnaire/types';
 import { ANSWER_PROVENANCES, QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import { sharedReason } from '@/lib/app/questionnaire/scope/reasons';
 import type {
   AnswerPanelView,
   PanelRefinementEntry,
@@ -53,6 +54,11 @@ export interface PanelSlotInput {
    */
   typeConfig?: unknown;
   required: boolean;
+  /**
+   * F17.33: why this question is in the respondent's interview, when Conditional Topics is what put
+   * it there. Absent on every question of an ordinary questionnaire, and on every always-run one.
+   */
+  addedReason?: string | null;
 }
 
 /** One captured answer, keyed back to its slot, as loaded from the session. */
@@ -127,6 +133,8 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
         slotKey: slot.slotKey,
         prompt: slot.prompt,
         type: asQuestionType(slot.type),
+        // Carried through unchanged; the section may absorb it below when every slot agrees.
+        ...(slot.addedReason ? { addedReason: slot.addedReason } : {}),
         typeConfig: slot.typeConfig ?? null,
         required: slot.required,
         answered,
@@ -143,7 +151,20 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
 
     // Drop sections that ended up with no rows (impossible in full_progress).
     if (slots.length === 0 && answeredOnlyProjection) continue;
-    sections.push({ sectionId: section.sectionId, title: section.title, slots });
+    // F17.33: one line under the heading when the whole section arrived together, rather than the
+    // same sentence repeated on every row. Computed over the slots the respondent will actually
+    // SEE, so a section whose added rows are filtered out by `answered_only` does not caption
+    // itself with an explanation for rows that are not on screen.
+    const shared = sharedReason(slots.map((slot) => slot.addedReason ?? null));
+    sections.push({
+      sectionId: section.sectionId,
+      title: section.title,
+      slots: shared
+        ? // The group says it once; the rows stop repeating it.
+          slots.map(({ addedReason: _absorbed, ...rest }) => rest)
+        : slots,
+      ...(shared ? { addedReason: shared } : {}),
+    });
   }
 
   return {

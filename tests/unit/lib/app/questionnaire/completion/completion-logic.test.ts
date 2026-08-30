@@ -81,6 +81,54 @@ describe('assessCompletion', () => {
     expect(a.displayCoverage).toBeCloseTo(a.coverage);
   });
 
+  /**
+   * F17.33: the progress figure's denominator is `progressQuestions`, the gate's is `questions`.
+   * They differ on exactly one kind of session — Conditional Topics, before the plan is decided —
+   * and the point of the split is that the split changes NOTHING a respondent is allowed to do.
+   */
+  describe('progressQuestions (F17.33)', () => {
+    it('measures displayCoverage against the wider progress set', () => {
+      const c = cctx({
+        // The interview as it stands: two always-run questions, both answered.
+        questions: [q({ id: 'a' }), q({ id: 'b' })],
+        // What could still be asked: two conditional topics' questions are yet to be decided.
+        progressQuestions: [q({ id: 'a' }), q({ id: 'b' }), q({ id: 'c' }), q({ id: 'd' })],
+        answered: [
+          { questionId: 'a', confidence: null },
+          { questionId: 'b', confidence: null },
+        ],
+      });
+      const a = assessCompletion(c);
+
+      // The bar under-reads (2 of 4) rather than showing a 100% that is about to become 50%.
+      expect(a.displayCoverage).toBeCloseTo(0.5);
+      // …and the GATE still sees a finished interview.
+      expect(a.coverage).toBeCloseTo(1);
+      expect(a.kind).toBe('offer');
+    });
+
+    it('leaves every gate figure byte-identical', () => {
+      const questions = [q({ id: 'a', required: true }), q({ id: 'b' })];
+      const answered = [{ questionId: 'a', confidence: null }];
+      const narrow = assessCompletion(cctx({ questions, answered }));
+      const wide = assessCompletion(
+        cctx({ questions, progressQuestions: [...questions, q({ id: 'c' })], answered })
+      );
+
+      expect({ ...wide, displayCoverage: narrow.displayCoverage }).toEqual(narrow);
+      expect(wide.displayCoverage).not.toBeCloseTo(narrow.displayCoverage);
+    });
+
+    it('falls back to `questions` when omitted — the behaviour of every version that never opted in', () => {
+      const questions = [q({ id: 'a' }), q({ id: 'b' })];
+      const answered = [{ questionId: 'a', confidence: null }];
+
+      expect(assessCompletion(cctx({ questions, answered }))).toEqual(
+        assessCompletion(cctx({ questions, progressQuestions: questions, answered }))
+      );
+    });
+  });
+
   it('counts the same answer once it is corroborated above the floor', () => {
     const c = cctx({
       questions: [q({ id: 'a' }), q({ id: 'b' })],

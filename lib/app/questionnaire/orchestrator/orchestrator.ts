@@ -28,6 +28,10 @@ import {
   resolveMilestoneCrossing,
 } from '@/lib/app/questionnaire/completion/milestones';
 import {
+  progressPctFromCoverage,
+  resolveDisplayedProgress,
+} from '@/lib/app/questionnaire/completion/progress';
+import {
   runContradictionPhase,
   questionProbeLabels,
   MIN_CONTRADICTION_ANSWERS as MIN_CONTRADICTION_ANSWERS_INTERNAL,
@@ -350,6 +354,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     answered: effective.answered,
     config: effective.config,
     sessionId: effective.sessionId,
+    // F17.33: the progress figure's denominator, which differs from the gate's only on a
+    // Conditional Topics session whose plan is not yet decided. Every gate below reads `questions`.
+    progressQuestions: effective.progressQuestions,
   });
 
   // 5b. Completeness milestones: a quiet inline banner the first time the respondent crosses a
@@ -377,6 +384,25 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       message: milestoneMessage(milestone.coveragePct),
     });
   }
+
+  // 5c. The progress floor (F17.33). Banked here, on the turn path, because the read path that
+  // actually draws the bar is a GET and must not write; nothing moves the coverage between turns,
+  // so a floor banked at the end of this turn is current when the next status poll reads it.
+  //
+  // Skipped on a probe turn for the same reason the milestone is: `effective` merged intents that
+  // `suppressWrites` means are never persisted, and a floor is permanent — holding the bar up on an
+  // answer that is about to be rolled back would be the one way this feature could overstate
+  // progress rather than merely delay it.
+  //
+  // Deliberately fed `assessment.displayCoverage`, the un-ratcheted truth: a floor is only ever
+  // derived from the honest figure, never from a previous floor, so it can only record a figure the
+  // respondent genuinely reached.
+  const progress = contradiction.suppressWrites
+    ? { pct: 0, progressFloorPct: undefined }
+    : resolveDisplayedProgress(
+        progressPctFromCoverage(assessment.displayCoverage),
+        state.progressFloorPct ?? 0
+      );
 
   // Soft cost cap (F6.3): bias toward offering completion early so the session winds down
   // before the hard cap, and tag the offer prose with a wrap-up instruction. Only overrides
@@ -477,6 +503,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         : {}),
       ...(milestone.raisedMilestones !== undefined
         ? { raisedMilestones: milestone.raisedMilestones }
+        : {}),
+      ...(progress.progressFloorPct !== undefined
+        ? { progressFloorPct: progress.progressFloorPct }
         : {}),
     },
     events,
