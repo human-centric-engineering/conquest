@@ -250,6 +250,48 @@ in the phase where a mistake would matter, and it needs a test that fails if the
 **Done when** the three stage-1 calls overlap, the merge is unchanged, and a test proves a
 speculative non-serious verdict is discarded when sensitivity fires.
 
+### Shipped 2026-08-30 — A1 only. **A2 is blocked on a decision, not on work.**
+
+Tracker: [`f20.3.md`](./features/f20.3.md).
+
+**A1 is done.** Extraction and sensitivity detection now overlap in both orchestrators. No input, no
+prompt and no verdict changed; `toolCalls` are still recorded in their original order because that is
+a read surface. Projected saving from the F20.1 sample: **~279 ms/turn**, the smaller of the two.
+
+**A2 was not built, because it cannot be built without relaxing a guarantee this plan misread.**
+
+The plan assumed the safeguarding invariant was about the OUTCOME — "a disclosure is never struck" —
+and that speculation would therefore be fine as long as the verdict was discarded. Reading the tests
+showed the guarantee is stronger and deliberate: three of them assert `calls.serious` is **zero** on a
+disclosure turn, one named _"neither struck nor judged"_. The disclosure is never sent to the
+sincerity judge **at all**.
+
+That cannot be preserved under speculation. Whether a turn carries a disclosure is not knowable until
+the extractor and the detector return, and either can be the one that flags it:
+
+- the deterministic keyword floor — knowable up front, so speculation could skip those turns;
+- the **dedicated detector** — knowable only after it returns;
+- the **extractor's own `sensitivity` field** — knowable only after extraction returns.
+
+There is no configuration in which speculation is provably safe, because the extractor's field gates
+even when the sensitivity feature is off. Adding the judge to the batch fails **ten** tests across
+both orchestrators, including all three safeguarding guarantees.
+
+So A2 is a values question, not an engineering one:
+
+| Option                    | Saving/turn | What changes                                                                                         |
+| ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
+| **Leave it** (current)    | 0 (A1 only) | Nothing. The guarantee stands as written.                                                            |
+| **Relax to outcome-only** | ~371 ms     | A disclosure may be sent to the sincerity judge; its verdict is discarded. 3 tests + the doc change. |
+
+Arguments for relaxing: no additional data leaves the system (the same message already goes to the
+extractor, the detector and the phraser, same provider), and the respondent suffers no consequence
+because the verdict is thrown away. Argument against: the guarantee was written down deliberately,
+tested three ways, and "we send your abuse disclosure to a sincerity judge and ignore the answer" is
+a sentence somebody may one day have to defend.
+
+**Recommendation: leave it.** ~371 ms is ~7% of a turn, and Phase 4 targets a stage worth 46%.
+
 ---
 
 ## 6. Phase 4 — Prompt-cache prefix ordering (A3)

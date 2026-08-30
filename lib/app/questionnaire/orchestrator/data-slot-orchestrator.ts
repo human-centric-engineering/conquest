@@ -256,47 +256,62 @@ export async function runDataSlotTurn(
   // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
   let extractedSensitivity: SensitivityAssessment | undefined;
 
-  // 1. Combined extraction — question answers (background) + data-slot fills (respondent-facing).
-  if (hasMessage) {
-    // Covers steps 1 → 1.5, as in question mode: extraction, sensitivity and the seriousness judge
-    // all read what the respondent just said, and announce as one sentence.
-    onStage?.('reading');
-    const out = await invokers.extractAnswers(state);
-    costUsd += out.costUsd;
+  // 1 + 1.4 — the two calls that READ what the respondent just said, launched TOGETHER (P20 A1),
+  // exactly as in question mode.
+  //
+  //   1.   Combined extraction — question answers (background) + data-slot fills
+  //        (respondent-facing).
+  //   1.4  Sensitivity detection (safeguarding). The extractor's optional `sensitivity` field gets
+  //        dropped non-deterministically on busy turns, so when the feature is on we ALSO run a
+  //        dedicated detector AND a deterministic keyword floor, and merge all three (strongest
+  //        signal wins).
+  //
+  // Independent of each other — the detector reads only `state` and the message, and
+  // `mergeSensitivitySignals` combines the results afterwards whichever order they land in. The
+  // seriousness judge (1.5) stays serial: it must never SEE a disclosure, and whether this turn is
+  // one is unknown until both of these return.
+  const runExtraction = hasMessage;
+  const runDetection = hasMessage && state.config.sensitivityAwareness;
+  // Covers steps 1 -> 1.5, as in question mode: extraction, sensitivity and the seriousness judge
+  // all read what the respondent just said, and announce as one sentence.
+  if (runExtraction) onStage?.('reading');
+  const [extraction, detection] = await Promise.all([
+    runExtraction ? invokers.extractAnswers(state) : null,
+    runDetection ? invokers.detectSensitivity(state) : null,
+  ]);
+
+  // Recorded in the ORIGINAL sequence so the persisted `toolCalls` order is unchanged.
+  if (extraction) {
+    costUsd += extraction.costUsd;
     toolCalls.push(
-      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, out.diagnostic === undefined, {
-        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
+      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, extraction.diagnostic === undefined, {
+        ...(extraction.latencyMs !== undefined ? { latencyMs: extraction.latencyMs } : {}),
       })
     );
-    answerUpserts.push(...out.intents);
-    dataSlotFills = out.dataSlotFills ?? [];
-    extractedSensitivity = out.sensitivity;
-    if (out.diagnostic !== undefined) {
+    answerUpserts.push(...extraction.intents);
+    dataSlotFills = extraction.dataSlotFills ?? [];
+    extractedSensitivity = extraction.sensitivity;
+    if (extraction.diagnostic !== undefined) {
       events.push({
         type: 'warning',
-        code: out.diagnostic,
+        code: extraction.diagnostic,
         message: "I couldn't quite capture that — let's keep going.",
       });
     }
   }
 
-  // 1.4 Sensitivity detection (safeguarding), parity with question mode. The extractor's optional
-  //     `sensitivity` field gets dropped non-deterministically on busy turns, so when the feature is
-  //     on we ALSO run a dedicated detector AND a deterministic keyword floor and merge all three
-  //     (strongest signal wins). Runs before the gate so its `!extractedSensitivity` guard sees the
-  //     combined result — a genuine disclosure is never judged for sincerity or struck.
-  if (hasMessage && state.config.sensitivityAwareness) {
-    const detected = await invokers.detectSensitivity(state);
-    costUsd += detected.costUsd;
+  // The merge is what makes the concurrency safe: the gate below reads only the combined result.
+  if (detection) {
+    costUsd += detection.costUsd;
     toolCalls.push(
-      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detected.diagnostic === undefined, {
-        ...(detected.diagnostic !== undefined ? { code: detected.diagnostic } : {}),
-        ...(detected.latencyMs !== undefined ? { latencyMs: detected.latencyMs } : {}),
+      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detection.diagnostic === undefined, {
+        ...(detection.diagnostic !== undefined ? { code: detection.diagnostic } : {}),
+        ...(detection.latencyMs !== undefined ? { latencyMs: detection.latencyMs } : {}),
       })
     );
     extractedSensitivity = mergeSensitivitySignals(
       extractedSensitivity,
-      detected.assessment,
+      detection.assessment,
       keywordSensitivityFloor(state.userMessage)
     );
   }

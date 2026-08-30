@@ -196,52 +196,72 @@ export async function runTurn(
   // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
   let extractedSensitivity: SensitivityAssessment | undefined;
 
-  // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
-  //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
-  //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
-  if (hasMessage) {
-    // One sentence covers steps 1 → 1.5: extraction, sensitivity detection and the seriousness
-    // judge all read what the respondent just said. See `TURN_STAGES` for why it is not three.
-    onStage?.('reading');
-    const out = await invokers.extractAnswers(state);
-    costUsd += out.costUsd;
+  // 1 + 1.4 — the two calls that READ what the respondent just said, launched TOGETHER (P20 A1).
+  //
+  //   1.   Extract answer slots. The extractor also emits a `suspectedNonGenuine` hint, but it
+  //        proved an unreliable GATE (an optional flag the model often omits even for blatant
+  //        abuse) — so it is no longer what decides whether the judge runs; see 1.5.
+  //   1.4  Sensitivity detection (safeguarding). Detection is too important to ride solely on the
+  //        extractor's optional `sensitivity` field — it gets dropped non-deterministically on busy
+  //        turns (the same failure the `suspectedNonGenuine` hint showed), so a real disclosure
+  //        ("i'm being abused by my manager") can go unflagged and no support is signposted. When
+  //        the feature is on we ALSO run a dedicated single-purpose detector AND a deterministic
+  //        keyword floor, and merge all three (strongest signal wins).
+  //
+  // These were serial purely by CODE ORDER. The detector takes nothing from the extractor: both
+  // read only `state` and the message, and `mergeSensitivitySignals` combines their results
+  // afterwards regardless of which finished first. Overlapping them removes a whole model
+  // round-trip from every turn of a sensitivity-aware questionnaire, while changing no input, no
+  // prompt and no verdict.
+  //
+  // The seriousness judge (1.5) is deliberately NOT in this batch, though it would save another
+  // round-trip: it must never SEE a disclosure, and whether this turn is one is not known until
+  // both of the above have returned. See the gate's own comment.
+  const runExtraction = hasMessage;
+  const runDetection = hasMessage && state.config.sensitivityAwareness;
+  // One sentence covers steps 1 -> 1.5: extraction, sensitivity detection and the seriousness
+  // judge all read what the respondent just said. See `TURN_STAGES` for why it is not three.
+  if (runExtraction) onStage?.('reading');
+  const [extraction, detection] = await Promise.all([
+    runExtraction ? invokers.extractAnswers(state) : null,
+    runDetection ? invokers.detectSensitivity(state) : null,
+  ]);
+
+  // Recorded in the ORIGINAL sequence, so the persisted `toolCalls` order is unchanged by the
+  // concurrency — it is a read surface (Diagnostics, the turn record) that callers order-match.
+  if (extraction) {
+    costUsd += extraction.costUsd;
     toolCalls.push(
-      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, out.diagnostic === undefined, {
-        ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
-        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
+      toolCall(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG, extraction.diagnostic === undefined, {
+        ...(extraction.diagnostic !== undefined ? { code: extraction.diagnostic } : {}),
+        ...(extraction.latencyMs !== undefined ? { latencyMs: extraction.latencyMs } : {}),
       })
     );
-    answerUpserts.push(...out.intents);
-    extractedSensitivity = out.sensitivity;
-    if (out.diagnostic !== undefined) {
+    answerUpserts.push(...extraction.intents);
+    extractedSensitivity = extraction.sensitivity;
+    if (extraction.diagnostic !== undefined) {
       events.push({
         type: 'warning',
-        code: out.diagnostic,
+        code: extraction.diagnostic,
         message: "I couldn't capture an answer from that — we can revisit it.",
       });
     }
   }
 
-  // 1.4 Sensitivity detection (safeguarding). Detection is too important to ride solely on the
-  //     answer-extractor's optional `sensitivity` field — it gets dropped non-deterministically on
-  //     busy turns (the same failure the seriousness gate's `suspectedNonGenuine` hint showed), so a
-  //     real disclosure ("i'm being abused by my manager") can go unflagged and no support is
-  //     signposted. So when the feature is on we ALSO run a dedicated single-purpose detector AND a
-  //     deterministic keyword floor, and merge all three (strongest signal wins). This runs BEFORE
-  //     the seriousness gate so its `!extractedSensitivity` guard sees the combined result — a
-  //     genuine disclosure must never be judged for sincerity or struck.
-  if (hasMessage && state.config.sensitivityAwareness) {
-    const detected = await invokers.detectSensitivity(state);
-    costUsd += detected.costUsd;
+  // The merge is what makes the concurrency safe: the detector's verdict, the extractor's own
+  // field and the deterministic keyword net are combined here (strongest wins), and the seriousness
+  // gate below reads only the combined result.
+  if (detection) {
+    costUsd += detection.costUsd;
     toolCalls.push(
-      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detected.diagnostic === undefined, {
-        ...(detected.diagnostic !== undefined ? { code: detected.diagnostic } : {}),
-        ...(detected.latencyMs !== undefined ? { latencyMs: detected.latencyMs } : {}),
+      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detection.diagnostic === undefined, {
+        ...(detection.diagnostic !== undefined ? { code: detection.diagnostic } : {}),
+        ...(detection.latencyMs !== undefined ? { latencyMs: detection.latencyMs } : {}),
       })
     );
     extractedSensitivity = mergeSensitivitySignals(
       extractedSensitivity, // the answer-extractor's field (may be undefined)
-      detected.assessment, // the dedicated detector
+      detection.assessment, // the dedicated detector
       keywordSensitivityFloor(state.userMessage) // the deterministic net
     );
   }
