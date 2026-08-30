@@ -250,3 +250,159 @@ describe('buildJudgePrompt — with no routing overlay', () => {
     expect(user).toMatch(/\[key=q_role\] \(type=free_text, required\) /);
   });
 });
+
+/**
+ * The prompt WITH the routing overlay (F17.34).
+ *
+ * The rules here are scoped to three dimensions and only appear when Conditional Topics is actually
+ * configured. Both halves of that are asserted: a rule reaching a dimension it is not for is
+ * attention spent for nothing, and a rule reaching a version that does not route is a claim about a
+ * feature the questionnaire has not got.
+ */
+describe('buildJudgePrompt — with the routing overlay', () => {
+  const ROUTED: VersionStructureInput = {
+    goal: 'Understand how the team is performing',
+    audience: null,
+    routing: {
+      enabled: true,
+      maxConditionalTopics: 3,
+      topics: [
+        { key: 'opening', label: 'Opening', phase: 'opening', depth: 'full', questionCount: 1 },
+        {
+          key: 'depth',
+          label: 'Talent depth',
+          phase: 'conditional',
+          depth: 'light',
+          questionCount: 1,
+        },
+      ],
+      conditionalQuestionCount: 1,
+    },
+    sections: [
+      {
+        title: 'Start',
+        questions: [
+          {
+            key: 'q_broad',
+            prompt: 'What is going well and what is not?',
+            type: 'free_text',
+            required: true,
+            topicKeys: ['opening'],
+          },
+          {
+            key: 'q_deep',
+            prompt: 'What is hard about hiring right now?',
+            type: 'free_text',
+            required: false,
+            topicKeys: ['depth'],
+          },
+          {
+            key: 'q_orphan',
+            prompt: 'Anything else?',
+            type: 'free_text',
+            required: false,
+            topicKeys: [],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('frames routing above the structure and states the proportion', () => {
+    // The ratio, not just the rule: a judge told how much of the instrument is conditional
+    // calibrates severity far better than one handed a rule alone.
+    const user = buildJudgePrompt('duplicates', ROUTED)[1].content;
+
+    expect(user).toContain('ROUTING — this questionnaire does not ask all of itself to everyone.');
+    expect(user).toContain('1 of the 3 question(s) below are in an "asked-when-it-fits" topic');
+  });
+
+  it('mentions the per-interview cap only where it can actually bind', () => {
+    // "At most 3 of them are chosen" beside a single conditional topic is incoherent, and a frame
+    // a judge half-disbelieves is worse than a shorter one it can take at face value.
+    expect(buildJudgePrompt('duplicates', ROUTED)[1].content).not.toContain('At most');
+
+    const capped: VersionStructureInput = {
+      ...ROUTED,
+      routing: {
+        ...ROUTED.routing!,
+        maxConditionalTopics: 1,
+        topics: [
+          ...ROUTED.routing!.topics,
+          { key: 'other', label: 'Other', phase: 'conditional', depth: 'full', questionCount: 0 },
+        ],
+      },
+    };
+    expect(buildJudgePrompt('duplicates', capped)[1].content).toContain(
+      'At most 1 of them are chosen for any one respondent.'
+    );
+  });
+
+  it('lists the topics with their plain-English phase and size', () => {
+    const user = buildJudgePrompt('duplicates', ROUTED)[1].content;
+
+    expect(user).toContain('Opening (opening) — opening, 1 question(s)');
+    expect(user).toContain('Talent depth (depth) — asked-when-it-fits, 1 question(s)');
+    // A light topic says so, because "deleting this guts the topic" is judged on it.
+    expect(user).toContain('only the most important few are asked');
+  });
+
+  it('annotates each question with its topic in the same words the rule uses', () => {
+    const user = buildJudgePrompt('duplicates', ROUTED)[1].content;
+
+    expect(user).toContain('[key=q_broad] (type=free_text, required, topic=opening/opening)');
+    expect(user).toContain(
+      '[key=q_deep] (type=free_text, optional, topic=depth/asked-when-it-fits)'
+    );
+  });
+
+  it('says outright that a question in no topic can never be asked', () => {
+    const user = buildJudgePrompt('duplicates', ROUTED)[1].content;
+
+    expect(user).toContain('topic=NONE — never asked while routing is on');
+  });
+
+  it('gives the Duplicates judge the co-occurrence rule, and the scale line that protects the score', () => {
+    const system = buildJudgePrompt('duplicates', ROUTED)[0].content;
+
+    expect(system).toContain('CO-OCCURRENCE');
+    expect(system).toContain(
+      'Two questions are only duplicates if the SAME respondent is asked both'
+    );
+    expect(system).toContain('Never propose delete_question for it');
+    expect(system).toContain('does not lower the score');
+  });
+
+  it('gives Ordering and Goal-Match their own routing rules', () => {
+    expect(buildJudgePrompt('ordering', ROUTED)[0].content).toContain(
+      'the phases ARE the sequence'
+    );
+    expect(buildJudgePrompt('goal_match', ROUTED)[0].content).toContain(
+      'a narrow question is not automatically off-mission'
+    );
+  });
+
+  it('gives the co-occurrence rule to Duplicates and to no other dimension', () => {
+    for (const dimension of EVALUATION_DIMENSIONS) {
+      const system = buildJudgePrompt(dimension, ROUTED)[0].content;
+      if (dimension === 'duplicates') expect(system).toContain('CO-OCCURRENCE');
+      else expect(system).not.toContain('CO-OCCURRENCE');
+    }
+  });
+
+  it('leaves the four uninvolved dimensions’ system prompts exactly as they were', () => {
+    // Clarity, Coverage, Type-Fit and Audience-Match judge things routing does not change. Adding a
+    // paragraph to them would cost attention on every routed questionnaire and buy nothing.
+    for (const dimension of ['clarity', 'coverage', 'type_fit', 'audience_match'] as const) {
+      expect(buildJudgePrompt(dimension, ROUTED)[0].content).toEqual(
+        buildJudgePrompt(dimension, STRUCTURE)[0].content
+      );
+    }
+  });
+
+  it('tells the Duplicates judge to narrow rather than delete inside a conditional topic', () => {
+    const system = buildJudgePrompt('duplicates', ROUTED)[0].content;
+
+    expect(system).toContain('prefer `replace_prompt` over deleting');
+  });
+});

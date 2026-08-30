@@ -53,7 +53,7 @@ export const EVALUATION_DIMENSION_SPECS = {
     slug: 'app-questionnaire-judge-duplicates',
     label: 'Duplicates Judge',
     summary:
-      'Scores whether questions are distinct, flagging redundant or substantially overlapping questions across sections.',
+      'Scores whether questions are distinct, flagging redundant or substantially overlapping questions across sections — counting an overlap only where the same respondent would be asked both.',
   },
   type_fit: {
     slug: 'app-questionnaire-judge-type-fit',
