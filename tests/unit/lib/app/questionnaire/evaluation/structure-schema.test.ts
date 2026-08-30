@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_EVAL_SECTIONS,
   MAX_EVAL_QUESTIONS_PER_SECTION,
+  MAX_EVAL_TOPICS,
+  MAX_EVAL_TOPICS_PER_QUESTION,
   parseAudienceShape,
   versionStructureSchema,
 } from '@/lib/app/questionnaire/evaluation';
@@ -95,5 +97,82 @@ describe('versionStructureSchema', () => {
       sections: [{ title: 'S', questions }],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+/**
+ * The routing overlay's contract (F17.34).
+ *
+ * `versionStructureSchema` has two jobs, and they pull in different directions: it validates the
+ * `evaluate-structure` capability's `structure` argument (an external boundary, so everything needs
+ * a bound), and it parses a stored `structureSnapshot` (where a failure degrades the WHOLE snapshot
+ * to null and silently switches that run's staleness derivation off). Both are asserted here.
+ */
+describe('versionStructureSchema — the routing overlay', () => {
+  const base = { goal: 'g', audience: null, sections: [] };
+
+  const routing = {
+    enabled: true,
+    maxConditionalTopics: 3,
+    topics: [{ key: 't', label: 'T', phase: 'conditional', depth: 'light', questionCount: 2 }],
+    conditionalQuestionCount: 2,
+  };
+
+  it('parses a structure carrying the overlay', () => {
+    const parsed = versionStructureSchema.safeParse({ ...base, routing });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('parses a pre-F17.34 snapshot that has no overlay at all', () => {
+    // The whole reason `routing` is optional: a required field here would fail every run created
+    // before the overlay existed, and `parseStructureSnapshot` degrades a failure to null.
+    const parsed = versionStructureSchema.safeParse(base);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).not.toHaveProperty('routing');
+  });
+
+  it('accepts a phase this build does not know, rather than failing the whole snapshot', () => {
+    // `phase` is a string, not a z.enum, precisely so a renamed phase costs one field's meaning
+    // instead of a run's entire staleness derivation.
+    const parsed = versionStructureSchema.safeParse({
+      ...base,
+      routing: { ...routing, topics: [{ ...routing.topics[0], phase: 'some_future_phase' }] },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('bounds the topic roster', () => {
+    const tooMany = Array.from({ length: MAX_EVAL_TOPICS + 1 }, (_, i) => ({
+      key: `t${i}`,
+      label: 'T',
+      phase: 'core',
+      depth: 'full',
+      questionCount: 0,
+    }));
+    expect(
+      versionStructureSchema.safeParse({ ...base, routing: { ...routing, topics: tooMany } })
+        .success
+    ).toBe(false);
+  });
+
+  it('bounds how many topics one question may name', () => {
+    const question = {
+      key: 'q',
+      prompt: 'p',
+      type: 'free_text',
+      required: false,
+      topicKeys: Array.from({ length: MAX_EVAL_TOPICS_PER_QUESTION + 1 }, (_, i) => `t${i}`),
+    };
+    expect(
+      versionStructureSchema.safeParse({
+        ...base,
+        sections: [{ title: 'S', questions: [question] }],
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects an overlay missing its counts', () => {
+    const { conditionalQuestionCount: _drop, ...incomplete } = routing;
+    expect(versionStructureSchema.safeParse({ ...base, routing: incomplete }).success).toBe(false);
   });
 });

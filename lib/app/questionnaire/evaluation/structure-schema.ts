@@ -33,12 +33,45 @@ export const audienceShapeSchema = z.object({
   notes: z.string().optional(),
 });
 
+/**
+ * Caps on the routing overlay, in the spirit of the two above: generous for a real questionnaire,
+ * bounded against abuse. `versionStructureSchema` validates the `evaluate-structure` capability's
+ * `structure` argument, so this is an external boundary and every list on it needs a bound.
+ */
+export const MAX_EVAL_TOPICS = 200;
+export const MAX_EVAL_TOPICS_PER_QUESTION = 20;
+
 export const structureQuestionSchema = z.object({
   key: z.string().min(1),
   prompt: z.string(),
   type: z.string(),
   required: z.boolean(),
   guidelines: z.string().optional(),
+  topicKeys: z.array(z.string().min(1)).max(MAX_EVAL_TOPICS_PER_QUESTION).optional(),
+});
+
+/**
+ * One topic in the routing roster.
+ *
+ * `phase` and `depth` are plain strings rather than `z.enum(TOPIC_PHASES)` / `z.enum(TOPIC_DEPTHS)`.
+ * That is the load-bearing choice here: this schema also parses a stored `structureSnapshot`, and
+ * `parseStructureSnapshot` degrades the WHOLE snapshot to `null` on any failure — so an enum would
+ * turn one renamed phase into silently-disabled staleness on every historical run. The reader
+ * narrows with `narrowToEnum` instead, degrading one field rather than the document.
+ */
+export const structureTopicSchema = z.object({
+  key: z.string().min(1),
+  label: z.string(),
+  phase: z.string(),
+  depth: z.string(),
+  questionCount: z.number().int().nonnegative(),
+});
+
+export const structureRoutingSchema = z.object({
+  enabled: z.boolean(),
+  maxConditionalTopics: z.number().int().nonnegative(),
+  topics: z.array(structureTopicSchema).max(MAX_EVAL_TOPICS),
+  conditionalQuestionCount: z.number().int().nonnegative(),
 });
 
 export const structureSectionSchema = z.object({
@@ -58,6 +91,10 @@ export const versionStructureSchema = z.object({
   goal: z.string().nullable(),
   audience: audienceShapeSchema.nullable(),
   sections: z.array(structureSectionSchema).max(MAX_EVAL_SECTIONS),
+  // Optional, which is also what keeps every run created before F17.34 readable: a required field
+  // here would fail `parseStructureSnapshot` on each of them and silently switch their staleness
+  // derivation off.
+  routing: structureRoutingSchema.optional(),
 }) satisfies z.ZodType<VersionStructureInput>;
 
 /**

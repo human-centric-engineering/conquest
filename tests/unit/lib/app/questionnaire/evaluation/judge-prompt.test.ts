@@ -221,3 +221,32 @@ describe('buildJudgeRetryMessage', () => {
     expect(buildJudgeRetryMessage(['score'])).not.toContain('Keep the response short');
   });
 });
+
+/**
+ * The inert-by-construction gate (F17.34).
+ *
+ * The routing overlay is optional and absent on every questionnaire that does not use Conditional
+ * Topics — which is most of them. This pins that absence: a structure with no `routing` block must
+ * produce exactly the prompt it produced before the overlay existed, for every dimension. If this
+ * fails, the feature has leaked a sentence about routing into prompts for questionnaires that have
+ * none, and every score in the product moved.
+ */
+describe('buildJudgePrompt — with no routing overlay', () => {
+  it('says nothing about routing, on any dimension', () => {
+    // Asserted on the overlay's own markers, not the bare word "topic": the Coverage rubric has
+    // always said "name the missing topic" in ordinary English, and always should.
+    for (const dimension of EVALUATION_DIMENSIONS) {
+      const [system, user] = buildJudgePrompt(dimension, STRUCTURE);
+      expect(system.content).not.toMatch(/CO-OCCURRENCE/);
+      expect(system.content).not.toMatch(/asked when it fits/i);
+      expect(user.content).not.toMatch(/topic=/);
+      expect(user.content).not.toMatch(/^ROUTING/m);
+    }
+  });
+
+  it('renders questions with the same flags line as before the overlay', () => {
+    const user = buildJudgePrompt('duplicates', STRUCTURE)[1].content;
+    // `type=…, required` and nothing appended — the shape every existing assertion depends on.
+    expect(user).toMatch(/\[key=q_role\] \(type=free_text, required\) /);
+  });
+});

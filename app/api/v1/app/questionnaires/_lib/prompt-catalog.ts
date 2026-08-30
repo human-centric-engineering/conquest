@@ -231,12 +231,14 @@ const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
           type: 'likert',
           required: true,
           guidelines: '{{ what a good answer looks like }}',
+          topicKeys: ['opening'],
         },
         {
           key: 'q2',
           prompt: '{{ question 2 }}',
           type: 'free_text',
           required: false,
+          topicKeys: ['opening'],
         },
       ],
     },
@@ -248,10 +250,35 @@ const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
           prompt: '{{ question 3 }}',
           type: 'boolean',
           required: false,
+          topicKeys: ['depth_topic'],
         },
       ],
     },
   ],
+  // Shown ON, because the catalogue exists to let an operator read what a judge actually receives —
+  // and the routing block is the half that is easy to forget exists. A version with Conditional
+  // Topics off simply omits it, and the prompt reverts to its pre-F17.34 shape.
+  routing: {
+    enabled: true,
+    maxConditionalTopics: 3,
+    topics: [
+      {
+        key: 'opening',
+        label: '{{ opening topic }}',
+        phase: 'opening',
+        depth: 'full',
+        questionCount: 2,
+      },
+      {
+        key: 'depth_topic',
+        label: '{{ conditional topic }}',
+        phase: 'conditional',
+        depth: 'full',
+        questionCount: 1,
+      },
+    ],
+    conditionalQuestionCount: 1,
+  },
 };
 
 const SAMPLE_DATA_SLOT_STRUCTURE = {
