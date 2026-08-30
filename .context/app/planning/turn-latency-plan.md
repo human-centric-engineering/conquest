@@ -119,6 +119,42 @@ effort is spent.
 **Done when** an admin can open a version's Diagnostics and read, per stage, how many calls ran, how
 long they took at avg and p95, and how much of the turn was not a model call at all.
 
+### Shipped 2026-08-30 — and the first reading
+
+`getStageLatency` + the **Where the time goes** panel. Tracker: [`f20.1.md`](./features/f20.1.md).
+
+Run against the dev database over every non-preview session (**10 turns — a small sample from one
+data-slot-mode questionnaire; treat the shape as indicative, not the population**):
+
+| Stage                      | Per turn     | Avg call | Calls |
+| -------------------------- | ------------ | -------- | ----- |
+| Interviewer phrasing       | **2,334 ms** | 2,334 ms | 10    |
+| Answer extraction          | 879 ms       | 2,196 ms | 4     |
+| Adaptive data-slot ranking | 598 ms       | 1,494 ms | 4     |
+| Data-slot selector         | 500 ms       | 1,249 ms | 4     |
+| Seriousness judge          | 371 ms       | 1,237 ms | 3     |
+| Sensitivity detection      | 279 ms       | 696 ms   | 4     |
+| **Not in a model call**    | **133 ms**   | —        | —     |
+
+Average turn: **5.1 s end to end.**
+
+Three findings, and they set up everything below:
+
+1. **The residual is 2.6%.** The turn is model-bound almost end to end. Phases 3 and 4 are aimed at
+   the right thing, and the "stop and re-plan" branch in §7 does not fire.
+2. **Interviewer phrasing is the single largest stage — 46% of the turn.** It is also the _last_
+   stage, and the one whose first token ends the wait. That makes Phase 4 (prompt-cache prefix
+   ordering, which acts on time-to-first-token) the highest-value item on the list, not the
+   afterthought it was ordered as.
+3. **The three Phase 3 candidates cost ~1.53 s/turn between them** (extraction 879 + seriousness 371
+   - sensitivity 279). Overlapping them leaves the slowest, ~879 ms — an expected saving of
+     **~650 ms/turn**, about 13% of the turn, for a change that alters no prompt and no output.
+
+One thing the sample raises that the plan did not anticipate: **the data-slot ranking and selector
+together cost ~1.1 s/turn**, comparable to all three Phase 3 candidates. They are not in scope and
+should not be pulled in without measuring a question-mode session for comparison — but they are
+worth a look once the shipped phases are re-measured on real traffic.
+
 ---
 
 ## 4. Phase 2 — The honest wait (B1 + B3)

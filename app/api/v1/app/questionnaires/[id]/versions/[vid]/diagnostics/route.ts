@@ -3,7 +3,8 @@
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/diagnostics
  *   Admin-only. Aggregate telemetry (tokens, response time, cost) + error tallies for the version
- *   over the window, plus one row per invitation. Query params: `from`/`to` (YYYY-MM-DD, default
+ *   over the window, one row per invitation, and the per-stage latency split (`stageLatency` —
+ *   where a turn's wall-clock actually goes). Query params: `from`/`to` (YYYY-MM-DD, default
  *   last 30 days), `roundId` (optional round scope). Read-only and version-scoped (error capture is
  *   always-on, the tab is gated on liveSessions in UI).
  */

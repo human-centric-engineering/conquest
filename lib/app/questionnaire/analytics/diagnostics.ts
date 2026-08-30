@@ -27,6 +27,8 @@ import type {
   DiagnosticsSessionDetail,
   DiagnosticsTurnRow,
   DiagnosticsErrorRow,
+  StageLatencyRow,
+  StageLatencyBreakdown,
   VersionDiagnosticsResult,
 } from '@/lib/app/questionnaire/analytics/views';
 
@@ -60,6 +62,145 @@ type TelemetryAgg = {
   avgTurnMs: number | null;
   lastTurnAt: Date | null;
 };
+
+/* ── Where a turn's time goes (P20 Phase 1) ───────────────────────────────── */
+
+/**
+ * The per-call traces, unnested. `inspectorCalls` is a `jsonb` array on every turn and is written
+ * for EVERY session (only the SSE emission to the admin drawer is preview-gated), so this reads
+ * telemetry that is already on disk — no schema change, no migration, nothing new to capture.
+ *
+ * The `CASE` guard is defensive: `jsonb_array_elements` raises on a non-array, which would take out
+ * the whole Diagnostics page for one malformed row. The column is `NOT NULL DEFAULT '[]'`, so this
+ * should never fire.
+ */
+const UNNESTED_CALLS = `jsonb_array_elements(
+  CASE WHEN jsonb_typeof(t."inspectorCalls") = 'array' THEN t."inspectorCalls" ELSE '[]'::jsonb END
+)`;
+
+/**
+ * Both queries below are restricted to turns with a recorded `durationMs`. That is what makes the
+ * stage totals and the residual describe the SAME population, so `perTurnMs` is a true per-turn
+ * figure rather than a total divided by a different denominator. Pre-telemetry turns have neither a
+ * duration nor any calls and drop out of both.
+ */
+const TURN_SCOPE = `t."sessionId" = ANY($1::text[])
+    AND t."createdAt" >= $2 AND t."createdAt" < $3
+    AND t."durationMs" IS NOT NULL`;
+
+type StageLatencySqlRow = {
+  label: string | null;
+  calls: number | null;
+  avg_ms: number | null;
+  p95_ms: number | null;
+  total_ms: number | null;
+};
+
+type TurnTotalsSqlRow = {
+  turns: number | null;
+  total_turn_ms: number | null;
+  total_call_ms: number | null;
+};
+
+/** The zero value — no turns in scope, or none of them recorded any telemetry. */
+const EMPTY_STAGE_LATENCY: StageLatencyBreakdown = {
+  turns: 0,
+  totalTurnMs: 0,
+  totalCallMs: 0,
+  residualMs: 0,
+  residualShare: null,
+  stages: [],
+};
+
+/**
+ * Split the window's turn wall-clock by pipeline stage, from the per-call traces already persisted
+ * on each turn. Answers "which stage is the wait?" — the question P20 Phase 1 exists to settle
+ * before any latency work is attempted.
+ *
+ * Grouping is by the call's own recorded `label`, not a hard-coded enum, so a stage added later
+ * appears here without this module changing.
+ *
+ * @param sessionIds Non-preview sessions in scope (already filtered by the caller).
+ */
+export async function getStageLatency(
+  sessionIds: string[],
+  from: Date,
+  to: Date
+): Promise<StageLatencyBreakdown> {
+  if (sessionIds.length === 0) return EMPTY_STAGE_LATENCY;
+
+  const [stageRows, totalsRows] = await Promise.all([
+    prisma.$queryRawUnsafe<StageLatencySqlRow[]>(
+      `
+      SELECT c->>'label' AS label,
+             COUNT(*)::int AS calls,
+             AVG((c->>'latencyMs')::float8) AS avg_ms,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY (c->>'latencyMs')::float8) AS p95_ms,
+             SUM((c->>'latencyMs')::float8) AS total_ms
+      FROM "app_questionnaire_turn" t
+      CROSS JOIN LATERAL ${UNNESTED_CALLS} AS c
+      WHERE ${TURN_SCOPE}
+        AND jsonb_typeof(c->'latencyMs') = 'number'
+        AND c->>'label' IS NOT NULL
+      GROUP BY 1
+      ORDER BY total_ms DESC NULLS LAST
+      `,
+      sessionIds,
+      from,
+      to
+    ),
+    prisma.$queryRawUnsafe<TurnTotalsSqlRow[]>(
+      `
+      SELECT COUNT(*)::int AS turns,
+             COALESCE(SUM(t."durationMs"), 0)::float8 AS total_turn_ms,
+             COALESCE(SUM(call_ms.sum_ms), 0)::float8 AS total_call_ms
+      FROM "app_questionnaire_turn" t
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM((c->>'latencyMs')::float8), 0) AS sum_ms
+        FROM ${UNNESTED_CALLS} AS c
+        WHERE jsonb_typeof(c->'latencyMs') = 'number'
+      ) AS call_ms
+      WHERE ${TURN_SCOPE}
+      `,
+      sessionIds,
+      from,
+      to
+    ),
+  ]);
+
+  const turns = numOrNull(totalsRows[0]?.turns) ?? 0;
+  const totalTurnMs = numOrNull(totalsRows[0]?.total_turn_ms) ?? 0;
+  const totalCallMs = numOrNull(totalsRows[0]?.total_call_ms) ?? 0;
+
+  const stages: StageLatencyRow[] = stageRows
+    .filter((r): r is StageLatencySqlRow & { label: string } => typeof r.label === 'string')
+    .map((r) => {
+      const totalMs = numOrNull(r.total_ms) ?? 0;
+      return {
+        label: r.label,
+        calls: numOrNull(r.calls) ?? 0,
+        avgMs: numOrNull(r.avg_ms) ?? 0,
+        p95Ms: numOrNull(r.p95_ms) ?? 0,
+        totalMs,
+        // Divided by turns, not by calls: what this stage adds to an average turn.
+        perTurnMs: turns > 0 ? totalMs / turns : 0,
+      };
+    });
+
+  // Clamped, because once P20 Phase 3 overlaps the stage-1 calls the summed latency can exceed the
+  // wall-clock. A negative residual is not a measurement — it means the turn was model-bound
+  // throughout — so 0 is the honest floor. See `StageLatencyBreakdown`.
+  const residualMs = Math.max(0, totalTurnMs - totalCallMs);
+
+  return {
+    turns,
+    totalTurnMs,
+    totalCallMs,
+    residualMs,
+    residualShare: totalTurnMs > 0 ? residualMs / totalTurnMs : null,
+    stages,
+  };
+}
 
 /**
  * Aggregate the per-version Diagnostics view: header totals + one row per invitation (plus a
@@ -119,8 +260,9 @@ export async function getVersionDiagnostics(
       : [];
   const telemetryBySession = new Map(turnAgg.map((t) => [t.sessionId, t]));
 
-  // Errors grouped per invitation (with the latest timestamp) and per severity.
-  const [errByInvitation, errBySeverity, durationStats] = await Promise.all([
+  // Errors grouped per invitation (with the latest timestamp) and per severity, plus the P20
+  // Phase 1 stage-latency split over the same sessions and window.
+  const [errByInvitation, errBySeverity, durationStats, stageLatency] = await Promise.all([
     prisma.appQuestionnaireError.groupBy({
       by: ['invitationId'],
       where: { versionId: scope.versionId, createdAt: errorWindow },
@@ -146,6 +288,7 @@ export async function getVersionDiagnostics(
           scope.to
         )
       : Promise.resolve([{ avg_ms: null, p95_ms: null }]),
+    getStageLatency(sessionIds, scope.from, scope.to),
   ]);
 
   const errorCountByInvitation = new Map<string | null, number>();
@@ -299,6 +442,7 @@ export async function getVersionDiagnostics(
     range,
     totals,
     invitations: rows,
+    stageLatency,
     identitySuppressed: anonymous,
   };
 }

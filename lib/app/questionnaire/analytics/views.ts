@@ -287,11 +287,72 @@ export interface InvitationDiagnosticsRow {
   lastActivityAt: string | null;
 }
 
+/* ── Where a turn's time goes (P20 Phase 1) ───────────────────────────────── */
+
+/**
+ * One pipeline stage's latency profile, derived from the `AgentCallTrace[]` persisted on every
+ * turn's `inspectorCalls`. The `label` is the call's own recorded label — `Answer extraction`,
+ * `Sensitivity detection`, `Seriousness judge`, `Contradiction detection`, `Answer refinement`,
+ * `Interviewer phrasing`, `Completion offer`, and the selector/ranking calls — so this list grows
+ * by itself when a new call is added, rather than needing a hard-coded stage enum kept in sync.
+ */
+export interface StageLatencyRow {
+  /** The recorded `AgentCallTrace.label` these calls share. */
+  label: string;
+  /** How many calls with this label ran in the window. */
+  calls: number;
+  /** Mean and 95th-percentile latency of a SINGLE call of this stage (ms). */
+  avgMs: number;
+  p95Ms: number;
+  /** Summed latency across every call of this stage in the window (ms). */
+  totalMs: number;
+  /**
+   * What this stage adds to an average turn (ms) — `totalMs / turns`. The decision-useful number:
+   * a stage that runs on half the turns but costs 4s when it does shows up here at ~2s.
+   */
+  perTurnMs: number;
+}
+
+/**
+ * Where a turn's wall-clock actually goes, split by pipeline stage, over the same window and the
+ * same non-preview sessions as the rest of the Diagnostics rollup.
+ *
+ * Restricted to turns that recorded a `durationMs`, so the stage totals and the residual describe
+ * exactly the same population and `perTurnMs` is a true per-turn figure. Turns written before the
+ * telemetry columns existed have neither a duration nor any calls, and drop out of both.
+ *
+ * > **The residual stops being exact once stages overlap.** Today every model call in a turn runs
+ * > strictly one after another, so summed call latency is bounded by the turn's wall-clock and the
+ * > difference is real non-model time. P20 Phase 3 deliberately overlaps three of those calls;
+ * > from then on the summed latency can exceed the wall-clock and {@link residualMs} clamps to 0.
+ * > That is the honest reading — it means the turn was model-bound throughout — but it is a floor,
+ * > not a measurement, and must not be read as "there is no overhead".
+ */
+export interface StageLatencyBreakdown {
+  /** Turns in the window that recorded an end-to-end duration. */
+  turns: number;
+  /** Summed end-to-end turn wall-clock across those turns (ms). */
+  totalTurnMs: number;
+  /** Summed model-call latency across those turns (ms). */
+  totalCallMs: number;
+  /** Wall-clock not spent inside a model call (ms), clamped at 0 — DB reads, embedding, persistence. */
+  residualMs: number;
+  /** {@link residualMs} as a share of {@link totalTurnMs}, 0–1; null when no turn recorded one. */
+  residualShare: number | null;
+  /** Per-stage rows, costliest total first. */
+  stages: StageLatencyRow[];
+}
+
 export interface VersionDiagnosticsResult {
   versionId: string;
   range: AnalyticsRange;
   totals: DiagnosticsTotals;
   invitations: InvitationDiagnosticsRow[];
+  /**
+   * Where the turn time went, by pipeline stage (P20 Phase 1). Empty stages + zero turns when
+   * nothing in the window recorded per-call telemetry.
+   */
+  stageLatency: StageLatencyBreakdown;
   /** True when `anonymousMode` is on: identity (email/name) is withheld from every row. */
   identitySuppressed: boolean;
 }

@@ -1,7 +1,8 @@
 /**
  * Diagnostics tab — version rollup view.
  *
- * Aggregate telemetry tiles + a per-invitation table (each row links to the drill-down). A plain
+ * Aggregate telemetry tiles, the per-stage latency split (`StageLatencyPanel` — where a turn's
+ * wall-clock actually goes), and a per-invitation table (each row links to the drill-down). A plain
  * server component: static markup, a GET filter form for the date window, and links — no client
  * state needed at this level (the deep-dive interactivity lives in the drill-down).
  */
@@ -25,6 +26,7 @@ import {
   formatMs,
   formatWhen,
 } from '@/components/admin/questionnaires/diagnostics/format';
+import { StageLatencyPanel } from '@/components/admin/questionnaires/diagnostics/stage-latency-panel';
 
 interface DiagnosticsViewProps {
   questionnaireId: string;
@@ -116,6 +118,8 @@ export function DiagnosticsView({
       </div>
 
       <CqStatTiles stats={stats} />
+
+      <StageLatencyPanel data={data.stageLatency} />
 
       {data.invitations.length === 0 ? (
         <p className="text-muted-foreground rounded-lg border px-4 py-6 text-sm">

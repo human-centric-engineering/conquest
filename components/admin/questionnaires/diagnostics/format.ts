@@ -34,3 +34,9 @@ export function severityVariant(severity: string): 'destructive' | 'secondary' |
   if (severity === 'warning') return 'secondary';
   return 'outline';
 }
+
+/** A 0–1 share rendered as a whole percent (e.g. `38%`). `null` → em dash. */
+export function formatShare(share: number | null | undefined): string {
+  if (share === null || share === undefined || !Number.isFinite(share)) return '—';
+  return `${Math.round(share * 100)}%`;
+}

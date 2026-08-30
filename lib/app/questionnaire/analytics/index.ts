@@ -73,6 +73,8 @@ export type {
   SafeguardingSummary,
   DiagnosticsTotals,
   InvitationDiagnosticsRow,
+  StageLatencyRow,
+  StageLatencyBreakdown,
   VersionDiagnosticsResult,
   DiagnosticsTurnRow,
   DiagnosticsErrorRow,
