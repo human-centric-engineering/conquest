@@ -99,6 +99,13 @@ const PROVENANCE_PREVIEW_CAP = 200;
  */
 export const MAX_CONTRADICTION_SLOTS = 300;
 export const MAX_CONTRADICTION_ANSWERS = 300;
+/**
+ * How many transcript lines the detector may be given. Small on purpose: the transcript is here so
+ * the model can read the latest message in the context of the question that prompted it, NOT as
+ * more material to find contradictions in. Prose that was never an answer is exactly where a
+ * detector invents conflicts.
+ */
+export const MAX_DETECTION_TRANSCRIPT = 6;
 
 /** A slot definition as the route/caller supplies it (key-space; ids optional). */
 const slotSchema = z.object({
@@ -140,6 +147,21 @@ const argsSchema = z.object({
    * the durable provenance row. Absent → the classic answer-vs-answer pass.
    */
   currentStatement: z.string().optional(),
+  /**
+   * The question `currentStatement` is answering — the one the interviewer asked last turn.
+   *
+   * Without it the detector is the only agent in the turn that cannot see what was asked, so a new
+   * answer to a NEW question ("40 hrs" to *what would be sustainable*) reads as a reversal of an
+   * old one ("70" to *what you actually work*). Omitted in data-slot mode, where there is no single
+   * active question. PII-free (authored question text), so it is safe in the provenance row.
+   */
+  activeQuestion: z.object({ key: z.string().min(1), prompt: z.string().min(1) }).optional(),
+  /**
+   * A short tail of the conversation before this message, oldest → newest — how the question was
+   * actually put, in the interviewer's own words. Bounded here so a caller cannot widen the prompt
+   * into a whole transcript for the detector to mine for tension. PII — redacted from provenance.
+   */
+  recentMessages: z.array(z.string().min(1)).max(MAX_DETECTION_TRANSCRIPT).optional(),
   /** Stable session identity, threaded into cost-log metadata. */
   /**
    * Definitions / glossary (P16): pre-formatted definition lines for the terms in play this turn,
@@ -227,6 +249,10 @@ function toContradictionContext(args: DetectContradictionsArgs): ContradictionCo
     mode: args.mode,
     windowN: args.windowN,
     ...(args.currentStatement !== undefined ? { currentStatement: args.currentStatement } : {}),
+    ...(args.activeQuestion !== undefined ? { activeQuestion: args.activeQuestion } : {}),
+    ...(args.recentMessages !== undefined && args.recentMessages.length > 0
+      ? { recentMessages: args.recentMessages }
+      : {}),
     // The route always supplies a real session id (`preview-<versionId>`); this
     // constant only labels direct/CLI dispatches in cost-log metadata.
     ...(args.glossary && args.glossary.length > 0 ? { glossary: args.glossary } : {}),
@@ -266,6 +292,13 @@ export class AppDetectContradictionsCapability extends BaseCapability<
       // The latest message is PII (free-text the respondent typed) — never persist it.
       ...(args.currentStatement !== undefined
         ? { currentStatement: redactedString('currentStatement') }
+        : {}),
+      // The question text is authored by the admin, not the respondent — safe to keep, and it is
+      // the field that explains after the fact why a finding was or was not raised.
+      ...(args.activeQuestion !== undefined ? { activeQuestionKey: args.activeQuestion.key } : {}),
+      // The transcript is the respondent's own words — count only.
+      ...(args.recentMessages !== undefined
+        ? { recentMessageCount: args.recentMessages.length }
         : {}),
       ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
     };

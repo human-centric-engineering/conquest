@@ -30,7 +30,16 @@ will drive.
   _comparison window size_, not an interval). F4.3 models cadence as a pure
   scheduler the F4.6 engine calls:
   - `phase: 'turn'` → run every turn, comparing the last `windowN` answers
-    (or all when `windowN <= 0`) — covers the prose's _every_turn_.
+    (or all when `windowN <= 0`) — covers the prose's _every_turn_. **That window went
+    unapplied until 2026-08-30**: `shouldRunDetection` returned a `compareWindow` from the
+    first release and every caller ignored it, so a questionnaire set to "check against the
+    last 3" checked against all of them — the admin field promised one thing and the detector
+    did another, with a wider comparison surface (and so more false positives) than anyone
+    asked for. `runContradictionPhase` now narrows `priorAnswers` through
+    `applyCompareWindow` before the detector sees them, and applies it **before** the answer
+    floor so the floor counts what the detector will actually get. The window is the tail:
+    `existingAnswers` is loaded oldest → newest (`turn-context.ts` orders on `updatedAt`,
+    which it previously did not, so "the last 3" would have been three arbitrary answers).
   - `phase: 'completion-sweep'` → run once before submit, comparing **all** answers
     — covers the prose's _sweep_only_.
   - The prose's _every_n_turns_ (a pure cost-tuning interval) **landed 2026-06-07**
@@ -135,6 +144,51 @@ Two orchestration details make this actually fire (both were live bugs):
   pre-`applyIntents`). This turn's contradicting statement is often extracted straight into the
   conflicting slot (`satisfaction` 1→5), which would erase the old value before the detector sees it;
   comparing the pre-merge answers against the latest message keeps it visible.
+
+### The question the message is answering (the 5GB3M8SS correction)
+
+Feeding the latest message in without saying **what it answers** created a second, worse false
+positive — worse because the respondent had done nothing ambiguous at all.
+
+Session `5GB3M8SS`, verbatim from the transcript:
+
+| Turn | Interviewer asked                                                         | Respondent |
+| ---- | ------------------------------------------------------------------------- | ---------- |
+| 3    | "roughly how many hours do you end up working across everything"          | `70 hrs`   |
+| 4    | "a more **sustainable** weekly rhythm … what number would feel realistic" | `40 hrs`   |
+
+Both answers were extracted correctly, into two different slots
+(`current_weekly_work_hours = 70`, `sustainable_weekly_hours = 40`). The **detector** was the one
+agent in the turn that never learned what was being asked. It received `current_weekly_work_hours`
+with its question text, plus a bare `"40 hrs"`, and a rule inviting it to report any recorded answer
+the message is incompatible with. Given only that, flagging it is the reasonable reading — the fact
+that would have exonerated the respondent was simply not in the prompt. Note also that detection
+runs **pre-merge**, so `sustainable_weekly_hours` did not yet exist to compare against.
+
+None of the existing guards could catch it: the restatement rule is about _matching_ numbers, the
+confidence floor does not apply (the model was rightly confident about what it could see), and the
+glossary rule needs a contested term.
+
+Three things fixed it, all of them context rather than wording:
+
+- **`activeQuestion`** — the key and prompt of the question the message answers, rendered
+  immediately BEFORE the message so the two read as a question and its answer rather than as a
+  free-floating claim. Absent in data-slot mode (no single active question) and on a kickoff.
+- **`recentMessages`** — a short tail of the conversation (capped at `MAX_DETECTION_TRANSCRIPT`),
+  labelled in the prompt as context and _not_ answers to check, so the question reads as the
+  interviewer actually put it. Deliberately **not** governed by the look-back window: the window
+  says how much _evidence_ to compare, this is how to read _one message_. Handing the detector a
+  whole transcript would give it pages of prose that were never answers to find tension in.
+- **The new-answer rule** — "an answer to a DIFFERENT question is a NEW ANSWER, never a reversal",
+  naming the shapes that keep tripping it: now vs preferred, actual vs target or ideal, one period
+  or role or scenario vs another. The latest-message rule was tightened to match: report it only
+  where it genuinely revisits **the same** question.
+
+The model's verdict cannot be unit-tested, so the tests pin the things that would have prevented it
+reaching the model: the schema keeps the keys (`contradiction/question-context-wiring.test.ts` —
+`BaseCapability.validate` safe-parses against a non-strict object, which is exactly how the glossary
+seam once shipped inert), the invoker assembles them (`turn-invokers.test.ts`), and the prompt
+renders them in the right order (`contradiction/detection-prompt.test.ts`).
 
 ## Probe-confirm flow (`probe` mode)
 

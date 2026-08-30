@@ -50,6 +50,7 @@ import {
   type StrategyDeps,
 } from '@/lib/app/questionnaire/selection';
 import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
+import { MAX_DETECTION_TRANSCRIPT } from '@/lib/app/questionnaire/capabilities/detect-contradictions';
 import { selectGlossaryLines } from '@/lib/app/questionnaire/glossary/injection';
 import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import {
@@ -419,6 +420,24 @@ export async function buildTurnInvokers(opts: {
         // (e.g. an earlier "I hate the job" answer vs a current "I love my job") even when this
         // turn's extraction didn't overwrite the stored answer. Omitted on a kickoff (empty).
         ...(state.userMessage.trim().length > 0 ? { currentStatement: state.userMessage } : {}),
+        // ...and, crucially, WHAT THAT MESSAGE IS ANSWERING. The detector was the only agent in
+        // the turn that never got this, so a new answer to a new question read as a reversal of an
+        // old one: session 5GB3M8SS gave 70 to "hours you actually work" and "40 hrs" to "hours
+        // that would be sustainable", and was told it had contradicted itself. Absent in data-slot
+        // mode (no single active question) and on a kickoff.
+        ...(state.userMessage.trim().length > 0 && activeQuestionKey
+          ? (() => {
+              const active = slots.find((slot) => slot.key === activeQuestionKey);
+              return active ? { activeQuestion: { key: active.key, prompt: active.prompt } } : {};
+            })()
+          : {}),
+        // A short tail of the conversation, so the question reads as the interviewer actually put
+        // it rather than only as its authored text. The last entries are the previous turn, which
+        // is the exchange that matters; the cap is the capability's, not the look-back window's —
+        // see MAX_DETECTION_TRANSCRIPT for why those are different jobs.
+        ...(state.userMessage.trim().length > 0 && state.recentMessages.length > 0
+          ? { recentMessages: state.recentMessages.slice(-MAX_DETECTION_TRANSCRIPT) }
+          : {}),
         // Definitions / glossary: the highest-value seam. Two answers that look contradictory are
         // often the same contested term read two ways — without the definitions the detector puts
         // that to the respondent as if they had contradicted themselves.

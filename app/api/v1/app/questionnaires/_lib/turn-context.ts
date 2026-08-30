@@ -336,6 +336,11 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         },
       },
       answers: {
+        // Oldest → newest. The contradiction phase's look-back window keeps the most recent N of
+        // `existingAnswers` (`applyCompareWindow`), which is only meaningful if the list has an
+        // order at all — without this the rows came back in whatever order Postgres chose, so
+        // "the last 3 answers" was three arbitrary ones.
+        orderBy: { updatedAt: 'asc' },
         select: {
           value: true,
           confidence: true,

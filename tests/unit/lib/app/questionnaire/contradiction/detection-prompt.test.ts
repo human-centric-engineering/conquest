@@ -11,6 +11,7 @@ import {
   choiceSlot,
   ctx,
   slot,
+  HOURS_FIXTURE,
 } from '@/tests/unit/lib/app/questionnaire/contradiction/_fixtures';
 
 /** Narrow a message's `content` (string | ContentPart[]) to a plain string. */
@@ -213,5 +214,113 @@ describe('buildContradictionDetectionRetryMessage', () => {
   it('falls back to a generic message when no paths are given', () => {
     const message = buildContradictionDetectionRetryMessage([]);
     expect(message).toContain('not valid JSON');
+  });
+});
+
+/**
+ * Session 5GB3M8SS: "70" to hours actually worked, then "40 hrs" to hours that would be
+ * sustainable — raised to the respondent as a contradiction. The extraction was right both times;
+ * the detector was the one agent in the turn that could not see WHAT WAS BEING ASKED, so a new
+ * answer to a new question arrived as a naked number to be checked against everything on record.
+ *
+ * The model's verdict cannot be unit-tested. What can be pinned is that the two things which would
+ * have prevented it — the question the message answers, and the rule that a different question
+ * taking a different value is a new answer — actually reach the prompt.
+ */
+describe('the question the latest message is answering', () => {
+  const hoursContext = ctx({
+    slots: [HOURS_FIXTURE.currentQuestion, HOURS_FIXTURE.idealQuestion],
+    answers: [HOURS_FIXTURE.recordedHours],
+    currentStatement: HOURS_FIXTURE.latestMessage,
+    activeQuestion: {
+      key: HOURS_FIXTURE.idealQuestion.key,
+      prompt: HOURS_FIXTURE.idealQuestion.prompt,
+    },
+  });
+
+  it('names the question the latest message answers, with its text', () => {
+    const user = text(buildContradictionDetectionPrompt(hoursContext)[1]);
+
+    expect(user).toContain('sustainable_weekly_hours');
+    expect(user).toContain('What would a sustainable total number of weekly hours look like');
+  });
+
+  it('puts that question immediately before the message, so they read as a pair', () => {
+    const user = text(buildContradictionDetectionPrompt(hoursContext)[1]);
+
+    // Order is the point. The same two facts in the other order leave the message reading as a
+    // free-floating claim, which is how it was read.
+    expect(user.indexOf('sustainable_weekly_hours')).toBeLessThan(
+      user.indexOf("The respondent's LATEST MESSAGE:")
+    );
+  });
+
+  it('tells the model that an answer to a different question is a new answer, not a reversal', () => {
+    const system = text(buildContradictionDetectionPrompt(hoursContext)[0]);
+
+    expect(system).toContain('NEW ANSWER');
+    expect(system).toMatch(/different question/i);
+    // The specific shapes that keep tripping it: now vs preferred, actual vs target.
+    expect(system).toMatch(/actual figure vs a target or an ideal/i);
+  });
+
+  it('omits the whole block on a turn with no message to interpret', () => {
+    const user = text(
+      buildContradictionDetectionPrompt(
+        ctx({
+          slots: [HOURS_FIXTURE.currentQuestion, HOURS_FIXTURE.idealQuestion],
+          answers: [HOURS_FIXTURE.recordedHours, answered({ slotKey: 'sustainable_weekly_hours' })],
+          activeQuestion: { key: 'sustainable_weekly_hours', prompt: 'Ignored without a message.' },
+        })
+      )[1]
+    );
+
+    // Answer-vs-answer passes (and the completion sweep) have no "latest message" to place, so a
+    // question block there would be describing a turn that isn't happening.
+    expect(user).not.toContain('Ignored without a message.');
+  });
+
+  it('still runs — with the old wording — when there is no active question', () => {
+    // Data-slot mode: the respondent answers an open prompt, so there is no single question.
+    const messages = buildContradictionDetectionPrompt(
+      ctx({
+        answers: [answered({ slotKey: 'a' })],
+        currentStatement: 'I love it here now.',
+      })
+    );
+
+    expect(text(messages[0])).toContain('NEW ANSWER');
+    expect(text(messages[0])).not.toContain('which is named below');
+    expect(text(messages[1])).toContain('LATEST MESSAGE');
+  });
+
+  it('passes the recent exchange as context, marked as not-answers', () => {
+    const user = text(
+      buildContradictionDetectionPrompt(
+        ctx({
+          answers: [HOURS_FIXTURE.recordedHours],
+          currentStatement: HOURS_FIXTURE.latestMessage,
+          recentMessages: ['i do 70 hrs per week', 'If you imagine a more sustainable rhythm…'],
+        })
+      )[1]
+    );
+
+    expect(user).toContain('If you imagine a more sustainable rhythm');
+    // Prose that was never an answer is exactly where a detector invents conflicts, so the block
+    // says what it is for.
+    expect(user).toContain('NOT answers to check');
+  });
+
+  it('leaves the transcript out when there is no message to read in context', () => {
+    const user = text(
+      buildContradictionDetectionPrompt(
+        ctx({
+          answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],
+          recentMessages: ['an earlier line'],
+        })
+      )[1]
+    );
+
+    expect(user).not.toContain('an earlier line');
   });
 });

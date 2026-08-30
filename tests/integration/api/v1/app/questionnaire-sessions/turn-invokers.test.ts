@@ -70,6 +70,7 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import { MAX_DETECTION_TRANSCRIPT } from '@/lib/app/questionnaire/capabilities/detect-contradictions';
 import {
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
   DEFAULT_COHORT_REPORT_SETTINGS,
@@ -400,6 +401,70 @@ describe('detectContradictions', () => {
       value: 'marketing',
       provenance: 'direct',
     });
+  });
+
+  /**
+   * Session 5GB3M8SS: "70" to hours actually worked, then "40 hrs" to hours that would be
+   * sustainable — put to the respondent as a contradiction. The detector was the ONE agent in the
+   * turn that never learned what was being asked, so a new answer to a new question arrived as a
+   * naked number to be checked against everything on record. These pin the two fields that fix
+   * that at the boundary where they are assembled; the schema guard is in
+   * `contradiction/question-context-wiring.test.ts` and the prompt rendering in
+   * `contradiction/detection-prompt.test.ts`.
+   */
+  it('tells the detector which question the message is answering, with its text', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers();
+    await inv.detectContradictions(state({ userMessage: '40 hrs' }));
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args.activeQuestion).toEqual({ key: 'role', prompt: 'Role?' });
+    expect(args.currentStatement).toBe('40 hrs');
+  });
+
+  it('passes a bounded tail of the transcript, not the whole conversation', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers();
+    const long = Array.from({ length: MAX_DETECTION_TRANSCRIPT + 4 }, (_, i) => `line ${i}`);
+    await inv.detectContradictions(state({ userMessage: '40 hrs', recentMessages: long }));
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    // The tail, because the question that prompted this message is at the END of the transcript.
+    expect(args.recentMessages).toEqual(long.slice(-MAX_DETECTION_TRANSCRIPT));
+  });
+
+  it('omits both on a kickoff — there is no message to interpret', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers();
+    await inv.detectContradictions(state({ userMessage: '' }));
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args.currentStatement).toBeUndefined();
+    expect(args.activeQuestion).toBeUndefined();
+    expect(args.recentMessages).toBeUndefined();
+  });
+
+  it('omits the active question in data-slot mode, where there is no single one', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers({ activeQuestionKey: null });
+    await inv.detectContradictions(state({ userMessage: '40 hrs' }));
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args.activeQuestion).toBeUndefined();
+    // The message and its context still go — the detector just cannot be told what it answers.
+    expect(args.currentStatement).toBe('40 hrs');
   });
 
   it('fail-soft on dispatch failure', async () => {
