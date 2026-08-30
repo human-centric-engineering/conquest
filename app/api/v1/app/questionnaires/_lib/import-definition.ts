@@ -32,6 +32,7 @@ import {
   buildTopicCreateInput,
   patchConditionalTopicsSettings,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { seedTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
 
 export interface ImportDefinitionInput {
   envelope: DefinitionImport;
@@ -313,6 +314,14 @@ export async function persistDefinitionImport(
       const topicCount = topicRows.length;
       if (topicRows.length > 0) {
         await tx.appQuestionnaireTopic.createMany({ data: topicRows });
+      } else {
+        // A definition file written before Conditional Topics existed — or exported from a version
+        // that never used it — carries no topics, so an import would land a questionnaire whose
+        // every question belongs to nothing. That is harmless until someone turns the feature on,
+        // at which point NO question is asked. Seed the same one-`core`-topic-per-section set
+        // ingest lays down, which is the shape an imported questionnaire would have had if it had
+        // been uploaded instead (F17.35).
+        await seedTopicsForVersion(tx, versionId);
       }
 
       // 8b. Conditional Topics (P17) settings — a top-level envelope field, not part of `version.config`

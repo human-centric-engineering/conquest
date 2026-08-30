@@ -31,6 +31,7 @@ import {
   loadScopedVersion,
   resolveForkedId,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { pruneTopicMembership } from '@/app/api/v1/app/questionnaires/_lib/topic-membership';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 type Params = { id: string; vid: string; questionId: string };
@@ -188,6 +189,18 @@ const handleDelete = withAdminAuth<Params>(async (request, session, { params }) 
   if (!targetId) return errorResponse('Question not found', { code: 'NOT_FOUND', status: 404 });
 
   await prisma.appQuestionSlot.delete({ where: { id: targetId } });
+
+  // Take the key out of every topic that claimed it. A dead key is not a crash — `resolveScope`
+  // skips one that resolves to no question — but `empty_topic` counts RAW member keys, so a topic
+  // emptied by deletions would read as non-empty and warn about nothing. Best-effort: the question
+  // is already gone, and failing the request now would report a delete that did happen as an error.
+  await pruneTopicMembership(prisma, fork.versionId, existing.key).catch((err: unknown) => {
+    log.warn('Question deleted but its key could not be pruned from its topics', {
+      versionId: fork.versionId,
+      key: existing.key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   logAdminAction({
     userId: session.user.id,

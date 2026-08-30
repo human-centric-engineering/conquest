@@ -39,14 +39,7 @@ import type {
   AudienceShape,
   FieldProvenance,
 } from '@/lib/app/questionnaire/types';
-import {
-  LIGHT_DEPTH_MEMBER_COUNT,
-  narrowTopicMembers,
-  withTopicQuestionKey,
-  withoutTopicQuestionKey,
-  type TopicMembers,
-} from '@/lib/app/questionnaire/scope/types';
-import { inheritTopicForQuestion } from '@/lib/app/questionnaire/scope/seed';
+import { LIGHT_DEPTH_MEMBER_COUNT, narrowTopicMembers } from '@/lib/app/questionnaire/scope/types';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -56,6 +49,11 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { deriveFindingState } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
+import {
+  copyTopicMembership,
+  inheritTopicMembership,
+  pruneTopicMembership,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-membership';
 
 /** The finding fields the apply engine needs (a row subset). */
 export interface ApplyFindingRow {
@@ -311,150 +309,6 @@ export async function applyFinding(args: {
     forked,
     versionNumber: editVersionNumber,
   };
-}
-
-/* -------------------------------------------------------------------------- */
-/* Topic membership (Conditional Topics, F17.35)                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Why every write in here is `updateMany` rather than `update`.
- *
- * These writes are a *side effect* of a question write, not the op the admin approved. The Topics
- * tab saves with `replaceTopics`, which is a `deleteMany` + `createMany` — so a concurrent save can
- * remove the row this is about between the read below and the write. With `update` that is a P2025,
- * and a thrown query inside a Postgres transaction aborts it: the catch would not save us, because
- * every following statement — including the finding stamp — fails on the poisoned transaction, and
- * the question write rolls back with it. Losing the question because its membership lost a race is
- * strictly worse than the orphan we are trying to prevent.
- *
- * `updateMany` matching zero rows is not an error. So the race degrades to exactly what happens
- * today (a question in no topic), the transaction stays healthy, and the review queue's orphan
- * banner is what surfaces it.
- *
- * `members` is a plain `Json` column with no version stamp, so a concurrent Topics-tab save can
- * still overwrite a membership written here. Accepted: an etag on a JSON blob is a lot of machinery
- * for a race between one admin's two open tabs, and the banner already reports the outcome.
- *
- * ## `source` is deliberately never stamped
- *
- * `scope-evaluation-apply.ts` stamps `source: 'manual'` on its topic writes, so copying it here
- * would look right. It is not. `isEligibleForScopeCandidacy` and `launchability.ts` both gate on
- * `source: { not: 'seeded' }` to decide whether a version is untouched by Conditional Topics — so
- * flipping a seeded topic because a question landed in it would silently suppress the Routing
- * Analyst candidacy check for that version. There the admin approved a change to the topic's own
- * configuration; here they approved a change to a *question*, and whether the topic is still an
- * untouched auto-seed is not something that decides.
- */
-
-/** A version's topics, as the membership writers read them. */
-async function loadTopicsForMembership(
-  tx: Prisma.TransactionClient,
-  versionId: string
-): Promise<{ id: string; key: string; ordinal: number; members: TopicMembers }[]> {
-  const rows = await tx.appQuestionnaireTopic.findMany({
-    where: { versionId },
-    orderBy: { ordinal: 'asc' },
-    select: { id: true, key: true, ordinal: true, members: true },
-  });
-  return rows.map((row) => ({
-    id: row.id,
-    key: row.key,
-    ordinal: row.ordinal,
-    members: narrowTopicMembers(row.members),
-  }));
-}
-
-/**
- * Give `newKey` the membership of `sourceKey` — every topic that claimed the source claims the copy.
- *
- * For `split_question`, where the two halves are one question reshaped: whatever the original was
- * part of, both halves are part of. The slot already inherits type, config, `required`, `weight`,
- * `fidelity` and guidelines from its parent for the same reason.
- */
-async function copyTopicMembership(
-  tx: Prisma.TransactionClient,
-  versionId: string,
-  sourceKey: string,
-  newKey: string
-): Promise<void> {
-  const topics = await loadTopicsForMembership(tx, versionId);
-  for (const topic of topics) {
-    if (!topic.members.questionKeys.includes(sourceKey)) continue;
-    const next = withTopicQuestionKey(topic.members, newKey);
-    if (next === topic.members) continue;
-    await tx.appQuestionnaireTopic.updateMany({
-      where: { id: topic.id },
-      data: { members: jsonInput(next) },
-    });
-  }
-}
-
-/**
- * Put a newly created question in the topic its section-mates are in.
- *
- * Returns the topic key it joined, `null` when no topic claims any of its siblings (so nothing
- * could be inferred and the question is uncovered), or `undefined` when the version has no topics
- * at all — three states, because "we could not decide" and "there was nothing to decide" read very
- * differently to an admin.
- *
- * The rule is `inheritTopicForQuestion`, which is `planDataSlotAttachment`'s majority-with-lowest-
- * ordinal-tie-break applied to a question. Guessing is the right default here: with Conditional
- * Topics on, the alternative to a guess is a question that can never be asked and that only the
- * coherence checker mentions.
- */
-async function inheritTopicMembership(
-  tx: Prisma.TransactionClient,
-  versionId: string,
-  questionKey: string,
-  siblingKeys: readonly string[]
-): Promise<string | null | undefined> {
-  const topics = await loadTopicsForMembership(tx, versionId);
-  if (topics.length === 0) return undefined;
-
-  const topicKey = inheritTopicForQuestion(topics, siblingKeys);
-  if (!topicKey) return null;
-
-  const topic = topics.find((t) => t.key === topicKey);
-  if (!topic) return null;
-
-  const next = withTopicQuestionKey(topic.members, questionKey);
-  if (next === topic.members) return topicKey;
-
-  await tx.appQuestionnaireTopic.updateMany({
-    where: { id: topic.id },
-    data: { members: jsonInput(next) },
-  });
-  return topicKey;
-}
-
-/**
- * Remove a deleted question's key from every topic that claimed it.
- *
- * Without this the key lingers. Nothing crashes — `resolveScope` skips a key that resolves to no
- * question — but `empty_topic` counts RAW member keys, so a conditional topic whose members have
- * all been deleted reads as non-empty, passes every coherence check, and resolves to nothing at
- * runtime. Pruning is what makes that warning fire.
- *
- * The emptied topic is left in place: it still carries a label, a phase and criteria an author
- * wrote, and `empty_topic` is the warning that says it now asks nothing. `reconcileTopicsForVersion`
- * does delete such topics, but it runs on a wholesale structure rewrite, where the topic's subject
- * is genuinely gone — not on a one-click apply of one judge's finding.
- */
-async function pruneTopicMembership(
-  tx: Prisma.TransactionClient,
-  versionId: string,
-  questionKey: string
-): Promise<void> {
-  const topics = await loadTopicsForMembership(tx, versionId);
-  for (const topic of topics) {
-    const next = withoutTopicQuestionKey(topic.members, questionKey);
-    if (next === topic.members) continue;
-    await tx.appQuestionnaireTopic.updateMany({
-      where: { id: topic.id },
-      data: { members: jsonInput(next) },
-    });
-  }
 }
 
 /** The `section:` prefix a finding's `targetKey` uses to address a section by title. */

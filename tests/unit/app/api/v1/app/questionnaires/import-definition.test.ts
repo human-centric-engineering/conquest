@@ -65,11 +65,16 @@ const tx = {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `sec-${String(row.ordinal)}`, ordinal: row.ordinal })))
     ),
+    // Read back by `seedTopicsForVersion`, which runs for a definition file that carried no topics
+    // of its own (F17.35). Empty is the honest default here: these tests assert what the IMPORTER
+    // writes, and a seeder with no sections to read seeds nothing.
+    findMany: vi.fn(async () => []),
   },
   appQuestionSlot: {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `q-${String(row.key)}`, key: row.key })))
     ),
+    findMany: vi.fn(async () => []),
   },
   appQuestionSlotTag: { createMany: vi.fn(async () => ({ count: 0 })) },
   appQuestionnaireConfig: {
@@ -82,9 +87,13 @@ const tx = {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `slot-${String(row.key)}`, key: row.key })))
     ),
+    findMany: vi.fn(async () => []),
   },
   appDataSlotQuestion: { createMany: vi.fn(async () => ({ count: 0 })) },
-  appQuestionnaireTopic: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionnaireTopic: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => []),
+  },
   appScoringSchema: { create: vi.fn(async () => ({ id: 'schema-1' })) },
   appGlossaryTerm: { create: vi.fn(async () => ({ id: 'term-1' })) },
 };

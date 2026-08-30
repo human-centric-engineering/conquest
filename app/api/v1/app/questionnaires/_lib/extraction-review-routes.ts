@@ -25,6 +25,12 @@ import {
   type QuestionType,
 } from '@/lib/app/questionnaire/types';
 import { nextAvailableKey, slugifyKey } from '@/lib/app/questionnaire/authoring/key';
+import { seedTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
+import {
+  inheritTopicMembership,
+  pruneTopicMembership,
+  sectionQuestionKeys,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-membership';
 import {
   planRevert,
   type ExtractionChangeListResponse,
@@ -397,6 +403,21 @@ export async function executeRevert(input: ExecuteRevertInput): Promise<void> {
       await applyOp(tx, editVersionId, op, taken);
     }
 
+    // A re-created section brings its questions with it, and they have no siblings in an existing
+    // topic to inherit from — so `inheritTopicMembership` has nothing to go on and the whole section
+    // would be uncovered. `seedTopicsForVersion` is the right mechanism: it adds one `core` topic
+    // per section that no topic claims, which is exactly what ingest did for the section originally.
+    //
+    // Gated on the version already HAVING topics. Additive and idempotent as it is, calling it on a
+    // version whose topics an admin deliberately deleted would silently put them all back — a
+    // revert must not resurrect something nobody asked it to.
+    if (plan.ops.some((op) => op.op === 'create-section')) {
+      const topicCount = await tx.appQuestionnaireTopic.count({
+        where: { versionId: editVersionId },
+      });
+      if (topicCount > 0) await seedTopicsForVersion(tx, editVersionId);
+    }
+
     await tx.appQuestionnaireExtractionChange.update({
       where: { id: changeId },
       data: { status: 'reverted', revertedAt, revertedByUserId },
@@ -448,9 +469,15 @@ async function applyOp(tx: Tx, versionId: string, op: RevertOp, taken: Set<strin
       const ordinal = await tx.appQuestionSlot.count({ where: { sectionId: op.sectionId } });
       const key = nextAvailableKey(slugifyKey(op.question.prompt), taken);
       taken.add(key);
+      // Read the section's existing keys BEFORE the create, so the new question is not counted as
+      // its own sibling — that would let one uncovered question in an empty section infer nothing
+      // while looking like it had evidence.
+      const siblings = await sectionQuestionKeys(tx, op.sectionId);
       await tx.appQuestionSlot.create({
         data: newQuestionData(versionId, op.sectionId, ordinal, key, op.question),
       });
+      // With Conditional Topics on, a question no topic claims is never asked (F17.35).
+      await inheritTopicMembership(tx, versionId, key, siblings);
       return;
     }
     case 'update-question':
@@ -465,11 +492,27 @@ async function applyOp(tx: Tx, versionId: string, op: RevertOp, taken: Set<strin
         data: sectionUpdateData(op.fields),
       });
       return;
-    case 'delete-question':
+    case 'delete-question': {
+      // The key, before it is gone — membership addresses a question by key, never by row id.
+      const doomed = await tx.appQuestionSlot.findUnique({
+        where: { id: op.questionId },
+        select: { key: true },
+      });
       await tx.appQuestionSlot.delete({ where: { id: op.questionId } });
+      if (doomed) await pruneTopicMembership(tx, versionId, doomed.key);
       return;
-    case 'delete-section':
+    }
+    case 'delete-section': {
+      // The cascade takes the section's questions with it, so their keys have to be pruned too —
+      // otherwise a topic built from that section keeps every one of them and reads as non-empty
+      // while resolving to nothing.
+      const doomed = await tx.appQuestionSlot.findMany({
+        where: { sectionId: op.sectionId },
+        select: { key: true },
+      });
       await tx.appQuestionnaireSection.delete({ where: { id: op.sectionId } });
+      for (const q of doomed) await pruneTopicMembership(tx, versionId, q.key);
       return;
+    }
   }
 }

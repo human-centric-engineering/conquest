@@ -69,6 +69,11 @@ const prismaMock = vi.hoisted(() => ({
   // see only the checks they are about.
   appQuestionnaireTopic: {
     count: vi.fn(async () => 0),
+    // Conditional Topics membership (F17.35): a created question joins the topic its section-mates
+    // are in, and a deleted one is pruned from every topic that held it. Default to no topics —
+    // the shape of a version that does not use the feature, which must stay untouched.
+    findMany: vi.fn(async (): Promise<unknown[]> => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
     // Read only when the version was flagged as describing routing and has no proposal yet — the
     // "has an admin authored a topic since?" half of the auto-trigger eligibility rule.
     findFirst: vi.fn(async (): Promise<unknown> => null),
@@ -745,6 +750,103 @@ describe('question create', () => {
       typeConfig: { min: 1, max: 5, labels: ['Awful', 'Poor', 'Okay', 'Good', 'Great'] },
     });
     expect(prismaMock.appQuestionSlot.count).not.toHaveBeenCalled(); // explicit ordinal
+  });
+});
+
+// ─── Conditional Topics membership on the manual question routes (F17.35) ─────
+
+describe('question create + delete — topic membership', () => {
+  const QUESTION_PARAMS = { id: 'qn-1', vid: 'v1', sectionId: 'sec-1' };
+
+  const TOPICS = [
+    {
+      id: 't-1',
+      key: 'background',
+      ordinal: 0,
+      members: { questionKeys: ['q_a'], dataSlotKeys: [] },
+    },
+    { id: 't-2', key: 'other', ordinal: 1, members: { questionKeys: ['q_z'], dataSlotKeys: [] } },
+  ];
+
+  function topicWrites() {
+    return (prismaMock.appQuestionnaireTopic.updateMany as Mock).mock.calls.map(
+      (c: unknown[]) =>
+        c[0] as { where: { id: string }; data: { members: { questionKeys: string[] } } }
+    );
+  }
+
+  beforeEach(() => {
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue(null);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(0);
+  });
+
+  it('puts a newly created question in the topic its section-mates are in', async () => {
+    // Without this the question belongs to nothing, and with Conditional Topics on it is never
+    // asked — with the launch gate the only thing that would ever say so, and only once the
+    // feature is turned on.
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'q_a' }]);
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'q-new', key: 'how_is_it_going' });
+
+    const res = await createQuestionPOST(
+      req({ prompt: 'How is it going?', type: 'free_text' }),
+      ctx(QUESTION_PARAMS)
+    );
+
+    expect(res.status).toBe(201);
+    expect(topicWrites()).toHaveLength(1);
+    expect(topicWrites()[0].where.id).toBe('t-1');
+    expect(topicWrites()[0].data.members.questionKeys).toEqual(['q_a', 'how_is_it_going']);
+  });
+
+  it('writes no membership when the version has no topics', async () => {
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'q-new', key: 'k' });
+
+    const res = await createQuestionPOST(
+      req({ prompt: 'Anything?', type: 'free_text' }),
+      ctx(QUESTION_PARAMS)
+    );
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('still returns 201 when no topic claims any section-mate', async () => {
+    // The question is created and uncovered. That is worth reporting, not worth failing: the
+    // Topics tab and the launch gate both already name it.
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'q_unclaimed' }]);
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+    prismaMock.appQuestionSlot.create.mockResolvedValue({ id: 'q-new', key: 'k' });
+
+    const res = await createQuestionPOST(
+      req({ prompt: 'Anything?', type: 'free_text' }),
+      ctx(QUESTION_PARAMS)
+    );
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.appQuestionnaireTopic.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('prunes a deleted question from every topic that held it', async () => {
+    // A dead key is not a crash, but `empty_topic` counts raw member keys — so a topic emptied by
+    // deletions reads as non-empty and warns about nothing.
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue({
+      id: 'q-1',
+      key: 'q_a',
+      sectionId: 'sec-1',
+    });
+    prismaMock.appQuestionSlot.delete.mockResolvedValue({ id: 'q-1' });
+    prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue(TOPICS);
+
+    const res = await questionDELETE(req(), ctx({ id: 'qn-1', vid: 'v1', questionId: 'q-1' }));
+
+    expect(res.status).toBe(200);
+    expect(topicWrites()).toHaveLength(1);
+    expect(topicWrites()[0].where.id).toBe('t-1');
+    expect(topicWrites()[0].data.members.questionKeys).toEqual([]);
   });
 });
 

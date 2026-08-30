@@ -45,11 +45,15 @@ const prismaMock = vi.hoisted(() => ({
   },
   appQuestionSlot: {
     findMany: vi.fn(),
+    findUnique: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   },
+  // Conditional Topics membership (F17.35): the revert executor keeps topic membership in step as
+  // it re-creates and prunes questions.
+  appQuestionnaireTopic: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
   // The fidelity critic's run for the version, joined onto the list payload.
   appAiRun: { findFirst: vi.fn() },
 }));
@@ -167,6 +171,11 @@ beforeEach(() => {
   prismaMock.appQuestionnaireSection.create.mockResolvedValue({ id: 'new-sec' });
   prismaMock.appQuestionnaireSection.update.mockResolvedValue({});
   prismaMock.appQuestionnaireSection.delete.mockResolvedValue({ id: 'deleted-sec' });
+  // No topics by default — the shape of a version that does not use Conditional Topics, and the
+  // one every membership write must leave completely alone.
+  prismaMock.appQuestionSlot.findUnique.mockResolvedValue({ key: 'q_deleted' });
+  prismaMock.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+  prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
 });
 
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
