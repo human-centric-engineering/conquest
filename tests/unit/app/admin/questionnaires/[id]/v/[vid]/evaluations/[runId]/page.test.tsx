@@ -33,10 +33,13 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }));
 
-// ─── workspace-data mock (data-slot count drives the "slot the new question" affordance) ──────
+// ─── workspace-data mock ──────────────────────────────────────────────────────
+// Data-slot count drives the "slot the new question" affordance; the topics payload drives the
+// orphaned-question banner (F17.35).
 
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionDataSlotCountCached: vi.fn(),
+  getVersionTopicsCached: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -70,6 +73,8 @@ vi.mock('@/components/admin/questionnaires/evaluation-run-detail', () => ({
     questionnaireId: string;
     versionId: string;
     canApply: boolean;
+    conditionalTopicsEnabled?: boolean;
+    uncoveredQuestionCount?: number;
   }) => (
     <div
       data-testid="evaluation-run-detail"
@@ -78,6 +83,8 @@ vi.mock('@/components/admin/questionnaires/evaluation-run-detail', () => ({
       data-vid={props.versionId}
       data-can-apply={String(props.canApply)}
       data-created-at={props.run.createdAt}
+      data-topics-enabled={String(props.conditionalTopicsEnabled)}
+      data-uncovered={String(props.uncoveredQuestionCount)}
     />
   ),
 }));
@@ -125,6 +132,10 @@ function renderPage(opts: { id?: string; vid?: string; runId?: string } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(0);
+  workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+    settings: { enabled: false },
+    coverage: { uncoveredQuestions: 0 },
+  });
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: makeRun() });
 });
@@ -222,6 +233,37 @@ describe('EvaluationRunTab', () => {
       // Assert — link appends /evaluations to the workspace version base
       const link = screen.getByRole('link', { name: /evaluations/i });
       expect(link).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/ver-1/evaluations');
+    });
+  });
+
+  describe('conditional-topics coverage (F17.35)', () => {
+    it('passes the enabled flag and the server-computed orphan count through', async () => {
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+        settings: { enabled: true },
+        coverage: { uncoveredQuestions: 4 },
+      });
+
+      render(await renderPage({ id: 'qn-1', vid: 'ver-1' }));
+
+      const detail = screen.getByTestId('evaluation-run-detail');
+      expect(detail).toHaveAttribute('data-topics-enabled', 'true');
+      expect(detail).toHaveAttribute('data-uncovered', '4');
+      expect(workspaceDataMock.getVersionTopicsCached).toHaveBeenCalledWith('qn-1', 'ver-1');
+    });
+
+    it('passes the count through unchanged when the feature is off — the component decides', async () => {
+      // The page never pre-filters to 0: the banner's own "off ⇒ silent" rule is what suppresses
+      // it, and a page that zeroed the count here would hide the fact from the component's tests.
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+        settings: { enabled: false },
+        coverage: { uncoveredQuestions: 4 },
+      });
+
+      render(await renderPage({ id: 'qn-1', vid: 'ver-1' }));
+
+      const detail = screen.getByTestId('evaluation-run-detail');
+      expect(detail).toHaveAttribute('data-topics-enabled', 'false');
+      expect(detail).toHaveAttribute('data-uncovered', '4');
     });
   });
 });

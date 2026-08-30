@@ -14,7 +14,10 @@ import { EvaluationRunDetail } from '@/components/admin/questionnaires/evaluatio
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { getVersionDataSlotCountCached } from '@/lib/app/questionnaire/workspace-data';
+import {
+  getVersionDataSlotCountCached,
+  getVersionTopicsCached,
+} from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { EvaluationRunDetail as EvaluationRunDetailView } from '@/lib/app/questionnaire/views';
 
@@ -54,6 +57,11 @@ export default async function EvaluationRunTab({ params }: PageProps) {
   // added afterwards would otherwise be orphaned from them).
   const dataSlotsAvailable = (await getVersionDataSlotCountCached(id, vid)) > 0;
 
+  // The same orphan count the Topics tab shows, from the same server-side `uncoveredQuestionKeys`
+  // call — applying suggestions here is one of the few places that can create one, and the launch
+  // gate is a long way off. `cache()`d, so a page that renders both pays for one fetch.
+  const topics = await getVersionTopicsCached(id, vid);
+
   return (
     // Capped to a reading column. The admin shell is full-bleed, which suits a table but not this
     // page — its content is prose (a question, a verdict, four judges' reasoning), and on a wide
@@ -80,6 +88,8 @@ export default async function EvaluationRunTab({ params }: PageProps) {
         versionId={vid}
         canApply={true}
         dataSlotsAvailable={dataSlotsAvailable}
+        conditionalTopicsEnabled={topics.settings.enabled}
+        uncoveredQuestionCount={topics.coverage.uncoveredQuestions}
       />
     </div>
   );

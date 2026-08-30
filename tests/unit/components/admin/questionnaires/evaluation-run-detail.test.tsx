@@ -1559,3 +1559,72 @@ describe('EvaluationRunDetail judge retry', () => {
     expect(screen.getByText('1 judge did not run')).toBeInTheDocument();
   });
 });
+
+/**
+ * The orphaned-question banner (F17.35).
+ *
+ * A question belonging to no topic can never be asked while Conditional Topics is on, and nothing
+ * else on this screen would say so. The two things worth pinning are both about *silence*: the
+ * banner must not appear when routing is off (where an uncovered question is simply asked), and it
+ * must not appear at zero — ingest seeds a topic per section, so most versions sit at zero and a
+ * banner that renders anyway would be noise on every run.
+ */
+describe('EvaluationRunDetail orphaned-question banner', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderWithTopics(over: {
+    conditionalTopicsEnabled?: boolean;
+    uncoveredQuestionCount?: number;
+  }) {
+    return render(
+      <EvaluationRunDetail
+        run={run([finding()])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        {...over}
+      />
+    );
+  }
+
+  it('names the count and links to the topics tab when routing is on', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 3 });
+
+    expect(
+      screen.getByText(/3 questions in this questionnaire belong to no topic/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Put them in a topic/ })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn1/v/v1/topics'
+    );
+  });
+
+  it('says "it", not "them", for a single orphan', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 1 });
+
+    expect(
+      screen.getByText(/1 question in this questionnaire belongs to no topic/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Put it in a topic/ })).toBeInTheDocument();
+  });
+
+  it('stays silent when Conditional Topics is off, however many questions are uncovered', () => {
+    renderWithTopics({ conditionalTopicsEnabled: false, uncoveredQuestionCount: 9 });
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
+  });
+
+  it('stays silent at zero orphans', () => {
+    renderWithTopics({ conditionalTopicsEnabled: true, uncoveredQuestionCount: 0 });
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
+  });
+
+  it('stays silent when the caller says nothing about topics at all', () => {
+    renderWithTopics({});
+
+    expect(screen.queryByText(/belongs? to no topic/)).not.toBeInTheDocument();
+  });
+});

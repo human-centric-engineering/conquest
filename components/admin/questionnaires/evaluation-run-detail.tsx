@@ -61,6 +61,7 @@ import type {
   EvaluationFindingView,
   EvaluationRunDetail as EvaluationRunDetailView,
 } from '@/lib/app/questionnaire/views';
+import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
 import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
 import {
@@ -142,6 +143,21 @@ interface Props {
   canApply: boolean;
   /** Whether the version has data slots — drives the "slot the new question" checkbox on add_question. */
   dataSlotsAvailable?: boolean;
+  /**
+   * Whether Conditional Topics is ON for this version.
+   *
+   * Passed rather than inferred from "the version has topics", because ingest seeds one `core`
+   * topic per section on EVERY questionnaire — so topics existing says nothing about whether
+   * routing can withhold a question.
+   */
+  conditionalTopicsEnabled?: boolean;
+  /**
+   * Questions belonging to no topic, server-computed by `uncoveredQuestionKeys` — the same
+   * function the `orphaned_questions` finding uses, including its "stay silent when the version
+   * has no topics at all" suppression. Counting client-side would report orphans on a version
+   * whose own issue list is deliberately quiet.
+   */
+  uncoveredQuestionCount?: number;
 }
 
 type ViewMode = 'question' | 'judge';
@@ -199,6 +215,8 @@ export function EvaluationRunDetail({
   versionId,
   canApply,
   dataSlotsAvailable = false,
+  conditionalTopicsEnabled = false,
+  uncoveredQuestionCount = 0,
 }: Props) {
   // The run header changes under a judge retry (status, tallies, per-judge summary), so it is
   // state rather than the prop read directly.
@@ -583,6 +601,27 @@ export function EvaluationRunDetail({
             className="underline"
           >
             Open the draft →
+          </Link>
+        </div>
+      )}
+
+      {/* Questions no topic claims, while routing is on — they can never be asked, and this is the
+          one screen where an admin is actively adding and removing questions. Placed above the
+          queue rather than on a card: it is a fact about the questionnaire, not about any one
+          finding. Silent when routing is off, where an uncovered question is simply asked. */}
+      {conditionalTopicsEnabled && uncoveredQuestionCount > 0 && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-400 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
+        >
+          {uncoveredQuestionCount === 1
+            ? '1 question in this questionnaire belongs to no topic, so it is never asked.'
+            : `${uncoveredQuestionCount} questions in this questionnaire belong to no topic, so they are never asked.`}{' '}
+          <Link
+            href={`${workspaceVersionBase(questionnaireId, versionId)}/topics`}
+            className="underline"
+          >
+            Put {uncoveredQuestionCount === 1 ? 'it' : 'them'} in a topic →
           </Link>
         </div>
       )}
