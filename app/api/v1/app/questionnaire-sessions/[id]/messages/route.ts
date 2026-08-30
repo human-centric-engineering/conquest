@@ -563,9 +563,15 @@ async function handleMessage(
 
     // A kickoff carries no respondent message (`userMessage` is `''`), so the core's `hasMessage`
     // guard already skips extraction / seriousness / sensitivity — no per-step disabling needed here.
+    // A card-answer turn is message-less too, but for the opposite reason: the answer is already
+    // persisted, so `answeredQuestionKey` is what tells the core an answer arrived. Contradiction
+    // checking reads it to tell the two apart — see `TurnState.answeredQuestionKey`.
     const state: TurnState = {
       ...loaded.base,
       userMessage,
+      ...(body.answeredQuestionKey !== undefined
+        ? { answeredQuestionKey: body.answeredQuestionKey }
+        : {}),
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };

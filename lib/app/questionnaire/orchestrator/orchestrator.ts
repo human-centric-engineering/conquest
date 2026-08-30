@@ -370,12 +370,15 @@ export async function runTurn(
   const effective = applyIntents(state, answerUpserts);
 
   // 3–4. Contradiction phase (F4.3 detect + F4.4 refine + the probe-confirm flow). Resolves a probe
-  //       raised on a prior turn, or detects afresh: under `probe` mode a fresh contradiction DEFERS
-  //       (ask a reconciliation question, suppress this turn's writes, park the finding); under `flag`
-  //       mode it surfaces the explanation AND refines immediately. See `contradiction-phase.ts`.
+  //       raised on a prior turn, or detects afresh: a fresh contradiction DEFERS (ask a
+  //       reconciliation question, suppress this turn's writes, park the finding). Runs on a typed
+  //       turn AND on a tap-to-answer turn. See `contradiction-phase.ts`.
   onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
+    // P18: an answer arrived through a question's answer control — a turn with no typed message but
+    // a brand-new answer to check. Distinguishes it from the opening turn, which has neither.
+    answerRecorded: state.answeredQuestionKey !== undefined,
     disregarded,
     dataMode: false,
     labels: questionProbeLabels(effective.questions),

@@ -191,6 +191,14 @@ acknowledge it and move on. Passing the value as a fake user message would leak 
 transcript and re-run extraction over text the respondent never typed. The route adds one briefing
 line telling the interviewer to acknowledge briefly and **not** repeat the answer back.
 
+`answeredQuestionKey` also rides on the `TurnState`, because a message-less turn is otherwise
+indistinguishable from the opening turn. [Contradiction
+checking](./contradiction-detection.md#which-turns-are-checked) reads it to decide whether anything
+arrived worth checking: until 2026-08-30 it gated on the typed message alone, so a respondent working
+through a questionnaire on cards was never checked mid-conversation — their conflicts surfaced only
+at the submit sweep. Answering by tapping is a first-class way to answer, not a way to skip the
+checks.
+
 The escape hatch ("I'd rather answer in my own words") dismisses the card without marking the
 question answered — the interviewer still comes back to it — so it cannot be used to dodge a required
 item.

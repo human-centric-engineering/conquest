@@ -158,11 +158,51 @@ Two orchestration details make this actually fire (both were live bugs):
 - **Floor.** The live phase requires only **≥1 stored answer** when a message is present (it can
   contradict the message); the detector capability's arg floor is `answers.min(1)` to match. The old
   `≥2` floor silently skipped the very case this targets (e.g. only `satisfaction` answered so far).
+  With **no** message the floor is back to **≥2** — a lone answer with nothing to compare it against
+  is not a pass worth dispatching. That arm is reachable as of 2026-08-30; see [Which turns are
+  checked](#which-turns-are-checked) below. It is also why `applyCompareWindow` runs **before** the
+  floor: a look-back of 1 on a message-less turn leaves the detector a single answer, and the floor
+  is what stops it.
 - **Pre-merge answers.** Detection runs over the answers **as they were before this turn's extraction
   merged in** (`runContradictionPhase`'s `priorAnswers` = the orchestrator's `state.existingAnswers`,
   pre-`applyIntents`). This turn's contradicting statement is often extracted straight into the
   conflicting slot (`satisfaction` 1→5), which would erase the old value before the detector sees it;
   comparing the pre-merge answers against the latest message keeps it visible.
+
+### Which turns are checked
+
+**Checking is about the answers, not the keyboard.** A turn is checked when something arrived to
+check — the respondent **typed** (`hasMessage`), or they **answered a question through its in-chat
+answer control** (`answerRecorded`, from `TurnState.answeredQuestionKey`). Those are the two ways an
+answer reaches the session.
+
+The card case is why this is not simply `hasMessage`. A P18 answer card persists the value itself
+(`PUT …/answers`) and then fires a turn carrying no message, because passing the picked value as a
+fake user message would leak form values into the transcript. Until 2026-08-30 the phase gated on the
+message alone, so **a respondent working through a questionnaire on answer cards was never checked
+mid-conversation** — their conflicts surfaced only at the submit-time sweep, stopping them at the
+finish line instead of being cleared up in the flow. Nothing was missed, but the feedback came at the
+worst moment.
+
+Two things fall out of using a positive "something arrived" signal rather than "not a kickoff":
+
+- **The opening turn is excluded by construction.** It has neither signal. This matters more than it
+  looks: a form-first session can reach its first conversational turn with answers already stored, and
+  opening the interview by challenging the respondent is not how it should start.
+- **A card turn has nothing to suppress.** `suppressWrites` exists so this turn's _extraction_ can't
+  overwrite the old value before the respondent confirms; on a card turn there is no extraction and
+  the value is the respondent's own deliberate pick. The promise the probe makes — nothing is
+  **changed** until you reply — still holds.
+
+One further rule keeps the conversation civil: **while a probe is parked and this turn cannot answer
+it** (a card tap, or a disregarded turn), no fresh detection runs. Stacking a second reconciliation
+question on top of an unanswered one is the nagging the ledger exists to prevent, and parking a new
+finding would overwrite the one still waiting. The parked conflict keeps its `unresolved` entry, so
+the completion sweep still raises it if the session ends without an answer.
+
+The remaining gap, accepted deliberately: a respondent who answers a probe by tapping another card
+rather than typing does not resolve it that turn. A probe is a free-text question, so typing is the
+natural reply; if they never do, the conflict is caught by the sweep.
 
 ### The question the message is answering (the 5GB3M8SS correction)
 

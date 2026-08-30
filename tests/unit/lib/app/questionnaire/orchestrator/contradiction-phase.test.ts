@@ -48,6 +48,7 @@ const TWO_ANSWERS = [
 
 type PhaseOpts = {
   hasMessage?: boolean;
+  answerRecorded?: boolean;
   disregarded?: boolean;
   dataMode?: boolean;
 };
@@ -59,6 +60,7 @@ async function runPhase(
 ) {
   return runContradictionPhase(s, inv.invokers, {
     hasMessage: opts.hasMessage ?? true,
+    answerRecorded: opts.answerRecorded ?? false,
     disregarded: opts.disregarded ?? false,
     dataMode: opts.dataMode ?? false,
     labels: emptyLabels,
@@ -621,6 +623,7 @@ describe('runContradictionPhase — priorAnswers override', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -644,6 +647,7 @@ describe('runContradictionPhase — priorAnswers override', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -717,6 +721,7 @@ describe('runContradictionPhase — look-back window', () => {
 
     await runContradictionPhase(s, inv.invokers, {
       hasMessage: true,
+      answerRecorded: false,
       disregarded: false,
       dataMode: false,
       labels: emptyLabels,
@@ -726,26 +731,111 @@ describe('runContradictionPhase — look-back window', () => {
     expect(inv.calls.detect[0]?.existingAnswers.map((a) => a.slotKey)).toEqual(['a5']);
   });
 
-  it('does not run the detector on a turn with no message to check', async () => {
-    // Named for what it proves. It was written as "counts the floor against what the detector will
-    // actually see", which it does not: `canDetect` opens with `opts.hasMessage &&`, so on a
-    // no-message turn the window and the floor are never reached — the assertion below holds with
-    // `applyCompareWindow` deleted outright. (The window IS covered, by the two tests above, which
-    // do fail without it.) The floor's answer-vs-answer arm is in fact unreachable today: whenever
-    // it is evaluated `hasMessage` is true, so the floor is 1, and a non-empty answer list can
-    // never be narrowed below 1 by a window. Left as-is rather than "fixed" here — collapsing that
-    // arm changes when the detector runs, which is a product decision, not a test cleanup.
+  it('does not run the detector on the opening turn — nothing arrived to check', async () => {
+    // The other message-less turn. A form-first session can reach it with answers already stored, so
+    // "no message" alone is not what excludes it — `answerRecorded` being false is. Opening the
+    // interview by challenging the respondent is not how it should start.
     const inv = stubInvokers({ detect: { findings: [] } });
     const s = state({
       userMessage: '',
       questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
       existingAnswers: TWO_ANSWERS,
     });
 
-    await runPhase(s, inv, { hasMessage: false });
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: false });
 
     expect(inv.calls.detect).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tap-to-answer turns (P18 answer cards) — checking is about the answers, not the keyboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runContradictionPhase — a turn answered by tapping, not typing', () => {
+  it('checks the stored answers against each other when an answer arrived without a message', async () => {
+    // The respondent used a question's answer control: the value is already persisted and there is
+    // no message, so the detector compares answer against answer (no `currentStatement`).
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a', 'b'], explanation: 'A vs B' })] },
+    });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    const result = await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(1);
+    expect(result.probe?.text).toBeTruthy();
+    expect(result.pendingContradiction).toMatchObject({ slotKeys: ['a', 'b'] });
+  });
+
+  it('needs TWO stored answers with no message — one has nothing to contradict', async () => {
+    // The floor's answer-vs-answer arm. With a message, one stored answer is enough (the message is
+    // the other party); without one, a lone answer can only be compared to itself.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+      existingAnswers: [{ slotKey: 'a', value: 1, provenance: 'direct' as const }],
+    });
+
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+  });
+
+  it('counts the floor against what the window leaves, not the full answer list', async () => {
+    // Why `applyCompareWindow` runs BEFORE the floor. Two stored answers, but a look-back of 1 hands
+    // the detector a single answer — nothing to compare it against, so the pass is skipped rather
+    // than dispatched with an input that cannot produce a finding.
+    const inv = stubInvokers({ detect: { findings: [] } });
+    const s = state({
+      userMessage: '',
+      questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+      config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+  });
+
+  it('does not stack a second question on a probe the respondent has not answered', async () => {
+    // A probe is parked and this turn is a card tap, which cannot be its answer. Asking again about
+    // something else on top of it is the nagging the ledger exists to prevent — and parking the new
+    // finding would overwrite the one still waiting.
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['c'], explanation: 'C conflict' })] },
+    });
+    const s = {
+      ...state({
+        userMessage: '',
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'c', key: 'c' })],
+        config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'A vs not-A',
+        statement: 'earlier statement',
+        raisedAtTurnIndex: 0,
+      },
+    };
+
+    const result = await runPhase(s, inv, { hasMessage: false, answerRecorded: true });
+
+    expect(inv.calls.detect).toHaveLength(0);
+    expect(inv.calls.refine).toHaveLength(0);
+    // The parked probe is left exactly as it was — not cleared, not replaced.
+    expect(result.pendingContradiction).toBeUndefined();
+    expect(result.raisedContradictions).toBeUndefined();
   });
 });
 

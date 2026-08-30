@@ -521,6 +521,9 @@ export async function runDataSlotTurn(
   onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
+    // P18: an answer arrived through a question's answer control — a turn with no typed message but
+    // a brand-new answer to check. Distinguishes it from the opening turn, which has neither.
+    answerRecorded: state.answeredQuestionKey !== undefined,
     disregarded,
     dataMode: true,
     labels: questionProbeLabels(effective.questions),

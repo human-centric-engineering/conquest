@@ -1347,13 +1347,13 @@ describe('reasoning stream (F9.9)', () => {
   });
 });
 
-describe('contradiction notice — explanation is the message (flag mode)', () => {
+describe('contradiction notice — the explanation is the message', () => {
   /**
-   * Invokers that trigger a flag-mode contradiction warning. The finding carries BOTH an
-   * `explanation` and a `suggestedProbe`. The contradiction phase always sets the notice
-   * `message` to `finding.explanation` (in both flag and probe mode — the probe question is asked
-   * as the interviewer turn, never as the notice), so the route surfaces the explanation as the
-   * warning message and adds NO `detail` (the enrichment fires only when detail ≠ message).
+   * Invokers that trigger a contradiction warning. The finding carries BOTH an `explanation` and a
+   * `suggestedProbe`. The contradiction phase always sets the notice `message` to
+   * `finding.explanation` — the probe question is asked as the interviewer turn, never as the
+   * notice — so the route surfaces the explanation as the warning message and adds NO `detail`
+   * (the enrichment fires only when detail ≠ message).
    */
   function contradictionInvokers() {
     return {
@@ -1379,7 +1379,7 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
             severity: 'medium' as const,
             confidence: 0.8,
             // A probe is present, but the blue notice is INFORMATIONAL — it shows the explanation,
-            // never the question (under `probe` mode the question is asked as the interviewer turn).
+            // never the question (the question is asked as the interviewer turn).
             suggestedProbe: 'Can you clarify your seniority level?',
           },
         ],
@@ -1443,6 +1443,48 @@ describe('contradiction notice — explanation is the message (flag mode)', () =
         raisedContradictions: [
           expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'unresolved' }),
         ],
+      })
+    );
+  });
+
+  it('checks a card-answer turn, which carries no message at all', async () => {
+    // P18: the respondent answered through the question's answer control. The card already persisted
+    // the value, so the request carries `answeredQuestionKey` and no `message`. The route must put
+    // that on the TurnState — without it the core cannot tell this turn from the opening one, and a
+    // whole tap-to-answer session goes unchecked until the submit sweep.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          existingAnswers: [
+            { slotKey: 'q1', value: 'junior', provenance: 'direct' as const, confidence: 0.7 },
+            { slotKey: 'role', value: 'engineer', provenance: 'direct' as const, confidence: 0.8 },
+          ],
+          config: {
+            ...baseCtx.base.config,
+            contradictionMode: 'probe',
+            contradictionWindowN: 4,
+            contradictionEveryNTurns: 1,
+          },
+        },
+      })
+    );
+    const invokers = contradictionInvokers();
+    invokersMock.buildTurnInvokers.mockResolvedValue(invokers);
+
+    const frames = await drainSse(await POST(req({ answeredQuestionKey: 'q1' }), ctx));
+
+    expect(invokers.detectContradictions).toHaveBeenCalledTimes(1);
+    const contradictionFrame = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
+    );
+    expect(contradictionFrame).toBeDefined();
+    // Parked for the respondent to answer, exactly as on a typed turn.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingContradiction: expect.objectContaining({ slotKeys: ['q1'] }),
       })
     );
   });

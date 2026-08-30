@@ -133,7 +133,7 @@ describe('runTurn — contradiction detection', () => {
     expect(calls.detect).toHaveLength(0);
   });
 
-  it('detects under flag mode and emits a warning per finding', async () => {
+  it('detects and emits a warning per finding', async () => {
     const { invokers, calls } = stubInvokers({
       detect: {
         findings: [finding({ explanation: 'conflict!', suggestedProbe: 'which is right?' })],
@@ -144,15 +144,15 @@ describe('runTurn — contradiction detection', () => {
       state({
         userMessage: 'x',
         questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag' },
+        config: { contradictionMode: 'probe' },
         existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
     expect(calls.detect).toHaveLength(1);
     expect(result.contradictions).toHaveLength(1);
-    // The blue notice is purely INFORMATIONAL — it shows the explanation, never the probe question
-    // (under `probe` mode the question is asked separately; flag mode never asks).
+    // The blue notice is purely INFORMATIONAL — it shows the explanation, never the probe question,
+    // which is asked separately as the turn's reply.
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: 'warning',
@@ -163,6 +163,47 @@ describe('runTurn — contradiction detection', () => {
     expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
   });
 
+  it('checks a turn the respondent answered by tapping, with no message', async () => {
+    // P18 answer cards: the value is persisted by the card, so the turn carries no message. Gating
+    // on the message alone let a whole tap-to-answer session through unchecked until the submit
+    // sweep. `answeredQuestionKey` is what tells the core an answer arrived.
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a', 'b'], explanation: 'A vs B' })] },
+    });
+    const result = await runTurn(
+      {
+        ...state({
+          userMessage: '',
+          questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+          config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+          existingAnswers: TWO_ANSWERS,
+        }),
+        answeredQuestionKey: 'a',
+      },
+      invokers
+    );
+    expect(calls.detect).toHaveLength(1);
+    expect(result.response.kind).toBe('contradiction_probe');
+  });
+
+  it('does not check the opening turn, even when answers are already stored', async () => {
+    // The other message-less turn. A form-first session reaches it with answers in hand; opening the
+    // interview by challenging the respondent is not how it should start.
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a', 'b'], explanation: 'A vs B' })] },
+    });
+    await runTurn(
+      state({
+        userMessage: '',
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+        config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(0);
+  });
+
   it('honours the every_n_turns cadence — skips an off-boundary turn, runs on a boundary', async () => {
     // every_n_turns = 2 → run on rounds 0, 2, 4; skip odd rounds.
     const skipped = stubInvokers();
@@ -170,7 +211,7 @@ describe('runTurn — contradiction detection', () => {
       state({
         userMessage: 'x',
         questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag', contradictionEveryNTurns: 2 },
+        config: { contradictionMode: 'probe', contradictionEveryNTurns: 2 },
         existingAnswers: TWO_ANSWERS,
         selectionRound: 1,
       }),
@@ -183,7 +224,7 @@ describe('runTurn — contradiction detection', () => {
       state({
         userMessage: 'x',
         questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag', contradictionEveryNTurns: 2 },
+        config: { contradictionMode: 'probe', contradictionEveryNTurns: 2 },
         existingAnswers: TWO_ANSWERS,
         selectionRound: 2,
       }),

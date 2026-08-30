@@ -130,6 +130,15 @@ export interface TurnState {
   sessionId: string;
   /** The respondent's message; `''` for the opening turn (no extraction/detect/refine). */
   userMessage: string;
+  /**
+   * Question fidelity (P18): the key of the question the respondent just answered through its
+   * in-chat answer control. Such a turn carries NO `userMessage` — the value is already persisted by
+   * the card, and passing it as a fake message would leak form values into the transcript — so this
+   * is the only signal that an answer arrived at all. Contradiction checking reads it to tell a
+   * tap-to-answer turn apart from the opening turn, which is the other message-less turn and has
+   * nothing to check. Absent on every other turn.
+   */
+  answeredQuestionKey?: string;
   /** The version's resolved config (defaults when no row was ever saved). */
   config: QuestionnaireConfigShape;
   /** Every question slot in the version. `prompt` must be populated for the live path. */

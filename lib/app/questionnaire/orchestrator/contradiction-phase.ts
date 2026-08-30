@@ -7,7 +7,10 @@
  *     raised on a PRIOR turn), THIS turn's message is the answer to it: run the refiner against the
  *     parked finding (apply the change on confirm, keep otherwise) and clear the pending state. No
  *     fresh detection runs while resolving.
- *   - **Detect** — otherwise, run the detector (gated by mode/cadence/answer floor). On a hit it
+ *   - **Detect** — otherwise, run the detector (gated by mode/cadence/answer floor). This covers a
+ *     turn the respondent TYPED and a turn they answered by tapping a question's answer control:
+ *     checking is about the answers, not the keyboard. The opening turn has neither and is skipped.
+ *     On a hit it
  *     **defers**: raise a reconciliation question (`contradiction_probe` response), suppress this
  *     turn's writes (nothing is overwritten before the respondent confirms), and park the finding as
  *     a `PendingContradiction`. The blue notice shows the EXPLANATION only.
@@ -176,8 +179,8 @@ function pendingAsFinding(pending: PendingContradiction): ContradictionFinding {
 }
 
 /**
- * Run the contradiction phase over the (post-merge) effective state. `hasMessage` / `disregarded`
- * gate the work as in the rest of the pipeline; `dataMode` only tweaks the probe's consequence noun;
+ * Run the contradiction phase over the (post-merge) effective state. `hasMessage` / `answerRecorded` /
+ * `disregarded` gate the work; `dataMode` only tweaks the probe's consequence noun;
  * `labels` name the conflicting topics in the probe. The orchestrator passes the same `effective`
  * state it uses for completion + selection.
  */
@@ -186,6 +189,13 @@ export async function runContradictionPhase(
   invokers: CapabilityInvokers,
   opts: {
     hasMessage: boolean;
+    /**
+     * An answer arrived this turn WITHOUT a typed message: the respondent used a question's in-chat
+     * answer control and the card persisted the value itself (P18 question fidelity). It is what
+     * separates the two kinds of message-less turn — a tap-to-answer turn, which has a brand-new
+     * answer worth checking, from the opening turn, which has nothing to check.
+     */
+    answerRecorded: boolean;
     disregarded: boolean;
     dataMode: boolean;
     labels: ContradictionProbeLabels;
@@ -236,6 +246,13 @@ export async function runContradictionPhase(
     return base;
   }
 
+  // A probe is parked but THIS turn can't answer it — the respondent tapped a card, or the turn was
+  // disregarded. Don't detect: stacking a second reconciliation question on top of one they haven't
+  // replied to yet is the nagging the ledger exists to prevent, and parking the new finding would
+  // overwrite the old one. The parked conflict keeps its `unresolved` ledger entry, so the
+  // completion sweep still raises it if the conversation ends without an answer.
+  if (pending) return base;
+
   // ── Detect over the PRE-MERGE answers (see `priorAnswers`) + the latest message. ──
   const allPriorAnswers = opts.priorAnswers ?? effective.existingAnswers;
   const decision = shouldRunDetection(
@@ -247,17 +264,25 @@ export async function runContradictionPhase(
       turnIndex: effective.selectionRound,
     }
   );
-  // The configured look-back, finally applied. `shouldRunDetection` has always returned a
-  // `compareWindow` and every caller has always ignored it, so "check against the last N answers"
-  // silently meant "check against all of them". It sits before the floor so the floor would count
-  // what the detector sees — though as written that ordering is unobservable: `canDetect` requires
-  // `hasMessage`, which pins the floor at 1, and a window never narrows a non-empty list below 1.
+  // The configured look-back, applied before the floor so the floor counts what the detector will
+  // actually be given. (`shouldRunDetection` returned a `compareWindow` from the first release and
+  // every caller ignored it, so "check against the last N answers" silently meant "check against all
+  // of them" until 2026-08-30.) The ordering is load-bearing on an answer-vs-answer pass: a window of
+  // 1 leaves a single answer with nothing to compare it to, and the floor is what stops that pass.
   const priorAnswers = applyCompareWindow(allPriorAnswers, decision.compareWindow);
   // Floor: with a latest message (fed to the detector as `currentStatement`), ONE stored answer is
   // enough — it can contradict the message. Without one, we need ≥2 answers to compare each other.
   const floor = opts.hasMessage ? 1 : MIN_CONTRADICTION_ANSWERS;
+  // What the turn brought: something the respondent typed, or an answer they tapped in. Checking is
+  // about the ANSWERS, not about whether they used the keyboard — a respondent working through a
+  // questionnaire on answer cards contradicts an earlier answer just as readily as one who types,
+  // and gating on the message alone let those sessions through unchecked to the submit-time sweep.
+  // The opening turn has neither and is excluded by the same condition, which is what it wants: a
+  // form-first session can reach it with answers already stored, and opening the interview by
+  // challenging the respondent is not how it should start.
+  const somethingToCheck = opts.hasMessage || opts.answerRecorded;
   const canDetect =
-    opts.hasMessage && !opts.disregarded && decision.run && priorAnswers.length >= floor;
+    somethingToCheck && !opts.disregarded && decision.run && priorAnswers.length >= floor;
   if (!canDetect) return base;
 
   // Detect against the pre-merge answers so the conflicting OLD value (which this turn's extraction

@@ -751,7 +751,7 @@ describe('runDataSlotTurn — contradiction detection + refinement (parity with 
           ds({ id: 'd2', key: 'd2', theme: 'B' }),
         ],
         existingAnswers: twoAnswers,
-        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
       }),
       invokers
     );
@@ -904,8 +904,30 @@ describe('runDataSlotTurn — contradiction detection + refinement (parity with 
         questions: [q({ id: 'q1', key: 'satisfaction' })],
         dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
         existingAnswers: [twoAnswers[0]], // a single prior answer — enough, given the latest message
-        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
       }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(1);
+  });
+
+  it('checks a tap-to-answer turn in data-slot mode too (parity with question mode)', async () => {
+    // No message, but an answer arrived through its answer control. The detector compares the stored
+    // background answers against each other, so the floor is two.
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [] },
+    });
+    await runDataSlotTurn(
+      {
+        ...dsState({
+          userMessage: '',
+          questions: [q({ id: 'q1', key: 'satisfaction' })],
+          dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+          existingAnswers: twoAnswers,
+          config: { contradictionMode: 'probe', contradictionWindowN: 4 },
+        }),
+        answeredQuestionKey: 'satisfaction',
+      },
       invokers
     );
     expect(calls.detect).toHaveLength(1);
@@ -921,7 +943,7 @@ describe('runDataSlotTurn — contradiction detection + refinement (parity with 
         questions: [q({ id: 'q1', key: 'satisfaction' })],
         dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
         existingAnswers: [],
-        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
       }),
       invokers
     );
@@ -939,7 +961,11 @@ describe('runDataSlotTurn — contradiction detection + refinement (parity with 
         dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
         existingAnswers: twoAnswers,
         selectionRound: 1, // every_n_turns=2 → run on 0,2,4… not turn 1
-        config: { contradictionMode: 'flag', contradictionWindowN: 1, contradictionEveryNTurns: 2 },
+        config: {
+          contradictionMode: 'probe',
+          contradictionWindowN: 1,
+          contradictionEveryNTurns: 2,
+        },
       }),
       invokers
     );
