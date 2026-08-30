@@ -150,6 +150,61 @@ export function planDataSlotAttachment(input: {
   return additions;
 }
 
+/**
+ * Which topic a NEW question should join, given the questions it will sit beside.
+ *
+ * {@link planDataSlotAttachment}'s rule applied to a question instead of a data slot, and it lives
+ * here for that reason: "which topic does this belong to" is one question, and two answers to it
+ * three modules apart would drift. Count how many of `siblingQuestionKeys` each topic owns, take
+ * the highest, ties breaking to the lower ordinal — the same strict `n > best` over the same
+ * ordinal-ascending order, so the two cannot disagree.
+ *
+ * ## Why this is needed at all
+ *
+ * Topic membership is written at ingest and by the Topics tab, and by nothing else. Every other way
+ * a question comes into existence — an admin adding one, a judge's `add_question` or
+ * `split_question` being applied, extraction review restoring one — created a question no topic
+ * claimed. With Conditional Topics on that question is never asked, and `resolveScope` has no way
+ * to report it: an orphan is indistinguishable from a question the plan simply did not seat.
+ *
+ * ## Why a tie does not return null
+ *
+ * A section split across two topics ties 1–1 constantly — it is the ordinary case, not the
+ * pathological one — so bailing on ties would orphan exactly the questions this exists to place.
+ * `null` is reserved for the genuinely undecidable case: no topic owns any sibling, so there is no
+ * evidence to reason from and a guess would be worse than the coherence finding that follows.
+ */
+export function inheritTopicForQuestion(
+  topics: readonly AttachTopic[],
+  siblingQuestionKeys: readonly string[]
+): string | null {
+  if (topics.length === 0 || siblingQuestionKeys.length === 0) return null;
+
+  // Lowest ordinal first, so the tie-break falls out of iteration order rather than a comparator —
+  // `planDataSlotAttachment`'s trick, for the same reason.
+  const ordered = [...topics].sort((a, b) => a.ordinal - b.ordinal);
+
+  const counts = new Map<string, number>();
+  for (const topic of ordered) {
+    for (const qKey of topic.members.questionKeys) {
+      if (!siblingQuestionKeys.includes(qKey)) continue;
+      counts.set(topic.key, (counts.get(topic.key) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return null;
+
+  let bestKey: string | null = null;
+  let best = 0;
+  for (const topic of ordered) {
+    const n = counts.get(topic.key) ?? 0;
+    if (n > best) {
+      best = n;
+      bestKey = topic.key;
+    }
+  }
+  return bestKey;
+}
+
 /** One topic the seeder proposes. Shaped for a direct `createMany`. */
 export interface SeededTopic {
   key: string;
