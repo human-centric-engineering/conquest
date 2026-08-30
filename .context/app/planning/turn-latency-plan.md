@@ -205,6 +205,27 @@ correct, not a gap.
 **Done when** a respondent sees the stage change as the turn progresses, and a turn slower than ~4s
 shows a running clock.
 
+### Shipped 2026-08-30
+
+Tracker: [`f20.2.md`](./features/f20.2.md) · doc:
+[`turn-progress.md`](../questionnaire/turn-progress.md).
+
+Built as planned. Three things the plan did not anticipate, all worth carrying forward:
+
+1. **Two live regions, not one.** The composer already had an `sr-only` `role="status"` cue. Pointing
+   it at the live label as well made both it and the new indicator announce every stage — twice per
+   stage, eight times across a five-second wait. Fixed by splitting _shown_ from _announced_: the
+   composer's placeholder shows the live label silently, its status line keeps stable copy, and
+   `TurnProgress` is the single live region.
+2. **Two comments in the new code were false, and mutation testing caught both.** The `Promise.race`
+   in `drain` is defensive rather than load-bearing (`wake` is assigned synchronously, so there is
+   no window to lose), and the stage label was being cleared twice where the teardown clear alone
+   already guaranteed it. The redundant clear was deleted; the comment was corrected. Neither was a
+   bug — both were claims that would have misled the next reader.
+3. **Testing mid-stream hook state took two attempts.** Recording renders shows nothing (one `act`
+   batches the whole stream into a single render) and gating frames deadlocks if `act` scopes nest.
+   The working shape is documented on the test helper.
+
 ---
 
 ## 5. Phase 3 — Remove two round-trips (A1 + A2)

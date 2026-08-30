@@ -2,7 +2,7 @@
  * Typed adapter over the shared SSE frame parser for the respondent turn loop (F7.1).
  *
  * The `/messages` route streams the orchestration `ChatEvent` shape, but only ever
- * emits a small subset on this surface: `start`, `content`, `warning`, `question_card`,
+ * emits a small subset on this surface: `start`, `status`, `content`, `warning`, `question_card`,
  * `done`, plus a defensive `error`. This narrows a raw `{ type, data }` block into that subset so
  * the stream consumer's switch stays small and exhaustively typed. Anything outside
  * the subset (or malformed) returns `null` and is ignored by the caller.
@@ -23,6 +23,10 @@ import { QUESTION_TYPES, type QuestionType } from '@/lib/app/questionnaire/types
 /** The `ChatEvent` variants the respondent `/messages` stream can produce. */
 export type SessionStreamEvent =
   | { type: 'start'; conversationId: string; messageId: string }
+  // P20 Phase 2: which stage of the turn is running right now ("Reading your answer…"). Several
+  // arrive per turn, each superseding the last, and none is ever committed onto a turn — the wait
+  // is over the moment content starts.
+  | { type: 'status'; message: string }
   | { type: 'content'; delta: string }
   | { type: 'warning'; code: string; message: string; detail?: string }
   | { type: 'reasoning'; steps: ReasoningStep[] }
@@ -139,6 +143,12 @@ export function parseSessionEvent(block: string): SessionStreamEvent | null {
       const messageId = asString(data.messageId);
       if (conversationId === null || messageId === null) return null;
       return { type: 'start', conversationId, messageId };
+    }
+    case 'status': {
+      const message = asString(data.message);
+      // A blank status would blank the indicator mid-wait, which reads as the turn having finished.
+      if (message === null || message.trim().length === 0) return null;
+      return { type: 'status', message };
     }
     case 'content': {
       const delta = asString(data.delta);

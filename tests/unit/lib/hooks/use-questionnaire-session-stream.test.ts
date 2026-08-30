@@ -805,3 +805,229 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.turns).toEqual([]);
   });
 });
+
+/* ── Stage progress (P20 Phase 2) ─────────────────────────────────────────── */
+
+/**
+ * A streaming Response whose frames are released one at a time, so a test can inspect hook state
+ * MID-turn.
+ *
+ * Two things this has to work around, both learned the hard way:
+ *
+ *   - **Recording renders is not enough.** Draining the whole stream inside one `act` batches every
+ *     `setState` into a single render, so the intermediate labels never exist to be observed. The
+ *     stream has to actually pause.
+ *   - **`act` must not nest.** Starting the turn inside one `act` and releasing frames inside
+ *     another leaves the outer scope's updates unflushed. So the turn is started WITHOUT `act` and
+ *     each release is its own `act` — one open scope at a time.
+ *
+ * Release is a permit COUNT, not a stored resolver: the consumer's first `read()` may not have been
+ * reached when the first release fires, and a resolver-based gate would drop it and deadlock.
+ */
+function gatedStreamResponse(frames: string[]): { response: Response; next: () => Promise<void> } {
+  const encoder = new TextEncoder();
+  let i = 0;
+  let permits = 0;
+  let waiter: (() => void) | null = null;
+
+  const reader = {
+    read: async () => {
+      if (i >= frames.length) return { value: undefined, done: true };
+      while (permits === 0) {
+        await new Promise<void>((resolve) => {
+          waiter = resolve;
+        });
+      }
+      permits -= 1;
+      return { value: encoder.encode(frames[i++]), done: false };
+    },
+  };
+
+  return {
+    response: {
+      ok: true,
+      status: 200,
+      body: { getReader: () => reader },
+      json: async () => ({}),
+    } as unknown as Response,
+    /** Let one more frame through, then flush the render it caused. */
+    next: async () => {
+      await act(async () => {
+        permits += 1;
+        waiter?.();
+        waiter = null;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    },
+  };
+}
+
+describe('useQuestionnaireSessionStream — turn stage label', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('shows each stage as it arrives, and clears it the moment the reply starts', async () => {
+    const gate = gatedStreamResponse([
+      frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+      frame('status', { message: 'Reading your answer…' }),
+      frame('status', { message: 'Choosing what to ask next…' }),
+      frame('content', { delta: 'How large ' }),
+      frame('content', { delta: 'is the team?' }),
+      frame('done', { costUsd: 0.001 }),
+    ]);
+    fetchMock.mockResolvedValue(gate.response);
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+
+    // Started outside `act` on purpose — see the gate's docblock.
+    const sent = result.current.sendMessage('about forty');
+
+    await gate.next(); // start — nothing claimed yet
+    expect(result.current.stageLabel).toBeNull();
+
+    await gate.next();
+    expect(result.current.stageLabel).toBe('Reading your answer…');
+
+    await gate.next(); // the next stage SUPERSEDES; labels never accumulate
+    expect(result.current.stageLabel).toBe('Choosing what to ask next…');
+
+    await gate.next(); // first content delta
+    // The reply is now its own progress; a label left up would sit under a message that is
+    // visibly already arriving.
+    expect(result.current.stageLabel).toBeNull();
+
+    await gate.next();
+    await gate.next();
+    await act(async () => {
+      await sent;
+    });
+
+    expect(result.current.stageLabel).toBeNull();
+    expect(result.current.turns.at(-1)).toEqual({
+      role: 'assistant',
+      content: 'How large is the team?',
+    });
+  });
+
+  it('does not carry a previous turn label into the next turn', async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        frame('status', { message: 'Reading your answer…' }),
+        frame('content', { delta: 'One.' }),
+        frame('done', { costUsd: 0 }),
+      ])
+    );
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('first');
+    });
+    expect(result.current.stageLabel).toBeNull();
+
+    // A second turn that reports NO stage at all. The label must stay empty throughout rather than
+    // inheriting the first turn's last stage, which would describe work that has not begun.
+    // The guarantee comes from the teardown clearing on EVERY exit, not from a clear on send —
+    // this pins the behaviour, deliberately without caring which line provides it.
+    const gate = gatedStreamResponse([
+      frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+      frame('content', { delta: 'Two.' }),
+      frame('done', { costUsd: 0 }),
+    ]);
+    fetchMock.mockResolvedValue(gate.response);
+
+    const sent = result.current.sendMessage('second');
+    await gate.next();
+    expect(result.current.stageLabel).toBeNull();
+    await gate.next();
+    expect(result.current.stageLabel).toBeNull();
+
+    await gate.next();
+    await act(async () => {
+      await sent;
+    });
+    expect(result.current.turns.at(-1)).toEqual({ role: 'assistant', content: 'Two.' });
+  });
+
+  it('never commits the stage label onto the turn it belonged to', async () => {
+    fetchMock.mockResolvedValue(
+      streamResponse([
+        frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+        frame('status', { message: 'Reading your answer…' }),
+        frame('content', { delta: 'Thanks.' }),
+        frame('done', { costUsd: 0 }),
+      ])
+    );
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    // A wait cue is not part of the conversation — it must not replay on resume or scroll-back.
+    expect(result.current.turns.at(-1)).toEqual({ role: 'assistant', content: 'Thanks.' });
+    expect(result.current.stageLabel).toBeNull();
+  });
+
+  it('drops the label when the request fails before the stream even opens', async () => {
+    fetchMock.mockResolvedValue(errorResponse(429, 'RATE_LIMITED'));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.stageLabel).toBeNull();
+    expect(result.current.status).toBe('error');
+  });
+
+  it('drops a stage label when the connection drops mid-wait, before any reply arrived', async () => {
+    // THE case the teardown exists for, and the only one the delta-clear cannot cover: a stage was
+    // announced, then the turn died with no content. Without the clear, "Reading your answer…"
+    // would sit there beside the error banner — animated dots and all — claiming work that stopped.
+    const encoder = new TextEncoder();
+    let read = 0;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (read++ === 0) {
+              return {
+                value: encoder.encode(frame('status', { message: 'Reading your answer…' })),
+                done: false,
+              };
+            }
+            throw new TypeError('network error');
+          },
+        }),
+      },
+      json: async () => ({}),
+    });
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.stageLabel).toBeNull();
+    expect(result.current.status).toBe('error');
+    expect(result.current.error?.code).toBe('NETWORK_ERROR');
+    // Nothing was committed — proving the label was cleared by the teardown, not by a content delta.
+    expect(result.current.turns).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+});

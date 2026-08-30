@@ -20,6 +20,17 @@ export {
   DATA_SLOT_FILLED_THRESHOLD,
   PROVISIONAL_FLOOR_CONFIDENCE,
 } from '@/lib/app/questionnaire/orchestrator/data-slot-orchestrator';
+export {
+  createStageChannel,
+  streamStageStatus,
+  TURN_STAGES,
+  TURN_STAGE_LABELS,
+} from '@/lib/app/questionnaire/orchestrator/stage-progress';
+export type {
+  StageChannel,
+  StageEmitter,
+  TurnStage,
+} from '@/lib/app/questionnaire/orchestrator/stage-progress';
 export type {
   CapabilityInvokers,
   DataSlotAnsweredView,

@@ -7,6 +7,13 @@
  * I/O (persistence, cost logging, the turn record, the streamed offer prose) is the
  * route's job; the core only *decides*.
  *
+ * The optional `onStage` reporter (P20 Phase 2) does not weaken that. It is a synchronous
+ * side-effect callback the core invokes as it crosses a stage boundary, so the route can tell
+ * the respondent which of the turn's several model calls is running instead of showing one
+ * static "Thinking…". It performs no I/O, returns nothing, and cannot fail the turn — the
+ * {@link TurnResult} is identical whether or not it is supplied. See
+ * `lib/app/questionnaire/orchestrator/stage-progress.ts`.
+ *
  * Pipeline order (a step is skipped, not failed, when its flag/config is off):
  *   1. Extract answer slots from the message (F4.2) — only with a non-empty message.
  *   2. Merge the extracted intents into an *effective* state (coverage + values) so the
@@ -53,6 +60,7 @@ import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
+import type { StageEmitter } from '@/lib/app/questionnaire/orchestrator/stage-progress';
 import type { ChatEvent } from '@/types/orchestration';
 
 import type {
@@ -166,7 +174,17 @@ function toolCall(
   };
 }
 
-export async function runTurn(state: TurnState, invokers: CapabilityInvokers): Promise<TurnResult> {
+export async function runTurn(
+  state: TurnState,
+  invokers: CapabilityInvokers,
+  /**
+   * Optional progress reporter (P20 Phase 2) — called as the turn crosses a stage boundary so the
+   * route can tell the respondent what is happening instead of one static "Thinking…". Purely a
+   * side-effect callback: it does no I/O, cannot fail the turn, and changing it changes nothing
+   * about the {@link TurnResult}. Omitted by every caller that does not stream.
+   */
+  onStage?: StageEmitter
+): Promise<TurnResult> {
   const events: ChatEvent[] = [];
   const toolCalls: ToolCallRecord[] = [];
   const answerUpserts: AnswerSlotIntent[] = [];
@@ -182,6 +200,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
   //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
   if (hasMessage) {
+    // One sentence covers steps 1 → 1.5: extraction, sensitivity detection and the seriousness
+    // judge all read what the respondent just said. See `TURN_STAGES` for why it is not three.
+    onStage?.('reading');
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
     toolCalls.push(
@@ -332,6 +353,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //       raised on a prior turn, or detects afresh: under `probe` mode a fresh contradiction DEFERS
   //       (ask a reconciliation question, suppress this turn's writes, park the finding); under `flag`
   //       mode it surfaces the explanation AND refines immediately. See `contradiction-phase.ts`.
+  onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
     disregarded,
@@ -444,6 +466,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     targetedQuestionId = null;
   } else {
     // Not ready to offer — pick the next question.
+    onStage?.('choosing');
     const out = await invokers.selectNext(effective);
     const decision = out.decision;
     if (decision.kind === 'ask') {

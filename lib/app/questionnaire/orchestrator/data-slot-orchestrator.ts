@@ -56,6 +56,7 @@ import {
 } from '@/lib/app/questionnaire/selection/context';
 import { resolveQuestionFidelity } from '@/lib/app/questionnaire/types';
 import { governsSlot, probesRemaining } from '@/lib/app/questionnaire/scope/probe';
+import type { StageEmitter } from '@/lib/app/questionnaire/orchestrator/stage-progress';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
   AnswerSlotIntent,
@@ -238,7 +239,9 @@ function toolCall(
 /** Run one data-slot-mode turn. Mirrors {@link runTurn}'s shape; targets data slots. */
 export async function runDataSlotTurn(
   state: TurnState,
-  invokers: CapabilityInvokers
+  invokers: CapabilityInvokers,
+  /** Optional progress reporter (P20 Phase 2) — see the identical parameter on `runTurn`. */
+  onStage?: StageEmitter
 ): Promise<TurnResult> {
   const dataSlots = state.dataSlots ?? [];
   const events: ChatEvent[] = [];
@@ -255,6 +258,9 @@ export async function runDataSlotTurn(
 
   // 1. Combined extraction — question answers (background) + data-slot fills (respondent-facing).
   if (hasMessage) {
+    // Covers steps 1 → 1.5, as in question mode: extraction, sensitivity and the seriousness judge
+    // all read what the respondent just said, and announce as one sentence.
+    onStage?.('reading');
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
     toolCalls.push(
@@ -497,6 +503,7 @@ export async function runDataSlotTurn(
   //     contradiction DEFERS: ask a reconciliation question, suppress this turn's writes (including
   //     the data-slot fills), and park the finding; the next turn resolves it. Under `flag` mode it
   //     surfaces the explanation and refines immediately.
+  onStage?.('checking');
   const contradiction = await runContradictionPhase(effective, invokers, {
     hasMessage,
     disregarded,
@@ -707,6 +714,7 @@ export async function runDataSlotTurn(
     // Offer just-volunteered tangent slots alongside the unfilled set so the selector can deepen them.
     const candidatePool =
       deepenCandidates.length > 0 ? [...deepenCandidates, ...unfilled] : unfilled;
+    onStage?.('choosing');
     const adaptivePick = invokers.selectDataSlot
       ? await invokers.selectDataSlot(state, candidatePool, {
           activeTheme,

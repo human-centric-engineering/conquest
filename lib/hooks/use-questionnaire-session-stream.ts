@@ -80,6 +80,13 @@ export interface UseQuestionnaireSessionStreamReturn {
   /** The animated assistant text for the in-flight turn (empty until the first delta). */
   streamingText: string;
   /**
+   * P20 Phase 2: what the server says it is doing right now — "Reading your answer…",
+   * "Choosing what to ask next…". Null before the first `status` frame, once the reply's first
+   * token lands, and whenever no turn is in flight. Purely a wait cue: never committed onto a turn
+   * and never replayed on resume.
+   */
+  stageLabel: string | null;
+  /**
    * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
    * oldest first. Seeded from the persisted traces on resume (`initialInspectorTurns`) and extended
    * by each live `inspector` frame — both of which the server emits solely for a preview session
@@ -248,6 +255,10 @@ export function useQuestionnaireSessionStream(
 
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
+  // P20 Phase 2: which stage of the turn the server says is running right now. Transient by
+  // design — it is never committed onto a turn, and it clears the instant the first content delta
+  // lands, because from then on the reply itself is the progress.
+  const [stageLabel, setStageLabel] = useState<string | null>(null);
   // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
   // `inspector` frame. Seeded from the persisted traces on resume (so a reload re-hydrates the
   // drawer instead of waiting for the next turn). Never populated for a real respondent — the
@@ -394,8 +405,13 @@ export function useQuestionnaireSessionStream(
             const ev = parseSessionEvent(block);
             if (ev) {
               if (ev.type === 'content') {
+                // The reply has started: the stage label has done its job and would otherwise sit
+                // under a message that is visibly already arriving.
+                if (fullText.length === 0) setStageLabel(null);
                 fullText += ev.delta;
                 typing.appendDelta(ev.delta);
+              } else if (ev.type === 'status') {
+                setStageLabel(ev.message);
               } else if (ev.type === 'warning') {
                 streamWarnings.push({
                   code: ev.code,
@@ -471,6 +487,11 @@ export function useQuestionnaireSessionStream(
         });
       } finally {
         setStreaming(false);
+        // The single point at which the stage label is retired, covering every exit — clean settle,
+        // HTTP failure, abort, network drop. Because it always runs, the next turn necessarily
+        // starts with no label, so there is no second clear on the send path; and a turn that ended
+        // without ever streaming content cannot leave a sentence up claiming work still in progress.
+        setStageLabel(null);
         abortRef.current = null;
       }
     },
@@ -531,6 +552,7 @@ export function useQuestionnaireSessionStream(
     turns,
     streaming,
     streamingText: typing.displayText,
+    stageLabel,
     inspectorTurns,
     status,
     error,

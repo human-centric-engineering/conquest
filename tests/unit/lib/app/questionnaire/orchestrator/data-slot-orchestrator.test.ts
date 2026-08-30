@@ -1488,3 +1488,57 @@ describe('runDataSlotTurn — must-ask hoist (P18)', () => {
     expect(result.response.kind).toBe('question');
   });
 });
+
+/* ── Stage progress (P20 Phase 2) ─────────────────────────────────────────── */
+
+describe('runDataSlotTurn — stage progress reporting', () => {
+  it('reports the same three stages as question mode, in the same order', async () => {
+    // Parity matters: a respondent cannot tell which pipeline their questionnaire runs, so the
+    // account of the wait must not differ between them.
+    const { invokers } = stubInvokers();
+    const seen: string[] = [];
+
+    await runDataSlotTurn(
+      dsState({
+        userMessage: 'we run mostly on referrals',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      }),
+      invokers,
+      (s) => seen.push(s)
+    );
+
+    expect(seen).toEqual(['reading', 'checking', 'choosing']);
+  });
+
+  it('does not claim to be reading an answer on the opening turn', async () => {
+    const { invokers } = stubInvokers();
+    const seen: string[] = [];
+
+    await runDataSlotTurn(
+      dsState({
+        userMessage: '',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      }),
+      invokers,
+      (s) => seen.push(s)
+    );
+
+    expect(seen).not.toContain('reading');
+  });
+
+  it('reaches the same decision whether or not a reporter is supplied', async () => {
+    const build = () =>
+      dsState({
+        userMessage: 'mostly referrals',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+      });
+
+    const withReporter = await runDataSlotTurn(build(), stubInvokers().invokers, () => {});
+    const without = await runDataSlotTurn(build(), stubInvokers().invokers);
+
+    expect(withReporter).toEqual(without);
+  });
+});

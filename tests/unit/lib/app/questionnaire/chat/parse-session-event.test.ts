@@ -22,6 +22,24 @@ describe('parseSessionEvent', () => {
     });
   });
 
+  it('parses a status frame (the live turn stage)', () => {
+    expect(parseSessionEvent(block('status', { message: 'Reading your answer…' }))).toEqual({
+      type: 'status',
+      message: 'Reading your answer…',
+    });
+  });
+
+  it('drops a blank or whitespace-only status rather than blanking the indicator', () => {
+    // An empty label would clear the wait cue mid-turn, which reads as the reply having arrived.
+    expect(parseSessionEvent(block('status', { message: '' }))).toBeNull();
+    expect(parseSessionEvent(block('status', { message: '   ' }))).toBeNull();
+  });
+
+  it('drops a status frame whose message is missing or the wrong type', () => {
+    expect(parseSessionEvent(block('status', {}))).toBeNull();
+    expect(parseSessionEvent(block('status', { message: 42 }))).toBeNull();
+  });
+
   it('parses a content delta', () => {
     expect(parseSessionEvent(block('content', { delta: 'Hello' }))).toEqual({
       type: 'content',
