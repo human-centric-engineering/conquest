@@ -311,6 +311,50 @@ as a no-op with the finding written down — which is a real outcome, not a fail
 **Done when** the prompt's stable prefix is provably contiguous, or the audit records that it
 already was.
 
+### Audited 2026-08-30 — the reorder was measured and deliberately NOT made
+
+Tracker: [`f20.4.md`](./features/f20.4.md).
+
+The audit found the prompt is indeed uncacheable, and then found two reasons not to fix it.
+
+**It caches nothing today.** Measured over 13 sessions of real persisted prompts: system prompts run
+~1,600–2,700 tokens, whole prompts ~1,785–3,031, and the prefix two consecutive turns share is only
+**~560–750 tokens — always breaking inside `<this_turn>`**, the third section. OpenAI's automatic
+caching needs **1,024 tokens**, so no turn is ever a hit.
+
+**Fixing it inverts a deliberate precedence hierarchy.** The prompt's convention is later-wins, and
+the large stable sections — `<output_format>`, `<message_shape>`, `<house_rules>` — are last
+_because_ last means highest precedence. Hoisting the ~650 tokens of reply contract ahead of
+`<this_turn>` would reach ~1,200 tokens and start caching, and would simultaneously let a client
+house rule outrank "conversational prose only". The prompt's design puts its most stable content
+exactly where a cache cannot use it. That is a real tension, not an oversight.
+
+**And the payoff would have been negligible.** The premise — phrasing is slow because it re-reads a
+big prompt — does not survive the telemetry. Latency barely tracks input size: r = 0.21 (gpt-4o,
+n=18) and r = 0.22 (gpt-5.1, n=7). Prefill is a small share of the call, and caching would remove
+only part of it.
+
+So: **no production code changed, no prompt text changed.** What shipped is a test pinning the
+section order as an executable contract, since Phase 4 has now created a standing temptation to
+reorder precisely those sections. Hoisting the reply contract fails four of its six tests.
+
+#### The bigger finding, deliberately not acted on
+
+The same telemetry shows the interviewer agent is on **`gpt-5.1`, averaging 3,947 ms against
+`gpt-4o`'s 1,732 ms — 2.3×** — on comparable input (2,065 vs 1,741 tokens) and output (84 vs 63).
+That is ~2.2 s/turn, **more than every saving in P20 combined**.
+
+It is not touched here: changing the interviewer's model is the excluded model-tier trade, and its
+prose is the product. It is also not established — n=7, uncontrolled across sessions, and gpt-5.1
+latency ranged 1,893–8,569 ms on near-identical inputs. Settling it needs a controlled A/B judged on
+output quality as well as speed.
+
+#### One gap this left
+
+We cannot confirm a cache hit empirically: the phraser records `tokensIn`/`tokensOut` but not
+OpenAI's `cached_tokens`, so "nothing caches" is derived from the measured prefix plus the
+documented threshold rather than observed. Capturing it would make this checkable, and is small.
+
 ---
 
 ## 7. Order and stopping rule
@@ -322,3 +366,22 @@ Phase 1 (measure) → Phase 2 (honest wait) → Phase 3 (round-trips) → Phase 
 Phase 2 is worth doing whatever Phase 1 says — an honest wait is right even for a fast turn. Phases
 3 and 4 are **contingent on Phase 1**: if the residual (non-model time) dominates, stop and re-plan
 rather than shaving round-trips that were never the cost.
+
+### Where P20 ended
+
+| Phase            | Outcome                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 — Measure      | Shipped. Turn is model-bound (2.6% residual); phrasing is 46% of it.                                                                                                           |
+| 2 — Honest wait  | Shipped. Four real stage labels + a delayed clock.                                                                                                                             |
+| 3 — Round-trips  | **A1 shipped** (~279 ms/turn). **A2 blocked on a values decision** — it cannot be built without relaxing the guarantee that a disclosure is never sent to the sincerity judge. |
+| 4 — Prompt cache | **Audited, not implemented.** The prompt caches nothing, fixing it inverts a safety-relevant precedence hierarchy, and latency barely tracks input size anyway.                |
+
+Two things are open and both belong to the owner rather than to another phase:
+
+1. **A2** — relax the safeguarding guarantee to outcome-only for ~371 ms/turn? Recommendation: no.
+2. **The interviewer's model** — `gpt-5.1` is 2.3× slower than `gpt-4o` here, worth ~2.2 s/turn.
+   Needs a controlled A/B judged on quality, not a config change.
+
+The honest summary of P20: the wait was made **legible** rather than substantially shorter. The
+measured savings total ~279 ms of an ~5.1 s turn. Everything larger sits behind a quality trade that
+was deliberately not taken.
