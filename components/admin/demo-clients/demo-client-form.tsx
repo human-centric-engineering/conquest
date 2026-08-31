@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, Wand2 } from 'lucide-react';
+import { Loader2, Sparkles, Wand2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -54,6 +54,13 @@ import { BrandColorField } from '@/components/admin/demo-clients/brand-color-fie
 import { BrandImportDialog } from '@/components/admin/demo-clients/brand-import-dialog';
 import { CustomFontField } from '@/components/admin/demo-clients/custom-font-field';
 import type { ImportableField } from '@/lib/app/questionnaire/brand-import/result';
+import {
+  brandPaletteSchema,
+  type BrandPalette,
+} from '@/lib/app/questionnaire/brand-import/palette-record';
+import { BrandPaletteStrip } from '@/components/admin/demo-clients/brand-palette-strip';
+import { ContrastOptimiseDialog } from '@/components/admin/demo-clients/contrast-optimise-dialog';
+import type { OptimisableField } from '@/lib/app/questionnaire/brand-contrast/result';
 
 /** True for an empty field, an https URL, or one of our own upload paths — shares the
  *  server's predicate (isBrandImageSrc) so the form and the API can't drift. */
@@ -110,6 +117,15 @@ const formSchema = z.object({
   // server does and a form that can submit what the API rejects is a worse experience than
   // one that says so first.
   fontPairing: z.enum(FONT_PAIRINGS),
+  /**
+   * The measured palette, held in FORM state rather than in a `useState` beside it.
+   *
+   * It is not a field the admin types into, so the instinct is to keep it out — but Save is gated
+   * on `isDirty`, and a palette that lived outside the form could be replaced by a re-import, or
+   * cleared, with the button still greyed out. Carrying it here makes an import indistinguishable
+   * from typing, which is the contract the rest of this form already has.
+   */
+  brandPalette: brandPaletteSchema.nullable(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -126,6 +142,26 @@ type ColorFieldName =
   | 'canvasColorDark'
   | 'inkColorDark'
   | 'accentColorEnd';
+
+/**
+ * Every field the contrast optimiser may propose is a colour field this form can write.
+ *
+ * Asserted rather than assumed: `applyContrastRepairs` routes every proposal through `setColor`,
+ * and an optimisable field that was not a `ColorFieldName` would be a silent no-op — the admin
+ * would accept a fix, watch nothing change, and save the unreadable colour.
+ */
+const _optimisableFieldsAreColorFields: Record<OptimisableField, ColorFieldName> = {
+  canvasColor: 'canvasColor',
+  inkColor: 'inkColor',
+  canvasColorDark: 'canvasColorDark',
+  inkColorDark: 'inkColorDark',
+  ctaColor: 'ctaColor',
+  ctaColorEnd: 'ctaColorEnd',
+  surfaceColor: 'surfaceColor',
+  accentColor: 'accentColor',
+  accentColorEnd: 'accentColorEnd',
+};
+void _optimisableFieldsAreColorFields;
 
 export interface DemoClientFormProps {
   /** Present in edit mode; absent in create mode. */
@@ -144,6 +180,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [contrastOpen, setContrastOpen] = useState(false);
 
   const {
     register,
@@ -179,11 +216,18 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
       // not know (a rollback, a seed) prefills as the default rather than leaving the select
       // with no selection and silently clearing the column on the next save.
       fontPairing: resolveFontPairing(client?.fontPairing),
+      brandPalette: client?.brandPalette ?? null,
     },
   });
 
   const isActive = watch('isActive');
   const logoBackgroundEnabled = watch('logoBackgroundEnabled');
+  // Watched on its own rather than in the theme batch below: the live preview resolves a THEME,
+  // and a measured palette is evidence about where that theme came from, not part of it.
+  const brandPalette = watch('brandPalette');
+
+  const setPalette = (value: BrandPalette | null) =>
+    setValue('brandPalette', value, { shouldDirty: true });
 
   // Live brand preview: reflect only valid inputs (a half-typed hex / non-https URL
   // shows the default rather than a broken swatch); blank → null → ConQuest default.
@@ -237,8 +281,15 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
    * touches the server — the import route persists nothing, and these values reach the columns
    * through the same PATCH as every other edit on this form.
    */
-  const applyImportedBrand = (values: Partial<Record<ImportableField, string>>) => {
+  const applyImportedBrand = (
+    values: Partial<Record<ImportableField, string>>,
+    palette: BrandPalette | null
+  ) => {
     let refresh = false;
+    // The evidence lands with the proposals it produced, in the same unsaved edit. A run that
+    // measured nothing clears any stored palette for the same reason: leaving the old strip up
+    // beside newly imported colours would attribute them to a site we did not read this time.
+    setPalette(palette);
     for (const [field, value] of Object.entries(values) as [ImportableField, string][]) {
       // The custom families are not form fields: the import already fetched and stored them
       // server-side, exactly as it re-hosts a logo. Refresh so the panel below re-reads the row
@@ -259,6 +310,19 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
       setValue(field, value, { shouldDirty: true, shouldValidate: true });
     }
     if (refresh) router.refresh();
+  };
+
+  /**
+   * Write accepted contrast repairs into form state.
+   *
+   * Every optimisable field is a colour field, so this is `setColor` for each — the same writer the
+   * pickers use, which is what makes an accepted repair indistinguishable from an admin dragging
+   * the swatch there themselves: the preview updates, Save enables, Cancel discards.
+   */
+  const applyContrastRepairs = (values: Partial<Record<OptimisableField, string>>) => {
+    for (const [field, value] of Object.entries(values) as [OptimisableField, string][]) {
+      setColor(field, value);
+    }
   };
 
   const validHex = (v: string) => (HEX_COLOR_PATTERN.test(v.trim()) ? v.trim() : null);
@@ -346,6 +410,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
         // already what every unset client has, and writing the word would make "never chose"
         // and "chose the default" two different rows that render identically.
         fontPairing: values.fontPairing === DEFAULT_FONT_PAIRING ? null : values.fontPairing,
+        brandPalette: values.brandPalette,
       };
 
       if (isEdit) {
@@ -469,6 +534,26 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           </p>
         </div>
 
+        {/* The other half of the same job, and it belongs beside the import rather than at the
+            bottom of the fieldset: one fills these boxes from a brand, the other checks that what
+            is in them can be read. Both propose; both are written by the ordinary Save. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isLoading}
+            onClick={() => setContrastOpen(true)}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            Optimise for contrast
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            Checks every pairing a respondent sees — the page, the button, the band, the links — and
+            suggests the nearest shade of your own colours that stays legible.
+          </p>
+        </div>
+
         <BrandImportDialog
           open={importOpen}
           onOpenChange={setImportOpen}
@@ -476,6 +561,28 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           uploadEnabled={uploadEnabled}
           onApply={applyImportedBrand}
         />
+
+        {/* Handed the LIVE theme, not the saved row: an admin presses this in the middle of
+            adjusting colours, and auditing what is in the database would check the colours they
+            have already moved on from. `livePreviewTheme` is the same object the preview draws. */}
+        <ContrastOptimiseDialog
+          open={contrastOpen}
+          onOpenChange={setContrastOpen}
+          theme={livePreviewTheme}
+          demoClientId={client?.id}
+          onApply={applyContrastRepairs}
+        />
+
+        {/* The evidence, immediately under the button that produced it and above the fields it
+            filled — so an admin reading a hex in a box can see where it came from without
+            re-opening the dialog. Absent until an import has been applied and saved. */}
+        {brandPalette && (
+          <BrandPaletteStrip
+            palette={brandPalette}
+            onClear={() => setPalette(null)}
+            disabled={isLoading}
+          />
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <BrandColorField

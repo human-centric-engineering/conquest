@@ -1,0 +1,11 @@
+-- Flip the respondent early-finish escape hatch's default back OFF.
+--
+-- Defaulting it ON meant every new questionnaire shipped with a "Finish up" control the admin never
+-- asked for. The reopen feature (lib/app/questionnaire/session/reopen-logic.ts) makes the hatch SAFE
+-- when an admin wants it, but "safe" is not "wanted by default" — early finish bypasses the
+-- required-question gate, so it is an opt-in per questionnaire.
+--
+-- Existing rows keep their stored value — this only changes the default applied to config rows
+-- created/saved without the column. Mirrors 20260809225255_app_reopen_early_finish, which flipped
+-- the same default the other way without touching stored rows.
+ALTER TABLE "app_questionnaire_config" ALTER COLUMN "allowEarlyFinish" SET DEFAULT false;

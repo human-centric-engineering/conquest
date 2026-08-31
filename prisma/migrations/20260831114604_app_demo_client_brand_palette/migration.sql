@@ -1,0 +1,13 @@
+-- Brand import: keep the palette an import MEASURED alongside the colours it proposed.
+--
+-- { candidates: [{hex, share, neutral}], readFrom, capturedAt } — the shape lives in
+-- lib/app/questionnaire/brand-import/palette-record.ts, which validates it on write and narrows it
+-- forgivingly on read. Nullable: every existing client has never run an import, which is the same
+-- state as "no palette" and renders no swatch strip.
+--
+-- NOTE: `prisma migrate dev` generated five DROP INDEX statements for the pgvector indexes and a
+-- DROP DEFAULT on ai_knowledge_chunk.searchVector alongside this ALTER. Those are phantom: the
+-- indexes are created by raw SQL in an earlier migration and Prisma cannot see them in the schema,
+-- so it proposes dropping them on every app migration. They are stripped here deliberately —
+-- applying them would silently disable vector search.
+ALTER TABLE "app_demo_client" ADD COLUMN "brandPalette" JSONB;

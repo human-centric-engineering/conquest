@@ -27,6 +27,10 @@ import userEvent from '@testing-library/user-event';
 
 import { BrandImportDialog } from '@/components/admin/demo-clients/brand-import-dialog';
 import type { BrandImportResult } from '@/lib/app/questionnaire/brand-import/result';
+import {
+  MAX_STORED_CANDIDATES,
+  brandPaletteSchema,
+} from '@/lib/app/questionnaire/brand-import/palette-record';
 
 // ─── fetch mock ────────────────────────────────────────────────────────────────
 
@@ -81,6 +85,24 @@ function okResult(overrides: Partial<BrandImportResult> = {}): BrandImportResult
     ],
     degraded: false,
     ...overrides,
+  };
+}
+
+/**
+ * What `onApply`'s second argument should look like for {@link okResult}.
+ *
+ * `capturedAt` is stamped when the run RETURNS, so it is matched loosely — pinning it would test
+ * the clock. What the assertions care about is that the measured colours and the provenance line
+ * travel with the proposals they produced, in the same call.
+ */
+function expectedPalette(readFrom: string | null) {
+  return {
+    candidates: [
+      { hex: '#334455', share: 0.42, neutral: false },
+      { hex: '#f7f7f7', share: 0.31, neutral: true },
+    ],
+    readFrom,
+    capturedAt: expect.any(String),
   };
 }
 
@@ -528,7 +550,7 @@ describe('BrandImportDialog — proposal list', () => {
     await user.click(screen.getByRole('button', { name: 'Apply 1 field' }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' });
+    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' }, expectedPalette('acme.example'));
   });
 
   it('re-ticking a proposal restores it to what Apply would send', async () => {
@@ -544,7 +566,8 @@ describe('BrandImportDialog — proposal list', () => {
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
     expect(onApply).toHaveBeenCalledWith(
-      expect.objectContaining({ logoUrl: 'https://client.example.com/logo.png' })
+      expect.objectContaining({ logoUrl: 'https://client.example.com/logo.png' }),
+      expectedPalette('acme.example')
     );
   });
 
@@ -585,11 +608,14 @@ describe('BrandImportDialog — applying plain (non-image, non-font) fields', ()
     await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({
-      ctaColor: '#112233',
-      surfaceColor: '#445566',
-      logoUrl: 'https://client.example.com/logo.png',
-    });
+    expect(onApply).toHaveBeenCalledWith(
+      {
+        ctaColor: '#112233',
+        surfaceColor: '#445566',
+        logoUrl: 'https://client.example.com/logo.png',
+      },
+      expectedPalette('acme.example')
+    );
     expect(onOpenChange).toHaveBeenCalledWith(false);
     // reset() ran: the proposal panel is gone.
     expect(screen.queryByText('What we found')).not.toBeInTheDocument();
@@ -639,11 +665,14 @@ describe('BrandImportDialog — re-hosting an accepted image', () => {
     await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({
-      ctaColor: '#112233',
-      surfaceColor: '#445566',
-      logoUrl: '/uploads/demo-clients/client-1/logo.png',
-    });
+    expect(onApply).toHaveBeenCalledWith(
+      {
+        ctaColor: '#112233',
+        surfaceColor: '#445566',
+        logoUrl: '/uploads/demo-clients/client-1/logo.png',
+      },
+      expectedPalette('acme.example')
+    );
 
     const rehostCall = mockFetch.mock.calls.find(
       ([url]) => url === '/api/v1/app/demo-clients/client-1/logo'
@@ -675,8 +704,113 @@ describe('BrandImportDialog — re-hosting an accepted image', () => {
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
     expect(onApply).toHaveBeenCalledWith(
-      expect.objectContaining({ logoUrl: 'https://client.example.com/logo.png' })
+      expect.objectContaining({ logoUrl: 'https://client.example.com/logo.png' }),
+      expectedPalette('acme.example')
     );
+  });
+});
+
+// ─── the measured palette rides with the proposals ────────────────────────────
+
+describe('BrandImportDialog — the measured palette', () => {
+  it('names the address alone as the source when no screenshot was added', async () => {
+    const { user, onApply } = await setupWithOkResult();
+
+    await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(onApply.mock.calls[0][1]).toMatchObject({ readFrom: 'acme.example' });
+  });
+
+  it('names both halves when the admin gave an address and screenshots', async () => {
+    // The combination the import prefers, and the one the strip should be able to say it used —
+    // an admin looking at a palette weeks later cannot otherwise tell what evidence produced it.
+    mockFetch.mockResolvedValueOnce(jsonResponse({ success: true, data: okResult() }));
+    const user = userEvent.setup();
+    const { onApply } = renderDialog();
+    await typeUrl(user, 'acme.example');
+    await pickScreenshot(screenshotFile('home.png'), screenshotFile('pricing.png'));
+    await user.click(readButton());
+    await screen.findByText('What we found');
+
+    await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(onApply.mock.calls[0][1]).toMatchObject({
+      readFrom: 'acme.example + 2 screenshots',
+    });
+  });
+
+  it('carries the palette even when the admin vetoes every colour proposal', async () => {
+    // The palette is evidence about the SITE, not about the fields accepted from it. Dropping it
+    // when the admin re-types the colours by hand would throw away the measurement they are
+    // typing FROM.
+    const { user, onApply } = await setupWithOkResult();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Apply CTA colour' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Apply Surface colour' }));
+    await user.click(screen.getByRole('button', { name: 'Apply 1 field' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(onApply.mock.calls[0][1]).toMatchObject({
+      candidates: [
+        { hex: '#334455', share: 0.42, neutral: false },
+        { hex: '#f7f7f7', share: 0.31, neutral: true },
+      ],
+    });
+  });
+
+  it('stamps capturedAt as an ISO timestamp the write boundary will accept', async () => {
+    const { user, onApply } = await setupWithOkResult();
+
+    await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    const palette = onApply.mock.calls[0][1] as { capturedAt: string };
+    expect(brandPaletteSchema.safeParse(onApply.mock.calls[0][1]).success).toBe(true);
+    expect(Number.isNaN(Date.parse(palette.capturedAt))).toBe(false);
+  });
+
+  it('caps what it hands back at the number the column will store', async () => {
+    // A merged run over a site plus three screenshots can return more candidates than we keep.
+    // Posting a body the API would reject fails the whole save over the least important thing in
+    // it, so the cap is applied here as well as at the write boundary.
+    const tooMany = Array.from({ length: MAX_STORED_CANDIDATES + 4 }, (_, i) => ({
+      hex: `#0000${i.toString(16).padStart(2, '0')}`,
+      share: 0.01,
+      neutral: false,
+    }));
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, data: okResult({ candidates: tooMany }) })
+    );
+    const user = userEvent.setup();
+    const { onApply } = renderDialog();
+    await importFromUrl(user);
+    await screen.findByText('What we found');
+
+    await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    const palette = onApply.mock.calls[0][1] as { candidates: unknown[] };
+    expect(palette.candidates).toHaveLength(MAX_STORED_CANDIDATES);
+    expect(brandPaletteSchema.safeParse(palette).success).toBe(true);
+  });
+
+  it('hands back null when the run measured nothing, clearing a stale palette', async () => {
+    // A blocked site produces no candidates. Leaving the previous strip in place beside colours
+    // this run did not read would attribute them to evidence we never gathered.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, data: okResult({ candidates: [] }) })
+    );
+    const user = userEvent.setup();
+    const { onApply } = renderDialog();
+    await importFromUrl(user);
+    await screen.findByText('What we found');
+
+    await user.click(screen.getByRole('button', { name: 'Apply 3 fields' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(onApply.mock.calls[0][1]).toBeNull();
   });
 });
 
@@ -704,12 +838,15 @@ describe('BrandImportDialog — custom typefaces', () => {
     await user.click(screen.getByRole('button', { name: /^Apply \d+ fields$/ }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({
-      ctaColor: '#112233',
-      fontPairing: 'custom',
-      customFontDisplay: 'Sora',
-      customFontBody: 'Sora',
-    });
+    expect(onApply).toHaveBeenCalledWith(
+      {
+        ctaColor: '#112233',
+        fontPairing: 'custom',
+        customFontDisplay: 'Sora',
+        customFontBody: 'Sora',
+      },
+      null
+    );
     const fontsCall = mockFetch.mock.calls.find(
       ([url]) => url === '/api/v1/app/demo-clients/client-1/fonts'
     );
@@ -750,7 +887,12 @@ describe('BrandImportDialog — custom typefaces', () => {
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
     // fontPairing was 'custom' and got deleted alongside the two family fields.
-    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' });
+    expect(onApply).toHaveBeenCalledWith(
+      { ctaColor: '#112233' },
+      // `customFontResult()` measured no colours, so there is no palette to keep — and a null
+      // clears whatever the client had rather than leaving an older strip beside new colours.
+      null
+    );
     expect(
       await screen.findByText(/sora was not found on google fonts\. everything else was applied/i)
     ).toBeInTheDocument();
@@ -777,7 +919,12 @@ describe('BrandImportDialog — custom typefaces', () => {
     await user.click(screen.getByRole('button', { name: /^Apply \d+ fields$/ }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' });
+    expect(onApply).toHaveBeenCalledWith(
+      { ctaColor: '#112233' },
+      // `customFontResult()` measured no colours, so there is no palette to keep — and a null
+      // clears whatever the client had rather than leaving an older strip beside new colours.
+      null
+    );
     expect(
       await screen.findByText(/could not load those typefaces\. everything else was applied/i)
     ).toBeInTheDocument();
@@ -793,7 +940,12 @@ describe('BrandImportDialog — custom typefaces', () => {
     await user.click(screen.getByRole('button', { name: /^Apply \d+ fields$/ }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' });
+    expect(onApply).toHaveBeenCalledWith(
+      { ctaColor: '#112233' },
+      // `customFontResult()` measured no colours, so there is no palette to keep — and a null
+      // clears whatever the client had rather than leaving an older strip beside new colours.
+      null
+    );
     expect(
       await screen.findByText(
         /file storage is not configured, so custom typefaces could not be stored/i
@@ -811,7 +963,12 @@ describe('BrandImportDialog — custom typefaces', () => {
     await user.click(screen.getByRole('button', { name: /^Apply \d+ fields$/ }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply).toHaveBeenCalledWith({ ctaColor: '#112233' });
+    expect(onApply).toHaveBeenCalledWith(
+      { ctaColor: '#112233' },
+      // `customFontResult()` measured no colours, so there is no palette to keep — and a null
+      // clears whatever the client had rather than leaving an older strip beside new colours.
+      null
+    );
     expect(
       await screen.findByText(/save the client first to store its typefaces/i)
     ).toBeInTheDocument();

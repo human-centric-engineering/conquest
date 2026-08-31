@@ -14,6 +14,7 @@
  */
 
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+import type { BrandPalette } from '@/lib/app/questionnaire/brand-import/palette-record';
 
 /** One row in the admin demo-clients list (and the full detail — same shape today). */
 export interface DemoClientView {
@@ -70,6 +71,15 @@ export interface DemoClientView {
   customFontDisplay: string | null;
   /** Google family for running text when `fontPairing` is `custom`; null = none loaded. */
   customFontBody: string | null;
+  /**
+   * The colours a brand import MEASURED off the client's site, kept as evidence for the theme
+   * above. Null when no import has ever been applied to this client — which is most of them, and
+   * the state the branding page already renders (no swatch strip).
+   *
+   * Narrowed on read: the column is `Json?`, so anything a seed or a rollback left there resolves
+   * to null rather than reaching the UI.
+   */
+  brandPalette: BrandPalette | null;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;
   createdAt: string;

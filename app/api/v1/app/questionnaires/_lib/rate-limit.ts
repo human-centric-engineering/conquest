@@ -510,3 +510,21 @@ export const brandImportLimiter = createRateLimiter({
   interval: BRAND_IMPORT_RATE_LIMIT_INTERVAL_MS,
   maxRequests: BRAND_IMPORT_RATE_LIMIT_MAX,
 });
+
+/**
+ * Brand contrast optimiser sub-cap. One reasoning call over the failing pairs and the shades that
+ * would fix them — a small prompt, but paid work, and the button is one an admin is *meant* to
+ * press repeatedly while adjusting colours. So it sits a band above the import's 10/min rather
+ * than beside it: the honest loop here is optimise → tweak → re-check, and throttling that to ten
+ * would make the feature annoying enough to stop using. Keyed on the admin user id, who owns the
+ * spend.
+ */
+export const BRAND_CONTRAST_RATE_LIMIT_MAX = 30;
+
+/** Sliding-window length for {@link brandContrastLimiter}, in milliseconds. */
+export const BRAND_CONTRAST_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const brandContrastLimiter = createRateLimiter({
+  interval: BRAND_CONTRAST_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: BRAND_CONTRAST_RATE_LIMIT_MAX,
+});

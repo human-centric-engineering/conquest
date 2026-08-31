@@ -53,6 +53,11 @@ import {
   type BrandImportResult,
   type ImportableField,
 } from '@/lib/app/questionnaire/brand-import/result';
+import {
+  MAX_STORED_CANDIDATES,
+  describeSource,
+  type BrandPalette,
+} from '@/lib/app/questionnaire/brand-import/palette-record';
 import type { BrandImageKind } from '@/lib/app/questionnaire/theming';
 
 /**
@@ -119,8 +124,15 @@ interface BrandImportDialogProps {
   demoClientId?: string;
   /** False when the server has no storage provider — image proposals degrade to a hotlink. */
   uploadEnabled?: boolean;
-  /** Write accepted proposals into form state. The parent owns which setter each field needs. */
-  onApply: (values: Partial<Record<ImportableField, string>>) => void;
+  /**
+   * Write accepted proposals into form state. The parent owns which setter each field needs.
+   *
+   * The measured palette rides along with them rather than being applied separately: it is the
+   * evidence for exactly these values, and persisting it on any other beat would let the strip on
+   * the branding page describe a set of colours the admin declined. Null when the run measured
+   * nothing (a blocked site), which clears a stale palette for the same reason.
+   */
+  onApply: (values: Partial<Record<ImportableField, string>>, palette: BrandPalette | null) => void;
 }
 
 export function BrandImportDialog({
@@ -138,18 +150,40 @@ export function BrandImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrandImportResult | null>(null);
   const [accepted, setAccepted] = useState<Set<ImportableField>>(new Set());
+  /**
+   * The palette this run measured, stamped at the moment the run RETURNED.
+   *
+   * Held apart from `result` because it carries two things the result does not: when we looked, and
+   * what we looked at. Both are read off the request the admin actually submitted, which the inputs
+   * above can still change afterwards — so it is captured here rather than composed on Apply from
+   * fields that may by then say something else.
+   */
+  const [palette, setPalette] = useState<BrandPalette | null>(null);
 
   /** Images can only be re-hosted against a SAVED client, and only when storage exists. */
   const canRehost = Boolean(demoClientId) && uploadEnabled;
 
   const reset = () => {
     setResult(null);
+    setPalette(null);
     setAccepted(new Set());
     setError(null);
   };
 
-  const receive = (parsed: BrandImportResult) => {
+  const receive = (parsed: BrandImportResult, readFrom: string | null) => {
     setResult(parsed);
+    // Capped on the way in as well as at the write boundary: a merged run over a site and three
+    // screenshots can return more candidates than we keep, and silently posting a body the API
+    // rejects would fail the whole save over the least important thing in it.
+    setPalette(
+      parsed.candidates.length > 0
+        ? {
+            candidates: parsed.candidates.slice(0, MAX_STORED_CANDIDATES),
+            readFrom,
+            capturedAt: new Date().toISOString(),
+          }
+        : null
+    );
     // Pre-tick everything: the admin's job is to VETO what looks wrong, not to re-select what the
     // import already got right. Anything left ticked is what they were shown.
     setAccepted(new Set(Object.keys(parsed.fields) as ImportableField[]));
@@ -188,7 +222,7 @@ export function BrandImportDialog({
         setError(parsed.error.message);
         return;
       }
-      receive(parsed.data);
+      receive(parsed.data, describeSource(address, files.length));
     } catch (err) {
       setError(
         err instanceof Error
@@ -315,7 +349,7 @@ export function BrandImportDialog({
         }
       }
 
-      onApply(values);
+      onApply(values, palette);
       // Stay open only when there is something to READ — the admin has to see why the type was
       // skipped. Keying this on "custom type was involved" instead kept the dialog open on the
       // SUCCESS path too, with nothing said: the admin's only cue was that it did not close, and

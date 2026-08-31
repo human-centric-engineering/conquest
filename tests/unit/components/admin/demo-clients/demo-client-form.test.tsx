@@ -28,6 +28,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import type { DemoClientView } from '@/lib/app/questionnaire/demo-clients';
+import type { BrandPalette } from '@/lib/app/questionnaire/brand-import/palette-record';
+
+/** A palette as a brand import would have left it — two colours is enough to render the strip. */
+const PALETTE: BrandPalette = {
+  candidates: [
+    { hex: '#fffcf5', share: 0.68, neutral: true },
+    { hex: '#0a1a3a', share: 0.21, neutral: false },
+  ],
+  readFrom: 'acme.example',
+  capturedAt: '2026-08-31T09:00:00.000Z',
+};
 
 const { mockPush, mockRefresh } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -67,6 +78,26 @@ vi.mock('@/components/admin/demo-clients/brand-image-field', () => ({
     </button>
   ),
 }));
+vi.mock('@/components/admin/demo-clients/contrast-optimise-dialog', () => ({
+  ContrastOptimiseDialog: ({
+    theme,
+    onApply,
+  }: {
+    theme: unknown;
+    onApply: (v: Record<string, string>) => void;
+  }) => (
+    <>
+      <span data-testid="contrast-theme">{JSON.stringify(theme)}</span>
+      <button
+        type="button"
+        data-testid="contrast-apply"
+        onClick={() => onApply({ inkColor: '#75756d' })}
+      >
+        apply contrast
+      </button>
+    </>
+  ),
+}));
 vi.mock('@/components/admin/demo-clients/demo-client-theme-preview', () => ({
   DemoClientThemePreview: () => <div data-testid="theme-preview" />,
 }));
@@ -80,6 +111,7 @@ const CLIENT: DemoClientView = {
   name: 'Acme Bank Demo',
   description: 'Internal note',
   isActive: true,
+  brandPalette: null,
   ctaColor: '#280039',
   accentColor: '#ff6600',
   logoUrl: 'https://cdn.example.com/logo.png',
@@ -300,6 +332,108 @@ describe('DemoClientForm', () => {
       expect(body.inkColor).toBe('#1a1a1a');
       // Already null on the client, and still null — not the empty string.
       expect(body.ctaColorEnd).toBeNull();
+    });
+  });
+
+  describe('the measured palette', () => {
+    it('shows nothing for a client that has never had an import applied', () => {
+      render(<DemoClientForm client={CLIENT} />);
+      expect(screen.queryByText('Colours we read')).not.toBeInTheDocument();
+    });
+
+    it('renders the stored palette beside the fields it filled', () => {
+      // The point of persisting it: an admin reading a hex in a box can see where it came from
+      // without re-opening the import dialog.
+      render(<DemoClientForm client={{ ...CLIENT, brandPalette: PALETTE }} />);
+      expect(screen.getByText('Colours we read')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Copy #0a1a3a/ })).toBeInTheDocument();
+    });
+
+    it('sends the stored palette back untouched when only the name was edited', async () => {
+      // An ordinary colour edit must not discard the measurement the colours came from.
+      const user = userEvent.setup();
+      mockPatch.mockResolvedValue(CLIENT);
+      render(<DemoClientForm client={{ ...CLIENT, brandPalette: PALETTE }} />);
+      await user.type(nameBox(), '!');
+      await user.click(saveButton());
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0][1].body.brandPalette).toEqual(PALETTE);
+    });
+
+    it('clears the column, and enables Save on its own, when the palette is dropped', async () => {
+      // The palette lives in form state precisely so this works: clearing it is the one edit that
+      // touches no visible field, and without `shouldDirty` Save would stay greyed out.
+      const user = userEvent.setup();
+      mockPatch.mockResolvedValue(CLIENT);
+      render(<DemoClientForm client={{ ...CLIENT, brandPalette: PALETTE }} />);
+
+      await user.click(screen.getByRole('button', { name: /Clear/ }));
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+      await user.click(saveButton());
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0][1].body.brandPalette).toBeNull();
+    });
+
+    it('leaves the colour fields alone when the palette is dropped', async () => {
+      // Clearing the evidence is not clearing the theme — the colours were accepted on their own
+      // merits and an admin dropping a stale strip is not asking to un-brand the client.
+      const user = userEvent.setup();
+      mockPatch.mockResolvedValue(CLIENT);
+      render(<DemoClientForm client={{ ...CLIENT, brandPalette: PALETTE }} />);
+
+      await user.click(screen.getByRole('button', { name: /Clear/ }));
+      await user.click(saveButton());
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0][1].body.canvasColor).toBe('#fffdf7');
+    });
+
+    it('sends null for a client that never had one, rather than omitting it', async () => {
+      const user = userEvent.setup();
+      mockPost.mockResolvedValue({ ...CLIENT, id: 'created-9' });
+      render(<DemoClientForm />);
+      await user.type(nameBox(), 'Acme Bank Demo');
+      await user.click(saveButton());
+
+      await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+      expect(mockPost.mock.calls[0][1].body.brandPalette).toBeNull();
+    });
+  });
+
+  describe('the contrast optimiser', () => {
+    it('offers the check beside the import, not buried at the bottom', () => {
+      render(<DemoClientForm client={CLIENT} />);
+      expect(screen.getByRole('button', { name: /Optimise for contrast/i })).toBeInTheDocument();
+    });
+
+    it('hands the dialog the LIVE theme, including edits that are not saved', async () => {
+      // The whole point of the feature. Auditing the saved row would check colours the admin has
+      // already moved on from — and would report a problem they have just fixed.
+      const user = userEvent.setup();
+      render(<DemoClientForm client={CLIENT} />);
+      await user.clear(hexBox('Canvas colour'));
+      await user.type(hexBox('Canvas colour'), '#123456');
+
+      expect(screen.getByTestId('contrast-theme')).toHaveTextContent('"canvasColor":"#123456"');
+    });
+
+    it('writes an accepted repair into the form and enables Save', async () => {
+      // Routed through the same setter the colour pickers use, so an accepted repair is
+      // indistinguishable from the admin dragging the swatch there themselves.
+      const user = userEvent.setup();
+      mockPatch.mockResolvedValue(CLIENT);
+      render(<DemoClientForm client={CLIENT} />);
+
+      await user.click(screen.getByTestId('contrast-apply'));
+
+      await waitFor(() => expect(hexBox('Ink colour')).toHaveValue('#75756d'));
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+
+      await user.click(saveButton());
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0][1].body.inkColor).toBe('#75756d');
     });
   });
 

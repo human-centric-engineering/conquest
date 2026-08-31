@@ -950,6 +950,12 @@ export const API = {
        */
       brandImport: '/api/v1/app/demo-clients/brand-import',
       /**
+       * DEMO-ONLY (brand contrast): audit the theme's colour pairings and propose readable shades
+       * (POST, JSON). Collection-scoped for the same reason as the import — the create form has no
+       * client id yet — and it likewise persists nothing: the theme is sent as an unsaved body.
+       */
+      optimiseContrast: '/api/v1/app/demo-clients/optimise-contrast',
+      /**
        * DEMO-ONLY (custom type): load the client's own Google Fonts families (POST) or clear them
        * (DELETE). Writes the families and the stored files immediately, like an image upload;
        * `fontPairing` itself stays an ordinary form field.

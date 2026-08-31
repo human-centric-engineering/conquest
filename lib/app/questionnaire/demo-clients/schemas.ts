@@ -14,6 +14,7 @@ import {
   DEMO_CLIENT_SLUG_PATTERN,
 } from '@/lib/app/questionnaire/demo-clients/slug';
 import { themeFields } from '@/lib/app/questionnaire/theming';
+import { brandPaletteSchema } from '@/lib/app/questionnaire/brand-import/palette-record';
 
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 500;
@@ -39,6 +40,18 @@ const descriptionField = z
   .transform((v) => (v.length === 0 ? null : v))
   .nullable();
 
+/**
+ * The measured palette an import produced, riding along with the colours it proposed.
+ *
+ * Deliberately NOT part of `themeFields`: that bag is the set `resolveTheme()` consumes, and a
+ * palette is evidence rather than theme — nothing renders a respondent surface from it. Spread in
+ * separately here so the type guard on `DEMO_CLIENT_THEME_SELECT` keeps meaning what it says.
+ *
+ * Nullable so the admin can clear a stale palette, and `.optional()` like every theme field so an
+ * ordinary save that never touched the import leaves the column exactly as it was.
+ */
+const brandPaletteField = brandPaletteSchema.nullable().optional();
+
 /** Create body: name required; slug optional (derived from name when absent). The
  *  F3.4 theme fields (themeFields) are each optional — absent leaves the column null. */
 export const createDemoClientSchema = z.object({
@@ -47,6 +60,7 @@ export const createDemoClientSchema = z.object({
   description: descriptionField.optional(),
   isActive: z.boolean().optional(),
   ...themeFields,
+  brandPalette: brandPaletteField,
 });
 
 /** Update body: every field optional, but at least one must be present. Theme fields
@@ -58,6 +72,7 @@ export const updateDemoClientSchema = z
     description: descriptionField,
     isActive: z.boolean(),
     ...themeFields,
+    brandPalette: brandPaletteField,
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, {
