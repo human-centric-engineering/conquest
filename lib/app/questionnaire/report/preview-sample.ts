@@ -27,6 +27,7 @@ import { mapWithConcurrency } from '@/lib/app/questionnaire/llm/run-with-concurr
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import type { ReportProgressEmitter } from '@/lib/app/questionnaire/report/progress-events';
 import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import {
   buildAnswerPanelView,
@@ -321,11 +322,15 @@ function buildBatchMessages(
  * uses. `includeConfidence` mirrors `generation.discountLowConfidence` so the preview annotates
  * confidence exactly as a live report would. Throws when the report agent is not seeded, no provider
  * resolves, or the model output can't be parsed after a retry.
+ *
+ * Pass `onProgress` to be told when the persona pass starts and as each answer batch lands — the
+ * streamed preview turns those into on-screen phases. Omitting it changes nothing.
  */
 export async function synthesiseSampleReportInputs(
   structure: PreviewStructure,
-  opts: { includeConfidence: boolean }
+  opts: { includeConfidence: boolean; onProgress?: ReportProgressEmitter }
 ): Promise<SampleReportInputs> {
+  const onProgress = opts.onProgress;
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: RESPONDENT_REPORT_AGENT_SLUG },
     select: { id: true, provider: true, model: true, fallbackProviders: true, temperature: true },
@@ -345,6 +350,7 @@ export async function synthesiseSampleReportInputs(
   // a different person. A failure here is not fatal: the batches fall back to the un-personalised
   // instruction, which is exactly the (coherent-on-one-call) behaviour this flow had before batching.
   let persona = '';
+  onProgress?.({ type: 'persona' });
   try {
     const personaResult = await provider.chat(buildPersonaMessages(structure), {
       model,
@@ -376,6 +382,13 @@ export async function synthesiseSampleReportInputs(
   // costs its items, not the preview: a sample missing some answers still renders a representative
   // report (the coverage block below reports the gap honestly), whereas throwing shows the admin
   // nothing at all.
+  //
+  // Progress is reported on batch COMPLETION, not launch: batches run concurrently, so "3 of 6
+  // started" would jump to 6/6 in the first second and then sit there for the rest of the fan-out.
+  let batchesDone = 0;
+  const reportBatchProgress = () =>
+    onProgress?.({ type: 'sampling', batchesDone, batchesTotal: batches.length });
+  reportBatchProgress();
   const batchResults = await mapWithConcurrency(
     batches,
     SAMPLE_BATCH_CONCURRENCY,
@@ -405,6 +418,8 @@ export async function synthesiseSampleReportInputs(
           answers: batchResult.value.answers.size,
           dataSlots: batchResult.value.dataSlots.size,
         });
+        batchesDone += 1;
+        reportBatchProgress();
         return batchResult.value;
       } catch (err) {
         logger.warn('report preview: sample batch failed; continuing without it', {
@@ -413,6 +428,10 @@ export async function synthesiseSampleReportInputs(
           model,
           error: errorMessage(err),
         });
+        // A failed batch still advances the counter — it is done, just empty. Leaving it out would
+        // strand the wait at "5 of 6" for the rest of the preview.
+        batchesDone += 1;
+        reportBatchProgress();
         return null;
       }
     }

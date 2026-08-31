@@ -70,6 +70,7 @@ import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scori
 import type { RespondentScores } from '@/lib/app/questionnaire/scoring/types';
 import { summariseReportMethod } from '@/lib/app/questionnaire/report/method-summary';
 import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
+import type { ReportProgressEmitter } from '@/lib/app/questionnaire/report/progress-events';
 
 /** Result of one generation run. */
 export interface GeneratedReport {
@@ -527,6 +528,13 @@ export interface ReportGenerationInputs {
    * uses — the questionnaire's vocabulary the way the admin defined it.
    */
   glossary?: string[];
+  /**
+   * Optional progress emitter — called as the run crosses a phase boundary (grounding, researching,
+   * writing, formatting, finishing). Fire-and-forget: it performs no I/O, returns nothing, and can
+   * never fail the run. The streamed admin preview turns these into on-screen phases; the queued
+   * (unwatched) report path omits it, which produces exactly the behaviour this had before.
+   */
+  onProgress?: ReportProgressEmitter;
 }
 
 /**
@@ -717,6 +725,7 @@ export async function generateReportFromInputs(
     notAssessed,
     reconciliation,
     preview = false,
+    onProgress,
   } = inputs;
 
   // Provenance capture runs alongside every stage below. Report generation is hand-rolled
@@ -758,6 +767,7 @@ export async function generateReportFromInputs(
   // 3. Optional client-KB grounding — strictly scoped to the client's documents.
   let knowledge = '';
   if (settings.generation.useClientKnowledge && demoClientId) {
+    onProgress?.({ type: 'grounding' });
     const documentIds = await resolveClientKnowledgeDocumentIds(demoClientId);
     if (documentIds.length > 0) {
       try {
@@ -851,6 +861,7 @@ export async function generateReportFromInputs(
 
   let beforeResearch: ReportResearchResult | null = null;
   if (runBefore) {
+    onProgress?.({ type: 'researching' });
     beforeResearch = await runReportResearch({
       phase: 'before',
       instructions: researchCfg.before.instructions,
@@ -888,6 +899,7 @@ export async function generateReportFromInputs(
     ...(reconciliation ? { reconciliation } : {}),
     ...(inputs.glossary && inputs.glossary.length > 0 ? { glossary: inputs.glossary } : {}),
   });
+  onProgress?.({ type: 'writing' });
   const result = await runStructuredCompletion<RespondentReportContent>({
     provider,
     model,
@@ -929,6 +941,7 @@ export async function generateReportFromInputs(
   // Best-effort — `formatReportContent` never throws and falls back to the unformatted content on any
   // drift or failure, so a formatter problem can never fail an otherwise-valid report.
   recorder.stageRan('write');
+  onProgress?.({ type: 'formatting' });
   const formattedResult = await formatReportContent(agentContent, { format: 'plaintext' });
   let content: RespondentReportContent = formattedResult.content;
   const baseCostUsd = result.costUsd + formattedResult.costUsd;
@@ -943,6 +956,7 @@ export async function generateReportFromInputs(
   // combined findings as the report's Research section (unless the admin chose to hide it).
   let afterResearch: ReportResearchResult | null = null;
   if (runAfter) {
+    onProgress?.({ type: 'researching' });
     afterResearch = await runReportResearch({
       phase: 'after',
       instructions: researchCfg.after.instructions,
@@ -989,6 +1003,7 @@ export async function generateReportFromInputs(
   // 6c. Optional appendix — when the admin opted in and any findings were gathered, ask the writer to
   // synthesize a short supporting appendix (drawing on before AND after findings + the finished report).
   // Agent's choice: most reports get none. Best-effort — never fails a report.
+  onProgress?.({ type: 'finishing' });
   if (appendixEnabled && hasResearchFindings(beforeResearch, afterResearch)) {
     const guidance = [researchCfg.before.instructions, researchCfg.after.instructions]
       .map((s) => s.trim())

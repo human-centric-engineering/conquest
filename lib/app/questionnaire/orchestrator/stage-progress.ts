@@ -14,7 +14,9 @@
  *     preserved: same state + same invoker outputs still produce the same {@link TurnResult}.
  *   - **The route is an async generator**, so a plain callback cannot `yield`. Hence the channel:
  *     the emitter fills a queue, and {@link StageChannel.drain} lets the route pull from that queue
- *     concurrently with the pipeline promise and turn each stage into an SSE frame.
+ *     concurrently with the pipeline promise and turn each stage into an SSE frame. That queue/drain
+ *     machinery is generic and now lives in `createProgressChannel`; this module owns the turn's
+ *     stage vocabulary and its labels.
  *
  * Passing no emitter is always valid and changes nothing — which is what keeps every existing
  * caller and test of `runTurn` working untouched.
@@ -22,6 +24,8 @@
  * @see app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts — the drain + `status` frames
  * @see .context/app/questionnaire/turn-progress.md
  */
+
+import { createProgressChannel } from '@/lib/app/questionnaire/llm/progress-channel';
 
 /**
  * The stages a respondent is told about, in the order a turn crosses them.
@@ -63,79 +67,15 @@ export interface StageChannel {
 }
 
 /**
- * A one-shot channel for a single turn. Not reusable across turns — the de-dup memory below is
- * per-turn state, and a shared channel would swallow the second turn's `reading`.
+ * A one-shot channel for a single turn. Not reusable across turns — the de-dup memory is per-turn
+ * state, and a shared channel would swallow the second turn's `reading`.
+ *
+ * De-dup is on the stage itself: both orchestrators can re-enter a boundary (a probe turn re-runs
+ * the contradiction phase), and re-announcing the same sentence reads as the surface having stalled
+ * and restarted.
  */
 export function createStageChannel(): StageChannel {
-  const queue: TurnStage[] = [];
-  let wake: (() => void) | null = null;
-  // The last stage ENQUEUED, so a stage emitted twice in a row announces once. Both orchestrators
-  // can re-enter a boundary (a probe turn re-runs the contradiction phase), and re-announcing the
-  // same sentence reads as the surface having stalled and restarted.
-  let last: TurnStage | null = null;
-
-  const emit: StageEmitter = (stage) => {
-    if (stage === last) return;
-    last = stage;
-    queue.push(stage);
-    wake?.();
-    wake = null;
-  };
-
-  async function* drain<T>(until: Promise<T>): AsyncGenerator<TurnStage, T, undefined> {
-    let settled = false;
-    let value: T;
-    let failure: unknown;
-    let failed = false;
-
-    // Attach BOTH handlers up front so `done` itself never rejects — it is only ever used as a
-    // wake-up race below, and an unhandled rejection there would crash the process rather than
-    // surface as the turn failure the route already knows how to render.
-    const done = until.then(
-      (v) => {
-        value = v;
-        settled = true;
-        wake?.();
-        wake = null;
-      },
-      (e) => {
-        failure = e;
-        failed = true;
-        settled = true;
-        wake?.();
-        wake = null;
-      }
-    );
-
-    for (;;) {
-      while (queue.length > 0) {
-        yield queue.shift() as TurnStage;
-      }
-      if (settled) break;
-      // Termination rests on `wake` being reachable from BOTH sides: `emit` calls it when a stage
-      // arrives, and the settle handlers above call it when the pipeline finishes. `wake` is
-      // assigned synchronously inside the executor below, with no await between it and the
-      // `settled` check, so as written there is no window in which the pipeline could settle
-      // un-noticed and strand this await.
-      //
-      // Racing `done` is belt-and-braces for the edit that introduces such a window — inserting
-      // any `await` between the check and the assignment would otherwise turn a hang into the
-      // failure mode, and a hung drain means a stream that never closes and a composer locked for
-      // the rest of the session. It costs one already-settled promise per wait.
-      await Promise.race([
-        done,
-        new Promise<void>((resolve) => {
-          wake = resolve;
-        }),
-      ]);
-      wake = null;
-    }
-
-    if (failed) throw failure;
-    return value!;
-  }
-
-  return { emit, drain };
+  return createProgressChannel<TurnStage>({ dedupeKey: (stage) => stage });
 }
 
 /**

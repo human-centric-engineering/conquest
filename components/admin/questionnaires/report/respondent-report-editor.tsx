@@ -12,13 +12,14 @@
  * (it has no separate raw section).
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { parseSseBlock } from '@/lib/api/sse-parser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -43,7 +44,16 @@ import {
 import { FieldHelp } from '@/components/ui/field-help';
 import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
 import { ReportBody, ReportPaperHeader } from '@/components/app/questionnaire/report/report-body';
-import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import {
+  validateRespondentReportContent,
+  type RespondentReportContent,
+} from '@/lib/app/questionnaire/report/content';
+import {
+  isReportProgressEvent,
+  reportProgressLabel,
+  type ReportPreviewEvent,
+} from '@/lib/app/questionnaire/report/progress-events';
+import { ExtractionProgress } from '@/components/admin/questionnaires/status-ticker';
 import {
   isAiRespondentReportMode,
   MAX_REPORT_RESEARCH_RESULTS,
@@ -103,6 +113,25 @@ interface PreviewResult {
   content: RespondentReportContent;
   formatted: boolean;
   completionPct: number | null;
+}
+
+/**
+ * Narrow the stream's terminal `done` frame into a renderable preview.
+ *
+ * The frame arrives as parsed JSON off the wire, so it is validated rather than asserted — and the
+ * content goes through the same validator the generation core uses, so a malformed report surfaces
+ * as the dialog's error state instead of a render crash inside `<ReportBody>`.
+ */
+function narrowPreviewDone(event: Record<string, unknown>): PreviewResult | null {
+  const content = validateRespondentReportContent(event.content);
+  if (!content) return null;
+  return {
+    questionnaireTitle:
+      typeof event.questionnaireTitle === 'string' ? event.questionnaireTitle : '',
+    content,
+    formatted: event.formatted === true,
+    completionPct: typeof event.completionPct === 'number' ? event.completionPct : null,
+  };
 }
 
 export interface RespondentReportEditorProps {
@@ -202,30 +231,109 @@ export function RespondentReportEditor({
 
   // Preview — generate an illustrative report from AI-synthesised sample answers using the CURRENT
   // (possibly unsaved) config, so the admin sees the effect of their settings before going live.
+  //
+  // Streamed, not a single POST: the run is a persona pass, a fan-out of sample-answer batches, the
+  // report writer and the formatter — ~100 seconds on a 69-question version. A static spinner for
+  // that long is indistinguishable from a hung request, so the dialog shows the phase the run is
+  // actually in plus a live elapsed clock (`<ExtractionProgress>`), the same honest-progress
+  // treatment the document-upload flow gets.
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPhase, setPreviewPhase] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+  // Live request, so closing the dialog stops the work instead of leaving the stream (and its paid
+  // LLM calls) running against a screen nobody is looking at.
+  const previewAbort = useRef<AbortController | null>(null);
+
+  const closePreview = (open: boolean) => {
+    if (!open) previewAbort.current?.abort();
+    setPreviewOpen(open);
+  };
 
   const runPreview = async () => {
+    previewAbort.current?.abort();
+    const controller = new AbortController();
+    previewAbort.current = controller;
+
     setPreviewOpen(true);
     setPreviewLoading(true);
+    setPreviewPhase(null);
     setPreviewError(null);
     setPreviewData(null);
     try {
-      const result = await apiClient.post<PreviewResult>(
-        API.APP.QUESTIONNAIRES.reportPreview(questionnaireId, versionId),
-        { body: { config: value } }
+      const res = await fetch(
+        API.APP.QUESTIONNAIRES.reportPreviewStream(questionnaireId, versionId),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ config: value }),
+          signal: controller.signal,
+        }
       );
-      setPreviewData(result);
+
+      // A pre-stream refusal (rate limit, raw mode, empty version) is the ordinary JSON error
+      // envelope, not a stream.
+      if (!res.ok || !res.body) {
+        let message: string | undefined;
+        try {
+          const body = (await res.json()) as { error?: { message?: string } };
+          message = body.error?.message;
+        } catch {
+          // Non-JSON body — fall through to the generic message.
+        }
+        setPreviewError(message ?? `Could not generate a preview (${res.status}).`);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let result: PreviewResult | null = null;
+      let streamError: string | null = null;
+
+      for (;;) {
+        const { value: chunk, done: finished } = await reader.read();
+        if (finished) break;
+        buffer += decoder.decode(chunk, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseBlock(block);
+          if (parsed) {
+            const event = parsed.data as unknown as ReportPreviewEvent;
+            if (event.type === 'done') {
+              result = narrowPreviewDone(parsed.data);
+              if (!result) streamError = 'The preview came back in an unexpected shape.';
+            } else if (event.type === 'error') {
+              streamError = event.message;
+            } else if (isReportProgressEvent(event)) {
+              setPreviewPhase(reportProgressLabel(event));
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+
+      if (streamError) setPreviewError(streamError);
+      else if (result) setPreviewData(result);
+      else setPreviewError('The preview did not finish. Please try again.');
     } catch (err) {
+      // An abort is the admin closing the dialog — not a failure to report.
+      if (controller.signal.aborted) return;
       setPreviewError(
         err instanceof APIClientError
           ? err.message
           : 'Could not generate a preview. Please try again.'
       );
     } finally {
-      setPreviewLoading(false);
+      if (previewAbort.current === controller) previewAbort.current = null;
+      if (!controller.signal.aborted) {
+        setPreviewLoading(false);
+        setPreviewPhase(null);
+      }
     }
   };
 
@@ -992,7 +1100,7 @@ export function RespondentReportEditor({
       </div>
 
       {/* Full-page report preview — the same paper renderer respondents see, from sample answers. */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Dialog open={previewOpen} onOpenChange={closePreview}>
         <DialogContent className="bg-muted/40 flex h-[calc(100dvh-3rem)] w-[calc(100vw-2rem)] max-w-[920px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
           <DialogHeader className="bg-background flex-row items-center justify-between space-y-0 border-b px-5 py-3 text-left">
             <DialogTitle className="text-sm font-semibold">Report preview</DialogTitle>
@@ -1003,9 +1111,16 @@ export function RespondentReportEditor({
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-8">
             {previewLoading && (
-              <div className="text-muted-foreground flex h-full items-center justify-center gap-2 text-sm">
+              <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 text-sm">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Generating a sample report…
+                <ExtractionProgress
+                  message={previewPhase ?? 'Generating a sample report…'}
+                  className="text-center"
+                />
+                <p className="text-muted-foreground/80 max-w-xs text-center text-xs">
+                  A full sample report takes a minute or two — the questionnaire is answered by an
+                  invented respondent before the report is written.
+                </p>
               </div>
             )}
             {previewError && !previewLoading && (

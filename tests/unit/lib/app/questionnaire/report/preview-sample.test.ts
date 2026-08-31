@@ -312,6 +312,43 @@ describe('synthesiseSampleReportInputs', () => {
       expect(result.coverage.answered).toBe(71);
     });
 
+    it('reports batch progress on completion, ending at total-of-total', async () => {
+      mockPerBatchCompletion();
+      const events: Array<{ type: string; batchesDone?: number; batchesTotal?: number }> = [];
+
+      await synthesiseSampleReportInputs(wideStructure(71), {
+        includeConfidence: false,
+        onProgress: (event) => events.push(event),
+      });
+
+      const sampling = events.filter((e) => e.type === 'sampling');
+      const total = sampling[0]?.batchesTotal ?? 0;
+      expect(total).toBeGreaterThan(1);
+      // Opens at 0 and closes at total — a counter that stopped short reads as a stalled preview.
+      expect(sampling[0]?.batchesDone).toBe(0);
+      expect(sampling[sampling.length - 1]).toEqual({
+        type: 'sampling',
+        batchesDone: total,
+        batchesTotal: total,
+      });
+      // Announced only once the persona is fixed, since that is the pass actually running first.
+      expect(events[0]).toEqual({ type: 'persona' });
+    });
+
+    it('still advances the counter past a failed batch, so the wait never strands', async () => {
+      mockPerBatchCompletion({ failBatchesMatching: /q0\]/ });
+      const events: Array<{ type: string; batchesDone?: number; batchesTotal?: number }> = [];
+
+      await synthesiseSampleReportInputs(wideStructure(71), {
+        includeConfidence: false,
+        onProgress: (event) => events.push(event),
+      });
+
+      const sampling = events.filter((e) => e.type === 'sampling');
+      const last = sampling[sampling.length - 1];
+      expect(last?.batchesDone).toBe(last?.batchesTotal);
+    });
+
     it('sums cost across the persona pass and every batch', async () => {
       mockPerBatchCompletion();
 
