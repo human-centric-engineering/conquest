@@ -112,6 +112,16 @@ export interface RoutingAnalystCardProps {
   initialDraft: ProposedTopicSet | null;
   /** Question keys on the version — for the "questions left in no topic" count. */
   questionKeys: readonly string[];
+  /**
+   * How many data slots the version has, so the card can say when running the analyst now will
+   * cost it the hard rules.
+   *
+   * A rule tests one data slot and the analyst's prompt is told "DATA SLOTS: none. Propose no hard
+   * rules" when there are none — and no ingest path generates data slots, so a freshly uploaded
+   * questionnaire is always in that state. Without this the admin runs the analyst, gets no rules,
+   * and has nothing telling them it was the order of work rather than their document.
+   */
+  dataSlotCount: number;
   /** Live topic count, so the banner can say what accepting would replace. */
   liveTopicCount: number;
   /**
@@ -196,6 +206,7 @@ export function RoutingAnalystCard({
   versionId,
   initialDraft,
   questionKeys,
+  dataSlotCount,
   liveTopicCount,
   scopeEnabled,
   candidacy,
@@ -367,6 +378,11 @@ export function RoutingAnalystCard({
           ...((draft.checkTopicPreference?.length ?? 0) > 0
             ? { checkTopicPreference: draft.checkTopicPreference }
             : {}),
+          // Same `.length > 0` reasoning as the two lists above: an empty string is not "the
+          // document said nothing", it is an instruction to erase what the admin already wrote.
+          ...((draft.plannerInstructions?.length ?? 0) > 0
+            ? { plannerInstructions: draft.plannerInstructions }
+            : {}),
           // Sent only when the admin ticked the box. An untouched accept carries no `enable` key
           // at all, which is what leaves the version's own setting alone on the server.
           ...(enableOnAccept ? { enable: true as const } : {}),
@@ -468,6 +484,30 @@ export function RoutingAnalystCard({
                 </p>
               </div>
             )}
+            {/* Said BEFORE the run, not after it. The analyst is given the version's data slots as
+                "the only keys a rule may test", so with none it is told outright to propose no hard
+                rules — an admin who runs it first gets a proposal with no rules and nothing
+                anywhere explaining that the order of work, not the document, is why. */}
+            {dataSlotCount === 0 && (
+              <div className="text-muted-foreground bg-muted/40 space-y-1 rounded-md border p-3 text-sm">
+                <p className="text-foreground font-medium">Consider setting up data slots first.</p>
+                <p>
+                  The analyst can propose topics either way. But hard rules (the certainties the
+                  agent cannot overrule) each decide from one data slot, so it cannot propose any
+                  until this questionnaire has some. It also won’t be able to say which data slots
+                  each topic covers.
+                </p>
+                <p>
+                  <a
+                    className="text-foreground font-medium underline underline-offset-2"
+                    href={`/admin/questionnaires/${questionnaireId}/v/${versionId}/data-slots`}
+                  >
+                    Set up data slots
+                  </a>
+                  , or carry on and re-run this afterwards to pick up the rest.
+                </p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">
                 Where are the routing rules? (optional){' '}
@@ -551,6 +591,18 @@ export function RoutingAnalystCard({
                     {draft.checkTopicPreference.map(labelForKey).join(', ')}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Prose, not a key list, so it gets its own block rather than a one-line label: this
+                is the only proposed setting an admin has to READ to judge, and burying several
+                sentences on the end of a comma-separated line makes that impossible. */}
+            {draft.plannerInstructions && (
+              <div className="space-y-1 text-sm">
+                <p className="text-foreground font-medium">Guidance across all topics</p>
+                <p className="text-muted-foreground bg-muted/30 rounded-md border px-3 py-2 whitespace-pre-wrap">
+                  {draft.plannerInstructions}
+                </p>
               </div>
             )}
 
@@ -760,8 +812,9 @@ export function RoutingAnalystCard({
               {liveTopicCount > 0
                 ? `This replaces all ${liveTopicCount} of your current topics with the ${draft?.topics.length ?? 0} proposed here`
                 : `This writes the ${draft?.topics.length ?? 0} proposed topics`}
-              {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}. You can
-              still edit everything afterwards.{' '}
+              {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}
+              {draft?.plannerInstructions ? ', and replaces your guidance across all topics' : ''}.
+              You can still edit everything afterwards.{' '}
               {scopeEnabled
                 ? 'Conditional topics is already on, so these topics decide what respondents are asked as soon as you accept.'
                 : offerEnable

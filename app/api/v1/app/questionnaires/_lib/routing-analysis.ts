@@ -119,6 +119,9 @@ export function toProposedSet(
     ...(result.checkTopicPreference !== undefined
       ? { checkTopicPreference: result.checkTopicPreference }
       : {}),
+    ...(result.plannerInstructions !== undefined
+      ? { plannerInstructions: result.plannerInstructions }
+      : {}),
     summary: result.summary,
     fromDocument: result.fromDocument,
     generatedAt,

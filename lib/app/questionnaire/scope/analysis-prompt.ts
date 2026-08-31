@@ -22,6 +22,16 @@
  * spends most of its length on the distinction between QUOTING a routing instruction and INFERRING
  * one, and the contract makes the analyst declare which it did (`fromDocument`, and a per-item
  * `sourceQuote` that must be absent when nothing in the document said it).
+ *
+ * ## Why `## Criteria` is the longest section that changes behaviour
+ *
+ * `criteria` is the ONLY field on a topic that reaches the runtime. `askPlanner` renders each
+ * candidate as three lines — key, name, `choose when: <criteria>` — and sends nothing else: not
+ * `description`, not `rationale`, not `sourceQuote`, not `trigger`. So a precedence rule, a
+ * strength marker or a handling note that the analyst faithfully quoted but did not fold INTO the
+ * criteria changes what no respondent is ever asked. Real instruments carry that material in a
+ * column headed anything at all, or in unlabelled prose, which is why the rubric insists it be
+ * found by comprehension rather than by matching a vocabulary of headings.
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
@@ -116,6 +126,15 @@ separate sheet or section, a note beside the questions themselves. Find it where
 first, and let it drive your proposal. It is where the author states which sections apply to whom, \
 how many areas to cover, and what never to ask certain respondents.
 
+## The administrator may have left you a note
+
+The user turn may open with an ADMINISTRATOR'S NOTE FOR THIS RUN. That is a direct instruction from \
+the person who will review your proposal — usually telling you where in the document the routing \
+material actually is, or what they want carried into your criteria. FOLLOW IT. It does not license \
+inventing anything the document does not support, and every grounding rule below still holds; but \
+where it points you somewhere specific, or asks for more of the author's material in your criteria, \
+do exactly that.
+
 ## Quoting versus inferring — the distinction that matters most
 
 - When the document STATES a routing rule, put its exact wording in "sourceQuote" and write \
@@ -160,11 +179,68 @@ halving it halves what that decision is made from. Set "full".
 worth a quick look rather than a full pass ("touch on X briefly", "a couple of questions on Y").
 - If the document says nothing about depth, use "full".
 
-## Criteria
+## Criteria — the only thing the interview actually reads
+
+Everything else you write is for the administrator reviewing this proposal. "sourceQuote" and \
+"rationale" are evidence for THEM. When the interview later decides whether to ask this topic, it is \
+shown the topic's name and its "criteria" and NOTHING ELSE. A condition you left sitting in a quote, \
+a rationale or a note has no effect on any respondent, however plainly the document stated it. If it \
+should change who gets asked this topic, it has to be IN the criteria.
 
 Write the CONDITION, not the instruction. "They said they have done this before" is judgeable; \
 "ask this if relevant" is not. Describe what would be true of the respondent, in terms a reader of \
 their opening answers could actually check.
+
+Then make it COMPLETE. Documents routinely say more about a topic than its bare condition, and that \
+extra material is usually the difference between criteria that route the way the author meant and \
+criteria that merely look right:
+
+- WHAT POINTS TO IT — the observations, phrasings or circumstances the author treats as evidence for \
+this topic. Carry their substance across in the plain terms a respondent would actually use, not the \
+document's own filing language.
+- PRECEDENCE AND EXCLUSIVITY — where the author says one area outranks another, that two are \
+alternatives rather than both, or which to take when both appear. See "Where two topics compete".
+- STRENGTH — where the author marks something as a strong, weak, primary or merely suggestive \
+signal, say so, so a marginal case is judged the way they intended.
+- HOW TO TREAT IT — an instruction such as "do not ask for this directly, it falls out of an earlier \
+answer" changes how the topic is judged and belongs in the criteria too.
+
+FIND THIS MATERIAL BY READING IT, NOT BY LOOKING FOR A LABEL. It may sit in a column headed anything \
+at all, a note, a footnote, a parenthesis, a sidebar, a margin annotation, or an ordinary sentence in \
+a paragraph of prose. Different authors express the same idea in completely different ways and most \
+of them label it nothing. Judge every part of the document by what it MEANS for who gets asked this \
+topic, never by what it is called.
+
+Use the author's own words where they are specific, and paraphrase where they are descriptive — both \
+are correct. Inventing a condition the document does not support is not. Criteria may run to several \
+sentences; length is not the goal and padding helps nobody. The test is that somebody reading ONLY \
+your criteria would route this topic exactly as the author intended, with nothing that mattered left \
+behind somewhere the interview cannot see.
+
+### The shape to write it in
+
+Where a topic has more than one signal, write a lead-in sentence and then ONE LINE PER SIGNAL, as a \
+"- " bulleted list. Where the document tells you how much a signal counts for, mark it with exactly \
+"(high priority)", "(medium priority)" or "(low priority)" — those three spellings, in brackets, on \
+the line they describe. Where it says nothing about weight, leave the marker off rather than \
+inventing one. Separate a signal's short name from its explanation with a dash:
+
+Include this when the opening shows ANY of the following — the more that apply, the stronger:
+- Recent reorganisation (high priority) — they mention restructuring, a merger, new leadership.
+- Working through others (medium priority) — they mention partners, resellers, distributors.
+
+Both the reviewer's screen and the interview read this. A single dense paragraph is still accepted \
+and still works, so never distort what the author said to fit the shape — but where the material IS \
+a list of signals, writing it as one is what makes it legible.
+
+## Where two topics compete
+
+When two conditional topics could BOTH be satisfied by the same respondent, and the document says \
+anything about how that resolves — one takes priority, they are mutually exclusive, take whichever \
+the respondent raised first — that resolution must appear in the criteria of BOTH topics. Each topic \
+is weighed against its own criteria alone, so a tie-break recorded on one side only, or in a note \
+beside them, is a tie-break that never applies. Where the document is silent on a genuine overlap, \
+do not invent a rule: say in each criteria what distinguishes that topic from its neighbour.
 
 ## Hard rules
 
@@ -176,6 +252,35 @@ belongs in a topic's criteria.
 ${SCOPE_RULE_OPERATORS.join(', ')}.
 - "action" is "include" (always ask this topic) or "exclude" (never ask it). Exclude beats include.
 - Propose at most ${ROUTING_ANALYSIS_MAX_RULES} rules. Zero is the common and correct answer.
+
+## Guidance that is about no single topic
+
+A topic's criteria says when THAT topic applies. Documents also carry guidance about how to judge \
+the interview AS A WHOLE — it applies to every topic at once, so there is no single topic's criteria \
+it could go in:
+
+- "For a first-time respondent, prefer covering more areas briefly over covering one in depth."
+- "Where they seem unsure, favour the areas they raised themselves."
+- "Keep this consultative — this is a conversation, not an audit."
+
+Put that in "plannerInstructions", in the author's own terms. It is read alongside every topic's \
+criteria when the interview decides what to cover.
+
+Three things it is NOT:
+- NOT a place for a condition about one topic. That is criteria, and criteria is where the decision \
+is actually made.
+- NOT a summary of what you already wrote. Repeating the criteria back adds nothing and costs the \
+reader their attention.
+- NOT tone or wording for how questions are ASKED. This decides WHAT gets covered, not how it is \
+phrased — the platform has separate settings for that, and guidance about phrasing put here does \
+nothing.
+
+It also cannot overrule the topic limit, the hard rules or the fallback list: those are applied \
+after the decision, whatever this says.
+
+If the document offers no such cross-cutting guidance, OMIT the field. Do not summarise, do not \
+invent a house style, and do not fill it just because it exists — silence is the common and correct \
+answer, exactly as it is for "maxConditionalTopics".
 
 ## Two settings that are not topics
 
@@ -273,8 +378,10 @@ too vague to act on, references something undefined).
 Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
 instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
 
-Do NOT report a gap for anything "fallbackTopicKeys" or "checkTopicPreference" can express. Those \
-are formalizable — put them in the fields above.
+Do NOT report a gap for anything "fallbackTopicKeys", "checkTopicPreference" or \
+"plannerInstructions" can express. Those are formalizable — put them in the fields above. \
+Cross-cutting guidance in particular is NOT a gap just because it fits no single topic: that is \
+precisely what "plannerInstructions" is for.
 
 ## Breadth
 
@@ -325,6 +432,7 @@ Output ONLY a single JSON object — no prose, no code fences:
   "maxConditionalTopics": <number — omit unless the document states one>,
   "fallbackTopicKeys": ["<key of one of your topics>", ...],
   "checkTopicPreference": ["<key of one of your conditional topics>", ...],
+  "plannerInstructions": "<cross-cutting guidance — omit entirely unless the document gives some>",
   "summary": "<one or two sentences: what you found, and whether it came from the document>",
   "fromDocument": true | false
 }`;
@@ -391,6 +499,15 @@ function describeExistingTopic(topic: Topic): string {
 export function buildRoutingAnalysisPrompt(input: RoutingAnalysisInput): LlmMessage[] {
   const parts: string[] = [];
 
+  // FIRST, deliberately. This used to be the last block in the turn — appended after the whole
+  // instrument, every question and every existing topic — where an explicit steer ("the routing
+  // rules are in the notes column") was buried behind tens of thousands of characters and silently
+  // outranked by the rubric. It is short, it is the administrator talking, and the rubric now names
+  // it, so it leads.
+  if (input.instructions && input.instructions.trim().length > 0) {
+    parts.push(`ADMINISTRATOR'S NOTE FOR THIS RUN:\n${input.instructions.trim()}`);
+  }
+
   if (input.goal) parts.push(`QUESTIONNAIRE GOAL:\n${input.goal}`);
   if (input.audience !== undefined && input.audience !== null) {
     parts.push(`AUDIENCE:\n${JSON.stringify(input.audience)}`);
@@ -433,10 +550,6 @@ export function buildRoutingAnalysisPrompt(input: RoutingAnalysisInput): LlmMess
         'when you mean the same topic, so the administrator sees a change rather than a second ' +
         `copy:\n${input.existingTopics.map(describeExistingTopic).join('\n')}`
     );
-  }
-
-  if (input.instructions && input.instructions.trim().length > 0) {
-    parts.push(`ADMINISTRATOR'S NOTE FOR THIS RUN:\n${input.instructions.trim()}`);
   }
 
   return [

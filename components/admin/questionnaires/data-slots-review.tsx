@@ -70,6 +70,16 @@ export interface DataSlotsReviewProps {
   initialSlots: DataSlotView[];
   /** A pending generated proposal the admin hasn't saved yet, if any. */
   initialDraft: DataSlotDraftView | null;
+  /**
+   * Whether this version is using (or is a candidate for) conditional topics.
+   *
+   * Saving data slots is the moment hard rules become possible for the first time — a rule decides
+   * from one data slot, so with none the Routing Analyst is told outright to propose none. Nothing
+   * else tells the admin that re-running it is now worth doing, and the analyst does not re-run
+   * itself once a proposal has been made. Gated rather than always shown: on a version with no
+   * conditional topics and no candidacy, pointing at the analyst is noise.
+   */
+  conditionalTopicsInUse?: boolean;
 }
 
 /** Whether the working set is an unsaved generated proposal or the saved live set. */
@@ -173,6 +183,7 @@ export function DataSlotsReview({
   questions,
   initialSlots,
   initialDraft,
+  conditionalTopicsInUse = false,
 }: DataSlotsReviewProps) {
   const router = useRouter();
 
@@ -204,6 +215,8 @@ export function DataSlotsReview({
   const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Set only by a save that landed, so the analyst nudge cannot appear beside a failed one. */
+  const [analystNudge, setAnalystNudge] = useState(false);
   // Index of the slot pending a delete confirmation, or null.
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   // Whether the discard-draft confirmation is open.
@@ -400,6 +413,7 @@ export function DataSlotsReview({
     setSaving(true);
     setError(null);
     setNotice(null);
+    setAnalystNudge(false);
     try {
       const res = await authoringMutate<{ slots: DataSlotView[] }>(
         'PUT',
@@ -421,6 +435,8 @@ export function DataSlotsReview({
       setLiveSlots(res.data.slots);
       resetTo(assignIds(res.data.slots.map(fromSaved)), 'live');
       setNotice(`Saved ${res.data.slots.length} data slots — now live.`);
+      // Hard rules just became possible for the first time, and nothing else says so.
+      setAnalystNudge(conditionalTopicsInUse);
       router.refresh();
       return true;
     } catch (err) {
@@ -583,6 +599,28 @@ export function DataSlotsReview({
       {notice && (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">
           {notice}
+        </div>
+      )}
+      {/* Shown only after a save that actually landed, and only where conditional topics are in
+          play. This is the one moment hard rules become possible — the analyst was previously told
+          "DATA SLOTS: none. Propose no hard rules" — and it does not re-run itself once a proposal
+          exists, so without this the admin would have to know to go back on their own. */}
+      {analystNudge && (
+        <div className="text-muted-foreground bg-muted/40 space-y-1 rounded-md border p-3 text-sm">
+          <p className="text-foreground font-medium">Conditional topics can now use these.</p>
+          <p>
+            Hard rules each decide from one data slot, so the Routing Analyst could not propose any
+            until now. Re-run it to pick up the rules your document describes, and to have it say
+            which data slots each topic covers.
+          </p>
+          <p>
+            <a
+              className="text-foreground font-medium underline underline-offset-2"
+              href={`/admin/questionnaires/${questionnaireId}/v/${versionId}/topics`}
+            >
+              Go to Conditional topics
+            </a>
+          </p>
         </div>
       )}
 

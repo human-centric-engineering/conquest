@@ -376,7 +376,15 @@ export function VersionEditor({
           No sections yet — add one to begin.
         </p>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          /* Explicit `id` — see the note in `topics/topic-list-editor.tsx`: dnd-kit's
+             `aria-describedby` comes from a module-scoped counter that does not reset per
+             request on the server, so an implicit one cannot survive hydration. */
+          id="dnd-version-sections"
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={sections.map((s) => s.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-5">
               {sections.map((section, i) => (

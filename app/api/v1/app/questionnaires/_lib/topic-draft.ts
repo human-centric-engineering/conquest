@@ -87,7 +87,8 @@ export interface AcceptTopicDraftResult {
  *   accept dialog offers that decision — as an UNTICKED box, shown only when the proposal contains
  *   a conditional topic — and `body.enable` carries the answer. Without it, `enabled` is untouched,
  *   exactly as before. Nothing here can turn the feature OFF: the schema accepts only `true`.
- * - **`fallbackTopicKeys` and `checkTopicPreference` ride along when the analyst proposed them**
+ * - **`fallbackTopicKeys`, `checkTopicPreference` and `plannerInstructions` ride along when the
+ *   analyst proposed them**
  *   (F17.23), on the same omitted-means-leave-alone / present-means-replace contract as `rules`.
  *   They are settings rather than topics, but they are read out of the same routing prose in the
  *   same pass — before this, a document that named a safe default or a blind-spot area came back as
@@ -150,6 +151,9 @@ export async function acceptTopicDraft(
         : {}),
       ...(body.checkTopicPreference !== undefined
         ? { checkTopicPreference: body.checkTopicPreference }
+        : {}),
+      ...(body.plannerInstructions !== undefined
+        ? { plannerInstructions: body.plannerInstructions }
         : {}),
       // One-way. An absent `enable` leaves the version's own value alone rather than resolving to
       // `false`, so accepting a second proposal on an already-live setup cannot silently switch

@@ -140,6 +140,6 @@ describe('ScopeSettingsCard — the opening follow-up allowance (G03)', () => {
     renderCard();
     const heading = screen.getByText(/Before the decision/);
     expect(heading.textContent).toMatch(/^1/);
-    expect(screen.getByText(/The cases you are certain about/).textContent).toMatch(/^2/);
+    expect(screen.getByText(/Always or never ask a topic/).textContent).toMatch(/^2/);
   });
 });

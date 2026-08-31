@@ -292,7 +292,13 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={2}>The cases you are certain about</SectionLabel>
+          {/* The data-slot dependency is named in the heading itself, not left to the ⓘ. A rule
+              tests one data slot, so with none on the version there is nothing to author a rule
+              against — and the admin who most needs telling is the one who never opens the help. */}
+          {/* Names the ACTION, not a category. "The cases you are certain about" told an admin
+              nothing about what to put in the field — "cases" is an abstraction, and the data-slot
+              dependency read as decoration rather than as the thing the rule is built from. */}
+          <SectionLabel step={2}>Always or never ask a topic based on one answer</SectionLabel>
           <ScopeRulesEditor
             rules={draft.rules}
             onChange={(next: ScopeRule[]) => set({ rules: next })}
@@ -540,10 +546,22 @@ export function ScopeSettingsCard({
           <Label className="text-sm font-medium">
             Guidance that applies across all topics{' '}
             <FieldHelp title="Extra guidance">
-              Appended to the planner prompt. Each topic’s criteria say when that one topic applies;
-              this says how to judge the plan as a whole — “prefer breadth over depth for first-time
-              respondents”. It cannot override the limit, the rules, or the fallback: those are
-              enforced after the model answers.
+              <strong>Advice that applies to every topic at once.</strong> Each topic’s criteria say
+              when <em>that</em> topic applies. This says how to weigh up the whole set, so it’s for
+              anything that isn’t about one topic in particular.
+              <br />
+              <br />
+              <em>
+                “For a first-time respondent, prefer covering more areas briefly than one in depth.”
+              </em>{' '}
+              <em>“Where they seem unsure, favour the areas they raised themselves.”</em>
+              <br />
+              <br />
+              It’s advice, not a rule: the agent weighs it up rather than obeying it, so anything
+              you can’t compromise on belongs in a hard rule. It can’t stretch the topic limit,
+              overrule a hard rule, or change the fallback list; those are applied afterwards
+              whatever this says. It also doesn’t change how questions are worded, only which topics
+              get covered.
             </FieldHelp>
           </Label>
           <AutoTextarea

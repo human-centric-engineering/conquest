@@ -11,6 +11,18 @@
  * is asked: **every match applies** (not first-match-wins — include and exclude are independent
  * assertions about different topics), and **exclude beats include** (an author's "never" is a line
  * drawn, and a second rule they forgot must not cross it).
+ *
+ * ## Rules depend on data slots, and the surface says so
+ *
+ * Every rule tests ONE data slot, so a version with none cannot carry a rule at all — and this is
+ * not a rare edge: no ingest path generates data slots, so a freshly uploaded questionnaire is
+ * always in this state. The Routing Analyst hits the same wall from the other side (its prompt is
+ * told "DATA SLOTS: none. Propose no hard rules"), which means an admin can run the analyst, get no
+ * rules, and have nothing on screen explaining why.
+ *
+ * So the dependency is stated three times over, deliberately: in the section heading above this
+ * editor, in the empty state, and by disabling "Add rule" (which would otherwise mint a rule with
+ * an empty `dataSlotKey` for the admin to discover and delete).
  */
 
 import { Plus, Trash2 } from 'lucide-react';
@@ -56,6 +68,8 @@ export function ScopeRulesEditor({
   disabled = false,
 }: ScopeRulesEditorProps) {
   const conditional = topics.filter((t) => t.phase === 'conditional');
+  /** A rule tests one data slot, so with none there is nothing a rule could be written against. */
+  const hasDataSlots = dataSlots.length > 0;
 
   const patch = (index: number, next: Partial<ScopeRule>) => {
     onChange(rules.map((r, i) => (i === index ? { ...r, ...next } : r)));
@@ -84,22 +98,56 @@ export function ScopeRulesEditor({
         <Label className="text-sm font-medium">
           Hard rules{' '}
           <FieldHelp title="Hard rules">
-            Checked <strong>before</strong> the agent, over the data slots the opening filled. Every
-            matching rule applies — they are independent assertions, not a first-match-wins chain —
-            and a <em>never include</em> always beats an <em>always include</em> on the same topic.
-            Use these for the cases you are certain about; leave the judgement calls to each topic’s
-            criteria.
+            <strong>
+              You build one sentence: when a given answer says X, always ask (or never ask) a given
+              topic.
+            </strong>
+            <br />
+            <br />
+            For example: <em>when “Licence holder” is “No”, never ask “Compliance audit”.</em> You
+            pick the answer from your data slots, pick how to compare it, then pick the topic to
+            force in or out.
+            <br />
+            <br />
+            Why you would: normally the agent reads the opening and decides each conditional topic
+            for itself, weighing it against that topic’s criteria, so it can go either way. A hard
+            rule takes that decision away. If the answer matches, the topic is in or out, every
+            time, on every interview.
+            <br />
+            <br />
+            Use one only where you cannot live with the agent judging it: eligibility, compliance, a
+            section that must never reach the wrong person. Anything you would want judged case by
+            case belongs in that topic’s criteria instead. That is what criteria are for.
+            <br />
+            <br />
+            Most questionnaires need none. If a rule and the agent disagree, the rule wins. If two
+            rules disagree about the same topic, <em>never ask</em> wins.
           </FieldHelp>
         </Label>
-        <Button variant="outline" size="sm" onClick={add} disabled={disabled}>
+        {/* Disabled with no data slots: `add()` would mint a rule whose `dataSlotKey` is '', which
+            is an invalid rule the admin then has to notice and delete. The empty state below says
+            why the button is off rather than leaving it inert and unexplained. */}
+        <Button variant="outline" size="sm" onClick={add} disabled={disabled || !hasDataSlots}>
           <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add rule
         </Button>
       </div>
 
       {rules.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          No hard rules. Every conditional topic is decided by the agent against its criteria.
-        </p>
+        /* The empty state has to teach the FORM, not just report the absence. "No hard rules" on
+           its own reads as a setting left at its default; what an admin needs to know is what one
+           would look like if they added it, in the shape the editor below actually builds. */
+        <div className="text-muted-foreground space-y-1 text-xs">
+          <p>
+            No hard rules. The agent decides every conditional topic for itself, weighing it against
+            that topic’s criteria.
+          </p>
+          <p>
+            Add one to overrule it for a specific answer:{' '}
+            <em>when “Licence holder” is “No”, never ask “Compliance audit”.</em>
+            {!hasDataSlots &&
+              ' You need at least one data slot before you can add one. That is where the answer comes from.'}
+          </p>
+        </div>
       ) : (
         <ul className="space-y-2">
           {rules.map((rule, index) => {

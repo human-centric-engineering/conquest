@@ -13,6 +13,7 @@ import { TOPIC_KEY_MAX_LENGTH } from '@/lib/app/questionnaire/scope/types';
 
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
+  ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS,
   ROUTING_ANALYSIS_MAX_SETTING_KEYS,
   ROUTING_ANALYSIS_MAX_TOPICS,
   validateRoutingAnalysis,
@@ -444,5 +445,63 @@ describe('validateRoutingAnalysis — the trigger a document asks for but the op
     if (!result.ok) return;
     expect(result.value.topics[0]?.trigger?.cues).toHaveLength(12);
     expect(result.value.topics[0]?.trigger?.cues[0]).toBe('cue 0');
+  });
+});
+
+describe('proposed planner guidance (Extra guidance)', () => {
+  const base = {
+    topics: [{ key: 't1', label: 'T1', phase: 'core', rationale: 'r' }],
+    summary: 's',
+    fromDocument: true,
+  };
+
+  it('accepts cross-cutting guidance the analyst read out of the document', () => {
+    const result = validateRoutingAnalysis({
+      ...base,
+      plannerInstructions: 'For a first-time respondent, prefer breadth over depth.',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.plannerInstructions).toBe(
+        'For a first-time respondent, prefer breadth over depth.'
+      );
+    }
+  });
+
+  it('leaves it undefined when the document said nothing', () => {
+    // Absent, never `''`. The accept path merges on `!== undefined`, so an empty string would ERASE
+    // guidance the admin wrote by hand — the opposite of "the document was silent".
+    const result = validateRoutingAnalysis(base);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.plannerInstructions).toBeUndefined();
+  });
+
+  it('truncates an over-long proposal instead of failing the whole analysis', () => {
+    // The `trigger.cues` lesson (T13): the one retry never mentions this field, so rejecting here
+    // would lose the document its entire proposal over an optional advisory string.
+    const result = validateRoutingAnalysis({ ...base, plannerInstructions: 'x'.repeat(5_000) });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.plannerInstructions).toHaveLength(
+        ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS
+      );
+    }
+  });
+
+  it('does not fail the whole analysis when the key is PRESENT but empty (code review regression)', () => {
+    // `.optional()` only tolerates the KEY being absent — it does nothing for a key present with
+    // an invalid value. A model told to omit this field routinely emits `""` instead of actually
+    // dropping the key, and `.string().trim().min(1)....optional()` failed `.min(1)` on that,
+    // which is not "rejected" the way an over-long string is truncated — it is
+    // `routingAnalysisSchema.safeParse()` returning `ok: false` for topics, rules and gaps too.
+    const result = validateRoutingAnalysis({ ...base, plannerInstructions: '' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.plannerInstructions).toBeUndefined();
+  });
+
+  it('treats a whitespace-only value the same as absent', () => {
+    const result = validateRoutingAnalysis({ ...base, plannerInstructions: '   ' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.plannerInstructions).toBeUndefined();
   });
 });

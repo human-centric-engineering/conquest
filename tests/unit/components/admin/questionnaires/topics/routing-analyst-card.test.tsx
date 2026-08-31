@@ -108,6 +108,7 @@ function renderCard(props: Partial<ComponentProps<typeof RoutingAnalystCard>> = 
       versionId={VID}
       initialDraft={null}
       questionKeys={['q1']}
+      dataSlotCount={2}
       liveTopicCount={0}
       scopeEnabled={false}
       candidacy={null}
@@ -392,6 +393,7 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
         versionId={VID}
         initialDraft={null}
         questionKeys={['q1']}
+        dataSlotCount={2}
         liveTopicCount={0}
         scopeEnabled={false}
         candidacy={CANDIDACY}
@@ -406,6 +408,7 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
         versionId={VID}
         initialDraft={null}
         questionKeys={['q1']}
+        dataSlotCount={2}
         liveTopicCount={0}
         scopeEnabled={false}
         candidacy={CANDIDACY}
@@ -1041,5 +1044,44 @@ describe('RoutingAnalystCard — a proposed trigger', () => {
     ) as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { topics: Record<string, unknown>[] };
     expect(body.topics[0]?.trigger).toEqual(TRIGGERED.trigger);
+  });
+});
+
+describe('the data-slot dependency, said before the run', () => {
+  /**
+   * A hard rule decides from one data slot, so the analyst's prompt is told "DATA SLOTS: none.
+   * Propose no hard rules" when the version has none — and no ingest path generates data slots, so
+   * a freshly uploaded questionnaire is always in that state. Run the analyst first and you get a
+   * proposal with no rules, with nothing anywhere saying the order of work was why.
+   *
+   * Pinned as a NOTICE, not a blocker: proposing topics without data slots is still useful, and the
+   * admin may legitimately not want rules at all.
+   */
+  it('suggests setting up data slots first when the version has none', () => {
+    renderCard({ dataSlotCount: 0 });
+    expect(screen.getByText(/Consider setting up data slots first/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Set up data slots/i })).toBeTruthy();
+  });
+
+  it('does not block the run — the analyst is still offered', () => {
+    renderCard({ dataSlotCount: 0 });
+    const run = screen.getByRole('button', { name: /Propose topics from the/i });
+    expect(run.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('stays quiet once the version has data slots', () => {
+    renderCard({ dataSlotCount: 3 });
+    expect(screen.queryByText(/Consider setting up data slots first/i)).toBeNull();
+  });
+
+  it('renders the link and its trailing sentence with no stray space before the comma', () => {
+    // Regression: a `{' '}` left over from an em-dash rewrite put a literal space between the
+    // link and the comma that followed it — "Set up data slots , or carry on…" — invisible to a
+    // substring match but visible on screen. Pinned on the exact text content, not a substring.
+    renderCard({ dataSlotCount: 0 });
+    const link = screen.getByRole('link', { name: /Set up data slots/i });
+    expect(link.parentElement?.textContent).toBe(
+      'Set up data slots, or carry on and re-run this afterwards to pick up the rest.'
+    );
   });
 });

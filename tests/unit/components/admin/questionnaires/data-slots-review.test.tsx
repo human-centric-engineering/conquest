@@ -788,3 +788,54 @@ describe('DataSlotsReview', () => {
     });
   });
 });
+
+// ── Re-run the Routing Analyst after saving ──────────────────────────────────
+
+describe('the analyst nudge after a save', () => {
+  /**
+   * Saving data slots is the one moment hard rules become possible: a rule decides from one data
+   * slot, so until now the Routing Analyst was told "DATA SLOTS: none. Propose no hard rules". It
+   * does not re-run itself once a proposal exists, so nothing otherwise tells the admin that going
+   * back is worth doing.
+   *
+   * Gated on `conditionalTopicsInUse` because on a version with no conditional topics and no
+   * candidacy, pointing at the analyst is noise — and shown only after a save that LANDED, so it
+   * can never sit beside a failure.
+   */
+  it('points back at the analyst once slots are saved and conditional topics are in play', async () => {
+    const user = userEvent.setup();
+    mockFetchSuccess({ slots: [makeSlot({ name: 'Primary Goal' })] });
+    render(
+      <DataSlotsReview
+        {...baseProps()}
+        initialSlots={[makeSlot({ name: 'Primary Goal' })]}
+        conditionalTopicsInUse
+      />
+    );
+
+    const nameInput = screen.getByDisplayValue('Primary Goal');
+    await user.type(nameInput, 'X');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Conditional topics can now use these/i)).toBeInTheDocument()
+    );
+    expect(screen.getByRole('link', { name: /Go to Conditional topics/i })).toBeInTheDocument();
+  });
+
+  it('stays quiet when the version has nothing to do with conditional topics', async () => {
+    const user = userEvent.setup();
+    mockFetchSuccess({ slots: [makeSlot({ name: 'Primary Goal' })] });
+    render(
+      <DataSlotsReview {...baseProps()} initialSlots={[makeSlot({ name: 'Primary Goal' })]} />
+    );
+
+    const nameInput = screen.getByDisplayValue('Primary Goal');
+    await user.type(nameInput, 'X');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    // The save still reports itself; only the analyst pointer is withheld.
+    await waitFor(() => expect(screen.getByText(/now live/i)).toBeInTheDocument());
+    expect(screen.queryByText(/Conditional topics can now use these/i)).not.toBeInTheDocument();
+  });
+});
