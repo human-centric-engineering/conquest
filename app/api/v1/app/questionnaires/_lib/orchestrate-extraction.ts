@@ -37,6 +37,7 @@ import type { ExtractedQuestion } from '@/lib/app/questionnaire/ingestion/extrac
 import type { ChangeRecordIntent, ChangeType } from '@/lib/app/questionnaire/ingestion/types';
 import {
   validateVerifyResult,
+  NOT_A_QUESTION_ISSUE,
   type VerifyResult,
   type QuestionVerdict,
 } from '@/lib/app/questionnaire/ingestion/verify-schema';
@@ -75,6 +76,28 @@ interface ExtractCtx {
  * and riskier than surfacing the raw draft for the admin to review. Skip repair and log.
  */
 const REPAIR_FLAG_CEILING = 20;
+
+/**
+ * How much of one ingest may be REMOVED as "not a question".
+ *
+ * A `not_a_question` verdict is the only one that deletes rather than corrects, so it needs a
+ * blast radius. Real documents carry a handful of script lines against dozens of questions; a
+ * critic claiming a quarter of the instrument is script has misread the document (a set of
+ * statements to rate is the obvious way to get there), and losing a quarter of a questionnaire to
+ * that misreading is far worse than shipping the script lines for an author to delete. Past the
+ * ceiling nothing is dropped at all and the run is logged.
+ *
+ * The floor exists because the fraction alone is useless on a short document: 25% of an
+ * eight-question instrument is two, and a two-page intro script is easily three lines. A handful
+ * is always allowed; a proportion is what governs everything larger.
+ */
+const NON_QUESTION_DROP_FRACTION = 0.25;
+const NON_QUESTION_DROP_FLOOR = 3;
+
+/** The most questions this ingest may drop as non-questions. See the constants above. */
+function nonQuestionDropCeiling(total: number): number {
+  return Math.max(NON_QUESTION_DROP_FLOOR, Math.floor(total * NON_QUESTION_DROP_FRACTION));
+}
 
 const EMPTY_VERIFY: VerifyResult = { verdicts: [], matrixGroups: [] };
 const EMPTY_REPAIR: RepairResult = { repairs: [] };
@@ -174,24 +197,51 @@ export async function* orchestrateExtraction(
   const flags = verification.result;
   const flagged = flags.verdicts.filter((v) => v.verdict === 'suspect');
 
+  // Split the flags by what they actually ask for. `not_a_question` says the span cannot be
+  // answered at all (interviewer script, a transition, an instruction) and no answer type repairs
+  // that, so the orchestrator drops it here and never sends it to the specialist. Everything else
+  // is a mis-READ, which a re-read can correct.
+  const nonQuestions = flagged.filter((v) => v.issue === NOT_A_QUESTION_ISSUE);
+  const repairable = flagged.filter((v) => v.issue !== NOT_A_QUESTION_ISSUE);
+
   // F14.15: what the critic actually concluded, and what was done about it. Persisted against
   // the version by the caller (the version doesn't exist yet at this point in the pipeline).
   let repairOutcome: FidelityRecord['repairOutcome'] =
     verification.provider === null ? 'verifier_unavailable' : 'none_flagged';
 
-  if (flagged.length === 0) {
-    // Verifier clean → no repair call at all (the common, cheap case).
-    yield {
-      type: 'phase',
-      phase: 'verifying',
-      message: 'All questions look faithful — no repairs needed.',
-    };
-  } else if (flagged.length > REPAIR_FLAG_CEILING) {
+  // ── Drop (deterministic): remove the spans that are not questions, revertibly. ──
+  let droppedNonQuestionKeys: string[] = [];
+  if (nonQuestions.length > 0) {
+    const pruned = dropNonQuestions(extraction, nonQuestions, ctx.log);
+    extraction = pruned.extraction;
+    droppedNonQuestionKeys = pruned.droppedKeys;
+    const dropped = droppedNonQuestionKeys.length;
+    if (dropped > 0) {
+      yield {
+        type: 'phase',
+        phase: 'verifying',
+        message: `Removed ${dropped} line${dropped === 1 ? '' : 's'} that ${dropped === 1 ? 'is not a question' : 'are not questions'}: interviewer script, a transition, or an instruction.`,
+      };
+    }
+  }
+
+  if (repairable.length === 0) {
+    // Verifier clean → no repair call at all (the common, cheap case). Said only when nothing
+    // was flagged AT ALL: after a drop it would read as "and everything else was fine", which
+    // the critic did not say. It said only that the rest needed no re-typing.
+    if (flagged.length === 0) {
+      yield {
+        type: 'phase',
+        phase: 'verifying',
+        message: 'All questions look faithful — no repairs needed.',
+      };
+    }
+  } else if (repairable.length > REPAIR_FLAG_CEILING) {
     // Systemic extractor failure. This used to be a log line and nothing else — the questions
     // stayed flagged-but-unrepaired in the persisted version with no trace of the bail-out.
     repairOutcome = 'skipped_systemic';
     ctx.log.warn('ingest verify flagged too many questions; skipping repair', {
-      flagged: flagged.length,
+      flagged: repairable.length,
       total,
     });
   } else {
@@ -199,10 +249,10 @@ export async function* orchestrateExtraction(
     yield {
       type: 'phase',
       phase: 'repairing',
-      message: `Scales & matrix specialist — repairing ${flagged.length} flagged question${flagged.length === 1 ? '' : 's'}…`,
-      progress: { done: 0, total: flagged.length },
+      message: `Scales & matrix specialist — repairing ${repairable.length} flagged question${repairable.length === 1 ? '' : 's'}…`,
+      progress: { done: 0, total: repairable.length },
     };
-    const repairs = await runRepair(extraction, flags, flagged, documentText, fileName, ctx);
+    const repairs = await runRepair(extraction, flags, repairable, documentText, fileName, ctx);
     // Set AFTER the call, from what came back. `runRepair` is fail-soft — an unseeded agent, a
     // failed dispatch, or a throw all return zero repairs — so claiming 'repaired' up front would
     // record the exact fiction this record exists to prevent: flagged-but-untouched questions
@@ -284,6 +334,10 @@ export async function* orchestrateExtraction(
         coverage,
         disallowedEditCount,
         unattributedPromptKeys,
+        droppedNonQuestionKeys,
+        // Counted HERE, off the final extraction, not from `total` minus the drops: everything
+        // that can change the count between the critic's read and this line has already run.
+        retainedCount: extraction.questions.length,
         durationMs: verification.durationMs,
       },
     },
@@ -557,6 +611,132 @@ async function runRepair(
     });
     return EMPTY_REPAIR;
   }
+}
+
+/**
+ * Build a revertible `prune_question` change for a span the critic said is not a question.
+ *
+ * `beforeJson` is written in the shape `planPruneQuestion` (`extraction-review/planner.ts`) reads
+ * back: `prompt` is what makes the revert possible at all, `type`/`typeConfig`/`guidelines`/
+ * `rationale`/`required` are the fields `toNewQuestion` restores, and `sectionOrdinal` +
+ * `sectionTitle` are how it finds the section to put the question back into. Getting these names
+ * wrong is not a compile error and not a visible bug: the row still renders in the change log, and
+ * the loss only shows up the day someone presses revert. The repair path has been bitten by exactly
+ * that (see {@link changeForCorrect}), which is why the shape is spelled out rather than spread.
+ *
+ * `afterJson` is null because a prune has no after. `PRUNE_CHANGE_TYPES` requires it, and the
+ * planner uses its absence to know the content lives in `beforeJson`.
+ */
+function changeForNonQuestion(
+  question: ExtractedQuestion,
+  sectionTitle: string | null,
+  detail: string | null
+): ChangeRecordIntent {
+  return {
+    changeType: 'prune_question',
+    targetEntityType: 'question',
+    beforeJson: {
+      key: question.key,
+      prompt: question.prompt,
+      type: question.suggestedType,
+      typeConfig: question.suggestedTypeConfig ?? null,
+      sectionOrdinal: question.sectionOrdinal,
+      ...(sectionTitle !== null ? { sectionTitle } : {}),
+      ...(question.guidelines !== undefined ? { guidelines: question.guidelines } : {}),
+      ...(question.rationale !== undefined ? { rationale: question.rationale } : {}),
+      ...(question.required !== undefined ? { required: question.required } : {}),
+    },
+    afterJson: null,
+    rationale: detail
+      ? `Removed during ingestion: this is not a question. ${detail}`
+      : 'Removed during ingestion: this is not a question but interviewer script, a transition, or an instruction.',
+    ...(question.sourceQuote !== undefined ? { sourceQuote: question.sourceQuote } : {}),
+  };
+}
+
+/**
+ * Remove the questions the critic flagged `not_a_question`, filing a revertible `prune_question`
+ * change for each. Deterministic once the verdicts are in: no second model call.
+ *
+ * ## Why the drop happens here rather than in repair
+ *
+ * The repair specialist can only `correct` (re-type one question) or `merge` (fold grid rows into a
+ * matrix). Neither does anything useful to "Bot script: That's useful. Based on what you've said I
+ * want to go deeper on the areas below." No answer type turns a line of interviewer narration into
+ * something a respondent can answer, so sending it to repair spends a call to get the same
+ * unanswerable question back. Removal is the only correct action, and it needs no judgement beyond
+ * the verdict already in hand.
+ *
+ * ## Three guards, because this is the only path that deletes
+ *
+ * 1. **The ceiling** ({@link nonQuestionDropCeiling}). Past it nothing is dropped at all. A critic
+ *    that calls a quarter of an instrument "script" has misread it, most likely a page of
+ *    statements-to-rate, and a quarter of a questionnaire is far too much to lose to a misreading
+ *    that an author would have caught in seconds.
+ * 2. **Never empty the questionnaire.** Dropping every question leaves a version that cannot be
+ *    launched and gives the admin nothing to review, which is strictly worse than a draft with some
+ *    script in it. Redundant against the ceiling above three questions; the whole guard on a short
+ *    document, where the floor allows three.
+ * 3. **Revertibility.** Each drop is a `prune_question` row carrying the full question, so the
+ *    change log shows what went and F2.3 puts it back. Dropping silently is the failure this
+ *    pipeline keeps re-learning: an admin cannot review a decision nothing recorded.
+ *
+ * Sections are deliberately left alone. A section whose only member was script becomes empty rather
+ * than pruned: an empty section is visible in the editor and takes one click to delete, whereas
+ * removing a section the author expected to see is the more expensive mistake, and it is a separate
+ * editorial decision from "this line is not a question".
+ *
+ * Exported for tests: the ceiling and the revert shape are the parts worth pinning.
+ */
+export function dropNonQuestions(
+  extraction: ExtractQuestionnaireStructureData,
+  verdicts: QuestionVerdict[],
+  log: RouteLogger
+): { extraction: ExtractQuestionnaireStructureData; droppedKeys: string[] } {
+  // Verdict keys are model output: one may name a question that no longer exists (or never did).
+  // Intersecting with the real questions is what makes the counts below trustworthy.
+  const detailByKey = new Map(verdicts.map((v) => [v.key, v.detail ?? null]));
+  const targets = extraction.questions.filter((q) => detailByKey.has(q.key));
+  if (targets.length === 0) return { extraction, droppedKeys: [] };
+
+  const total = extraction.questions.length;
+  const ceiling = nonQuestionDropCeiling(total);
+  if (targets.length > ceiling) {
+    log.warn('ingest verify flagged too many spans as non-questions; dropping none', {
+      flagged: targets.length,
+      ceiling,
+      total,
+    });
+    return { extraction, droppedKeys: [] };
+  }
+  if (targets.length >= total) {
+    log.warn('ingest verify flagged every question as a non-question; dropping none', { total });
+    return { extraction, droppedKeys: [] };
+  }
+
+  const titleByOrdinal = new Map(extraction.sections.map((s) => [s.ordinal, s.title]));
+  const droppedKeys = new Set(targets.map((q) => q.key));
+  const changes = targets.map((q) =>
+    changeForNonQuestion(
+      q,
+      titleByOrdinal.get(q.sectionOrdinal) ?? null,
+      detailByKey.get(q.key) ?? null
+    )
+  );
+
+  log.info('ingest dropped spans that are not questions', {
+    droppedKeys: [...droppedKeys],
+    total,
+  });
+
+  return {
+    extraction: {
+      ...extraction,
+      questions: extraction.questions.filter((q) => !droppedKeys.has(q.key)),
+      changes: [...extraction.changes, ...changes],
+    },
+    droppedKeys: targets.map((q) => q.key),
+  };
 }
 
 /**

@@ -372,6 +372,218 @@ describe('orchestrateExtraction — repair applied', () => {
   });
 });
 
+// ─── Non-questions dropped ────────────────────────────────────────────────────
+
+/**
+ * Four questions and the document they came from, one of which is a line of interviewer script.
+ *
+ * Four is the smallest size that lets the drop actually happen: the ceiling is
+ * `max(3, floor(4 * 0.25))` = 3, and the never-empty guard needs at least one question left over.
+ * `dropNonQuestions` is unit-tested directly in `drop-non-questions.test.ts`. What these tests
+ * cover is the WIRING, which that file structurally cannot reach: that the orchestrator splits the
+ * verdicts by issue, reassigns the pruned extraction, keeps the dropped key away from the repair
+ * specialist, and carries the keys onto the fidelity record.
+ */
+const BOT_SCRIPT_PROMPT = "That's useful. Based on what you've said I want to go deeper.";
+
+function withScript(): ExtractQuestionnaireStructureData {
+  return {
+    sections: [{ ordinal: 0, title: 'About You' }],
+    questions: [
+      {
+        sectionOrdinal: 0,
+        key: 'name',
+        prompt: 'What is your name?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+      {
+        sectionOrdinal: 0,
+        key: 'role',
+        prompt: 'What is your role?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+      {
+        sectionOrdinal: 0,
+        key: 'tenure',
+        prompt: 'How long have you been in it?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+      {
+        sectionOrdinal: 0,
+        key: 'bot_script',
+        prompt: BOT_SCRIPT_PROMPT,
+        suggestedType: 'free_text',
+        extractionConfidence: 0.4,
+      },
+    ],
+    changes: [],
+  };
+}
+
+/** The source all four prompts really appear in, so no prompt reads as an unattributed edit. */
+const SCRIPT_DOC = {
+  title: 'Onboarding',
+  fullText: `# Form\n\n## About You\n\n1. What is your name?\n2. What is your role?\n3. How long have you been in it?\n\n${BOT_SCRIPT_PROMPT}\n`,
+} as unknown as ExtractedDocument['parsed'];
+
+function notAQuestion(key: string, detail?: string) {
+  return {
+    key,
+    verdict: 'suspect' as const,
+    issue: 'not_a_question' as const,
+    ...(detail ? { detail } : {}),
+  };
+}
+
+describe('orchestrateExtraction — non-questions dropped', () => {
+  beforeEach(() => {
+    (extractFromDocument as Mock).mockResolvedValue({
+      ok: true,
+      value: { extraction: withScript(), parsed: SCRIPT_DOC },
+    });
+  });
+
+  it('removes the flagged line, records it revertibly, and never sends it to repair', async () => {
+    seedAgents();
+    const verifyResult: VerifyResult = {
+      verdicts: [
+        { key: 'name', verdict: 'ok' },
+        { key: 'role', verdict: 'ok' },
+        { key: 'tenure', verdict: 'ok' },
+        notAQuestion('bot_script', 'Interviewer script, not a question.'),
+      ],
+      matrixGroups: [],
+    };
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: { result: verifyResult },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { phases, result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The drop reached the RETURNED extraction. Forgetting `extraction = pruned.extraction`
+      // leaves the pure function correct and the questionnaire unchanged.
+      expect(result.value.extraction.questions.map((q) => q.key)).toEqual([
+        'name',
+        'role',
+        'tenure',
+      ]);
+      // ...and it is recoverable. `prompt` is the field `toNewQuestion` refuses to restore without.
+      expect(result.value.extraction.changes).toHaveLength(1);
+      expect(result.value.extraction.changes[0]).toMatchObject({
+        changeType: 'prune_question',
+        targetEntityType: 'question',
+        beforeJson: { key: 'bot_script', prompt: BOT_SCRIPT_PROMPT, sectionOrdinal: 0 },
+        afterJson: null,
+      });
+      // The keys reach the provenance row, which is the only thing that tells an admin by name
+      // what is missing from the editor.
+      expect(result.value.fidelity?.droppedNonQuestionKeys).toEqual(['bot_script']);
+      // Every suspect verdict still counts as flagged. The band subtracts the drops itself.
+      expect(result.value.fidelity?.flaggedCount).toBe(1);
+      // `totalCount` is what the critic was given; `retainedCount` is what the version holds.
+      // Collapsing them back into one number is what made the coverage line quote a count the
+      // Structure editor does not show.
+      expect(result.value.fidelity?.totalCount).toBe(4);
+      expect(result.value.fidelity?.retainedCount).toBe(3);
+    }
+    // Verify dispatched, repair NOT. No answer type rescues a line of narration, so a repair call
+    // here spends a model round-trip to get the same unanswerable question back.
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalledWith(
+      REPAIR_QUESTIONS_CAPABILITY_SLUG,
+      expect.anything(),
+      expect.anything()
+    );
+    expect(
+      phases.some((p) => p.phase === 'verifying' && p.message?.includes('Removed 1 line'))
+    ).toBe(true);
+  });
+
+  it('does not also claim the questionnaire was faithful when every flag was a removal', async () => {
+    // "All questions look faithful — no repairs needed" would read as "and everything else was
+    // fine", which the critic never said. It said only that the rest needed no re-typing.
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            verdicts: [notAQuestion('bot_script')],
+            matrixGroups: [],
+          } satisfies VerifyResult,
+        },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { phases, result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.droppedNonQuestionKeys).toEqual(['bot_script']);
+    expect(phases.some((p) => p.message?.includes('Removed 1 line'))).toBe(true);
+    expect(phases.some((p) => p.message?.includes('look faithful'))).toBe(false);
+  });
+
+  it('still repairs the mis-typed questions alongside a dropped one', async () => {
+    // The split has to cut both ways: a `not_a_question` in the same batch must not cost the
+    // other flags their re-read, and the dropped key must not appear in the repair targets.
+    seedAgents();
+    const repairResult: RepairResult = {
+      repairs: [
+        { originalKeys: ['name'], action: 'correct', questions: [q('name', 'likert', goodLikert)] },
+      ],
+    };
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            verdicts: [
+              { key: 'name', verdict: 'suspect', issue: 'type_mismatch', detail: 'is a scale' },
+              notAQuestion('bot_script'),
+            ],
+            matrixGroups: [],
+          } satisfies VerifyResult,
+        },
+      },
+      [REPAIR_QUESTIONS_CAPABILITY_SLUG]: { success: true, data: { result: repairResult } },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      REPAIR_QUESTIONS_CAPABILITY_SLUG,
+      expect.objectContaining({ targets: [expect.objectContaining({ key: 'name' })] }),
+      expect.objectContaining({ agentId: 'repair-1' })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.extraction.questions.map((q) => q.key)).toEqual([
+        'name',
+        'role',
+        'tenure',
+      ]);
+      expect(result.value.extraction.questions[0].suggestedType).toBe('likert');
+      expect(result.value.fidelity?.droppedNonQuestionKeys).toEqual(['bot_script']);
+      expect(result.value.fidelity?.repairOutcome).toBe('repaired');
+      // Counted after BOTH stages. A `merge` repair collapses several questions into one, so
+      // deriving this by subtracting the drops from `totalCount` would overcount on any run that
+      // merged, and overcount silently.
+      expect(result.value.fidelity?.retainedCount).toBe(3);
+    }
+  });
+});
+
 // ─── Fidelity record (F14.15) ─────────────────────────────────────────────────
 
 describe('orchestrateExtraction — fidelity record repairOutcome', () => {

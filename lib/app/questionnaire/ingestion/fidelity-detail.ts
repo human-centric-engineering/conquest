@@ -47,16 +47,19 @@ export interface FidelityDetailInput {
   coverage: VerifyCoverage | null;
   disallowedEditCount: number;
   unattributedPromptKeys: string[];
+  droppedNonQuestionKeys: string[];
+  retainedCount: number;
   fileName: string;
 }
 
 /**
  * Build the `detail` blob for the `extraction_verify` run.
  *
- * The three whole-set signals are **omitted when they have nothing to say** — no coverage read, no
- * disallowed edits, no unattributed prompts. That is deliberate and load-bearing for the reader: a
- * present key means something happened, so a clean ingest's row stays short and an admin surface
- * can render "nothing to report" by finding nothing rather than by comparing zeroes.
+ * The whole-set signals are **omitted when they have nothing to say** — no coverage read, no
+ * disallowed edits, no unattributed prompts, nothing dropped. That is deliberate and load-bearing
+ * for the reader: a present key means something happened, so a clean ingest's row stays short and
+ * an admin surface can render "nothing to report" by finding nothing rather than by comparing
+ * zeroes.
  *
  * `unattributedPromptCount` is written alongside the keys, derived from `.length` rather than
  * carried separately, because a corpus run reads the count and two fields that can disagree
@@ -73,7 +76,17 @@ export function buildFidelityDetail(input: FidelityDetailInput): Record<string, 
           unattributedPromptKeys: input.unattributedPromptKeys,
         }
       : {}),
+    ...(input.droppedNonQuestionKeys.length > 0
+      ? {
+          droppedNonQuestionCount: input.droppedNonQuestionKeys.length,
+          droppedNonQuestionKeys: input.droppedNonQuestionKeys,
+        }
+      : {}),
     totalCount: input.totalCount,
+    // Written only when it disagrees with `totalCount`, which is the same omit-when-nothing-to-say
+    // rule the signals above follow: an ingest that removed and merged nothing retained everything
+    // it checked, and a key repeating that says nothing a reader has to read.
+    ...(input.retainedCount !== input.totalCount ? { retainedCount: input.retainedCount } : {}),
     repairOutcome: input.repairOutcome,
     fileName: input.fileName,
   };
@@ -129,6 +142,28 @@ export interface VersionFidelityView {
   unattributedPromptCount: number;
   /** Editorial edits the extractor was instructed not to make. Build health; not shown to admins. */
   disallowedEditCount: number;
+  /**
+   * Keys of spans REMOVED because they were not questions (interviewer script, a transition, an
+   * instruction). Empty on a legacy row and on any ingest that removed nothing.
+   */
+  droppedNonQuestionKeys: string[];
+  /**
+   * How many were removed. Read separately from the list's length for the same reason
+   * {@link unattributedPromptCount} is: a row can carry a count without the keys, and reporting
+   * zero because the names are missing would say "nothing was deleted" about an ingest that
+   * deleted something.
+   */
+  droppedNonQuestionCount: number;
+  /**
+   * How many questions the version actually holds, as opposed to how many the critic checked
+   * ({@link VersionFidelityView.totalCount}). The two differ once a drop or a `merge` repair has
+   * changed the count between the check and the persist.
+   *
+   * Falls back to `totalCount` rather than to zero: a row that omits it is a row where nothing
+   * changed the count (or a legacy row written before the field existed), and both of those
+   * retained everything they checked.
+   */
+  retainedCount: number;
   /** The document this describes, when the row recorded it. */
   fileName: string | null;
   /** When the check ran (ISO). */
@@ -145,6 +180,9 @@ const detailSchema = z.object({
   disallowedEditCount: z.number().int().nonnegative().nullish().catch(null),
   unattributedPromptCount: z.number().int().nonnegative().nullish().catch(null),
   unattributedPromptKeys: z.array(z.string()).nullish().catch(null),
+  droppedNonQuestionCount: z.number().int().nonnegative().nullish().catch(null),
+  droppedNonQuestionKeys: z.array(z.string()).nullish().catch(null),
+  retainedCount: z.number().int().nonnegative().nullish().catch(null),
   fileName: z.string().nullish().catch(null),
 });
 
@@ -185,6 +223,7 @@ export function readFidelityDetail(input: {
     .map((v) => ({ key: v.key, issue: v.issue ?? null, detail: v.detail ?? null }));
 
   const keys = d.unattributedPromptKeys ?? [];
+  const droppedKeys = d.droppedNonQuestionKeys ?? [];
   return {
     totalCount: d.totalCount,
     flagged,
@@ -196,6 +235,9 @@ export function readFidelityDetail(input: {
     // two still reports 2 rather than reading as clean. Falls back to the list's length for a row
     // that somehow carried keys without a count.
     unattributedPromptCount: d.unattributedPromptCount ?? keys.length,
+    droppedNonQuestionKeys: droppedKeys,
+    droppedNonQuestionCount: d.droppedNonQuestionCount ?? droppedKeys.length,
+    retainedCount: d.retainedCount ?? d.totalCount,
     disallowedEditCount: d.disallowedEditCount ?? 0,
     fileName: d.fileName ?? null,
     checkedAt: input.createdAt.toISOString(),
@@ -216,6 +258,7 @@ export function hasFidelityFindings(view: VersionFidelityView): boolean {
     view.verifierUnavailable ||
     view.flaggedCount > 0 ||
     view.unattributedPromptCount > 0 ||
+    view.droppedNonQuestionCount > 0 ||
     (view.coverage !== null &&
       view.coverage.assessment !== 'matches' &&
       view.coverage.assessment !== 'uncountable')

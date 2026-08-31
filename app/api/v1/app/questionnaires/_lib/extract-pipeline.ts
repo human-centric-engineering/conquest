@@ -150,6 +150,38 @@ export interface FidelityRecord {
    * Reported, never enforced: by the time it is readable the questions already exist.
    */
   unattributedPromptKeys: string[];
+  /**
+   * The KEYS of questions REMOVED because the critic said they were not questions at all:
+   * interviewer script, a transition between sections, an instruction about how to answer, a note
+   * to whoever runs the interview. The span that prompted this was a "Bot script:" line in a growth
+   * assessor document, and it reads as a fluent first-person sentence. That is exactly why the
+   * extractor promoted it to a question and why nothing downstream noticed.
+   *
+   * Recorded because this is the ONE thing the ingest chain does that deletes. Every other signal
+   * on this record describes something left in place for an author to judge; these questions are
+   * gone from the draft, and an admin comparing the editor to the document deserves to be told so
+   * by name rather than left to spot an absence. The `prune_question` change rows carry the content
+   * and make it revertible; this list is what makes it VISIBLE without reading the change log.
+   *
+   * Empty on every ingest where the critic flagged none, and also where it flagged more than the
+   * drop ceiling allows. In that second case nothing was removed: the questions are still in the
+   * draft, flagged, which `flaggedCount` already reports.
+   */
+  droppedNonQuestionKeys: string[];
+  /**
+   * How many questions the PERSISTED version actually holds, counted after the drop and the
+   * repair merge rather than before them.
+   *
+   * `totalCount` above answers a different question: how many the critic was given to check. The
+   * two used to be the same number, so one field said both things. They are not the same once a
+   * stage between the check and the persist can change the count, and two now can: a drop removes
+   * questions, and a `merge` repair collapses several mis-split rows into one matrix.
+   *
+   * Stored rather than derived by subtracting the drops, because subtraction is only right for the
+   * drop. A run that merged four rows into one matrix and removed nothing would report four
+   * questions the version does not have, and it would be wrong quietly.
+   */
+  retainedCount: number;
   durationMs: number;
 }
 

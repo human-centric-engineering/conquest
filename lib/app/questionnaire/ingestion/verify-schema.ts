@@ -23,9 +23,25 @@ export const VERIFY_ISSUES = [
   'matrix_flattened',
   'matrix_rows_lost',
   'config_invalid',
+  'not_a_question',
   'other',
 ] as const;
 export type VerifyIssue = (typeof VERIFY_ISSUES)[number];
+
+/**
+ * The one issue that is not a repair job.
+ *
+ * Every other value here says "this question was read wrongly, re-read it". This one says the
+ * span is not a question at all: interviewer script, a transition, an instruction about how to
+ * answer, a note to the operator. There is nothing for the scales/matrix specialist to correct,
+ * because no answer type makes a line like "Based on what you've said I want to go deeper on the
+ * areas below" into something a respondent can answer.
+ *
+ * So the orchestrator handles it itself, by DROPPING the question and filing a revertible
+ * `prune_question` change, and never sends it to repair. Named here rather than spelled inline at
+ * the two call sites so the drop path and the prompt cannot drift apart from the enum.
+ */
+export const NOT_A_QUESTION_ISSUE: VerifyIssue = 'not_a_question';
 
 export const questionVerdictSchema = z.object({
   /** The extracted question's key (must be one from the input set). */

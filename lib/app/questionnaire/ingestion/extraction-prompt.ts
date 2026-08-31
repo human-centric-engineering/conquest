@@ -192,9 +192,35 @@ questionnaire, and the same document ingested twice does not agree with itself.
 This is a faithful read of the document, NOT a judgement call — omit "required" when the \
 source gives no such signal. Do not emit a change entry for it.
 
+Not every sentence-shaped span is a question. A questionnaire document almost always \
+carries material written for whoever RUNS the interview rather than for the person answering \
+it, and none of it may become a question. Prune it, and record each removal as a \
+"prune_question" change with the removed text in "beforeJson". The recognisable forms:
+- Interviewer or bot script: a line the facilitator or chatbot says out loud, usually \
+first-person and often labelled ("Bot script:", "Facilitator:", "Moderator:", "Interviewer:", \
+"Narrator:"), e.g. "That's useful. Based on what you've said I want to go deeper on the areas \
+below."
+- Transitions and framing: "We'll now move on to the next section", "The following statements \
+are about how your team works", "This should take about ten minutes".
+- Instructions about HOW to answer, which ask for nothing themselves: "Quick answers are fine, \
+first instinct is usually right", "Rate each statement below", "Tick all that apply". When such \
+an instruction sits above real questions it is answering guidance for THOSE questions: put it \
+in their "guidelines" rather than emitting it as a question of its own.
+- Notes aimed at the operator rather than the respondent: "Score 4 or above triggers a \
+follow-up call", "Record the response in the CRM", "For office use only".
+
+Apply this test to EVERY question before you emit it: could a respondent answer this span, and \
+would their answer be data the questionnaire wants? A span that requests nothing, or that only \
+tells the respondent what is about to happen, fails the test and is not a question however \
+conversational and well-formed it reads. A span can carry a label ("Q7", a numbered bullet, a \
+row in the questions column) and still fail: the document's own numbering is not evidence that \
+something is a question.
+
 Conservative default: when you are unsure whether a span is real content or \
 boilerplate, KEEP it. A pruned question is recoverable; a silently dropped one the \
-author remembers is the worse failure.
+author remembers is the worse failure. That is a tie-breaker for genuine doubt, not a licence \
+to keep a span you can see is script: a line that plainly asks the respondent for nothing is \
+not a borderline case.
 
 Accountability — this is mandatory:
 - Record EVERY editorial decision as one entry in "changes", each with a "changeType" \
@@ -203,7 +229,13 @@ Accountability — this is mandatory:
 original span where one exists.
 - A question you carry through verbatim, with no edit, produces NO change entry.
 - For prune_section / prune_question, put the removed content in "beforeJson" and leave \
-"afterJson" null — the prune must be reversible.
+"afterJson" null — the prune must be reversible. "beforeJson" must be an OBJECT using the same \
+field names the entity itself uses, never a bare string and never a "text"/"content" wrapper: \
+what restores a pruned QUESTION is "prompt", which is mandatory because nothing can be put back \
+without it, plus "type", "typeConfig", "guidelines", "rationale", "required" and \
+"sectionOrdinal" wherever you had them; what restores a pruned SECTION is "title", plus \
+"description" and a "questions" array of the same question objects. A prune whose "beforeJson" is missing "prompt" (or "title") \
+still shows in the change log but can never be undone.
 - For infer_goal / infer_audience, set "targetEntityType" to "version" and put the \
 inferred value in "afterJson".
 

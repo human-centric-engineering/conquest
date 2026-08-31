@@ -2,8 +2,9 @@
  * Prompt builder for the extraction verifier (ingest verify + repair).
  *
  * Pure and provider-agnostic: returns `LlmMessage[]`. The verifier reads the extracted
- * questions + the source document and FLAGS each question whose type/config isn't
- * faithful to the source — it never rewrites. Its rubric lives here (not the seeded
+ * questions + the source document and FLAGS each one that is not a faithful extraction:
+ * a wrong type or config, or a span that is not a question at all (interviewer script, a
+ * transition, an instruction). It never rewrites. Its rubric lives here (not the seeded
  * agent's `systemInstructions`), the same load-bearing-prompt convention the extractor
  * uses.
  */
@@ -24,8 +25,9 @@ export interface VerifyQuestionView {
 
 const SYSTEM_RULES = `You are a meticulous verifier for an automatically-extracted questionnaire. \
 You are given the SOURCE document text and the extracted QUESTIONS (each with its chosen answer type \
-and config). Your job is to FLAG — never fix — every question whose answer type or config does not \
-FAITHFULLY match what the source shows.
+and config). Your job is to FLAG — never fix — every question that is not a faithful extraction: \
+one whose answer type or config does not match what the source shows, or one that is not a question \
+at all.
 
 Flag a question "suspect" (with an "issue") when:
 - type_mismatch — the chosen type contradicts the source: a rating scale typed as single_choice/\
@@ -39,6 +41,16 @@ instead of one "matrix" question with rows.
 - matrix_rows_lost — a grid WAS recognised but fewer row-questions/rows exist than the source lists.
 - config_invalid — the config is structurally broken for its type (a choice with <2 options, a \
 scale with no range, a matrix with no rows).
+- not_a_question — the span is not a question at ALL, so no answer type could rescue it. This is \
+the material a questionnaire document carries for whoever RUNS the interview rather than for the \
+person answering it: interviewer or chatbot script ("Bot script: That's useful. Based on what \
+you've said I want to go deeper on the areas below. I'll ask some short scored statements."), a \
+transition ("We'll now move on to the next section"), an instruction about how to answer that \
+requests nothing itself ("Quick answers are fine, first instinct is usually right"), or a note \
+aimed at the operator ("Score 4 or above triggers a follow-up call", "For office use only"). The \
+test: could a respondent ANSWER this span, and would their answer be data the questionnaire wants? \
+Put the offending wording in "detail". A question flagged this way is REMOVED from the \
+questionnaire rather than re-read, so flag it only when the span genuinely asks for nothing.
 - other — an unfaithful extraction not covered above.
 
 NEVER flag these — they are CORRECT extractions, not problems:
@@ -51,10 +63,21 @@ wasted. Only call a rating mis-typed when the source DOES anchor it and the extr
 chose numeric.
 - A "numeric" carrying no "labels". Numeric questions never have labels; that is not a missing \
 config.
+- A STATEMENT the respondent is meant to rate. "My manager gives me useful feedback" asks nothing \
+and carries no question mark, yet paired with a scale it is exactly how a scored instrument is \
+written. It is a real question, never "not_a_question".
+- A terse or fragmentary prompt ("Job title", "Years in role", "Biggest challenge"). Terse is not \
+the same as unanswerable: a respondent can answer every one of those.
+- A question you simply think is weak, redundant, badly placed, or not worth asking. \
+"not_a_question" is about whether a respondent can answer the span at all. It is never a verdict \
+on whether the question earns its place. That judgement belongs to an author reviewing the draft, \
+not to you, and using this issue for it deletes questions the document really did ask.
 
 Otherwise the verdict is "ok". Be specific but conservative: only flag a real, source-evidenced \
-problem — a faithful, well-typed question is "ok". Cover EVERY question you are given, each exactly \
-once, using its exact "key".
+problem — a faithful, well-typed question is "ok". Be most conservative of all with \
+"not_a_question", because it is the only verdict that removes something: when you are unsure \
+whether a span is script or a genuinely terse question, say "ok" and leave it for an author to \
+delete. Cover EVERY question you are given, each exactly once, using its exact "key".
 
 Whenever you detect a rating grid in the source (flattened OR correctly split), also emit a \
 "matrixGroups" entry: the grid's heading as "label", the FULL grid block from the source (its rows \

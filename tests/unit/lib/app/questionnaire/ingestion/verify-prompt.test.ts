@@ -126,4 +126,49 @@ describe('coverage — the axis per-question verdicts cannot see', () => {
     // Without this the check is circular: told 28 questions, the critic concludes the source has 28.
     expect(prompt).toMatch(/Do not reason backwards/i);
   });
+
+  describe('the not_a_question verdict', () => {
+    // The second net under the extractor's own pruning rule, and the only verdict that DELETES.
+    // Its rubric therefore has two jobs: make the critic recognise script, and stop it reaching
+    // for the verdict on anything else.
+
+    it('offers the verdict at all, with the answerability test attached', () => {
+      expect(prompt).toContain('not_a_question');
+      expect(prompt).toMatch(/could a respondent ANSWER this span/i);
+    });
+
+    it('names the forms a document actually uses', () => {
+      expect(prompt).toMatch(/Bot script:/i);
+      expect(prompt).toMatch(/transition/i);
+      expect(prompt).toMatch(/For office use only/i);
+    });
+
+    it('tells the critic the flagged span is removed, not re-read', () => {
+      // Every other issue sends a question to the repair specialist. A critic that does not know
+      // this one deletes will reach for it as casually as the rest.
+      expect(prompt).toMatch(/REMOVED from the questionnaire/i);
+    });
+
+    it('protects a statement-to-rate, the obvious way to over-flag a scored instrument', () => {
+      // "My manager gives me useful feedback" asks nothing and has no question mark. Flagging that
+      // family would empty a whole psychometric instrument.
+      expect(prompt).toMatch(/STATEMENT the respondent is meant to rate/i);
+      expect(prompt).toMatch(/never "not_a_question"/i);
+    });
+
+    it('protects a terse prompt', () => {
+      expect(prompt).toMatch(/Terse is not the same as unanswerable/i);
+    });
+
+    it('refuses the verdict as a judgement on question quality', () => {
+      // The dangerous misreading: "cannot justify its place" sliding from "asks for nothing" into
+      // "I would not have asked this". The second deletes questions the document really did ask.
+      expect(prompt).toMatch(/weak, redundant, badly placed/i);
+      expect(prompt).toMatch(/never a verdict/i);
+    });
+
+    it('asks for the most conservatism on the one verdict that removes something', () => {
+      expect(prompt).toMatch(/most conservative of all/i);
+    });
+  });
 });
