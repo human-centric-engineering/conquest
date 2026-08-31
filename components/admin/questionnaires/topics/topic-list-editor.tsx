@@ -710,7 +710,19 @@ export function TopicListEditor({
           .
         </p>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          /* Explicit `id` — dnd-kit derives `aria-describedby` from a MODULE-SCOPED counter
+             (`let ids = {}` in @dnd-kit/utilities), not React's `useId`. On the server that
+             counter lives for the whole Node process and is shared across every request, so the
+             Nth DndContext ever rendered gets `DndDescribedBy-(N-1)`, while the client always
+             starts at 0 — a guaranteed hydration mismatch on any page whose server render is not
+             the process's first. Passing an id short-circuits it (see `useUniqueId`), and is
+             returned VERBATIM as the DOM id, hence the `dnd-` namespace. */
+          id="dnd-topic-list"
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext
             items={visible.map(({ draft }) => draft.clientId)}
             strategy={verticalListSortingStrategy}

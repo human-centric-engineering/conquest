@@ -205,7 +205,15 @@ export function SectionEditor({
             No questions in this section yet.
           </p>
         ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <DndContext
+            /* Explicit `id` — see the note in `topics/topic-list-editor.tsx`. Keyed on the
+               section, because a version renders one of these per section and a shared literal
+               would put the same DOM id on several description nodes. */
+            id={`dnd-section-questions-${section.id}`}
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+          >
             <SortableContext
               items={questions.map((q) => q.id)}
               strategy={verticalListSortingStrategy}
