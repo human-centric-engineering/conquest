@@ -1,48 +1,73 @@
-// Lints the tree in N sequential chunks, in ONE process at a time.
+// Lints the tree as N sequential ESLint processes, one at a time.
 //
 // WHY THIS EXISTS
-// Type-aware ESLint peaks at 4.70GB on this repo against a `CI_NODE_HEAP_MB`
-// of 6144, and this repo is going private — where `ubuntu-latest` is a 7GB
-// machine, not 16GB. It already OOM'd on #273 (a `typescript-eslint` bump,
-// which invalidates every cache entry and so forces a cold whole-tree run).
-// Raising the ceiling is not available: the ceiling is the machine now.
+// `CI_NODE_HEAP_MB` (Knob 2) raises the ceiling. This is the lever for after
+// that one runs out of room, because the ceiling eventually IS the machine:
+// a private-fork `ubuntu-latest` is an 8GB box, and `.context/architecture/ci.md`
+// already treats ~6GB as the practical maximum, since a cap above physical RAM
+// converts a clean V8 abort into an OOM kill.
 //
-// THE MEASUREMENT THIS IS BUILT ON (28 Aug 2026, serial, worst of 2 runs):
+// Base Sunrise is not near that ceiling and does not need chunking — this ships
+// unchunked by default (see `DEFAULT_CHUNKS`). It is here for the forks, which
+// is where it was measured: a downstream fork of ~4,500 lintable files (roughly
+// 2x this tree) peaked at 6.36GB and OOM'd at a 6144 cap on a runner.
+//
+// THE MEASUREMENT THIS IS BUILT ON — all figures below were taken on THAT fork,
+// on a 4-core runner, cold. They are not Sunrise's numbers and are recorded as
+// the shape of the cost, not as a prediction for any particular tree:
 //
 //     files linted   peak RSS
 //              1     2.64 GB   <- floor: the TypeScript Program
 //            565     3.02 GB
 //          1,131     3.50 GB
-//          2,262     3.91 GB
-//          4,525     4.70 GB   <- one whole-tree pass, what this replaces
+//          4,525     4.70 GB   <- one whole-tree pass
 //
 // 56% of the cost is a FLOOR that no amount of splitting removes. Type-aware
 // linting needs types for the file under test, types come from the whole
 // project graph, so ESLint builds a Program over every file in `tsconfig.json`
-// before it lints a line. (For scale: `tsc --noEmit` type-checks the entire
-// repo in 2.26GB — ESLint costs more to lint ONE file, because
-// typescript-eslint re-materialises TypeScript's AST into ESTree, a second AST
-// per file, and ESLint layers scope analysis on that.) The other 44% is
-// marginal per-file cost, and that is what chunking divides.
+// before it lints a line. (For scale: `tsc --noEmit` type-checks that entire
+// repo in 2.26GB — ESLint costs MORE to lint one file, because typescript-eslint
+// re-materialises TypeScript's AST into ESTree, a second AST per file, and
+// ESLint layers scope analysis on that.) The other 44% is marginal per-file
+// cost, and that is the part chunking divides.
 //
-// WHY SEQUENTIAL CHUNKS AND NOT PARALLEL JOBS. Each chunk is its own `eslint`
-// process, so the memory is released when it exits and the job's peak is the
-// LARGEST chunk rather than the sum. That gets sharding's memory profile
-// without sharding's bill: a matrix of N jobs pays N checkouts and N `npm ci`s,
-// which on a private repo is metered runner time. One job that takes longer
-// beats N jobs that each pay setup. The cost is wall-clock, and it is the right
-// currency to pay in here.
+// WHY THIS AND NOT A CHANGED-FILES FILTER. The run that dies is the COLD one,
+// and ESLint keys cache entries on the resolved config — so a `typescript-eslint`
+// bump invalidates every entry and forces a whole-tree run. That bump touches
+// only `package.json` and `package-lock.json`, so a diff filter would lint
+// NOTHING, while the entire risk of a linter bump is that it changes results on
+// any file. The complete lint has to run *and* fit.
+//
+// WHY SEQUENTIAL CHUNKS AND NOT A PARALLEL JOB MATRIX. Each chunk is its own
+// `eslint` process, so its memory is released when it exits and the job's peak
+// is the LARGEST chunk rather than the sum. That is sharding's memory profile
+// without sharding's bill: Actions meters per job rounded up to the minute, so
+// a matrix of N jobs pays N checkouts and N `npm ci`s — real money on a private
+// fork, for setup it throws away. This trades wall-clock instead, which is the
+// cheaper currency here.
 //
 // GETTING THE FILE LIST RIGHT IS THE WHOLE SAFETY PROPERTY. A chunk plan that
 // omits files does not fail — it passes, faster, having linted less. An earlier
 // draft of this change split by directory name and silently dropped 139 files
-// (`emails/`, `hooks/`, `types/`, `prisma/`, `proxy.ts`, every root config).
-// So the list is derived from ESLint's OWN ignore logic via `isPathIgnored`
-// rather than from a roster, and `tests/unit/scripts/chunked-lint.test.ts`
-// asserts the chunks partition it exactly — every file once, none lost.
+// (`emails/`, `hooks/`, `types/`, `prisma/`, `proxy.ts`, every root config)
+// while staying green. So the list is derived from ESLint's OWN ignore logic via
+// `isPathIgnored` rather than from a roster, and
+// `tests/unit/scripts/ci/chunked-lint.test.ts` asserts the chunks partition it
+// exactly — every file once, none lost.
 //
 // PLAIN .mjs, NO BUILD STEP — same rule as `run-capped.mjs` and
 // `dev-server.mjs`. It runs from `npm run lint:ci` in a fresh checkout.
+//
+// POSIX AND CI ONLY, and this is the one place that matters. Every file is
+// passed as argv, which on this tree is 2,340 paths / ~125,000 characters —
+// four times Windows' 32,767-character `CreateProcess` limit, and `shell: false`
+// does not help. So `lint:ci` cannot run on Windows below roughly five chunks,
+// and should not be relied on there at any count. `resolveEslintCommand` is
+// still written Windows-correctly (see its `.cmd`/CVE-2024-27980 note) because
+// being half-portable is not a reason to be casually wrong; but the file list
+// is the hard limit. Windows developers use `npm run lint`, which passes `.`
+// and is unaffected. If a fork ever needs this on Windows, the fix is a
+// temp-file list, not more chunks.
 //
 // NOT ROUTED THROUGH `run-capped.mjs`, deliberately. That wrapper spawns with
 // `shell: true` on Windows and quotes only the command, so a caller whose argv
@@ -51,39 +76,92 @@
 // script's argv IS filenames, so it spawns with `shell: false` and applies the
 // heap cap itself (`withHeapCap`), which is the one thing the wrapper would
 // otherwise have done for it.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { constants } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+
 import { ESLint } from 'eslint';
+
+// Relative, not `@/` — this file is plain .mjs executed by node before anything
+// is compiled, so the alias would not resolve at runtime.
+//
+// Importing PURE HELPERS from the wrapper is not the same as routing through
+// it: the header above explains why this script must not hand its argv to
+// `run-capped.mjs` (that wrapper spawns with `shell: true` on Windows and our
+// argv is filenames). `resolveHeapMb` and `buildEnv` spawn nothing. Sharing
+// them is what stops this file's cap drifting from the one the rest of the
+// toolchain uses — which it had already done: it applied a flat 6144 while
+// claiming in a comment to "match run-capped.mjs", which clamps.
+import { buildEnv, resolveHeapMb, DEFAULT_HEAP_MB } from '../run-capped.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IS_WINDOWS = process.platform === 'win32';
 
-/** Extensions the flat config has `files` blocks for. */
-export const LINTABLE = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
-
-/** Chunks when nothing asks for a number. Measured on a runner at cap 6144:
- * 1 chunk OOMs, 2 -> 5.75GB, 4 -> 5.20GB, 6 -> 4.98GB. */
-export const DEFAULT_CHUNKS = 4;
-
-/** Cap applied when the environment carries none. Matches `run-capped.mjs`'s
- * value, and comfortably clears the measured 2.64GB floor. */
-export const DEFAULT_HEAP_MB = 6144;
+/**
+ * Extensions the flat config has `files` blocks for.
+ *
+ * `.mts`/`.cts` are here for `eslint.config.mjs`'s `files:
+ * ['*.config.{ts,mts,js,mjs,cjs}']` block. The tree contains no such file today,
+ * so leaving them out changed nothing measurable — which is exactly why it was
+ * worth adding: a fork that lands a root `foo.config.mts` would otherwise have
+ * it dropped from the plan **in silence**, the one failure mode this script
+ * exists to prevent.
+ *
+ * Widening this cannot fail a run. A file no `files` block matches is reported
+ * by ESLint as `File ignored because no matching configuration was supplied` —
+ * a warning, exit 0 (verified against 9.39). So the cost of listing an extension
+ * the config does not configure is a visible line saying so, and the cost of
+ * omitting one it does configure is an unlinted file nobody hears about. Those
+ * are not symmetric, and this list errs toward the loud one.
+ *
+ * `tests/unit/scripts/ci/chunked-lint.test.ts` derives the set ESLint actually
+ * configures and asserts this covers it, so the roster cannot quietly fall
+ * behind a fork's config.
+ */
+export const LINTABLE = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'];
 
 /**
- * Parse `LINT_CHUNKS`. A garbage value falls back rather than failing the run:
+ * Chunks when nothing asks for a number: ONE, i.e. exactly today's behaviour.
+ *
+ * This differs from the fork the script was measured on, which defaults to 4,
+ * and the difference is the point. Chunking is not free — it pays the ~2.6GB
+ * TypeScript Program floor once per chunk, which on that fork took a cold lint
+ * from 1m23s to 6m51s. Base Sunrise has never approached its heap ceiling, so
+ * upstream should not buy memory headroom it does not need with wall-clock it
+ * would rather keep.
+ *
+ * A fork raises `CI_LINT_CHUNKS` when its lint aborts with exit 134. Measured
+ * on that fork at a 6144 cap, cold: 1 chunk 6.36GB (OOM), 2 -> 5.75GB,
+ * 4 -> 5.20GB, 6 -> 4.98GB. See `.context/architecture/ci.md` Knob 4.
+ */
+export const DEFAULT_CHUNKS = 1;
+
+/**
+ * Parse `LINT_CHUNKS`. A garbage value falls back rather than failing the run —
  * refusing to lint because an unrelated variable is malformed trades a small
- * problem for a bigger one. Same rule as `run-capped.mjs`'s `NODE_HEAP_MB`.
+ * problem for a bigger one, the same rule as `run-capped.mjs`'s `NODE_HEAP_MB`.
+ *
+ * But it falls back LOUDLY, which the fork original did not. There the fallback
+ * was 4, so a typo'd knob still chunked and the only cost was the wrong number.
+ * Here the fallback is 1 — unchunked — so silence would let a fork that set
+ * `CI_LINT_CHUNKS=six` believe it had fixed its OOM and meet the identical
+ * failure with nothing in the log connecting the two.
  *
  * @param {string | undefined} raw
+ * @param {(message: string) => void} [warn]
  * @returns {number}
  */
-export function parseChunks(raw) {
+export function parseChunks(raw, warn = console.error) {
   if (raw === undefined || raw === '') return DEFAULT_CHUNKS;
   const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : DEFAULT_CHUNKS;
+  if (Number.isInteger(value) && value > 0) return value;
+  warn(
+    `chunked-lint: LINT_CHUNKS="${raw}" is not a positive integer — falling back to ${DEFAULT_CHUNKS} chunk(s). ` +
+      `If you set this to fix a lint OOM, it has NOT taken effect.`
+  );
+  return DEFAULT_CHUNKS;
 }
 
 /**
@@ -102,14 +180,15 @@ export function groupKey(file, depth = 2) {
 /**
  * Bucket `items` by directory, deepening any bucket bigger than `target`.
  *
- * A FIXED DEPTH DOES NOT WORK on this tree. At depth 2, `tests/unit` alone is
- * 1,649 of 4,527 files — one indivisible group, so every plan had a chunk more
- * than a third of the tree and that chunk set the peak on its own. Deepening
- * only the oversized buckets keeps small directories whole (locality preserved
- * where it is free) while splitting the few that are too big to pack.
+ * A FIXED DEPTH DOES NOT WORK on a tree this shape. At depth 2, `tests/unit`
+ * alone was 1,649 of the measured fork's 4,527 files — one indivisible group, so
+ * every plan had a chunk more than a third of the tree wide and that chunk set
+ * the peak on its own. Deepening only the oversized buckets keeps small
+ * directories whole (locality preserved where it is free) while splitting the
+ * few that are too big to pack.
  *
- * Terminates because each pass either deepens a bucket or leaves it alone, and
- * a bucket stops deepening once its files have no deeper segment to split on —
+ * Terminates because each pass either deepens a bucket or leaves it alone, and a
+ * bucket stops deepening once its files have no deeper segment to split on —
  * which is also why a directory of 2,000 sibling files stays one bucket rather
  * than looping forever.
  *
@@ -165,10 +244,10 @@ export function adaptiveGroups(items, target) {
  * the full cost.
  *
  * What a chunk actually costs is its IMPORT CLOSURE, not its file count.
- * `eslint prisma` — 98 files — peaks at 1.92GB, while a single file in
- * `lib/api` peaks at 2.64GB, because the second reaches most of the app and the
- * first does not. So chunks are built from whole directories, and the win comes
- * from chunks whose closures barely overlap.
+ * `eslint prisma` — 98 files — peaks at 1.92GB, while a single file in `lib/api`
+ * peaks at 2.64GB, because the second reaches most of the app and the first does
+ * not. So chunks are built from whole directories, and the win comes from chunks
+ * whose closures barely overlap.
  *
  * Greedy largest-first bin packing: buckets are sorted by size and each is
  * placed in the currently-smallest bin. That balances file counts without
@@ -186,8 +265,8 @@ export function chunk(items, count) {
   const bins = Array.from({ length: Math.min(n, groups.size) }, () => /** @type {string[]} */ ([]));
 
   // Largest bucket first, into the emptiest bin. Size then key, so the plan is
-  // deterministic — the same commit chunks identically on every runner, which
-  // is what makes a chunk failure reproducible.
+  // deterministic — the same commit chunks identically on every runner, which is
+  // what makes a chunk failure reproducible.
   const ordered = [...groups.entries()].sort(
     (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])
   );
@@ -203,11 +282,11 @@ export function chunk(items, count) {
 /**
  * Every file ESLint would lint, repo-relative and sorted.
  *
- * Sourced from `git ls-files` (tracked files only — an untracked scratch file
- * is not something CI should fail on) filtered by ESLint's own
- * `isPathIgnored`. Deriving it from ESLint means the flat config's `ignores`
- * are honoured without this script re-implementing them, which is where a
- * hand-rolled equivalent would drift.
+ * Sourced from `git ls-files` (tracked files only — an untracked scratch file is
+ * not something CI should fail on) filtered by ESLint's own `isPathIgnored`.
+ * Deriving it from ESLint means the flat config's `ignores` are honoured without
+ * this script re-implementing them, which is where a hand-rolled equivalent
+ * would drift.
  *
  * Sorted so the chunk plan is deterministic: the same commit produces the same
  * chunks on every runner, which is what makes a failure reproducible.
@@ -217,8 +296,18 @@ export function chunk(items, count) {
  */
 export async function lintTargets(deps = {}) {
   const {
+    // `-z` (NUL-delimited), not newline-delimited. Without it `git ls-files`
+    // C-QUOTES any path containing a control character — wrapping it in `"` and
+    // escaping the byte — so the line no longer ends in a lintable extension and
+    // the file falls out of the plan without a word. `core.quotePath=false` does
+    // NOT cover this: it suppresses escaping of bytes >= 0x80 (non-ASCII names),
+    // not of control characters. It is kept for the non-ASCII half.
+    //
+    // `scripts/ci/scoped-tests.ts` treats a C-quoted path as "could not look"
+    // and refuses to proceed, for the same reason. Splitting on NUL means the
+    // path arrives verbatim and simply gets linted.
     listFiles = () =>
-      execFileSync('git', ['-C', ROOT, '-c', 'core.quotePath=false', 'ls-files'], {
+      execFileSync('git', ['-C', ROOT, '-c', 'core.quotePath=false', 'ls-files', '-z'], {
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
       }),
@@ -228,9 +317,15 @@ export async function lintTargets(deps = {}) {
     exists = existsSync,
   } = deps;
 
+  // Split on NUL and NOTHING ELSE. Tolerating `\n` as a second separator — the
+  // first version of this line, so test fixtures could stay readable — reopened
+  // the exact hole `-z` was added to close, by tearing a path containing a
+  // newline into two paths that do not exist.
+  //
+  // No trimming either: a path may legitimately begin or end with whitespace,
+  // and trimming would hand eslint a path that is not there.
   const candidates = listFiles()
-    .split('\n')
-    .map((line) => line.trim())
+    .split('\0')
     .filter((line) => line !== '' && LINTABLE.some((ext) => line.endsWith(ext)));
 
   const kept = [];
@@ -238,9 +333,9 @@ export async function lintTargets(deps = {}) {
     const absolute = join(ROOT, file);
     // `git ls-files` reads the INDEX, so a file deleted from the working tree
     // but not yet staged is still listed. Handing that path to eslint exits 2
-    // ("No files matching the pattern were found") and fails the whole chunk
-    // for a reason that has nothing to do with lint — which is exactly the
-    // state a developer is in while reproducing a CI failure locally.
+    // ("No files matching the pattern were found") and fails the whole chunk for
+    // a reason that has nothing to do with lint — which is exactly the state a
+    // developer is in while reproducing a CI failure locally.
     if (!exists(absolute)) continue;
     if (!(await eslint.isPathIgnored(absolute))) kept.push(file);
   }
@@ -250,12 +345,12 @@ export async function lintTargets(deps = {}) {
 /**
  * How to invoke eslint: `[command, ...leadingArgs]`.
  *
- * Runs eslint's JS entry point under `process.execPath` rather than the
- * `.bin` shim. The shim is a `.cmd` on Windows, and since the CVE-2024-27980
- * fix (Node >= 18.20.2 / 20.12.2 — this repo requires 24) `spawn` REFUSES a
+ * Runs eslint's JS entry point under `process.execPath` rather than the `.bin`
+ * shim. The shim is a `.cmd` on Windows, and since the CVE-2024-27980 fix
+ * (Node >= 18.20.2 / 20.12.2 — this repo requires 24) `spawn` REFUSES a
  * `.bat`/`.cmd` target unless `shell: true`. We cannot pass `shell: true`,
- * because the argv is filenames and a shell would interpret whatever `&` or
- * `^` a path contains. So the Windows branch of a `.bin`-based resolver is
+ * because the argv is filenames and a shell would interpret whatever `&` or `^`
+ * a path contains. So the Windows branch of a `.bin`-based resolver is
  * unreachable by construction: every chunk would fail with `spawn EINVAL`.
  *
  * Going through `execPath` sidesteps that, and keeps one code path on every
@@ -274,28 +369,35 @@ export function resolveEslintCommand() {
  * The child's environment, with an old-space cap appended when nothing has set
  * one.
  *
- * NOT COSMETIC, and this file's header used to CLAIM this behaviour before the
- * code did — a review caught the discrepancy. Without it `lint:ci` inherits
- * Node's default heap, which is derived from machine RAM and is roughly 2GB on
- * an 8GB box: BELOW this script's own measured 2.64GB floor, so every chunk
- * would abort with exit 134 — the exact failure it exists to prevent. In CI the
- * workflow's `NODE_OPTIONS` supplies a cap and this stands down; anywhere else
- * (a developer reproducing a CI lint failure, a fork on a different runner)
- * there is nothing else to supply one.
+ * NOT COSMETIC. Without it `lint:ci` inherits Node's default heap, which is
+ * derived from machine RAM and is roughly 2GB on an 8GB box: BELOW the measured
+ * 2.64GB floor one chunk needs, so every chunk would abort with exit 134 — the
+ * exact failure this script exists to prevent. In CI the workflow's
+ * `NODE_OPTIONS` supplies a cap and this stands down; anywhere else (a developer
+ * reproducing a CI lint failure, a fork on a different runner) there is nothing
+ * else to supply one.
  *
- * Matches `run-capped.mjs`: append to `NODE_OPTIONS` rather than passing
- * `--max-old-space-size` on the command line, and only when no cap is already
- * present, so an explicit value always wins.
+ * Delegates to `run-capped.mjs` rather than restating it, so "matches
+ * run-capped" is enforced by construction instead of by a comment. It appends
+ * to `NODE_OPTIONS` rather than passing `--max-old-space-size` on the command
+ * line, and only when no cap is already present, so an explicit value wins.
+ *
+ * THE CLAMP IS THE PART THAT WAS MISSING. `resolveHeapMb` reduces the request
+ * to 75% of physical memory, floored at whatever Node would have picked
+ * unaided. Without it this handed every machine a flat 6144 — and the very user
+ * this function exists for, a developer reproducing a CI lint failure on an 8GB
+ * laptop or in a 4GB container, got a ceiling the box cannot back. That turns
+ * the readable `JavaScript heap out of memory` abort into an opaque OS OOM
+ * kill, which is the trade `run-capped.mjs` documents and refuses.
  *
  * @param {Record<string, string | undefined>} env
+ * @param {{ heapMb?: number }} [deps] `heapMb` injected so a test can assert an
+ *   exact value without depending on the machine it runs on.
  * @returns {Record<string, string | undefined>}
  */
-export function withHeapCap(env) {
-  if (/(^|\s)--max[-_]old[-_]space[-_]size(\s|=|$)/.test(env.NODE_OPTIONS ?? '')) {
-    return { ...env };
-  }
-  const existing = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : '';
-  return { ...env, NODE_OPTIONS: `${existing}--max-old-space-size=${DEFAULT_HEAP_MB}` };
+export function withHeapCap(env, deps = {}) {
+  const { heapMb = resolveHeapMb({ requestedMb: DEFAULT_HEAP_MB }) } = deps;
+  return buildEnv(env, heapMb);
 }
 
 /**
@@ -303,6 +405,24 @@ export function withHeapCap(env) {
  * chunk does not abandon the ones after it — a lint run that stops at the first
  * failing chunk reports a fraction of the problems and sends the author round
  * the loop again for each one.
+ *
+ * ARGV ORDER IS A SECURITY BOUNDARY, not a style choice: passthrough flags
+ * first, then `--`, then filenames. Everything after `--` is a file pattern to
+ * eslint, verified against 9.39 — `eslint -- --fix` reports *No files matching
+ * the pattern "--fix"* rather than enabling autofix.
+ *
+ * Without the terminator this script would hand eslint a list of paths as bare
+ * argv, so a TRACKED FILE whose name begins with `-` becomes a flag. That is a
+ * surface `eslint .` never had, because it passes one dot. `--fix` would rewrite
+ * the tree mid-CI; worse, a file named `--config` consumes the NEXT argv entry
+ * as its value, and the list is sorted, so a name can be chosen to make eslint
+ * load an attacker-supplied JS config — which eslint executes. The blast radius
+ * is a CI job rather than production, but it is code execution and it costs one
+ * argument to remove.
+ *
+ * This is the same class of hazard as the `shell: false` rule below, one level
+ * up: that one stops a shell interpreting a path, this one stops *eslint*
+ * interpreting one.
  *
  * @param {readonly string[]} files
  * @param {readonly string[]} passthrough
@@ -313,7 +433,7 @@ export function runChunk(files, passthrough, deps = {}) {
   const { spawnFn = spawn, env = process.env, command = resolveEslintCommand() } = deps;
   const [bin, ...leading] = command;
   return new Promise((resolveCode) => {
-    const child = spawnFn(bin, [...leading, ...files, ...passthrough], {
+    const child = spawnFn(bin, [...leading, ...passthrough, '--', ...files], {
       cwd: ROOT,
       env: withHeapCap(env),
       stdio: 'inherit',
@@ -324,7 +444,26 @@ export function runChunk(files, passthrough, deps = {}) {
       console.error(`Failed to start eslint: ${error.message}`);
       resolveCode(1);
     });
-    child.on('exit', (code) => resolveCode(code ?? 1));
+    child.on('exit', (code, signal) => {
+      // A V8 heap abort raises SIGABRT, so `code` is null and `signal` carries
+      // the answer. Collapsing that to 1 — which this did — destroys the ONE
+      // diagnostic the docs hand a fork: `ci.md` Knob 4, the `ci.yml` step
+      // comment and the CHANGELOG all say "raise this when lint aborts with
+      // exit 134". Reporting 1 for the exact failure the knob exists to fix
+      // means the documented trigger never appears.
+      //
+      // `128 + signum` is the shell's own convention for a signalled child, so
+      // SIGABRT (6) surfaces as 134 exactly as an unwrapped `eslint` would.
+      // `run-capped.mjs` re-raises the signal instead; that is right for a
+      // single-child wrapper but wrong here, because re-raising mid-plan would
+      // abandon the remaining chunks and report a fraction of the problems.
+      if (signal) {
+        const signum = constants.signals[signal];
+        resolveCode(signum ? 128 + signum : 1);
+        return;
+      }
+      resolveCode(code ?? 1);
+    });
   });
 }
 
@@ -335,16 +474,23 @@ export function runChunk(files, passthrough, deps = {}) {
  */
 export async function main(argv = process.argv.slice(2), deps = {}) {
   const {
-    targets = await lintTargets(),
-    chunks = parseChunks((deps.env ?? process.env).LINT_CHUNKS),
-    run = runChunk,
-    log = console.log,
     env = process.env,
+    log = console.log,
+    warn = console.error,
+    targets = await lintTargets(),
+    chunks = parseChunks(env.LINT_CHUNKS, warn),
+    run = runChunk,
   } = deps;
 
   if (targets.length === 0) {
-    log('chunked-lint: no lintable files found — nothing to do.');
-    return 0;
+    // Loud and FAILING, unlike every other fallback in this file. An empty
+    // target list is the silent-pass shape the whole script is written against:
+    // `eslint` with no file arguments lints nothing and exits 0, so a broken
+    // `git ls-files` or an over-broad `ignores` would report a clean lint of an
+    // unlinted tree. There is no tree this repo builds on that legitimately has
+    // zero lintable files, so this is a "could not look", not a "found nothing".
+    warn('chunked-lint: no lintable files found — refusing to report a clean lint of nothing.');
+    return 1;
   }
 
   const plan = chunk(targets, chunks);
@@ -363,4 +509,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   process.exit(await main());
 }
 
-export { ROOT };
+// Re-exported so this module stays self-describing: a reader (and its test)
+// asks chunked-lint what cap it uses without having to know it borrows the
+// number from `run-capped.mjs`.
+export { ROOT, DEFAULT_HEAP_MB };

@@ -194,6 +194,20 @@ export const ALWAYS_RUN_TESTS: readonly AlwaysRunEntry[] = [
       'change it exists to catch is a NEW route returning the platform ' +
       'version — a file that by definition no existing import chain reaches.',
   },
+  {
+    path: 'tests/unit/toolchain-cache-location.test.ts',
+    reason:
+      'reads `package.json`, `.lintstagedrc.json`, `.gitignore` and ' +
+      '`.github/workflows/ci.yml` as text to hold the eslint/prettier caches ' +
+      'at the repo root and keep the CI cache paths equal to what those ' +
+      'scripts write. Its whole input is config files no module imports — a ' +
+      'workflow-only edit is precisely the change that must trigger it (#677). ' +
+      "FORK NOTE: half its subject is upstream's `.github/workflows/ci.yml`. " +
+      'A fork that owns that file — renaming the lint-cache step, or folding ' +
+      'lint into a workflow of its own — should delete this entry and keep its ' +
+      'own version of the guard, rather than carry a red suite about a file it ' +
+      'no longer shares.',
+  },
 ];
 
 /** Just the paths, for argv building and set arithmetic. */
@@ -298,12 +312,29 @@ function hasControlCharacter(value: string): boolean {
 /**
  * Changed paths worth asking for coverage on.
  *
- * Deliberately thin: TypeScript sources, minus tests and type declarations.
- * Everything else — layouts, `lib/env.ts`, `types/**`, `emails/**` — is left to
- * `vitest.config.ts`'s own `coverage.exclude`, which still applies over a CLI
- * `--coverage.include` (verified against vitest 4.1.10). One source of truth
- * for what coverage ignores, so this cannot drift away from the config the way
- * a second copied exclusion list would.
+ * Deliberately thin: JavaScript and TypeScript sources, minus tests and type
+ * declarations. Everything else — layouts, `lib/env.ts`, `types/**`,
+ * `emails/**` — is left to `vitest.config.ts`'s own `coverage.exclude`, which
+ * still applies over a CLI `--coverage.include` (verified against vitest
+ * 4.1.10). One source of truth for what coverage ignores, so this cannot drift
+ * away from the config the way a second copied exclusion list would.
+ *
+ * **`.mjs` counts, and used not to.** This filter read `.ts`/`.tsx` only, so
+ * every `.mjs` in the tree bypassed the per-file floor #647 added — silently,
+ * which is the failure mode this whole runner is written against. It is not a
+ * hypothetical corner: `scripts/ci/**` is deliberately NOT excluded from
+ * coverage, and `scripts/run-capped.mjs`, `scripts/dev-server.mjs` and
+ * `scripts/ci/chunked-lint.mjs` are ordinary unit-tested tooling that the gate
+ * simply could not see. The fork that found it measured a new `.mjs` at 78.66%
+ * lines with `/pre-pr` reporting PASS.
+ *
+ * The extension list is the one `vitest.config.ts` already instruments (the v8
+ * provider handles `.mjs`/`.cjs` exactly like `.ts`), so widening it here needed
+ * two matching `coverage.exclude` entries there — `lib/app/eslint.config.mjs`
+ * and `scripts/spikes/**`, both structurally 0% and neither production code.
+ * The fork-owned config seam is the load-bearing one: without its exclusion a
+ * fork editing its own `lib/app/eslint.config.mjs` would fail a coverage gate
+ * on a file Sunrise ships as `export default []`.
  *
  * Note the asymmetry with `scripts/ci/missing-tests.ts`, which keeps its own
  * exemption list on purpose: that check asks "should a human have written a
@@ -314,8 +345,13 @@ function hasControlCharacter(value: string): boolean {
 export function coverageTargets(changed: readonly string[]): string[] {
   return (
     changed
-      .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
-      .filter((path) => !path.endsWith('.d.ts'))
+      .filter((path) => /\.[cm]?[jt]sx?$/.test(path))
+      // `.d.mts` / `.d.cts` too, not just `.d.ts`. The extension filter above
+      // now admits `.mts`/`.cts`, and `vitest.config.ts` excludes only
+      // `**/*.d.ts` — so a fork's `lib/foo.d.mts` would reach
+      // `--coverage.include` under `perFile` and fail the 80% floor on a file
+      // with no executable code in it at all.
+      .filter((path) => !/\.d\.[cm]?ts$/.test(path))
       .filter((path) => !path.startsWith('tests/'))
       // Colocated tests too, not just the `tests/` tree. The selection side was
       // deliberately widened to accept a fork's `.spec.ts` files, so this side
