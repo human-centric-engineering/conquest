@@ -99,8 +99,8 @@ export function ScopeRulesEditor({
           Hard rules{' '}
           <FieldHelp title="Hard rules">
             <strong>
-              You build one sentence: when a given answer says X, always ask — or never ask — a
-              given topic.
+              You build one sentence: when a given answer says X, always ask (or never ask) a given
+              topic.
             </strong>
             <br />
             <br />
@@ -110,14 +110,14 @@ export function ScopeRulesEditor({
             <br />
             <br />
             Why you would: normally the agent reads the opening and decides each conditional topic
-            for itself, weighing it against that topic’s criteria — so it can go either way. A hard
+            for itself, weighing it against that topic’s criteria, so it can go either way. A hard
             rule takes that decision away. If the answer matches, the topic is in or out, every
             time, on every interview.
             <br />
             <br />
             Use one only where you cannot live with the agent judging it: eligibility, compliance, a
             section that must never reach the wrong person. Anything you would want judged case by
-            case belongs in that topic’s criteria instead — that is what criteria are for.
+            case belongs in that topic’s criteria instead. That is what criteria are for.
             <br />
             <br />
             Most questionnaires need none. If a rule and the agent disagree, the rule wins. If two
@@ -138,14 +138,14 @@ export function ScopeRulesEditor({
            would look like if they added it, in the shape the editor below actually builds. */
         <div className="text-muted-foreground space-y-1 text-xs">
           <p>
-            No hard rules — the agent decides every conditional topic for itself, weighing it
-            against that topic’s criteria.
+            No hard rules. The agent decides every conditional topic for itself, weighing it against
+            that topic’s criteria.
           </p>
           <p>
             Add one to overrule it for a specific answer:{' '}
             <em>when “Licence holder” is “No”, never ask “Compliance audit”.</em>
             {!hasDataSlots &&
-              ' You need at least one data slot before you can add one — that is where the answer comes from.'}
+              ' You need at least one data slot before you can add one. That is where the answer comes from.'}
           </p>
         </div>
       ) : (

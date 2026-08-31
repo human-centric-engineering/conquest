@@ -298,7 +298,7 @@ export function ScopeSettingsCard({
           {/* Names the ACTION, not a category. "The cases you are certain about" told an admin
               nothing about what to put in the field — "cases" is an abstraction, and the data-slot
               dependency read as decoration rather than as the thing the rule is built from. */}
-          <SectionLabel step={2}>Always or never ask a topic — based on one answer</SectionLabel>
+          <SectionLabel step={2}>Always or never ask a topic based on one answer</SectionLabel>
           <ScopeRulesEditor
             rules={draft.rules}
             onChange={(next: ScopeRule[]) => set({ rules: next })}
@@ -547,8 +547,8 @@ export function ScopeSettingsCard({
             Guidance that applies across all topics{' '}
             <FieldHelp title="Extra guidance">
               <strong>Advice that applies to every topic at once.</strong> Each topic’s criteria say
-              when <em>that</em> topic applies. This says how to weigh up the whole set — so it’s
-              for anything that isn’t about one topic in particular.
+              when <em>that</em> topic applies. This says how to weigh up the whole set, so it’s for
+              anything that isn’t about one topic in particular.
               <br />
               <br />
               <em>
@@ -557,11 +557,11 @@ export function ScopeSettingsCard({
               <em>“Where they seem unsure, favour the areas they raised themselves.”</em>
               <br />
               <br />
-              It’s advice, not a rule — the agent weighs it up rather than obeying it, so anything
+              It’s advice, not a rule: the agent weighs it up rather than obeying it, so anything
               you can’t compromise on belongs in a hard rule. It can’t stretch the topic limit,
               overrule a hard rule, or change the fallback list; those are applied afterwards
-              whatever this says. It also doesn’t change how questions are worded — only which
-              topics get covered.
+              whatever this says. It also doesn’t change how questions are worded, only which topics
+              get covered.
             </FieldHelp>
           </Label>
           <AutoTextarea

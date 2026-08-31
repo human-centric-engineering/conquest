@@ -83,7 +83,7 @@ describe('with data slots available', () => {
   it('keeps the plain empty state — nothing is blocking the admin', () => {
     renderEditor();
     expect(
-      screen.getByText(/No hard rules — the agent decides every conditional topic/i)
+      screen.getByText(/No hard rules\. The agent decides every conditional topic/i)
     ).toBeTruthy();
     expect(
       screen.queryByText(/You need at least one data slot before you can add one/i)

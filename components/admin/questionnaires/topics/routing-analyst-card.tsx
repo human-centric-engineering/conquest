@@ -492,8 +492,8 @@ export function RoutingAnalystCard({
               <div className="text-muted-foreground bg-muted/40 space-y-1 rounded-md border p-3 text-sm">
                 <p className="text-foreground font-medium">Consider setting up data slots first.</p>
                 <p>
-                  The analyst can propose topics either way. But hard rules — the certainties the
-                  agent cannot overrule — each decide from one data slot, so it cannot propose any
+                  The analyst can propose topics either way. But hard rules (the certainties the
+                  agent cannot overrule) each decide from one data slot, so it cannot propose any
                   until this questionnaire has some. It also won’t be able to say which data slots
                   each topic covers.
                 </p>
@@ -504,7 +504,7 @@ export function RoutingAnalystCard({
                   >
                     Set up data slots
                   </a>{' '}
-                  — or carry on, and re-run this afterwards to pick up the rest.
+                  , or carry on and re-run this afterwards to pick up the rest.
                 </p>
               </div>
             )}
