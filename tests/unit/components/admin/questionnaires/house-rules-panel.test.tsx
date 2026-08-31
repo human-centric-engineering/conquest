@@ -231,6 +231,66 @@ describe('HouseRulesPanel — authoring guidance', () => {
     expect(screen.getByRole('button', { name: /suggest rules/i })).toBeInTheDocument();
   });
 
+  it('names the unfinished rule by position and by the field it is actually missing', () => {
+    const { rerender } = render(
+      <HouseRulesPanel
+        value={ON([
+          rule({ id: 'a', kind: 'if_asked', text: 'Only the team.', trigger: 'who sees this' }),
+          rule({ id: 'b', kind: 'always', text: '' }),
+        ])}
+        onChange={vi.fn()}
+      />
+    );
+
+    // The blank rule is the `always` one in position 2. Naming the "if asked" fields here — as the
+    // banner used to, whatever the kind — sends the admin to re-check a rule that is already fine.
+    expect(screen.getByText(/Rule 2 is unfinished/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/still needs what the interviewer should always do/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/what they ask about/)).not.toBeInTheDocument();
+
+    // An "if asked" rule missing only its trigger asks for that one field, not for both.
+    rerender(
+      <HouseRulesPanel
+        value={ON([rule({ id: 'a', kind: 'if_asked', text: 'Only the team.', trigger: '  ' })])}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Rule 1 is unfinished/)).toBeInTheDocument();
+    expect(screen.getByText(/still needs what they ask about\./)).toBeInTheDocument();
+
+    // Complete on both fields ⇒ silence. This is the state the admin in the bug report was in.
+    rerender(
+      <HouseRulesPanel
+        value={ON([
+          rule({ id: 'a', kind: 'if_asked', text: 'Only the team.', trigger: 'who sees this' }),
+        ])}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.queryByText(/unfinished/i)).not.toBeInTheDocument();
+  });
+
+  it('marks each unfinished rule on its own card, and lists every position when several are', () => {
+    render(
+      <HouseRulesPanel
+        value={ON([
+          rule({ id: 'a', kind: 'always', text: '' }),
+          rule({ id: 'b', kind: 'never', text: 'Give advice.' }),
+          rule({ id: 'c', kind: 'if_asked', text: '', trigger: '' }),
+        ])}
+        onChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Rules 1 and 3 are/)).toBeInTheDocument();
+    // Per-card notes, so the admin can find the offender in a list of twenty without counting.
+    const notes = screen.getAllByText(/^Unfinished/);
+    expect(notes).toHaveLength(2);
+    expect(notes[1]).toHaveTextContent('add what they ask about and what to say');
+  });
+
   it('warns when an enabled rule still carries a fill-in-the-blank placeholder', () => {
     const { rerender } = render(
       <HouseRulesPanel
