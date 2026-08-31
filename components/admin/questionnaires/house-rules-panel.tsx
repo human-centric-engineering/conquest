@@ -82,6 +82,27 @@ const TEXT_PLACEHOLDER: Record<HouseRuleKind, string> = {
 };
 
 /**
+ * Which fields a rule still needs before the save will keep it, named the way its own labels name
+ * them. Kind-aware on purpose: an unfinished `always` rule is missing its wording, and telling the
+ * admin an “if asked” rule needs a trigger sends them to inspect a rule that was never the problem.
+ */
+function missingParts(rule: HouseRule): string[] {
+  const parts: string[] = [];
+  if (rule.kind === 'if_asked' && !(rule.trigger ?? '').trim()) parts.push('what they ask about');
+  if (!rule.text.trim()) {
+    const label = TEXT_LABEL[rule.kind];
+    parts.push(label.charAt(0).toLowerCase() + label.slice(1));
+  }
+  return parts;
+}
+
+/** “a”, “a and b”, “a, b and c” — three cases, not worth an `Intl.ListFormat` dependency. */
+function joinWords(items: ReadonlyArray<string>): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
  * A fresh id that cannot collide with anything already stored. Ids must be unique (the server
  * rejects duplicates) and stored rules may carry positional ids like `rule-2` from the read-path
  * narrower, so a naive counter is not safe — check against what is actually in the list.
@@ -175,9 +196,17 @@ export function HouseRulesPanel({
   // Rules the save will discard: no text, or an `if_asked` rule with nothing to react to. The save
   // drops them rather than failing validation with a path error the admin cannot act on — but
   // dropping them silently would lose real wording, so say so before they hit Save.
-  const incomplete = rules.filter(
-    (rule) => !rule.text.trim() || (rule.kind === 'if_asked' && !(rule.trigger ?? '').trim())
-  ).length;
+  //
+  // Reported by position and by the field actually missing, because “one rule is unfinished” in a
+  // list of twenty is a hunt — and the previous wording named the `if_asked` fields whatever the
+  // rule's kind, so a blank `always` rule sent the admin to re-check a rule that was already fine.
+  const incomplete = useMemo(
+    () =>
+      rules
+        .map((rule, index) => ({ position: index + 1, missing: missingParts(rule) }))
+        .filter((entry) => entry.missing.length > 0),
+    [rules]
+  );
 
   return (
     <div className="space-y-4">
@@ -267,11 +296,19 @@ export function HouseRulesPanel({
             </p>
           )}
 
-          {incomplete > 0 && (
+          {incomplete.length > 0 && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              {incomplete === 1 ? 'One rule is' : `${incomplete} rules are`} unfinished and
-              won&rsquo;t be saved — an &ldquo;if asked&rdquo; rule needs both what they ask about
-              and what to say.
+              {incomplete.length === 1 ? (
+                <>
+                  Rule {incomplete[0].position} is unfinished and won&rsquo;t be saved &mdash; it
+                  still needs {joinWords(incomplete[0].missing)}.
+                </>
+              ) : (
+                <>
+                  Rules {joinWords(incomplete.map((entry) => String(entry.position)))} are
+                  unfinished and won&rsquo;t be saved &mdash; each says below what it still needs.
+                </>
+              )}
             </p>
           )}
 
@@ -284,145 +321,169 @@ export function HouseRulesPanel({
           )}
 
           <div className="space-y-2">
-            {rules.map((rule, index) => (
-              <div key={rule.id} className="bg-card space-y-3 rounded-lg border p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={rule.kind}
-                    onValueChange={(v) => patchRule(rule.id, { kind: v as HouseRuleKind })}
-                    disabled={disabled}
-                  >
-                    <SelectTrigger className="h-8 w-[9.5rem] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {HOUSE_RULE_KINDS.map((kind) => (
-                        <SelectItem key={kind} value={kind}>
-                          {HOUSE_RULE_KIND_LABELS[kind]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Badge
-                    variant="secondary"
-                    className={cn('text-[10px] font-medium', KIND_ACCENT[rule.kind])}
-                  >
-                    {HOUSE_RULE_KIND_LABELS[rule.kind]}
-                  </Badge>
+            {rules.map((rule, index) => {
+              // Recomputed here rather than looked up from `incomplete`: the check is pure and
+              // cheap, and ids are only unique by server contract — a stale duplicate must not make
+              // one card borrow another's warning.
+              const missing = missingParts(rule);
+              return (
+                <div
+                  key={rule.id}
+                  className={cn(
+                    'bg-card space-y-3 rounded-lg border p-3',
+                    missing.length > 0 && 'border-amber-500/60'
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* The position the banner names. Without it "Rule 3" means counting cards. */}
+                    <span className="text-muted-foreground w-4 text-xs tabular-nums">
+                      {index + 1}
+                    </span>
+                    <Select
+                      value={rule.kind}
+                      onValueChange={(v) => patchRule(rule.id, { kind: v as HouseRuleKind })}
+                      disabled={disabled}
+                    >
+                      <SelectTrigger className="h-8 w-[9.5rem] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {HOUSE_RULE_KINDS.map((kind) => (
+                          <SelectItem key={kind} value={kind}>
+                            {HOUSE_RULE_KIND_LABELS[kind]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Badge
+                      variant="secondary"
+                      className={cn('text-[10px] font-medium', KIND_ACCENT[rule.kind])}
+                    >
+                      {HOUSE_RULE_KIND_LABELS[rule.kind]}
+                    </Badge>
 
-                  <div className="ml-auto flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      aria-label="Move up"
-                      disabled={disabled || index === 0}
-                      onClick={() => move(index, -1)}
-                    >
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      aria-label="Move down"
-                      disabled={disabled || index === rules.length - 1}
-                      onClick={() => move(index, 1)}
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                    {/* Individually switchable so an admin can park a rule without losing its
+                    <div className="ml-auto flex items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label="Move up"
+                        disabled={disabled || index === 0}
+                        onClick={() => move(index, -1)}
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label="Move down"
+                        disabled={disabled || index === rules.length - 1}
+                        onClick={() => move(index, 1)}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                      {/* Individually switchable so an admin can park a rule without losing its
                         wording — drafting and shipping are different decisions. */}
-                    <Switch
-                      checked={rule.enabled}
-                      onCheckedChange={(next) => patchRule(rule.id, { enabled: next })}
-                      disabled={disabled}
-                      aria-label="Use this rule"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="text-muted-foreground hover:text-destructive h-7 w-7"
-                      aria-label="Remove rule"
-                      disabled={disabled}
-                      onClick={() => setRules(rules.filter((r) => r.id !== rule.id))}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                      <Switch
+                        checked={rule.enabled}
+                        onCheckedChange={(next) => patchRule(rule.id, { enabled: next })}
+                        disabled={disabled}
+                        aria-label="Use this rule"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive h-7 w-7"
+                        aria-label="Remove rule"
+                        disabled={disabled}
+                        onClick={() => setRules(rules.filter((r) => r.id !== rule.id))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
 
-                {rule.kind === 'if_asked' && (
+                  {rule.kind === 'if_asked' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">
+                        When the respondent asks about{' '}
+                        <FieldHelp title="What the respondent asks about">
+                          <p>
+                            Describe the subject in plain words — &ldquo;who will see their
+                            answers&rdquo;, &ldquo;how long this takes&rdquo;. The interviewer
+                            matches on meaning, so it doesn&rsquo;t need the exact phrasing someone
+                            might use.
+                          </p>
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        value={rule.trigger ?? ''}
+                        maxLength={HOUSE_RULE_TRIGGER_MAX}
+                        placeholder="who will see their answers"
+                        disabled={disabled}
+                        onChange={(e) => patchRule(rule.id, { trigger: e.target.value })}
+                      />
+                    </div>
+                  )}
+
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium">
-                      When the respondent asks about{' '}
-                      <FieldHelp title="What the respondent asks about">
-                        <p>
-                          Describe the subject in plain words — &ldquo;who will see their
-                          answers&rdquo;, &ldquo;how long this takes&rdquo;. The interviewer matches
-                          on meaning, so it doesn&rsquo;t need the exact phrasing someone might use.
-                        </p>
+                      {TEXT_LABEL[rule.kind]}{' '}
+                      <FieldHelp title="Writing a good rule">
+                        <p>Rules work best when each one is a single, checkable instruction.</p>
+                        <ul className="mt-2 list-disc space-y-1.5 pl-4">
+                          <li>
+                            <strong>One instruction per rule.</strong> Split &ldquo;be warm and
+                            always get an example&rdquo; into two.
+                          </li>
+                          <li>
+                            <strong>Describe behaviour, not a mood.</strong> &ldquo;Ask for a recent
+                            example&rdquo; works; &ldquo;be more insightful&rdquo; doesn&rsquo;t.
+                          </li>
+                          <li>
+                            <strong>Say what to do instead</strong> where you can — a
+                            &ldquo;never&rdquo; on its own leaves the interviewer guessing.
+                          </li>
+                          <li>
+                            <strong>Don&rsquo;t restate other settings.</strong> Tone, question
+                            order, scoring and report content are controlled elsewhere and a rule
+                            here won&rsquo;t change them.
+                          </li>
+                        </ul>
+                        {rule.kind === 'if_asked' && (
+                          <p className="mt-2">
+                            The interviewer answers <em>in its own words</em> along these lines
+                            rather than reading this out, and never raises it unprompted.
+                          </p>
+                        )}
                       </FieldHelp>
                     </Label>
-                    <Input
-                      value={rule.trigger ?? ''}
-                      maxLength={HOUSE_RULE_TRIGGER_MAX}
-                      placeholder="who will see their answers"
+                    <Textarea
+                      value={rule.text}
+                      maxLength={HOUSE_RULE_TEXT_MAX}
+                      rows={2}
+                      placeholder={TEXT_PLACEHOLDER[rule.kind]}
                       disabled={disabled}
-                      onChange={(e) => patchRule(rule.id, { trigger: e.target.value })}
+                      onChange={(e) => patchRule(rule.id, { text: e.target.value })}
                     />
+                    <p className="text-muted-foreground text-right text-[11px]">
+                      {rule.text.length}/{HOUSE_RULE_TEXT_MAX}
+                    </p>
                   </div>
-                )}
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">
-                    {TEXT_LABEL[rule.kind]}{' '}
-                    <FieldHelp title="Writing a good rule">
-                      <p>Rules work best when each one is a single, checkable instruction.</p>
-                      <ul className="mt-2 list-disc space-y-1.5 pl-4">
-                        <li>
-                          <strong>One instruction per rule.</strong> Split &ldquo;be warm and always
-                          get an example&rdquo; into two.
-                        </li>
-                        <li>
-                          <strong>Describe behaviour, not a mood.</strong> &ldquo;Ask for a recent
-                          example&rdquo; works; &ldquo;be more insightful&rdquo; doesn&rsquo;t.
-                        </li>
-                        <li>
-                          <strong>Say what to do instead</strong> where you can — a
-                          &ldquo;never&rdquo; on its own leaves the interviewer guessing.
-                        </li>
-                        <li>
-                          <strong>Don&rsquo;t restate other settings.</strong> Tone, question order,
-                          scoring and report content are controlled elsewhere and a rule here
-                          won&rsquo;t change them.
-                        </li>
-                      </ul>
-                      {rule.kind === 'if_asked' && (
-                        <p className="mt-2">
-                          The interviewer answers <em>in its own words</em> along these lines rather
-                          than reading this out, and never raises it unprompted.
-                        </p>
-                      )}
-                    </FieldHelp>
-                  </Label>
-                  <Textarea
-                    value={rule.text}
-                    maxLength={HOUSE_RULE_TEXT_MAX}
-                    rows={2}
-                    placeholder={TEXT_PLACEHOLDER[rule.kind]}
-                    disabled={disabled}
-                    onChange={(e) => patchRule(rule.id, { text: e.target.value })}
-                  />
-                  <p className="text-muted-foreground text-right text-[11px]">
-                    {rule.text.length}/{HOUSE_RULE_TEXT_MAX}
-                  </p>
+                  {missing.length > 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Unfinished &mdash; add {joinWords(missing)}, or this rule won&rsquo;t be
+                      saved.
+                    </p>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {previewOpen && (

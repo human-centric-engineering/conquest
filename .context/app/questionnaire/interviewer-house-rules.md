@@ -141,6 +141,13 @@ On save the editor trims text and triggers and **drops incomplete rules** (empty
 with no trigger) rather than letting them fail server validation: a blocked save with no visible
 cause is a worse outcome than silently dropping a rule that says nothing.
 
+Because the drop is silent, the panel says so first, and says it **per rule**: each unfinished card
+carries an amber border and a note naming the field it still needs, and the banner above the list
+names the positions (the number now shown at the left of each card header). The wording is
+kind-aware — a blank `always` rule asks for "what the interviewer should always do", not for the
+`if_asked` fields. The earlier copy named the `if_asked` fields for every kind, which read as a
+false alarm to an admin whose only `if_asked` rule was complete.
+
 Rules can be individually switched off, which keeps their wording — drafting a rule and shipping it
 are different decisions.
 
