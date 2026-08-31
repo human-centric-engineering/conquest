@@ -253,6 +253,35 @@ ${SCOPE_RULE_OPERATORS.join(', ')}.
 - "action" is "include" (always ask this topic) or "exclude" (never ask it). Exclude beats include.
 - Propose at most ${ROUTING_ANALYSIS_MAX_RULES} rules. Zero is the common and correct answer.
 
+## Guidance that is about no single topic
+
+A topic's criteria says when THAT topic applies. Documents also carry guidance about how to judge \
+the interview AS A WHOLE — it applies to every topic at once, so there is no single topic's criteria \
+it could go in:
+
+- "For a first-time respondent, prefer covering more areas briefly over covering one in depth."
+- "Where they seem unsure, favour the areas they raised themselves."
+- "Keep this consultative — this is a conversation, not an audit."
+
+Put that in "plannerInstructions", in the author's own terms. It is read alongside every topic's \
+criteria when the interview decides what to cover.
+
+Three things it is NOT:
+- NOT a place for a condition about one topic. That is criteria, and criteria is where the decision \
+is actually made.
+- NOT a summary of what you already wrote. Repeating the criteria back adds nothing and costs the \
+reader their attention.
+- NOT tone or wording for how questions are ASKED. This decides WHAT gets covered, not how it is \
+phrased — the platform has separate settings for that, and guidance about phrasing put here does \
+nothing.
+
+It also cannot overrule the topic limit, the hard rules or the fallback list: those are applied \
+after the decision, whatever this says.
+
+If the document offers no such cross-cutting guidance, OMIT the field. Do not summarise, do not \
+invent a house style, and do not fill it just because it exists — silence is the common and correct \
+answer, exactly as it is for "maxConditionalTopics".
+
 ## Two settings that are not topics
 
 Two settings sit outside the topic list. Until now you had nowhere to put the document's \
@@ -349,8 +378,10 @@ too vague to act on, references something undefined).
 Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
 instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
 
-Do NOT report a gap for anything "fallbackTopicKeys" or "checkTopicPreference" can express. Those \
-are formalizable — put them in the fields above.
+Do NOT report a gap for anything "fallbackTopicKeys", "checkTopicPreference" or \
+"plannerInstructions" can express. Those are formalizable — put them in the fields above. \
+Cross-cutting guidance in particular is NOT a gap just because it fits no single topic: that is \
+precisely what "plannerInstructions" is for.
 
 ## Breadth
 
@@ -401,6 +432,7 @@ Output ONLY a single JSON object — no prose, no code fences:
   "maxConditionalTopics": <number — omit unless the document states one>,
   "fallbackTopicKeys": ["<key of one of your topics>", ...],
   "checkTopicPreference": ["<key of one of your conditional topics>", ...],
+  "plannerInstructions": "<cross-cutting guidance — omit entirely unless the document gives some>",
   "summary": "<one or two sentences: what you found, and whether it came from the document>",
   "fromDocument": true | false
 }`;

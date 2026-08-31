@@ -508,8 +508,10 @@ describe('the rubric the analyst kept getting wrong (F17.23)', () => {
     });
 
     it('stops them being reported as unformalizable gaps', () => {
+      // `plannerInstructions` joined this list when it became proposable — same argument, same
+      // sentence, so it is extended rather than duplicated.
       expect(rubric()).toContain(
-        'Do NOT report a gap for anything "fallbackTopicKeys" or "checkTopicPreference" can express'
+        'Do NOT report a gap for anything "fallbackTopicKeys", "checkTopicPreference" or "plannerInstructions" can express'
       );
     });
 
@@ -676,5 +678,50 @@ describe('the criteria shape the renderer already recovers', () => {
 
   it('keeps a plain paragraph legal, so the shape never distorts the author', () => {
     expect(rubric()).toContain('never distort what the author said to fit the shape');
+  });
+});
+
+describe('cross-cutting guidance is proposable (Extra guidance)', () => {
+  /**
+   * `plannerInstructions` used to be deliberately un-proposable, on the reasoning that "an analyst
+   * writing its own steering is a loop worth not building". It steers the PLANNER — a different
+   * agent, at a different point in the session — and documents state this kind of guidance
+   * routinely, so with nowhere to put it the analyst filed it as an unformalizable `gap`. That is
+   * the exact defect F17.23 fixed for `fallbackTopicKeys` / `checkTopicPreference`.
+   */
+  function rubric(): string {
+    const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+    return typeof system.content === 'string' ? system.content : '';
+  }
+
+  it('gives cross-cutting guidance a home and says why topics cannot hold it', () => {
+    const content = rubric();
+    expect(content).toContain('Guidance that is about no single topic');
+    expect(content).toContain('plannerInstructions');
+  });
+
+  it('is in the output contract', () => {
+    expect(rubric()).toContain('"plannerInstructions"');
+  });
+
+  it('omits rather than defaults when the document is silent', () => {
+    const content = rubric();
+    expect(content).toContain('OMIT the field');
+    expect(content).toContain('silence is the common and correct');
+  });
+
+  it('rules out the three things it is not, so it does not become a dumping ground', () => {
+    const content = rubric();
+    // A condition about ONE topic belongs in criteria — the field the runtime actually reads.
+    expect(content).toContain('NOT a place for a condition about one topic');
+    expect(content).toContain('NOT a summary of what you already wrote');
+    // Phrasing/tone has its own settings; guidance about it here is silently inert.
+    expect(content).toContain('NOT tone or wording');
+  });
+
+  it('stops it being double-reported as a gap', () => {
+    expect(rubric()).toContain(
+      'Cross-cutting guidance in particular is NOT a gap just because it fits no single topic'
+    );
   });
 });

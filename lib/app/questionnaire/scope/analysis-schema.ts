@@ -29,6 +29,7 @@ import { z } from 'zod';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_TRIGGER_CUES,
+  MAX_PROPOSED_PLANNER_INSTRUCTIONS,
   MAX_PROPOSED_SETTING_KEYS,
   MIN_CONDITIONAL_TOPICS,
   SCOPE_RATIONALE_MAX_LENGTH,
@@ -162,6 +163,9 @@ export type ProposedGapPayload = z.infer<typeof proposedGapSchema>;
  */
 export const ROUTING_ANALYSIS_MAX_SETTING_KEYS = MAX_PROPOSED_SETTING_KEYS;
 
+/** Re-exported for the same one-place-to-read reason as {@link ROUTING_ANALYSIS_MAX_SETTING_KEYS}. */
+export const ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS = MAX_PROPOSED_PLANNER_INSTRUCTIONS;
+
 export const routingAnalysisSchema = z.object({
   topics: z
     .array(proposedTopicSchema)
@@ -202,6 +206,32 @@ export const routingAnalysisSchema = z.object({
   checkTopicPreference: z
     .array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH))
     .max(ROUTING_ANALYSIS_MAX_SETTING_KEYS)
+    .optional(),
+  /**
+   * Cross-cutting guidance for the planner — how to judge the plan AS A WHOLE, where the document
+   * says something that is about no single topic ("prefer breadth for a first-time respondent").
+   *
+   * Proposable since the Extra-guidance change, on exactly the F17.23 argument that made
+   * `fallbackTopicKeys` and `checkTopicPreference` proposable: documents state this routinely, and
+   * with nowhere to put it the analyst reported it as an unformalizable `gap` — a proposal admitting
+   * defeat about a setting the platform had implemented all along. The earlier "deliberately not
+   * proposable" reasoning (an analyst writing its own steering) does not hold: this steers the
+   * PLANNER, a different agent at a different point in the session, not the analyst.
+   *
+   * Omitted when the document says nothing, the same discipline `maxConditionalTopics` follows — a
+   * default here would put the analyst's guess where the author's silence was.
+   *
+   * **Truncated, never rejected** — the `trigger.cues` reasoning exactly. A rejecting `.max()` here
+   * would fail the WHOLE analysis over one advisory field, and the single retry is blind to it
+   * (`buildRoutingAnalysisRetryMessage` names topics, rules, gaps, summary and `fromDocument` — not
+   * this), so an analyst that overran would lose the document its entire proposal twice. Slicing
+   * matches `narrowProposedTopicSet`, which trims to the same bound rather than dropping the field.
+   */
+  plannerInstructions: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((text) => text.slice(0, ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS))
     .optional(),
   summary: z.string().trim().min(1).max(SCOPE_RATIONALE_MAX_LENGTH),
   /** The analyst's own claim about whether the document contained routing instructions at all. */

@@ -266,6 +266,18 @@ export const MAX_CONDITIONAL_TOPICS_CEILING = 20;
 export const MAX_PROPOSED_SETTING_KEYS = 5;
 
 /**
+ * Most characters of cross-cutting planner guidance the Routing Analyst may propose.
+ *
+ * Here rather than beside the analyst's other caps for the same cycle reason as
+ * {@link MAX_PROPOSED_SETTING_KEYS} — both the contract and `narrowProposedTopicSet` read it.
+ *
+ * Tighter than the field's own {@link PLANNER_INSTRUCTIONS_MAX_LENGTH}: what an author may type by
+ * hand and what a model may propose unreviewed are different budgets. ~200 words is a few sentences
+ * of cross-cutting steering, which is all this field is for.
+ */
+export const MAX_PROPOSED_PLANNER_INSTRUCTIONS = 1_200;
+
+/**
  * Bounds on a session's time budget, in seconds. `0` means "no budget" and is the default, so
  * nothing changes for a version that never sets one.
  *
@@ -457,6 +469,12 @@ export interface ProposedTopicSet {
    * proposal admitting defeat about a setting the platform has implemented all along.
    */
   checkTopicPreference?: string[];
+  /**
+   * Cross-cutting guidance for the planner, when the document gave some — guidance about how to
+   * judge the interview as a whole rather than about any one topic. Absent when it said nothing,
+   * same discipline as {@link maxConditionalTopics}.
+   */
+  plannerInstructions?: string;
   /**
    * Topics whose `light` depth was corrected to `full` on the way in, because they run for
    * everyone. Empty on a well-formed proposal.
@@ -1312,6 +1330,15 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
   const fallbackTopicKeys = settingKeys(value.fallbackTopicKeys);
   const checkTopicPreference = settingKeys(value.checkTopicPreference);
 
+  // Trimmed to the ANALYST's cap, not the field's own 4,000: this narrow reads what a model
+  // proposed, and an over-long proposal is trimmed rather than dropped for the same reason the
+  // trigger cues are — losing a whole proposal to one long field is the T13 mistake.
+  const plannerInstructions = asText(
+    value.plannerInstructions,
+    MAX_PROPOSED_PLANNER_INSTRUCTIONS,
+    ''
+  );
+
   return {
     v: 1,
     topics,
@@ -1320,6 +1347,7 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
     ...(cap !== null ? { maxConditionalTopics: cap } : {}),
     ...(fallbackTopicKeys.length > 0 ? { fallbackTopicKeys } : {}),
     ...(checkTopicPreference.length > 0 ? { checkTopicPreference } : {}),
+    ...(plannerInstructions.length > 0 ? { plannerInstructions } : {}),
     ...(depthCorrectedKeys.length > 0 ? { depthCorrectedKeys } : {}),
     summary: asText(value.summary, SCOPE_RATIONALE_MAX_LENGTH, ''),
     fromDocument: asBool(value.fromDocument, false),

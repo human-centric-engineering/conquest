@@ -367,6 +367,11 @@ export function RoutingAnalystCard({
           ...((draft.checkTopicPreference?.length ?? 0) > 0
             ? { checkTopicPreference: draft.checkTopicPreference }
             : {}),
+          // Same `.length > 0` reasoning as the two lists above: an empty string is not "the
+          // document said nothing", it is an instruction to erase what the admin already wrote.
+          ...((draft.plannerInstructions?.length ?? 0) > 0
+            ? { plannerInstructions: draft.plannerInstructions }
+            : {}),
           // Sent only when the admin ticked the box. An untouched accept carries no `enable` key
           // at all, which is what leaves the version's own setting alone on the server.
           ...(enableOnAccept ? { enable: true as const } : {}),
@@ -551,6 +556,18 @@ export function RoutingAnalystCard({
                     {draft.checkTopicPreference.map(labelForKey).join(', ')}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Prose, not a key list, so it gets its own block rather than a one-line label: this
+                is the only proposed setting an admin has to READ to judge, and burying several
+                sentences on the end of a comma-separated line makes that impossible. */}
+            {draft.plannerInstructions && (
+              <div className="space-y-1 text-sm">
+                <p className="text-foreground font-medium">Guidance across all topics</p>
+                <p className="text-muted-foreground bg-muted/30 rounded-md border px-3 py-2 whitespace-pre-wrap">
+                  {draft.plannerInstructions}
+                </p>
               </div>
             )}
 
@@ -760,8 +777,9 @@ export function RoutingAnalystCard({
               {liveTopicCount > 0
                 ? `This replaces all ${liveTopicCount} of your current topics with the ${draft?.topics.length ?? 0} proposed here`
                 : `This writes the ${draft?.topics.length ?? 0} proposed topics`}
-              {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}. You can
-              still edit everything afterwards.{' '}
+              {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}
+              {draft?.plannerInstructions ? ', and replaces your guidance across all topics' : ''}.
+              You can still edit everything afterwards.{' '}
               {scopeEnabled
                 ? 'Conditional topics is already on, so these topics decide what respondents are asked as soon as you accept.'
                 : offerEnable

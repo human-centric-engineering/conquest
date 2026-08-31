@@ -540,10 +540,22 @@ export function ScopeSettingsCard({
           <Label className="text-sm font-medium">
             Guidance that applies across all topics{' '}
             <FieldHelp title="Extra guidance">
-              Appended to the planner prompt. Each topic’s criteria say when that one topic applies;
-              this says how to judge the plan as a whole — “prefer breadth over depth for first-time
-              respondents”. It cannot override the limit, the rules, or the fallback: those are
-              enforced after the model answers.
+              <strong>Advice that applies to every topic at once.</strong> Each topic’s criteria say
+              when <em>that</em> topic applies. This says how to weigh up the whole set — so it’s
+              for anything that isn’t about one topic in particular.
+              <br />
+              <br />
+              <em>
+                “For a first-time respondent, prefer covering more areas briefly than one in depth.”
+              </em>{' '}
+              <em>“Where they seem unsure, favour the areas they raised themselves.”</em>
+              <br />
+              <br />
+              It’s advice, not a rule — the agent weighs it up rather than obeying it, so anything
+              you can’t compromise on belongs in a hard rule. It can’t stretch the topic limit,
+              overrule a hard rule, or change the fallback list; those are applied afterwards
+              whatever this says. It also doesn’t change how questions are worded — only which
+              topics get covered.
             </FieldHelp>
           </Label>
           <AutoTextarea

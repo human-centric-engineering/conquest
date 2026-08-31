@@ -84,11 +84,21 @@ export function ScopeRulesEditor({
         <Label className="text-sm font-medium">
           Hard rules{' '}
           <FieldHelp title="Hard rules">
-            Checked <strong>before</strong> the agent, over the data slots the opening filled. Every
-            matching rule applies — they are independent assertions, not a first-match-wins chain —
-            and a <em>never include</em> always beats an <em>always include</em> on the same topic.
-            Use these for the cases you are certain about; leave the judgement calls to each topic’s
-            criteria.
+            <strong>A rule the agent cannot overrule.</strong> Normally the agent reads what someone
+            said in the opening and judges each topic against its criteria. A hard rule skips that
+            judgement: if the answer it names matches, the topic is in or out, every time.
+            <br />
+            <br />
+            Use one where you cannot live with the agent weighing it up — eligibility, compliance, a
+            section that must never be shown to the wrong person.{' '}
+            <em>“If they aren’t a licence holder, never ask the audit questions.”</em> For
+            everything you’d want judged case by case, write it into the topic’s criteria instead.
+            <br />
+            <br />
+            Each rule reads <strong>one answer the opening captured</strong> — that’s why you pick a
+            data slot. If a rule and the agent disagree, the rule wins. If two rules disagree about
+            the same topic, the one that excludes wins, so a topic can never be forced on to someone
+            you’ve ruled it out for.
           </FieldHelp>
         </Label>
         <Button variant="outline" size="sm" onClick={add} disabled={disabled}>

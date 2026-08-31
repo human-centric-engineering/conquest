@@ -203,6 +203,16 @@ export const acceptTopicDraftSchema = z.object({
   /** Same contract as `fallbackTopicKeys` above. */
   checkTopicPreference: z.array(topicKeySchema).max(20).optional(),
   /**
+   * Cross-cutting planner guidance the analyst read out of the document and the admin kept. Same
+   * omitted-leaves-alone / present-replaces contract as `rules`.
+   *
+   * Capped at the FIELD's length rather than the analyst's tighter proposal cap, for the same
+   * reason `fallbackTopicKeys` is capped at 20 here and 5 there: both paths write the same field,
+   * so anything acceptable through the settings PATCH must be acceptable through this one — the
+   * admin may have edited the proposal before accepting it.
+   */
+  plannerInstructions: z.string().trim().max(PLANNER_INSTRUCTIONS_MAX_LENGTH).optional(),
+  /**
    * Turn conditional topics ON as part of this accept (F17.22 Phase 4). Sent only when the admin ticks
    * the offer in the accept dialog, which is itself only shown when the proposal contains a
    * conditional topic.
