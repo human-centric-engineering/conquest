@@ -245,10 +245,16 @@ export function main(
   let status = 0;
 
   if (lintable.length > 0) {
+    // Cache flags mirror `package.json`'s `lint` script exactly, so this path and a full
+    // `npm run lint` share one cache entry rather than each paying its own cold run. Both
+    // now write to the repo root — `.eslintcache` (eslint's default, hence no
+    // `--cache-location`) and `.prettiercache` — because the old `.next/cache/` home was
+    // destroyed by `rm -rf .next`, the reflex fix for a stale build (Sunrise #677). Clear
+    // them deliberately with `npm run clean:cache`.
     status =
       deps.run(
         join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'),
-        ['--cache', '--cache-strategy', 'content', '--cache-location', '.next/cache/eslint/'],
+        ['--cache', '--cache-strategy', 'content'],
         lintable
       ) || status;
   }
@@ -259,14 +265,7 @@ export function main(
     status =
       deps.run(
         join(ROOT, 'node_modules', 'prettier', 'bin', 'prettier.cjs'),
-        [
-          '--check',
-          '--cache',
-          '--cache-strategy',
-          'content',
-          '--cache-location',
-          '.next/cache/.prettiercache',
-        ],
+        ['--check', '--cache', '--cache-strategy', 'content', '--cache-location', '.prettiercache'],
         formattable
       ) || status;
   }
