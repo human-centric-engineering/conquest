@@ -143,11 +143,15 @@ describe('main', () => {
     const exit = vi.fn();
     const spawnFn = vi.fn();
 
-    await main(['tsc', '--noEmit'], { error, exit, spawnFn });
+    // Deliberately a real binary that is NOT on the allowlist, rather than a
+    // nonsense string: the allowlist exists to keep `package.json` the only
+    // place that decides which jobs get a cap, so the case worth pinning is a
+    // plausible tool someone might wire up, not a typo.
+    await main(['prettier', '--check', '.'], { error, exit, spawnFn });
 
     expect(spawnFn).not.toHaveBeenCalled();
     expect(exit).toHaveBeenCalledWith(1);
-    expect(error.mock.calls[0][0]).toContain('Unknown command "tsc"');
+    expect(error.mock.calls[0][0]).toContain('Unknown command "prettier"');
   });
 
   it('names the allowed commands so the message is actionable', async () => {
