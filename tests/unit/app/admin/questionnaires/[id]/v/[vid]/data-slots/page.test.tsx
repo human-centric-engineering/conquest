@@ -18,6 +18,9 @@ import { render, screen } from '@testing-library/react';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import { EMPTY_TOPICS_PAYLOAD } from '@/lib/app/questionnaire/scope/views';
+import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
+import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 // ─── Navigation mock ──────────────────────────────────────────────────────────
 
@@ -32,10 +35,15 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }));
 
-// ─── workspace-data mock (for getVersionGraphCached) ─────────────────────────
+// ─── workspace-data mock ──────────────────────────────────────────────────────
+//
+// BOTH loaders, because this page reads both: the graph for its questions, and the topics payload
+// to decide whether saving data slots should point the admin back at the Routing Analyst (hard
+// rules only become possible once data slots exist). A mock missing one throws at import.
 
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  getVersionTopicsCached: vi.fn<() => Promise<TopicsPayload>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -74,6 +82,7 @@ vi.mock('@/components/admin/questionnaires/data-slots-review', () => ({
     questions: unknown[];
     initialSlots: unknown[];
     initialDraft: unknown;
+    conditionalTopicsInUse?: boolean;
   }) => (
     <div
       data-testid="data-slots-review"
@@ -82,6 +91,7 @@ vi.mock('@/components/admin/questionnaires/data-slots-review', () => ({
       data-qcount={String(props.questions.length)}
       data-scount={String(props.initialSlots.length)}
       data-has-draft={String(props.initialDraft !== null)}
+      data-conditional-topics-in-use={String(props.conditionalTopicsInUse === true)}
     />
   ),
 }));
@@ -156,6 +166,12 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph(3));
+  // The quiet default: no conditional topics anywhere, so the page computes
+  // `conditionalTopicsInUse: false` and the analyst nudge stays off.
+  workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+    ...EMPTY_TOPICS_PAYLOAD,
+    settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  });
   apiData.slots = { slots: [], draft: null };
   apiMock.serverFetch.mockImplementation(async (url: string) => ({ ok: true, _url: url }));
   apiMock.parseApiResponse.mockImplementation(async () =>
@@ -263,6 +279,111 @@ describe('DataSlotsTab', () => {
         'data slots tab: slots fetch failed',
         expect.any(Error)
       );
+    });
+  });
+
+  // ── conditionalTopicsInUse ─────────────────────────────────────────────────
+  //
+  // Saving data slots is the moment hard rules become possible (a rule decides from one data slot,
+  // so with none the Routing Analyst is told to propose none), and the analyst does not re-run
+  // itself. The page therefore tells `DataSlotsReview` whether pointing back at the analyst is
+  // signal or noise. Four independent facts can each make it signal; none of them was covered when
+  // this flag was added, which is how a missing `getVersionTopicsCached` mock reached CI.
+
+  describe('conditionalTopicsInUse', () => {
+    const withTopics = (over: Partial<TopicsPayload>): TopicsPayload => ({
+      ...EMPTY_TOPICS_PAYLOAD,
+      settings: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      ...over,
+    });
+
+    async function flagFor(payload: TopicsPayload): Promise<string | null> {
+      workspaceDataMock.getVersionTopicsCached.mockResolvedValue(payload);
+      render(await renderPage());
+      return screen.getByTestId('data-slots-review').getAttribute('data-conditional-topics-in-use');
+    }
+
+    it('is false when nothing about the version involves conditional topics', async () => {
+      expect(await flagFor(withTopics({}))).toBe('false');
+    });
+
+    it('is true when the feature is switched on', async () => {
+      const payload = withTopics({
+        settings: { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true },
+      });
+      expect(await flagFor(payload)).toBe('true');
+    });
+
+    it('is true when a conditional topic already exists, even with the feature off', async () => {
+      const payload = withTopics({
+        topics: [
+          {
+            id: 't1',
+            key: 'partner_channel',
+            label: 'Partner channel',
+            description: null,
+            phase: 'conditional',
+            criteria: 'They sell through partners',
+            depth: 'full',
+            members: { dataSlotKeys: [], questionKeys: [] },
+            ordinal: 0,
+            source: 'analyst',
+            trigger: null,
+          },
+        ],
+      });
+      expect(await flagFor(payload)).toBe('true');
+    });
+
+    it('is false when the only topics are always-run ones', async () => {
+      // A `core` topic is not conditional routing, so it must not trigger the nudge.
+      const payload = withTopics({
+        topics: [
+          {
+            id: 't1',
+            key: 'spine',
+            label: 'Spine',
+            description: null,
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            members: { dataSlotKeys: [], questionKeys: [] },
+            ordinal: 0,
+            source: 'manual',
+            trigger: null,
+          },
+        ],
+      });
+      expect(await flagFor(payload)).toBe('false');
+    });
+
+    it('is true when an unreviewed analyst proposal is waiting', async () => {
+      const payload = withTopics({
+        draft: {
+          v: 1,
+          topics: [],
+          rules: [],
+          gaps: [],
+          summary: 's',
+          fromDocument: true,
+          generatedAt: '2026-08-31T00:00:00.000Z',
+        },
+      });
+      expect(await flagFor(payload)).toBe('true');
+    });
+
+    it('is true when the ingest candidacy check said the document describes routing', async () => {
+      const payload = withTopics({
+        candidacy: { isCandidate: true, confidence: 0.9, summary: 'Routing table present' },
+      });
+      expect(await flagFor(payload)).toBe('true');
+    });
+
+    it('is false when candidacy explicitly said no', async () => {
+      const payload = withTopics({
+        candidacy: { isCandidate: false, confidence: 0.8, summary: 'No routing instructions' },
+      });
+      expect(await flagFor(payload)).toBe('false');
     });
   });
 });
