@@ -557,6 +557,13 @@ The dialog also renders **every measured colour** as a palette strip, ranked by 
 can copy a hex by hand when a suggestion is wrong. On a degraded run that strip is the entire
 result — and it is still useful.
 
+## The sibling feature
+
+The import fills these boxes from a brand; the **contrast optimiser** checks that what is in them
+can be read, and proposes the nearest shade of the client's own colours where it cannot. Same
+propose-and-veto contract, same "the model cannot invent a colour" guarantee, and the two buttons
+sit side by side on the branding form. See [brand-contrast.md](./brand-contrast.md).
+
 ## The palette is kept
 
 The proposals used to be the durable half of an import and the palette the disposable one: accepted

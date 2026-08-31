@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, Wand2 } from 'lucide-react';
+import { Loader2, Sparkles, Wand2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -59,6 +59,8 @@ import {
   type BrandPalette,
 } from '@/lib/app/questionnaire/brand-import/palette-record';
 import { BrandPaletteStrip } from '@/components/admin/demo-clients/brand-palette-strip';
+import { ContrastOptimiseDialog } from '@/components/admin/demo-clients/contrast-optimise-dialog';
+import type { OptimisableField } from '@/lib/app/questionnaire/brand-contrast/result';
 
 /** True for an empty field, an https URL, or one of our own upload paths — shares the
  *  server's predicate (isBrandImageSrc) so the form and the API can't drift. */
@@ -141,6 +143,26 @@ type ColorFieldName =
   | 'inkColorDark'
   | 'accentColorEnd';
 
+/**
+ * Every field the contrast optimiser may propose is a colour field this form can write.
+ *
+ * Asserted rather than assumed: `applyContrastRepairs` routes every proposal through `setColor`,
+ * and an optimisable field that was not a `ColorFieldName` would be a silent no-op — the admin
+ * would accept a fix, watch nothing change, and save the unreadable colour.
+ */
+const _optimisableFieldsAreColorFields: Record<OptimisableField, ColorFieldName> = {
+  canvasColor: 'canvasColor',
+  inkColor: 'inkColor',
+  canvasColorDark: 'canvasColorDark',
+  inkColorDark: 'inkColorDark',
+  ctaColor: 'ctaColor',
+  ctaColorEnd: 'ctaColorEnd',
+  surfaceColor: 'surfaceColor',
+  accentColor: 'accentColor',
+  accentColorEnd: 'accentColorEnd',
+};
+void _optimisableFieldsAreColorFields;
+
 export interface DemoClientFormProps {
   /** Present in edit mode; absent in create mode. */
   client?: DemoClientView;
@@ -158,6 +180,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [contrastOpen, setContrastOpen] = useState(false);
 
   const {
     register,
@@ -287,6 +310,19 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
       setValue(field, value, { shouldDirty: true, shouldValidate: true });
     }
     if (refresh) router.refresh();
+  };
+
+  /**
+   * Write accepted contrast repairs into form state.
+   *
+   * Every optimisable field is a colour field, so this is `setColor` for each — the same writer the
+   * pickers use, which is what makes an accepted repair indistinguishable from an admin dragging
+   * the swatch there themselves: the preview updates, Save enables, Cancel discards.
+   */
+  const applyContrastRepairs = (values: Partial<Record<OptimisableField, string>>) => {
+    for (const [field, value] of Object.entries(values) as [OptimisableField, string][]) {
+      setColor(field, value);
+    }
   };
 
   const validHex = (v: string) => (HEX_COLOR_PATTERN.test(v.trim()) ? v.trim() : null);
@@ -498,12 +534,43 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           </p>
         </div>
 
+        {/* The other half of the same job, and it belongs beside the import rather than at the
+            bottom of the fieldset: one fills these boxes from a brand, the other checks that what
+            is in them can be read. Both propose; both are written by the ordinary Save. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isLoading}
+            onClick={() => setContrastOpen(true)}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            Optimise for contrast
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            Checks every pairing a respondent sees — the page, the button, the band, the links — and
+            suggests the nearest shade of your own colours that stays legible.
+          </p>
+        </div>
+
         <BrandImportDialog
           open={importOpen}
           onOpenChange={setImportOpen}
           demoClientId={client?.id}
           uploadEnabled={uploadEnabled}
           onApply={applyImportedBrand}
+        />
+
+        {/* Handed the LIVE theme, not the saved row: an admin presses this in the middle of
+            adjusting colours, and auditing what is in the database would check the colours they
+            have already moved on from. `livePreviewTheme` is the same object the preview draws. */}
+        <ContrastOptimiseDialog
+          open={contrastOpen}
+          onOpenChange={setContrastOpen}
+          theme={livePreviewTheme}
+          demoClientId={client?.id}
+          onApply={applyContrastRepairs}
         />
 
         {/* The evidence, immediately under the button that produced it and above the fields it

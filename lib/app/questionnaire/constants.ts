@@ -1486,3 +1486,21 @@ export const QUESTIONNAIRE_OPENING_EXAMPLES_AGENT_SLUG =
  * alone, and the result is marked degraded rather than silently weaker.
  */
 export const BRAND_IMPORT_AGENT_SLUG = 'app-brand-import-analyst';
+
+/* ── Brand contrast — the theming adviser ──────────────────────────────────── */
+
+/**
+ * Slug of the seeded contrast-optimiser adviser `AiAgent` (empty provider/model → dynamic
+ * resolution).
+ *
+ * The sibling of {@link BRAND_IMPORT_AGENT_SLUG}, and constrained the same way: the arithmetic is
+ * done before it is asked anything. It is handed the brand, the pairs that fail WCAG AA, and the
+ * shades we have already proved would fix each one, and its whole job is to pick which side of a
+ * failing pair should move — the ink or the paper, the button or nothing — and to say why in one
+ * line an admin can agree or disagree with.
+ *
+ * It chooses an INDEX into a list it did not write, so it cannot invent a colour any more than the
+ * import analyst can. Unavailable, the optimiser still works: the repairs are ranked by how little
+ * they move the brand, and the result is marked degraded rather than silently weaker.
+ */
+export const BRAND_CONTRAST_AGENT_SLUG = 'app-brand-contrast-adviser';

@@ -78,6 +78,26 @@ vi.mock('@/components/admin/demo-clients/brand-image-field', () => ({
     </button>
   ),
 }));
+vi.mock('@/components/admin/demo-clients/contrast-optimise-dialog', () => ({
+  ContrastOptimiseDialog: ({
+    theme,
+    onApply,
+  }: {
+    theme: unknown;
+    onApply: (v: Record<string, string>) => void;
+  }) => (
+    <>
+      <span data-testid="contrast-theme">{JSON.stringify(theme)}</span>
+      <button
+        type="button"
+        data-testid="contrast-apply"
+        onClick={() => onApply({ inkColor: '#75756d' })}
+      >
+        apply contrast
+      </button>
+    </>
+  ),
+}));
 vi.mock('@/components/admin/demo-clients/demo-client-theme-preview', () => ({
   DemoClientThemePreview: () => <div data-testid="theme-preview" />,
 }));
@@ -379,6 +399,41 @@ describe('DemoClientForm', () => {
 
       await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
       expect(mockPost.mock.calls[0][1].body.brandPalette).toBeNull();
+    });
+  });
+
+  describe('the contrast optimiser', () => {
+    it('offers the check beside the import, not buried at the bottom', () => {
+      render(<DemoClientForm client={CLIENT} />);
+      expect(screen.getByRole('button', { name: /Optimise for contrast/i })).toBeInTheDocument();
+    });
+
+    it('hands the dialog the LIVE theme, including edits that are not saved', async () => {
+      // The whole point of the feature. Auditing the saved row would check colours the admin has
+      // already moved on from — and would report a problem they have just fixed.
+      const user = userEvent.setup();
+      render(<DemoClientForm client={CLIENT} />);
+      await user.clear(hexBox('Canvas colour'));
+      await user.type(hexBox('Canvas colour'), '#123456');
+
+      expect(screen.getByTestId('contrast-theme')).toHaveTextContent('"canvasColor":"#123456"');
+    });
+
+    it('writes an accepted repair into the form and enables Save', async () => {
+      // Routed through the same setter the colour pickers use, so an accepted repair is
+      // indistinguishable from the admin dragging the swatch there themselves.
+      const user = userEvent.setup();
+      mockPatch.mockResolvedValue(CLIENT);
+      render(<DemoClientForm client={CLIENT} />);
+
+      await user.click(screen.getByTestId('contrast-apply'));
+
+      await waitFor(() => expect(hexBox('Ink colour')).toHaveValue('#75756d'));
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+
+      await user.click(saveButton());
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0][1].body.inkColor).toBe('#75756d');
     });
   });
 
