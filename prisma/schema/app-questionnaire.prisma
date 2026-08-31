@@ -214,7 +214,7 @@ model AppQuestionnaireConfig {
   // Respondent-controlled early finish: let the respondent voluntarily end the session and get their
   // report before the agent's own completion thresholds are met. Bypasses the required-question gate.
   // Config-only (no platform flag). minCoverage/minQuestions are OR'd; 0 = not a criterion on that axis.
-  allowEarlyFinish        Boolean @default(true) // respondent may finish early (escape hatch); the "reopen" feature makes defaulting-on safe (see reopen-logic.ts)
+  allowEarlyFinish        Boolean @default(false) // respondent may finish early (escape hatch); OFF by default — an admin opts in per questionnaire
   earlyFinishMinCoverage  Float   @default(1.0) // 0–1 weighted coverage to unlock; 0 = not a criterion
   earlyFinishMinQuestions Int     @default(0) // answered slots to unlock; 0 = not a criterion
 

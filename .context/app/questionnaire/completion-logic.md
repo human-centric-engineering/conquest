@@ -152,9 +152,12 @@ required questions still open** (a deliberate escape hatch, unlike `offer`).
 It is **config-only** (no platform flag), three fields on `AppQuestionnaireConfig`
 (`configuration.md`):
 
-- `allowEarlyFinish` (bool, default `true`) — turns the feature on. Defaulting on is safe
-  because completing this way is no longer a dead end for the respondent — see the reopen
-  note below.
+- `allowEarlyFinish` (bool, default `false`) — turns the feature on. **Opt-in per
+  questionnaire**: the hatch bypasses the required-question gate, so an admin asks for it
+  rather than inheriting it. (It briefly defaulted on between
+  `20260809225255_app_reopen_early_finish` and `20260831131230_app_early_finish_default_off`,
+  on the argument that the reopen feature made finishing early no longer a dead end — safe,
+  but still not something every questionnaire wants.)
 - `earlyFinishMinCoverage` (0–1, default `1.0`) — weighted-coverage bar. Stored as a fraction but
   **edited as a whole percent** (0–100) in `config-editor.tsx` (`pctString` / `fractionFromPct`);
   the default `1.0` (100%) surfaces the control only once the respondent has effectively completed

@@ -147,7 +147,7 @@ const FULLY_ENABLED: ConfigView = configOf({
  * The mirror image of {@link FULLY_ENABLED}: every gate explicitly OFF.
  *
  * Needed because the default config is not "everything off" — `reasoningStream*`,
- * `personaSelection`, `interviewerStrategy`, `allowEarlyFinish` and `milestoneBanner*` all ship ON,
+ * `personaSelection`, `interviewerStrategy` and `milestoneBanner*` all ship ON,
  * so their disabled arm is unreachable from either of the other two fixtures. Together the three
  * configs take both sides of every gate in the registry.
  */
