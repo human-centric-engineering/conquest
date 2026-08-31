@@ -61,8 +61,13 @@ describe('with no data slots on the version', () => {
   it('says a rule cannot be added yet, and why', () => {
     renderEditor({ dataSlots: [] });
     // The reason, not just the absence — "No hard rules" alone reads as a choice the admin made.
-    expect(screen.getByText(/none can be added yet/i)).toBeTruthy();
-    expect(screen.getByText(/needs at least one data slot first/i)).toBeTruthy();
+    expect(
+      screen.getByText(/You need at least one data slot before you can add one/i)
+    ).toBeTruthy();
+    // And the shape of the thing, so the admin knows what they would be adding. Matched on a
+    // phrase unique to the empty state — the ⓘ help carries the same worked example, and this
+    // suite mocks FieldHelp so its children render inline.
+    expect(screen.getByText(/Add one to overrule it for a specific answer/i)).toBeTruthy();
   });
 
   it('disables "Add rule" rather than minting a rule with no data slot', () => {
@@ -77,8 +82,12 @@ describe('with no data slots on the version', () => {
 describe('with data slots available', () => {
   it('keeps the plain empty state — nothing is blocking the admin', () => {
     renderEditor();
-    expect(screen.getByText(/No hard rules\. Every conditional topic is decided/i)).toBeTruthy();
-    expect(screen.queryByText(/none can be added yet/i)).toBeNull();
+    expect(
+      screen.getByText(/No hard rules — the agent decides every conditional topic/i)
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/You need at least one data slot before you can add one/i)
+    ).toBeNull();
   });
 
   it('adds a rule seeded with the first data slot', () => {

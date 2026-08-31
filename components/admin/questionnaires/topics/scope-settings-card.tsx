@@ -295,9 +295,10 @@ export function ScopeSettingsCard({
           {/* The data-slot dependency is named in the heading itself, not left to the ⓘ. A rule
               tests one data slot, so with none on the version there is nothing to author a rule
               against — and the admin who most needs telling is the one who never opens the help. */}
-          <SectionLabel step={2}>
-            The cases you are certain about — decided from your data slots
-          </SectionLabel>
+          {/* Names the ACTION, not a category. "The cases you are certain about" told an admin
+              nothing about what to put in the field — "cases" is an abstraction, and the data-slot
+              dependency read as decoration rather than as the thing the rule is built from. */}
+          <SectionLabel step={2}>Always or never ask a topic — based on one answer</SectionLabel>
           <ScopeRulesEditor
             rules={draft.rules}
             onChange={(next: ScopeRule[]) => set({ rules: next })}

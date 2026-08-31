@@ -98,21 +98,30 @@ export function ScopeRulesEditor({
         <Label className="text-sm font-medium">
           Hard rules{' '}
           <FieldHelp title="Hard rules">
-            <strong>A rule the agent cannot overrule.</strong> Normally the agent reads what someone
-            said in the opening and judges each topic against its criteria. A hard rule skips that
-            judgement: if the answer it names matches, the topic is in or out, every time.
+            <strong>
+              You build one sentence: when a given answer says X, always ask — or never ask — a
+              given topic.
+            </strong>
             <br />
             <br />
-            Use one where you cannot live with the agent weighing it up — eligibility, compliance, a
-            section that must never be shown to the wrong person.{' '}
-            <em>“If they aren’t a licence holder, never ask the audit questions.”</em> For
-            everything you’d want judged case by case, write it into the topic’s criteria instead.
+            For example: <em>when “Licence holder” is “No”, never ask “Compliance audit”.</em> You
+            pick the answer from your data slots, pick how to compare it, then pick the topic to
+            force in or out.
             <br />
             <br />
-            Each rule reads <strong>one answer the opening captured</strong> — that’s why you pick a
-            data slot. If a rule and the agent disagree, the rule wins. If two rules disagree about
-            the same topic, the one that excludes wins, so a topic can never be forced on to someone
-            you’ve ruled it out for.
+            Why you would: normally the agent reads the opening and decides each conditional topic
+            for itself, weighing it against that topic’s criteria — so it can go either way. A hard
+            rule takes that decision away. If the answer matches, the topic is in or out, every
+            time, on every interview.
+            <br />
+            <br />
+            Use one only where you cannot live with the agent judging it: eligibility, compliance, a
+            section that must never reach the wrong person. Anything you would want judged case by
+            case belongs in that topic’s criteria instead — that is what criteria are for.
+            <br />
+            <br />
+            Most questionnaires need none. If a rule and the agent disagree, the rule wins. If two
+            rules disagree about the same topic, <em>never ask</em> wins.
           </FieldHelp>
         </Label>
         {/* Disabled with no data slots: `add()` would mint a rule whose `dataSlotKey` is '', which
@@ -124,11 +133,21 @@ export function ScopeRulesEditor({
       </div>
 
       {rules.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {hasDataSlots
-            ? 'No hard rules. Every conditional topic is decided by the agent against its criteria.'
-            : 'No hard rules — and none can be added yet. A hard rule decides from one answer the opening captured, so this questionnaire needs at least one data slot first. Until then, every conditional topic is decided by the agent against its criteria.'}
-        </p>
+        /* The empty state has to teach the FORM, not just report the absence. "No hard rules" on
+           its own reads as a setting left at its default; what an admin needs to know is what one
+           would look like if they added it, in the shape the editor below actually builds. */
+        <div className="text-muted-foreground space-y-1 text-xs">
+          <p>
+            No hard rules — the agent decides every conditional topic for itself, weighing it
+            against that topic’s criteria.
+          </p>
+          <p>
+            Add one to overrule it for a specific answer:{' '}
+            <em>when “Licence holder” is “No”, never ask “Compliance audit”.</em>
+            {!hasDataSlots &&
+              ' You need at least one data slot before you can add one — that is where the answer comes from.'}
+          </p>
+        </div>
       ) : (
         <ul className="space-y-2">
           {rules.map((rule, index) => {
