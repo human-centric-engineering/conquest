@@ -57,7 +57,8 @@ export interface ReportPreviewRefusal {
 /** The preview stage an error came from — recorded so a failure names the pass that produced it. */
 export type PreviewStage = 'sample' | 'generate';
 
-function errorMessage(err: unknown): string {
+/** Shared by both preview routes for their own failure logging (this module logs its own too). */
+export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
@@ -261,7 +262,10 @@ export async function runReportPreview(
   };
 }
 
-export interface StreamReportPreviewParams extends Omit<RunReportPreviewParams, 'onProgress'> {
+export interface StreamReportPreviewParams extends Omit<
+  RunReportPreviewParams,
+  'onProgress' | 'onStage'
+> {
   /** Log context — the questionnaire the version belongs to. */
   questionnaireId: string;
   /** Admin who triggered the preview (owns the spend). */

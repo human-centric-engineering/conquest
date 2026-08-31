@@ -32,6 +32,7 @@ import { logger } from '@/lib/logging';
 import {
   classifyPreviewFailure,
   checkPreviewStructure,
+  errorMessage,
   loadPreviewStructure,
   preparePreviewSettings,
   runReportPreview,
@@ -51,10 +52,6 @@ const previewRequestSchema = z.object({
  * mid-flight and the admin gets a blank failure with nothing in the logs to explain it.
  */
 export const maxDuration = 300;
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const handlePreview = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
