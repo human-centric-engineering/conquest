@@ -47,10 +47,18 @@ const IS_WINDOWS = process.platform === 'win32';
  * that decides which jobs get a cap and a typo fails loudly instead of
  * spawning something unexpected.
  *
- * `tsc` is deliberately absent. Measured peak for `tsc --noEmit` is 1.64-1.75
- * GiB across Sunrise, Hub and Daybreak — a factor of 2.4 under the default, so
- * capping it would be speculation, not a fix. Adding it later is one entry
- * here plus the script in `package.json`.
+ * `tsc` is here because ConQuest measured otherwise, which is the condition
+ * the previous note invited. The 1.64-1.75 GiB figure for `tsc --noEmit` is a
+ * WARM run: `tsconfig.json` sets `incremental`, so a warm pass reuses
+ * `tsconfig.tsbuildinfo` and costs 2.28 GB here. A COLD one — no buildinfo,
+ * which is what a fresh clone, a CI cache miss, or any broad change produces —
+ * peaks at 4.40 GB and aborts against the 4288 MB default this wrapper exists
+ * to raise. Measured 31 Aug 2026 on a 16GB host; pre-merge `main` was 4.34 GB,
+ * so this is tree size, not any one change. The warm/cold split is why the
+ * ceiling stayed invisible: it only bites the run nobody has warmed.
+ *
+ * Its argv is static (`--noEmit` from `package.json`, no filenames), so it
+ * meets the Windows precondition below.
  *
  * BEFORE ADDING ONE, know what the argv is. Everything this wrapper spawns
  * today takes a **static** argv from `package.json`. On Windows it runs under
@@ -63,7 +71,7 @@ const IS_WINDOWS = process.platform === 'win32';
  * other filename-passing caller) through this wrapper means quoting the
  * passthrough args first.
  */
-export const BINS = ['eslint'];
+export const BINS = ['eslint', 'tsc'];
 
 /** Cap applied when nothing else asks for one. Matches the worked example in
  * `.context/architecture/ci.md` and the value the largest fork measured. */

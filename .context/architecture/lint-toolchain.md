@@ -236,18 +236,36 @@ value always wins. `NODE_HEAP_MB` overrides the local default (6144), which is
 itself clamped to 75% of physical memory and floored at Node's own default — a
 cap above available RAM trades a clean V8 abort for an OS OOM kill.
 
-**What is deliberately _not_ capped**, because a cap without a measurement is
-the mistake this section exists to prevent:
+**`type-check` is capped here, and upstream Sunrise does not cap it.** The
+1.64-1.75 GiB figure Sunrise measured is a **warm** run. `tsconfig.json` sets
+`incremental`, so a warm pass reuses `tsconfig.tsbuildinfo` and costs 2.28 GB on
+this tree — comfortably inside the 4288 MB default. A **cold** pass, with no
+buildinfo, peaks at **4.40 GB and aborts**:
 
-- `type-check` — `tsc --noEmit` peaks at 1.64-1.75 GiB across Sunrise, Hub and
-  Daybreak. A 2.4x margin.
+| `tsc --noEmit` | peak RSS | wall  | result |
+| -------------- | -------- | ----- | ------ |
+| warm           | 1.33 GB  | 13s   | ok     |
+| cold           | 4.40 GB  | ~111s | OOM    |
+
+Measured 31 Aug 2026, 16GB host, Node 24. Pre-merge `main` measured 4.34 GB
+cold, so this is tree size rather than any one change — and the warm/cold split
+is why it stayed invisible: it only bites the run nobody has warmed, which is a
+fresh clone, a CI cache miss, or the first run after a broad change such as an
+upstream sync. **A cold local `npm run validate` was failing outright before
+this.** CI never saw it, because the workflow sets `NODE_OPTIONS` globally from
+`CI_NODE_HEAP_MB` and caches the buildinfo.
+
+**What is still deliberately _not_ capped**, because a cap without a
+measurement is the mistake this section exists to prevent:
+
 - `lint-staged` (the pre-commit hook) — one staged file measured 1.85 GiB. The
   project service builds only what the linted files reach transitively, so a
   commit-sized changeset stays far below a whole-repo run.
 
-Both are one line away in `BINS` if a fork ever measures otherwise. Re-derive by
+It is one line away in `BINS` if a fork ever measures otherwise. Re-derive by
 bisection rather than guessing: raise `--max-old-space-size` until the job stops
-aborting, then stop.
+aborting, then stop. Measure **cold** — delete `tsconfig.tsbuildinfo` first, or
+you will reproduce the warm number and conclude there is nothing to fix.
 
 **But check the argv before you add one.** Everything the wrapper spawns today
 takes a static argv from `package.json`. On Windows it runs under `shell: true`
