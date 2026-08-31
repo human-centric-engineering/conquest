@@ -446,6 +446,7 @@ unavailable would throw away the work and leave the admin with nothing.
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `brand-import/index.ts`                                 | The barrel. What the route and the dialog import; nothing reaches past it.                        |
 | `brand-import/result.ts`                                | The shared contract — outcomes, proposals, the `analysedResult` / `blockedResult` builders. Pure. |
+| `brand-import/palette-record.ts`                        | The palette as STORED: the Zod write boundary, `narrowBrandPalette`, `describeSource`. Pure.      |
 | `brand-import/color.ts`                                 | Hex ↔ channels, chroma, redmean distance. Pure.                                                   |
 | `brand-import/css-color.ts`                             | Every CSS colour notation → hex. Pure; see [Colour notation](#colour-notation).                   |
 | `brand-import/palette.ts`                               | Buffer → ranked candidates (sharp). Bucket, then merge.                                           |
@@ -463,6 +464,7 @@ unavailable would throw away the work and leave the admin with nothing.
 | `app/api/v1/app/demo-clients/[id]/fonts/route.ts`       | Loads (POST) / clears (DELETE) a client's custom faces into storage.                              |
 | `app/api/v1/app/demo-clients/[id]/font/[face]/route.ts` | Serves one stored face same-origin, which is what `font-src 'self'` requires.                     |
 | `components/admin/demo-clients/brand-import-dialog.tsx` | Upload, per-field accept, the palette strip.                                                      |
+| `components/admin/demo-clients/brand-palette-strip.tsx` | The kept palette on the branding page — proportional band, click-to-copy chips, Clear.            |
 | `components/admin/demo-clients/custom-font-field.tsx`   | The two family names, the load action, and what is currently stored.                              |
 
 ### Why buckets, then a merge
@@ -554,6 +556,67 @@ import already got right.
 The dialog also renders **every measured colour** as a palette strip, ranked by share, so an admin
 can copy a hex by hand when a suggestion is wrong. On a degraded run that strip is the entire
 result — and it is still useful.
+
+## The palette is kept
+
+The proposals used to be the durable half of an import and the palette the disposable one: accepted
+colours landed in columns, and the measurement they came from disappeared when the dialog closed.
+That is backwards. A proposal can be re-typed off a brand guideline; a colour measured from a site
+that has since been redesigned **cannot be measured again**.
+
+So the palette is persisted on `AppDemoClient.brandPalette` and the branding page renders it under
+the import button, beside the fields it filled.
+
+### The contract
+
+```ts
+interface BrandPalette {
+  candidates: ColorCandidate[]; // every measured colour, ranked by share
+  readFrom: string | null; // "acme.example + 2 screenshots"
+  capturedAt: string; // ISO, stamped when the run RETURNED
+}
+```
+
+`readFrom` and `capturedAt` are what make the strip honest rather than decorative. A row of hexes
+with no provenance invites an admin to trust colours read off a brand that has since changed; with
+them, the strip says what it is — a record of what was there on the day we looked.
+
+### It rides with the proposals, not on its own beat
+
+`onApply` hands the palette back **in the same call** as the accepted fields, and the form writes it
+through the same `setValue`/`shouldDirty` path. Three consequences, all deliberate:
+
+- An import that is applied but never saved leaves **no trace**, exactly like the colours it
+  proposed.
+- Vetoing every colour still keeps the palette: it is evidence about the **site**, not about the
+  fields accepted from it, and an admin re-typing colours by hand is typing _from_ it.
+- A run that measured nothing hands back `null`, which **clears** a stored palette. Leaving an older
+  strip beside newly imported colours would attribute them to evidence we did not gather this time.
+
+Because it is not a field anyone types into, the instinct is to keep it out of form state. It lives
+there anyway: Save is gated on `isDirty`, and a palette held beside the form could be replaced by a
+re-import — or cleared — with the button still greyed out.
+
+### Strict write, forgiving read
+
+`brandPaletteSchema` validates on the way in (six-digit lower-case hex, `share` in 0–1, at most
+`MAX_STORED_CANDIDATES`, an ISO `capturedAt`). `narrowBrandPalette` narrows on the way out and
+returns `null` for anything it does not recognise — the same split `customFontFiles` already uses on
+this table, and for the same reason: the column is `Json?`, so a seed, a rollback or an older build
+can leave anything there, and a branding page with no strip is a state the page already renders
+correctly. One that throws is not.
+
+The cap is applied in the dialog **as well as** at the write boundary. A merged run over a site plus
+three screenshots can measure more colours than the column keeps, and silently posting a body the
+API rejects would fail the whole save over the least important thing in it.
+
+### Copy, not apply
+
+A chip copies its hex. It deliberately does not write itself into a field: the strip has a dozen
+colours and the form has ten colour boxes, so "apply" would need a target, and every way of choosing
+one is more machinery than pasting. Assigning colours to roles is the **dialog's** job; the strip is
+the reference sheet beside it. Clearing travels back through the form rather than being handled in
+the strip, so the column and the Save button stay in step.
 
 A one-line reminder sits beside the import button: check you are entitled to use the client's
 branding. Pulling a prospect's logo is equivalent to an admin downloading it manually, but the

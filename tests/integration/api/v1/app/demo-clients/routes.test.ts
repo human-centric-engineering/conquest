@@ -49,6 +49,7 @@ vi.mock('@/app/api/v1/app/demo-clients/_lib/read', async (importOriginal) => {
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { GET as listGET, POST as createPOST } from '@/app/api/v1/app/demo-clients/route';
+import { MAX_STORED_CANDIDATES } from '@/lib/app/questionnaire/brand-import/palette-record';
 import {
   GET as detailGET,
   PATCH as updatePATCH,
@@ -325,6 +326,21 @@ describe('PATCH /api/v1/app/demo-clients/:id (update)', () => {
     expect(body.error.code).toBe('SLUG_CONFLICT');
   });
 
+  it('re-throws a database error that is not a slug collision, rather than reporting a fake 409', async () => {
+    // Only P2002 (unique-constraint) means "the slug is taken" — any other failure (a different
+    // constraint, a connection drop) must propagate rather than get relabelled as a slug conflict
+    // the admin would go looking for and not find. `withAdminAuth` is the real implementation in
+    // this integration file, so the propagated error surfaces as its own 500 — not as the 409
+    // `SLUG_CONFLICT` shape the P2002 branch above returns.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockRejectedValue(new Error('connection reset'));
+    const res = await updatePATCH(jsonReq({ name: 'Renamed' }), ctx({ id: 'dc-1' }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).not.toBe('SLUG_CONFLICT');
+  });
+
   it('patches the F3.4 theme fields, including clearing one to null', async () => {
     prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
     prismaMock.appDemoClient.update.mockResolvedValue({ ...ROW, ctaColor: '#000000' });
@@ -337,6 +353,40 @@ describe('PATCH /api/v1/app/demo-clients/:id (update)', () => {
       expect.objectContaining({
         data: expect.objectContaining({ ctaColor: '#000000', welcomeCopy: null }),
       })
+    );
+  });
+
+  it('patches every field the update handler recognises, in one round trip', async () => {
+    // The handler is one `data:` object built entirely from `field !== undefined ? {...} : {}`
+    // ternaries — a present-vs-omitted branch per column. The tests above and below each exercise
+    // a handful; this fills in the rest (identity, chrome, and dark-mode/mark columns) so every
+    // ternary's PRESENT arm is proven to actually reach Prisma, not just the handful the narrower
+    // tests happen to touch.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    const patch = {
+      description: 'Updated note',
+      isActive: false,
+      accentColor: '#2f6bff',
+      logoUrl: 'https://cdn.example.com/logo.png',
+      bannerUrl: 'https://cdn.example.com/banner.png',
+      surfaceColor: '#280039',
+      ctaColorEnd: '#FF03DF',
+      logoBackgroundColor: '#111111',
+      logoBackgroundEnabled: true,
+      inkColor: '#1a1a1a',
+      canvasColorDark: '#0a0a0a',
+      inkColorDark: '#fafafa',
+      accentColorEnd: '#7b5cff',
+      logoMarkUrl: 'https://cdn.example.com/mark.png',
+      logoDarkUrl: 'https://cdn.example.com/logo-dark.png',
+    };
+
+    const res = await updatePATCH(jsonReq(patch), ctx({ id: 'dc-1' }));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appDemoClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining(patch) })
     );
   });
 });
@@ -371,6 +421,100 @@ describe('PATCH /api/v1/app/demo-clients/:id (brand kit)', () => {
     for (const col of ['canvasColor', 'inkColor', 'accentColorEnd', 'fontPairing']) {
       expect(data).not.toHaveProperty(col);
     }
+  });
+});
+
+describe('the measured brand palette (write boundary)', () => {
+  const PALETTE = {
+    candidates: [
+      { hex: '#0a1a3a', share: 0.42, neutral: false },
+      { hex: '#fffcf5', share: 0.31, neutral: true },
+    ],
+    readFrom: 'acme.example',
+    capturedAt: '2026-08-31T09:00:00.000Z',
+  };
+
+  it('persists a palette applied alongside the colours it produced', async () => {
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    const res = await updatePATCH(
+      jsonReq({ ctaColor: '#0a1a3a', brandPalette: PALETTE }),
+      ctx({ id: 'dc-1' })
+    );
+    expect(res.status).toBe(200);
+    expect(prismaMock.appDemoClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ brandPalette: PALETTE }) })
+    );
+  });
+
+  it('clears the column with a JSON DbNull rather than storing a JSON null', async () => {
+    // `Prisma.DbNull` is SQL NULL; a bare `null` on a Json column stores the JSON value `null`,
+    // which narrows to null on read but is not the same "never had one" state the strip tests.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    await updatePATCH(jsonReq({ brandPalette: null }), ctx({ id: 'dc-1' }));
+    const data = prismaMock.appDemoClient.update.mock.calls[0]?.[0]?.data as Record<
+      string,
+      unknown
+    >;
+    expect(data.brandPalette).toBe(Prisma.DbNull);
+  });
+
+  it('leaves the column untouched when the patch omits it', async () => {
+    // The common case: an admin nudging one colour must not discard the measurement the whole
+    // theme was read from.
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue(ROW);
+    await updatePATCH(jsonReq({ ctaColor: '#0a1a3a' }), ctx({ id: 'dc-1' }));
+    const data = prismaMock.appDemoClient.update.mock.calls[0]?.[0]?.data as Record<
+      string,
+      unknown
+    >;
+    expect(data).not.toHaveProperty('brandPalette');
+  });
+
+  it('400s on a palette whose shares are percentages rather than fractions', async () => {
+    // The strip renders share as a band width and a percentage label; 42 rather than 0.42 draws
+    // one colour and reads "4200.0%".
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    const res = await updatePATCH(
+      jsonReq({
+        brandPalette: {
+          ...PALETTE,
+          candidates: [{ hex: '#0a1a3a', share: 42, neutral: false }],
+        },
+      }),
+      ctx({ id: 'dc-1' })
+    );
+    expect(res.status).toBe(400);
+    expect(prismaMock.appDemoClient.update).not.toHaveBeenCalled();
+  });
+
+  it('400s on a palette with more candidates than the column will hold', async () => {
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    const res = await updatePATCH(
+      jsonReq({
+        brandPalette: {
+          ...PALETTE,
+          candidates: Array.from({ length: MAX_STORED_CANDIDATES + 1 }, (_, i) => ({
+            hex: `#0000${i.toString(16).padStart(2, '0')}`,
+            share: 0.01,
+            neutral: false,
+          })),
+        },
+      }),
+      ctx({ id: 'dc-1' })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('persists a palette supplied on create', async () => {
+    prismaMock.appDemoClient.create.mockResolvedValue(ROW);
+    const res = await createPOST(jsonReq({ name: 'Acme Bank', brandPalette: PALETTE }));
+    expect(res.status).toBe(201);
+    expect(prismaMock.appDemoClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ brandPalette: PALETTE }) })
+    );
   });
 });
 

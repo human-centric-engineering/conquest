@@ -280,6 +280,7 @@ function makeDemoClientApiRow(
   return {
     description: null,
     isActive: true,
+    brandPalette: null,
     ctaColor: null,
     accentColor: null,
     canvasColor: null,

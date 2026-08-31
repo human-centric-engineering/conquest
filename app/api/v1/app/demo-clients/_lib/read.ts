@@ -14,6 +14,7 @@ import { prisma } from '@/lib/db/client';
 import type { DemoClientDetail, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import { APP_QUESTIONNAIRE_STATUSES, narrowToEnum } from '@/lib/app/questionnaire/types';
 import { DEMO_CLIENT_THEME_SELECT } from '@/lib/app/questionnaire/theming';
+import { narrowBrandPalette } from '@/lib/app/questionnaire/brand-import/palette-record';
 
 /**
  * Selection shared by every demo-client read/write serializer — identity columns
@@ -31,6 +32,9 @@ export const DEMO_CLIENT_SELECT = {
   // (see lib/app/questionnaire/theming/select.ts). The admin form prefills from these and
   // the invitation / respondent seams resolve them. Nullable; null = ConQuest default.
   ...DEMO_CLIENT_THEME_SELECT,
+  // Brand import evidence, NOT a theme column — so it is selected here rather than added to the
+  // theme fragment, whose `satisfies` guard asserts it holds exactly what `resolveTheme()` reads.
+  brandPalette: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { questionnaires: true } },
@@ -82,6 +86,9 @@ export function toDemoClientView(row: DemoClientRow): DemoClientView {
     fontPairing: row.fontPairing,
     customFontDisplay: row.customFontDisplay,
     customFontBody: row.customFontBody,
+    // Narrowed, never cast: `Json?` can hold whatever an older build, a seed or a direct write put
+    // there, and an unrecognised shape must render as "no palette" rather than reach the strip.
+    brandPalette: narrowBrandPalette(row.brandPalette),
     questionnaireCount: row._count.questionnaires,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

@@ -54,6 +54,11 @@ import { BrandColorField } from '@/components/admin/demo-clients/brand-color-fie
 import { BrandImportDialog } from '@/components/admin/demo-clients/brand-import-dialog';
 import { CustomFontField } from '@/components/admin/demo-clients/custom-font-field';
 import type { ImportableField } from '@/lib/app/questionnaire/brand-import/result';
+import {
+  brandPaletteSchema,
+  type BrandPalette,
+} from '@/lib/app/questionnaire/brand-import/palette-record';
+import { BrandPaletteStrip } from '@/components/admin/demo-clients/brand-palette-strip';
 
 /** True for an empty field, an https URL, or one of our own upload paths — shares the
  *  server's predicate (isBrandImageSrc) so the form and the API can't drift. */
@@ -110,6 +115,15 @@ const formSchema = z.object({
   // server does and a form that can submit what the API rejects is a worse experience than
   // one that says so first.
   fontPairing: z.enum(FONT_PAIRINGS),
+  /**
+   * The measured palette, held in FORM state rather than in a `useState` beside it.
+   *
+   * It is not a field the admin types into, so the instinct is to keep it out — but Save is gated
+   * on `isDirty`, and a palette that lived outside the form could be replaced by a re-import, or
+   * cleared, with the button still greyed out. Carrying it here makes an import indistinguishable
+   * from typing, which is the contract the rest of this form already has.
+   */
+  brandPalette: brandPaletteSchema.nullable(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -179,11 +193,18 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
       // not know (a rollback, a seed) prefills as the default rather than leaving the select
       // with no selection and silently clearing the column on the next save.
       fontPairing: resolveFontPairing(client?.fontPairing),
+      brandPalette: client?.brandPalette ?? null,
     },
   });
 
   const isActive = watch('isActive');
   const logoBackgroundEnabled = watch('logoBackgroundEnabled');
+  // Watched on its own rather than in the theme batch below: the live preview resolves a THEME,
+  // and a measured palette is evidence about where that theme came from, not part of it.
+  const brandPalette = watch('brandPalette');
+
+  const setPalette = (value: BrandPalette | null) =>
+    setValue('brandPalette', value, { shouldDirty: true });
 
   // Live brand preview: reflect only valid inputs (a half-typed hex / non-https URL
   // shows the default rather than a broken swatch); blank → null → ConQuest default.
@@ -237,8 +258,15 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
    * touches the server — the import route persists nothing, and these values reach the columns
    * through the same PATCH as every other edit on this form.
    */
-  const applyImportedBrand = (values: Partial<Record<ImportableField, string>>) => {
+  const applyImportedBrand = (
+    values: Partial<Record<ImportableField, string>>,
+    palette: BrandPalette | null
+  ) => {
     let refresh = false;
+    // The evidence lands with the proposals it produced, in the same unsaved edit. A run that
+    // measured nothing clears any stored palette for the same reason: leaving the old strip up
+    // beside newly imported colours would attribute them to a site we did not read this time.
+    setPalette(palette);
     for (const [field, value] of Object.entries(values) as [ImportableField, string][]) {
       // The custom families are not form fields: the import already fetched and stored them
       // server-side, exactly as it re-hosts a logo. Refresh so the panel below re-reads the row
@@ -346,6 +374,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
         // already what every unset client has, and writing the word would make "never chose"
         // and "chose the default" two different rows that render identically.
         fontPairing: values.fontPairing === DEFAULT_FONT_PAIRING ? null : values.fontPairing,
+        brandPalette: values.brandPalette,
       };
 
       if (isEdit) {
@@ -476,6 +505,17 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           uploadEnabled={uploadEnabled}
           onApply={applyImportedBrand}
         />
+
+        {/* The evidence, immediately under the button that produced it and above the fields it
+            filled — so an admin reading a hex in a box can see where it came from without
+            re-opening the dialog. Absent until an import has been applied and saved. */}
+        {brandPalette && (
+          <BrandPaletteStrip
+            palette={brandPalette}
+            onClear={() => setPalette(null)}
+            disabled={isLoading}
+          />
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <BrandColorField

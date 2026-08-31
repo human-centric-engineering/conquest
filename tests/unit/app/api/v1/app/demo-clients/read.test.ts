@@ -52,6 +52,9 @@ describe('listDemoClients', () => {
         name: 'Acme Bank',
         description: null,
         isActive: true,
+        // Not `undefined` like the unset theme columns: the column is narrowed on read, and an
+        // unrecognised (or absent) value resolves to an explicit null the view contract declares.
+        brandPalette: null,
         questionnaireCount: 3,
         createdAt: D.toISOString(),
         updatedAt: D.toISOString(),
@@ -66,6 +69,36 @@ describe('listDemoClients', () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { createdAt: 'desc' } })
     );
+  });
+});
+
+describe('the measured brand palette', () => {
+  it('narrows a stored palette through to the view', async () => {
+    const palette = {
+      candidates: [{ hex: '#0a1a3a', share: 0.42, neutral: false }],
+      readFrom: 'acme.example',
+      capturedAt: '2026-08-31T09:00:00.000Z',
+    };
+    findMany.mockResolvedValue([row({ brandPalette: palette })]);
+    expect((await listDemoClients())[0].brandPalette).toEqual(palette);
+  });
+
+  it.each([
+    ['a string left by an older build', 'acme.example'],
+    ['a record missing capturedAt', { candidates: [], readFrom: null }],
+    [
+      'a share expressed as a percentage',
+      {
+        candidates: [{ hex: '#0a1a3a', share: 42, neutral: false }],
+        readFrom: null,
+        capturedAt: '2026-08-31T09:00:00.000Z',
+      },
+    ],
+  ])('degrades %s to null rather than reaching the strip', async (_label, stored) => {
+    // The column is `Json?`, so a seed, a rollback or a direct write can put anything there. A
+    // branding page with no strip is a state it already renders; one that throws is not.
+    findMany.mockResolvedValue([row({ brandPalette: stored })]);
+    expect((await listDemoClients())[0].brandPalette).toBeNull();
   });
 });
 

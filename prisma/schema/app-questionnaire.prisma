@@ -720,6 +720,17 @@ model AppDemoClient {
   customFontBody    String? // Google family for running text; null → the pairing's own face
   customFontFiles   Json? // { display?: Record<weight, url>, body?: Record<weight, url> } — what we actually stored
 
+  // Brand import: the palette that import MEASURED, kept as evidence for the colours above.
+  // { candidates: [{hex, share, neutral}], readFrom, capturedAt } — see
+  // lib/app/questionnaire/brand-import/palette-record.ts, which owns the shape and narrows it on
+  // read. Written by the same PATCH as the colour columns, so an import that is applied but not
+  // saved leaves no trace, exactly like the colours it proposed.
+  //
+  // Kept rather than discarded because it is the expensive, unrepeatable half of an import: the
+  // proposals can be re-typed by hand, but a colour measured off a site that has since been
+  // redesigned cannot be measured again. The branding page renders it as a swatch strip.
+  brandPalette Json?
+
   // Respondent Report: this client's dedicated KnowledgeTag id (KnowledgeTag is a platform model;
   // a plain String, no @relation — UG-1 and a deliberate seam, so the app never forks the platform
   // knowledge schema). Provisioned on first KB use; documents tagged with it are the client's

@@ -88,6 +88,11 @@ const handleUpdate = withAdminAuth<{ id: string }>(async (request, session, { pa
         ...(body.logoMarkUrl !== undefined ? { logoMarkUrl: body.logoMarkUrl } : {}),
         ...(body.logoDarkUrl !== undefined ? { logoDarkUrl: body.logoDarkUrl } : {}),
         ...(body.fontPairing !== undefined ? { fontPairing: body.fontPairing } : {}),
+        // Brand import evidence. `null` clears a stale palette; absent leaves it untouched, so an
+        // ordinary colour edit never discards the measurement the colours came from.
+        ...(body.brandPalette !== undefined
+          ? { brandPalette: body.brandPalette ?? Prisma.DbNull }
+          : {}),
       },
       select: DEMO_CLIENT_SELECT,
     });
