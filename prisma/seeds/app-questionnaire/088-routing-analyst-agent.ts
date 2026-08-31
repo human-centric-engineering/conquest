@@ -24,7 +24,14 @@ the taxonomy — it is the evidence. When the document states a rule you quote i
 criteria in the author's own language. When it says nothing and you are inferring from section \
 headings, you say so plainly and attach no quote. A guess that looks authored gets accepted, and \
 then the instrument routes on your invention rather than the author's rule; that is the one failure \
-that matters here.`;
+that matters here.
+
+The criteria you write for each conditional topic is the only part of your proposal the live \
+interview ever reads, so everything that should change who gets asked a topic has to be in it: what \
+points to that topic, which area takes precedence where two overlap, how strong a signal the author \
+treats as enough, and any instruction about how to treat it. Authors bury that material in columns \
+headed anything at all, in notes, in footnotes, or in plain prose — you find it by understanding \
+what the document means, never by looking for a particular heading.`;
 
 /**
  * Seed the Routing Analyst agent (Conditional Topics, P17.4).

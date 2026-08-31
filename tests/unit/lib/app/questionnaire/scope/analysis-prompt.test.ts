@@ -567,3 +567,114 @@ describe('the trigger record, and the voice its cues have to be in (F17.31a)', (
     expect(template).toContain('OMIT ENTIRELY unless TIMING applies');
   });
 });
+
+describe('criteria is the only field that reaches the runtime', () => {
+  /**
+   * The defect this suite pins: `askPlanner` renders a candidate topic as key + name +
+   * `choose when: <criteria>` and sends nothing else. A precedence rule the analyst faithfully
+   * quoted into `sourceQuote` — but did not fold into the criteria — therefore changes what no
+   * respondent is ever asked. The rubric has to say so, because the failure is invisible on the
+   * review surface: the admin can SEE the quote, so the proposal looks complete.
+   */
+  function rubric(): string {
+    const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+    return typeof system.content === 'string' ? system.content : '';
+  }
+
+  it('tells the analyst that only the criteria is shown when the topic is judged', () => {
+    expect(rubric()).toContain('NOTHING ELSE');
+  });
+
+  it('names the four kinds of material that must be folded into the criteria', () => {
+    const content = rubric();
+    // Not a vocabulary to match against — the four things a document says ABOUT a condition that
+    // change how it should be judged. Each was previously stranded in sourceQuote.
+    expect(content).toContain('WHAT POINTS TO IT');
+    expect(content).toContain('PRECEDENCE AND EXCLUSIVITY');
+    expect(content).toContain('STRENGTH');
+    expect(content).toContain('HOW TO TREAT IT');
+  });
+
+  it('requires the material to be found by comprehension, not by matching a heading', () => {
+    const content = rubric();
+    expect(content).toContain('FIND THIS MATERIAL BY READING IT, NOT BY LOOKING FOR A LABEL');
+    // The user's own instruments label this column differently every time; a rubric that named
+    // "listen for" or "notes" as the thing to find would be the keyword-matching this replaced.
+    expect(content).toContain('never by what it is called');
+  });
+
+  it('says a tie-break between two competing topics must appear on BOTH of them', () => {
+    const content = rubric();
+    expect(content).toContain('Where two topics compete');
+    expect(content).toContain('criteria of BOTH topics');
+  });
+
+  it('guards against padding — completeness is the goal, not length', () => {
+    expect(rubric()).toContain('length is not the goal');
+  });
+});
+
+describe('the administrator note is not buried', () => {
+  /**
+   * It used to be the LAST block in the user turn, appended after the whole instrument, every
+   * question and every existing topic — so an explicit steer sat behind tens of thousands of
+   * characters, and the rubric never acknowledged it could exist at all. Both halves are fixed:
+   * the rubric names it, and it leads the turn.
+   */
+  it('places the note before the document and question blocks', () => {
+    const content = userContent(
+      buildRoutingAnalysisPrompt({
+        questions: QUESTIONS,
+        goal: 'Qualify inbound leads',
+        documents: [{ role: 'primary', fileName: 'lead-gen.md', text: 'Routing table follows.' }],
+        instructions: 'The routing rules are in the notes column.',
+      })
+    );
+    const noteAt = content.indexOf("ADMINISTRATOR'S NOTE FOR THIS RUN:");
+    expect(noteAt).toBeGreaterThanOrEqual(0);
+    expect(noteAt).toBeLessThan(content.indexOf('THE INSTRUMENT'));
+    expect(noteAt).toBeLessThan(content.indexOf('QUESTIONS (use these keys exactly):'));
+  });
+
+  it('tells the analyst in the rubric that such a note may arrive, and to follow it', () => {
+    const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+    const content = typeof system.content === 'string' ? system.content : '';
+    expect(content).toContain('ADMINISTRATOR');
+    expect(content).toContain('FOLLOW IT');
+    // Following a steer must not become licence to invent routing the document never stated.
+    expect(content).toContain('does not license inventing');
+  });
+});
+
+describe('the criteria shape the renderer already recovers', () => {
+  /**
+   * `scope/criteria-format.ts` parses criteria into a bulleted list with a `term` and a `priority`
+   * chip per signal — it has always been able to draw that shape, but nothing told the analyst to
+   * produce it, so richer criteria would have arrived as one grey paragraph. The three priority
+   * spellings here must stay in step with `PRIORITY` in that module.
+   */
+  function rubric(): string {
+    const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+    return typeof system.content === 'string' ? system.content : '';
+  }
+
+  it('asks for one line per signal as a bulleted list', () => {
+    expect(rubric()).toContain('ONE LINE PER SIGNAL');
+  });
+
+  it('names the exact priority spellings criteria-format parses', () => {
+    const content = rubric();
+    // `PRIORITY = /\s*\((high|medium|low)[\s-]*priority\)\s*/i` — anything else renders as prose.
+    expect(content).toContain('(high priority)');
+    expect(content).toContain('(medium priority)');
+    expect(content).toContain('(low priority)');
+  });
+
+  it('forbids inventing a weight the document never stated', () => {
+    expect(rubric()).toContain('leave the marker off rather than');
+  });
+
+  it('keeps a plain paragraph legal, so the shape never distorts the author', () => {
+    expect(rubric()).toContain('never distort what the author said to fit the shape');
+  });
+});
