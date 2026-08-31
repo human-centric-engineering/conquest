@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('@/lib/api/client', () => ({
@@ -130,8 +130,74 @@ function renderEditor(
   );
 }
 
+/**
+ * Stand in for the streamed preview endpoint.
+ *
+ * Each event becomes its own SSE frame in its own chunk. In `manual` mode the frames are released
+ * one at a time by the returned `push()`, which is what makes the intermediate phases assertable:
+ * the point of the change under test is that the dialog updates BETWEEN frames, and a fake that
+ * handed over the whole body at once would let a component that only renders the terminal frame
+ * pass.
+ */
+function mockPreviewStream(
+  events: Array<Record<string, unknown>>,
+  options: { manual?: boolean } = {}
+) {
+  const frames = events.map(
+    (event) => `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`
+  );
+  let releaseNext: (() => void) | null = null;
+  const armGate = () =>
+    options.manual
+      ? new Promise<void>((resolve) => {
+          releaseNext = resolve;
+        })
+      : Promise.resolve();
+  let gate = armGate();
+
+  (globalThis.fetch as unknown as Mock).mockResolvedValue({
+    ok: true,
+    status: 200,
+    body: new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        await gate;
+        gate = armGate();
+        const frame = frames.shift();
+        if (frame === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(frame));
+      },
+    }),
+  });
+
+  return {
+    /** Deliver the next frame and let React render what it produced. */
+    async push() {
+      releaseNext?.();
+      await act(async () => {
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: a preview that streams nothing but its terminal frame. Tests that care about the
+  // phases in between call `mockPreviewStream` with their own script.
+  globalThis.fetch = vi.fn();
+  mockPreviewStream([
+    {
+      type: 'done',
+      questionnaireTitle: 'Pulse',
+      mode: 'narrative',
+      content: { summary: 'Sample.', sections: [], actions: [] },
+      formatted: false,
+      completionPct: 100,
+    },
+  ]);
 });
 
 describe('RespondentReportEditor', () => {
@@ -197,19 +263,70 @@ describe('RespondentReportEditor', () => {
     expect(opts.body.respondentReport.generation.dataSlotInfluence).toBe(50);
   });
 
-  it('generates a preview from the current config via the preview endpoint', () => {
+  it('generates a preview from the current config via the streamed preview endpoint', () => {
     renderEditor({
       mode: 'narrative',
       generation: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation, dataSlotInfluence: 70 },
     });
     fireEvent.click(screen.getByRole('button', { name: /preview report/i }));
 
-    const post = apiClient.post as unknown as Mock;
-    expect(post).toHaveBeenCalledTimes(1);
-    const [path, opts] = post.mock.calls[0];
-    expect(path).toBe('/api/v1/app/questionnaires/qn-1/versions/v1/report/preview');
-    expect(opts.body.config.mode).toBe('narrative');
-    expect(opts.body.config.generation.dataSlotInfluence).toBe(70);
+    const fetchMock = globalThis.fetch as unknown as Mock;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [path, init] = fetchMock.mock.calls[0];
+    // The streamed route, not the one-response one — a preview takes ~two minutes and the dialog
+    // has to be able to say what it is doing.
+    expect(path).toBe('/api/v1/app/questionnaires/qn-1/versions/v1/report/preview/stream');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.config.mode).toBe('narrative');
+    expect(body.config.generation.dataSlotInfluence).toBe(70);
+  });
+
+  it('shows each streamed phase while the preview runs, then renders the report', async () => {
+    const stream = mockPreviewStream(
+      [
+        { type: 'started', questionCount: 3, dataSlotCount: 1 },
+        { type: 'sampling', batchesDone: 1, batchesTotal: 2 },
+        { type: 'writing' },
+        {
+          type: 'done',
+          questionnaireTitle: 'Pulse',
+          mode: 'narrative',
+          content: { summary: 'Sample summary.', sections: [], actions: [] },
+          formatted: false,
+          completionPct: 100,
+        },
+      ],
+      { manual: true }
+    );
+    renderEditor({ mode: 'narrative' });
+    fireEvent.click(screen.getByRole('button', { name: /preview report/i }));
+
+    // Each phase is on screen while it is the one actually running — that is the whole point: a
+    // static spinner for ~two minutes is indistinguishable from a hang.
+    await stream.push();
+    expect(screen.getByText(/Preparing a sample respondent for 3 questions/i)).toBeInTheDocument();
+    await stream.push();
+    expect(screen.getByText(/1 of 2 parts done/i)).toBeInTheDocument();
+    await stream.push();
+    expect(screen.getByText(/Writing the report/i)).toBeInTheDocument();
+
+    await stream.push();
+    // …and once more to close the stream, which is what ends the component's read loop.
+    await stream.push();
+    expect(await screen.findByText(/Sample summary\./i)).toBeInTheDocument();
+  });
+
+  it('surfaces a terminal error frame instead of spinning forever', async () => {
+    mockPreviewStream([
+      { type: 'started', questionCount: 3, dataSlotCount: 1 },
+      { type: 'error', code: 'REPORT_PREVIEW_TIMEOUT', message: 'The preview took too long.' },
+    ]);
+    renderEditor({ mode: 'narrative' });
+    fireEvent.click(screen.getByRole('button', { name: /preview report/i }));
+
+    expect(await screen.findByText(/The preview took too long\./i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
   });
 
   it('hides the Q&A toggle in narrative mode (woven-only) but keeps the captured-data toggle', () => {

@@ -47,7 +47,11 @@ and the design is entirely a consequence of them.
   a reporter. Passing nothing is always valid, which is what left every pre-existing caller and test
   untouched.
 - The route is an **async generator**, so a callback cannot `yield`. Hence the channel: `emit` fills
-  a queue and `drain` lets the route pull from it concurrently with the pipeline promise.
+  a queue and `drain` lets the route pull from it concurrently with the pipeline promise. That
+  queue/drain machinery is generic and lives in `createProgressChannel`
+  (`lib/app/questionnaire/llm/progress-channel.ts`); `createStageChannel` is a thin delegate that
+  supplies the turn's de-dup rule. The report-preview stream uses the same channel — see
+  [`respondent-report.md`](./respondent-report.md#why-it-streams).
 
 ```ts
 async function* drive() {

@@ -381,16 +381,20 @@ for how several legs' records merge into one.
 ## Config preview (AI-synthesised)
 
 The Generation tab's **Preview report** button lets an admin see how the configured report will read
-**before going live**, without a real respondent. It posts the current (possibly unsaved) config to
-`POST …/versions/:vid/report/preview` (`reportPreview` in `lib/api/endpoints.ts`; admin-only,
-per-admin `reportPreviewLimiter` — two LLM calls per preview). The route:
+**before going live**, without a real respondent. It sends the current (possibly unsaved) config to
+`POST …/versions/:vid/report/preview/stream` (`reportPreviewStream` in `lib/api/endpoints.ts`;
+admin-only, per-admin `reportPreviewLimiter`). Every decision the run makes lives in
+`lib/app/questionnaire/report/preview-run.ts`:
 
-1. loads the version's structure (questions + data slots);
-2. `synthesiseSampleReportInputs` (`lib/app/questionnaire/report/preview-sample.ts`) invents a single
-   plausible sample respondent via one structured LLM call and maps it through the **same**
-   `buildAnswerTranscript` + `buildDataSlotContextBlock` builders production uses;
-3. forces `research.enabled = false` and `generation.useClientKnowledge = false` (previews are fast,
-   cheap, deterministic — no web search, no KB dependency), then runs `generateReportFromInputs`.
+1. `loadPreviewStructure` reads the version's structure (questions + data slots);
+2. `preparePreviewSettings` narrows the posted config and forces `research.enabled = false` and
+   `generation.useClientKnowledge = false` (previews are fast, cheap, deterministic — no web search,
+   no KB dependency);
+3. `synthesiseSampleReportInputs` (`lib/app/questionnaire/report/preview-sample.ts`) invents one
+   plausible sample respondent (a persona pass), answers the questionnaire as them across batched
+   parallel calls, and maps the result through the **same** `buildAnswerTranscript` +
+   `buildDataSlotContextBlock` builders production uses;
+4. `generateReportFromInputs` runs the real generation core with `preview: true`.
 
 Only the **AI modes** are previewable (a `raw` config is rejected — its output is just the answers,
 previewed via the respondent walkthrough). The editor renders the returned `RespondentReportContent`
@@ -398,6 +402,52 @@ in a paper dialog using the shared `ReportBody` / `ReportPaperHeader`
 (`components/app/questionnaire/report/report-body.tsx`, extracted from `session-complete.tsx` so preview
 and the live respondent view can't drift), behind a caveat banner ("sample answers; research/KB skipped").
 Nothing is persisted.
+
+### Why it streams
+
+A preview is not one call, it is five or six: the persona pass, a fan-out of sample-answer batches,
+the report writer, and the formatter, back to back. A measured 69-question / 5-data-slot version
+takes **~110 seconds** end to end (~7s persona, ~35s sampling, ~40s writing, ~30s formatting).
+
+The dialog used to show a single static "Generating a sample report…" spinner for all of it, which is
+indistinguishable from a hung request — the admin has no way to tell "this takes two minutes" from
+"this is broken", and no reason to keep waiting. So the run reports what it is doing as it does it:
+
+| Phase         | On screen                                                       |
+| ------------- | --------------------------------------------------------------- |
+| `started`     | Preparing a sample respondent for N questions and M data slots… |
+| `persona`     | Inventing a sample respondent…                                  |
+| `sampling`    | Answering the questionnaire as them — X of Y parts done…        |
+| `grounding`   | Reading the client knowledge base…                              |
+| `researching` | Researching…                                                    |
+| `writing`     | Writing the report…                                             |
+| `formatting`  | Laying out the report…                                          |
+| `finishing`   | Finishing up…                                                   |
+
+The vocabulary and the labels live in `lib/app/questionnaire/report/progress-events.ts` — one place,
+shared by the server that emits them and the client that renders them, so the two can't drift. The
+dialog pairs the current phase with a live elapsed `mm:ss` clock (`<ExtractionProgress>`, the same
+honest-progress component the document-upload flow uses).
+
+`sampling` counts **completed** batches, not launched ones: batches run concurrently, so
+"3 of 6 started" would jump to 6/6 in the first second and then sit there. A batch that _fails_ still
+advances the counter — it is done, just empty — otherwise the wait strands at "5 of 6".
+
+Mechanically, `synthesiseSampleReportInputs` and `generateReportFromInputs` each take an **optional**
+`onProgress` emitter: a synchronous, side-effect-only callback that does no I/O and can never fail the
+run. Omitting it is always valid and changes nothing, which is what keeps the queued (unwatched)
+report path exactly as it was. A callback can't `yield`, so `createProgressChannel`
+(`lib/app/questionnaire/llm/progress-channel.ts`) bridges the two: the emitter fills a queue, and
+`drain` pulls from it concurrently with the run's promise. That is the same machinery behind the
+respondent turn indicator — see [`turn-progress.md`](./turn-progress.md).
+
+Pre-stream guards (auth, rate limit, raw mode, missing version, empty version) return **ordinary JSON
+errors**; once the response switches to `text/event-stream` every outcome is an SSE frame, terminating
+in `done` (carrying the rendered report) or `error`. Closing the dialog aborts the request, so the
+paid LLM work stops rather than running on against a screen nobody is looking at.
+
+The synchronous `POST …/versions/:vid/report/preview` route is still there for headless callers and
+returns the same payload in one response. Both routes share `preview-run.ts`, so they cannot diverge.
 
 ## Admin re-run (revisions)
 

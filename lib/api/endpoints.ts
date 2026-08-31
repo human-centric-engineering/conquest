@@ -439,6 +439,9 @@ export const API = {
       /** Respondent Report: generate a preview from AI-sample answers (POST — Generation tab). */
       reportPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/preview`,
+      /** Respondent Report: the same preview, streamed phase-by-phase over SSE (POST). */
+      reportPreviewStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/preview/stream`,
       /** Pre-launch cost estimate (GET `?respondents=N` — F3.3). */
       versionCostEstimate: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/cost-estimate`,
