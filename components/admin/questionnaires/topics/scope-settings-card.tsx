@@ -292,7 +292,12 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={2}>The cases you are certain about</SectionLabel>
+          {/* The data-slot dependency is named in the heading itself, not left to the ⓘ. A rule
+              tests one data slot, so with none on the version there is nothing to author a rule
+              against — and the admin who most needs telling is the one who never opens the help. */}
+          <SectionLabel step={2}>
+            The cases you are certain about — decided from your data slots
+          </SectionLabel>
           <ScopeRulesEditor
             rules={draft.rules}
             onChange={(next: ScopeRule[]) => set({ rules: next })}

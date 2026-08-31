@@ -11,6 +11,18 @@
  * is asked: **every match applies** (not first-match-wins — include and exclude are independent
  * assertions about different topics), and **exclude beats include** (an author's "never" is a line
  * drawn, and a second rule they forgot must not cross it).
+ *
+ * ## Rules depend on data slots, and the surface says so
+ *
+ * Every rule tests ONE data slot, so a version with none cannot carry a rule at all — and this is
+ * not a rare edge: no ingest path generates data slots, so a freshly uploaded questionnaire is
+ * always in this state. The Routing Analyst hits the same wall from the other side (its prompt is
+ * told "DATA SLOTS: none. Propose no hard rules"), which means an admin can run the analyst, get no
+ * rules, and have nothing on screen explaining why.
+ *
+ * So the dependency is stated three times over, deliberately: in the section heading above this
+ * editor, in the empty state, and by disabling "Add rule" (which would otherwise mint a rule with
+ * an empty `dataSlotKey` for the admin to discover and delete).
  */
 
 import { Plus, Trash2 } from 'lucide-react';
@@ -56,6 +68,8 @@ export function ScopeRulesEditor({
   disabled = false,
 }: ScopeRulesEditorProps) {
   const conditional = topics.filter((t) => t.phase === 'conditional');
+  /** A rule tests one data slot, so with none there is nothing a rule could be written against. */
+  const hasDataSlots = dataSlots.length > 0;
 
   const patch = (index: number, next: Partial<ScopeRule>) => {
     onChange(rules.map((r, i) => (i === index ? { ...r, ...next } : r)));
@@ -101,14 +115,19 @@ export function ScopeRulesEditor({
             you’ve ruled it out for.
           </FieldHelp>
         </Label>
-        <Button variant="outline" size="sm" onClick={add} disabled={disabled}>
+        {/* Disabled with no data slots: `add()` would mint a rule whose `dataSlotKey` is '', which
+            is an invalid rule the admin then has to notice and delete. The empty state below says
+            why the button is off rather than leaving it inert and unexplained. */}
+        <Button variant="outline" size="sm" onClick={add} disabled={disabled || !hasDataSlots}>
           <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add rule
         </Button>
       </div>
 
       {rules.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
-          No hard rules. Every conditional topic is decided by the agent against its criteria.
+          {hasDataSlots
+            ? 'No hard rules. Every conditional topic is decided by the agent against its criteria.'
+            : 'No hard rules — and none can be added yet. A hard rule decides from one answer the opening captured, so this questionnaire needs at least one data slot first. Until then, every conditional topic is decided by the agent against its criteria.'}
         </p>
       ) : (
         <ul className="space-y-2">
