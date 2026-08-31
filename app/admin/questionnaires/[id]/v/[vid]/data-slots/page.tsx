@@ -11,7 +11,10 @@ import { DataSlotEmbeddingStep } from '@/components/admin/questionnaires/data-sl
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
+import {
+  getVersionGraphCached,
+  getVersionTopicsCached,
+} from '@/lib/app/questionnaire/workspace-data';
 import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
 
 export const metadata: Metadata = {
@@ -45,7 +48,27 @@ async function getSlots(id: string, versionId: string): Promise<LoadedSlots> {
 export default async function DataSlotsTab({ params }: PageProps) {
   const { id, vid } = await params;
 
-  const [graph, loaded] = await Promise.all([getVersionGraphCached(id, vid), getSlots(id, vid)]);
+  const [graph, loaded, topics] = await Promise.all([
+    getVersionGraphCached(id, vid),
+    getSlots(id, vid),
+    getVersionTopicsCached(id, vid),
+  ]);
+
+  /**
+   * Whether pointing the admin at the Routing Analyst after they save is signal or noise.
+   *
+   * Saving data slots is the moment hard rules become possible — until then the analyst is told
+   * "DATA SLOTS: none. Propose no hard rules". Any of these four means conditional topics are
+   * genuinely in play: the feature is on, a conditional topic exists, a proposal is waiting, or the
+   * ingest check said the document describes routing. `getVersionTopicsCached` is `cache()`-wrapped
+   * and degrades to "feature off, nothing to say" on failure, so this costs at most one shared
+   * fetch and can only ever fall silent.
+   */
+  const conditionalTopicsInUse =
+    topics.settings.enabled ||
+    topics.topics.some((t) => t.phase === 'conditional') ||
+    topics.draft !== null ||
+    topics.candidacy?.isCandidate === true;
 
   const questions = graph
     ? graph.sections.flatMap((s) => s.questions.map((q) => ({ key: q.key, prompt: q.prompt })))
@@ -70,6 +93,7 @@ export default async function DataSlotsTab({ params }: PageProps) {
           questions={questions}
           initialSlots={loaded.slots}
           initialDraft={loaded.draft}
+          conditionalTopicsInUse={conditionalTopicsInUse}
         />
       )}
 

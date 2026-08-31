@@ -378,6 +378,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             versionId={versionId}
             initialDraft={payload.draft}
             questionKeys={payload.inventory.questions.map((q) => q.key)}
+            dataSlotCount={payload.inventory.dataSlots.length}
             liveTopicCount={payload.topics.length}
             scopeEnabled={payload.settings.enabled}
             candidacy={payload.candidacy}
