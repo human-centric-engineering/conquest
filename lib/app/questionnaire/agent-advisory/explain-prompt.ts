@@ -3,10 +3,10 @@
  *
  * Serialises one agent's current settings, the deterministic recommendation, and
  * the cost trade-off into an LlmMessage[] that asks for an INDEPENDENT, critical
- * second opinion: (a) a plain-language assessment of whether the settings are
- * genuinely the best cost/quality/latency choice for this agent's role, and (b)
- * a concrete patch when a better config exists — even if the current settings
- * already match the deterministic baseline. The advisor is told to treat that
+ * second opinion grounded in what the agent's task requires: (a) a plain-language
+ * assessment of whether the settings are genuinely the best fit for the work — its
+ * depth, who is waiting on it, and what it costs — and (b) a concrete patch when a
+ * better config exists, even if the current settings already match the baseline. The advisor is told to treat that
  * baseline as a fallible opinion, not ground truth. Pure — builds messages from
  * a snapshot; no Prisma / Next / LLM imports.
  */
@@ -21,17 +21,22 @@ reasoning-effort, a DETERMINISTIC baseline recommendation, a rough cost trade-of
 
 Your job is an INDEPENDENT, critical second opinion — NOT to justify the defaults. Treat the deterministic \
 recommendation as one fallible opinion, not ground truth: it is a hand-maintained table and has been wrong \
-before (it once put conversational agents on reasoning models). Question BOTH the current settings AND the \
-recommendation, and reason from this agent's specific role.
+before. Question BOTH the current settings AND the recommendation, and reason from what this agent's task \
+actually has to do.
 
-Judge fitness from first principles:
-- Match the model CATEGORY to the task. Conversational, per-turn agents the respondent reads (question \
-phrasing, rapport, contradiction handling, completion) need a fast, temperature-honouring conversational \
-model such as gpt-4o or gpt-4o-mini. Heavy, one-off cognition (document extraction, turn judging, reports) \
-benefits from a reasoning model such as the gpt-5 family.
-- The gpt-5 reasoning family IGNORES temperature and shares its max-token budget with hidden reasoning \
-tokens. So on a reasoning model a small maxTokens clips or blanks the visible reply, and temperature tuning \
-is inert. Never put a latency- or warmth-sensitive conversational agent on a reasoning model.
+Judge fitness on the task, not on parameter support:
+- Ask what the work requires. Does quality depend on sustained analysis over a lot of material (reading a \
+document into structure, judging a design against a rubric, synthesising a report across many respondents)? \
+Then a reasoning model such as the gpt-5 family fits. Is it a short, well-specified job — phrasing a \
+question, pulling a typed value from a reply, formatting prose, reading an image — where fluency and speed \
+are the quality bar? Then a fast conversational model such as gpt-4o or gpt-4o-mini fits.
+- Ask who is waiting. On the per-turn path a respondent sits watching for a reply, so latency is part of \
+quality and a deliberative model makes the experience worse. Background and one-off work has no such \
+constraint, so depth is close to free there.
+- Size the parameters to the task: temperature by how much latitude the task should have, maxTokens by the \
+largest realistic output, reasoning effort by how much deliberation the work rewards. Never recommend a \
+model because of which parameters it does or does not read — that is a housekeeping detail, not a reason to \
+choose or reject a model.
 - Weigh cost AND quality AND latency, and lean on the real recent spend: optimise the expensive, \
 high-volume paths hardest; do not overspend on rare ones.
 
@@ -64,7 +69,7 @@ function describe(agent: AgentSettingEvaluation): string {
     '',
     'CURRENT:',
     `  resolved model: ${c.resolvedModel ?? 'unresolved (tier default unset)'}${c.explicitModel ? ' (pinned override)' : ' (inherited)'}`,
-    `  temperature: ${c.temperature}${agent.flags.temperatureIgnored ? ' (IGNORED — model uses the reasoning param profile)' : ''}`,
+    `  temperature: ${c.temperature}${agent.flags.temperatureIgnored ? ' (not read by the resolved model — housekeeping only, not a reason to change model)' : ''}`,
     `  maxTokens: ${c.maxTokens}`,
     `  reasoningEffort: ${c.reasoningEffort ?? 'none'}`,
     '',

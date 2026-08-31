@@ -34,25 +34,26 @@ import type { SeedUnit } from '@/prisma/runner';
  * Desired OpenAI defaults per task tier. Values are provider model ids.
  *
  * Tier strategy (see `lib/app/questionnaire/agent-advisory/recommendations.ts`):
- * model **category** must match the task, then optimise cost within category.
+ * pick the model whose strengths match what the task has to do, then optimise
+ * cost within that choice.
  *
- *   - reasoning → gpt-5.4 (reasoning family): heavy, one-off, accuracy-critical
- *     cognition — document extraction, turn evaluation, reports, config advisor.
- *     Never on the per-turn chat path, so frontier reasoning here is safe.
- *   - chat → gpt-4o (conversational family): the per-turn hot path the respondent
- *     actually reads — interviewer phrasing, answer extraction, contradiction
- *     detection, completion. This MUST be a conversational, temperature-honouring
- *     model, NOT a reasoning model: the gpt-5 reasoning family ignores
- *     `temperature` (killing tuned warmth) and shares its token cap with hidden
- *     reasoning tokens (clipping short outputs). A reasoning model here produced
- *     tone-deaf, contradiction-spamming chat in testing (session QXDNENKN).
- *   - routing → gpt-4.1-nano (conversational family, cheapest): history
- *     summarisation only, no reasoning needed, honours temperature.
+ *   - reasoning → gpt-5.4: work whose quality depends on sustained analysis over
+ *     a lot of material — document extraction, turn evaluation, session planning,
+ *     reports, config advice. It runs in the background, so depth beats latency.
+ *   - chat → gpt-4o: the per-turn path a respondent is waiting on — interviewer
+ *     phrasing, answer extraction, contradiction detection, completion — plus
+ *     short, well-specified jobs like formatting prose or reading a screenshot.
+ *     Each call is small and responsiveness is part of the quality, so a fast,
+ *     fluent, multimodal model fits; a deliberative one would only add latency to
+ *     work it cannot do better.
+ *   - routing → gpt-4.1-nano: mechanical, high-frequency chores (history
+ *     summarisation) where any competent small model is indistinguishable and
+ *     cost decides.
  */
 const OPENAI_DEFAULTS: Record<string, string> = {
-  reasoning: 'gpt-5.4', // extraction, turn-eval, reports, config advisor (reasoning family)
-  chat: 'gpt-4o', // per-turn hot path: phrasing, extraction, contradiction (conversational — NOT reasoning)
-  routing: 'gpt-4.1-nano', // conversation summarisation (cheapest, honours temperature)
+  reasoning: 'gpt-5.4', // deep one-off work: extraction, turn-eval, reports, config advice
+  chat: 'gpt-4o', // per-turn path + short, well-specified jobs (fast, fluent, multimodal)
+  routing: 'gpt-4.1-nano', // conversation summarisation (cheapest competent model)
   embeddings: 'text-embedding-3-small', // 1536-dim, schema-compatible
   audio: 'gpt-4o-transcribe', // streaming-chat mic transcription
 };

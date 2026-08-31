@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * One agent card in the Agent Settings Evaluation grid. Compares the agent's
- * current resolved model / temperature / maxTokens / reasoning effort against the
- * advisory recommendation, shows the per-call cost delta and real 30-day spend,
- * and flags the gpt-5-family "temperature ignored" caveat. The Apply button
- * PATCHes the agent's per-agent fields (and, for outliers, the override model).
+ * One agent card in the Agent Settings grid. Compares the agent's current
+ * resolved model / temperature / maxTokens / reasoning effort against the
+ * advisory recommendation, and shows the per-call cost delta and real 30-day
+ * spend. "Accept recommended" applies every row shown, model included — the
+ * caveat on the model row says whether that lands on the agent (a pin) or on the
+ * task-tier default it inherits.
  *
  * Presentational — the panel owns state and the apply handler.
  */
@@ -152,10 +153,12 @@ export function AgentSettingCard({
             recommended={recommended.model}
             changed={modelChanged}
             caveat={
-              recommended.isOverride && modelChanged
-                ? 'per-agent override'
-                : flags.modelUnresolved
-                  ? 'tier default unset'
+              flags.modelUnresolved
+                ? `${agent.taskTier} tier default unset`
+                : modelChanged
+                  ? recommended.isOverride || current.explicitModel !== null
+                    ? 'pinned on this agent'
+                    : `moves the ${agent.taskTier} tier default`
                   : undefined
             }
           />
@@ -164,7 +167,7 @@ export function AgentSettingCard({
             current={formatTemperature(current.temperature)}
             recommended={formatTemperature(recommended.temperature)}
             changed={tempChanged}
-            caveat={flags.temperatureIgnored ? 'ignored by this model' : undefined}
+            caveat={flags.temperatureIgnored ? 'not read by this model' : undefined}
           />
           <Row
             label="Max tokens"

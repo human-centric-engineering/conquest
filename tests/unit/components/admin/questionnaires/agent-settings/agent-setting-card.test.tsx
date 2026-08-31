@@ -3,7 +3,7 @@
 /**
  * Component test: AgentSettingCard.
  *
- * Asserts the current→recommended comparison renders, the temperature-ignored
+ * Asserts the current→recommended comparison renders, the temperature-unread
  * caveat shows for a gpt-5 resolved model, Accept fires `onApply`, and the
  * "AI Advisory" button posts to the explain endpoint and renders the result.
  */
@@ -29,6 +29,7 @@ function agent(overrides: Partial<AgentSettingEvaluation> = {}): AgentSettingEva
     label: 'Question Selector',
     role: 'Picks the next question',
     taskTier: 'chat',
+    panel: null,
     current: {
       explicitModel: null,
       resolvedModel: 'gpt-5.4-mini',
@@ -67,7 +68,7 @@ beforeEach(() => {
 });
 
 describe('AgentSettingCard', () => {
-  it('renders the comparison and the temperature-ignored caveat', () => {
+  it('renders the comparison and the temperature-not-read caveat', () => {
     render(
       <AgentSettingCard
         agent={agent()}
@@ -80,8 +81,8 @@ describe('AgentSettingCard', () => {
     expect(screen.getByText('Question Selector')).toBeInTheDocument();
     expect(screen.getByText('gpt-5.4-mini')).toBeInTheDocument();
     expect(screen.getByText('gpt-5.4-nano')).toBeInTheDocument();
-    expect(screen.getByText(/per-agent override/i)).toBeInTheDocument();
-    expect(screen.getByText(/ignored by this model/i)).toBeInTheDocument();
+    expect(screen.getByText(/pinned on this agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/not read by this model/i)).toBeInTheDocument();
   });
 
   it('fires onApply when Accept recommended is clicked', () => {

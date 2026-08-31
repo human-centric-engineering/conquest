@@ -1,11 +1,14 @@
 /**
  * Unit test: the curated agent-advisory recommendation table.
  *
- * Guards the invariants the evaluation engine and UI rely on: every covered
- * agent has a well-formed recommendation, slugs are unique, no agent carries a
- * per-agent model override (all inherit their task tier), and the task-tier
- * defaults are the agreed OpenAI ids.
+ * Guards the invariants the evaluation engine and UI rely on: every agent the
+ * app declares is covered (including all three judge panels), every entry is
+ * well-formed, slugs are unique, per-agent model pins stay the rare exception,
+ * and the task-tier defaults are the agreed OpenAI ids.
  */
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { describe, it, expect } from 'vitest';
 
@@ -16,15 +19,60 @@ import {
   INFRA_DEFAULT_RECOMMENDATIONS,
   TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/agent-advisory/recommendations';
+import { AGENT_SETTINGS_ADVISOR_SLUG } from '@/lib/app/questionnaire/agent-advisory/explain-schema';
+import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
+import { SCOPE_EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/scope-evaluation/dimensions';
+import { POLICY_EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/policy-evaluation/dimensions';
 
 const TIERS = ['reasoning', 'chat', 'routing'] as const;
 const EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
 
 describe('AGENT_RECOMMENDATIONS', () => {
-  it('covers the expected 17 questionnaire agents with unique slugs', () => {
-    expect(AGENT_RECOMMENDATIONS).toHaveLength(17);
+  it('has unique slugs', () => {
     const slugs = AGENT_RECOMMENDATIONS.map((r) => r.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
+  /**
+   * Drift guard. The advisor is only useful if it covers every agent the app
+   * actually runs, so this parses the app's own slug constants rather than
+   * trusting a hand-kept count: add an agent to `constants.ts` (or a sibling
+   * constants module) and this fails until it has a recommendation.
+   */
+  it('covers every agent slug the app declares', () => {
+    const sources = [
+      'lib/app/questionnaire/constants.ts',
+      'lib/app/questionnaire/experiences/constants.ts',
+      'lib/app/questionnaire/scope/constants.ts',
+    ];
+    const declared = new Set<string>();
+    for (const file of sources) {
+      const src = readFileSync(resolve(process.cwd(), file), 'utf8');
+      for (const match of src.matchAll(
+        /export const [A-Z0-9_]*AGENT_SLUG\s*(?::[^=]*)?=\s*\n?\s*'([^']+)'/g
+      )) {
+        declared.add(match[1]);
+      }
+    }
+    expect(declared.size).toBeGreaterThan(30);
+
+    const uncovered = [...declared].filter((slug) => !AGENT_RECOMMENDATION_BY_SLUG.has(slug));
+    expect(uncovered).toEqual([]);
+    expect(AGENT_RECOMMENDATION_BY_SLUG.has(AGENT_SETTINGS_ADVISOR_SLUG)).toBe(true);
+  });
+
+  it('covers every judge in the three design-time panels', () => {
+    for (const specs of [
+      EVALUATION_DIMENSION_SPECS,
+      SCOPE_EVALUATION_DIMENSION_SPECS,
+      POLICY_EVALUATION_DIMENSION_SPECS,
+    ]) {
+      for (const spec of Object.values(specs)) {
+        const rec = AGENT_RECOMMENDATION_BY_SLUG.get(spec.slug);
+        expect(rec, `${spec.slug} has no recommendation`).toBeDefined();
+        expect(rec?.panel).not.toBeNull();
+      }
+    }
   });
 
   it('includes the turn-evaluator judge', () => {
@@ -49,15 +97,15 @@ describe('AGENT_RECOMMENDATIONS', () => {
     }
   });
 
-  it('carries no per-agent model overrides — every agent inherits its task tier', () => {
-    // Conversational agents must NOT be pinned to a reasoning nano: the gpt-5
-    // family ignores temperature and shares its token cap with hidden reasoning,
-    // which produced tone-deaf, contradiction-spamming chat (session QXDNENKN).
+  it('pins a per-agent model only where the job differs from the rest of its tier', () => {
+    // Inheritance is the default so a tier move carries every agent with it. The
+    // candidacy check is the one deliberate exception (see its rationale) — any
+    // new pin should be a considered decision, not a drift.
     const overridden = AGENT_RECOMMENDATIONS.filter((r) => r.overrideModel !== null);
-    expect(overridden).toEqual([]);
+    expect(overridden.map((r) => r.slug)).toEqual(['app-questionnaire-scope-candidacy']);
   });
 
-  it('chat-tier agents carry no reasoning effort (gpt-4o ignores it)', () => {
+  it('chat-tier agents carry no reasoning effort', () => {
     const chatAgents = AGENT_RECOMMENDATIONS.filter((r) => r.taskTier === 'chat');
     expect(chatAgents.length).toBeGreaterThan(0);
     for (const rec of chatAgents) {

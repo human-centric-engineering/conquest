@@ -2,7 +2,7 @@
  * Unit test: the "Explain with AI" prompt builder.
  *
  * Asserts the user message serialises the agent's current settings, the
- * recommendation, and the cost trade-off, surfaces the temperature-ignored
+ * recommendation, and the cost trade-off, surfaces the temperature-unread
  * caveat, and that the system message states the OpenAI / gpt-5 temperature rule.
  */
 
@@ -27,6 +27,7 @@ function buildAgent(overrides: Partial<AgentSettingEvaluation> = {}): AgentSetti
     label: 'Question Selector',
     role: 'Picks the next question',
     taskTier: 'chat',
+    panel: null,
     current: {
       explicitModel: null,
       resolvedModel: 'gpt-5.4-mini',
@@ -77,23 +78,25 @@ describe('buildExplainPrompt', () => {
     expect(user).toContain('-72%'); // delta
   });
 
-  it('surfaces the temperature-ignored caveat when the resolved model ignores it', () => {
+  it('notes when the resolved model does not read temperature', () => {
     const user = text(buildExplainPrompt(buildAgent())[1]);
-    expect(user).toContain('IGNORED');
+    expect(user).toContain('not read by the resolved model');
   });
 
-  it('omits the caveat when temperature is honoured', () => {
+  it('omits the note when temperature is read', () => {
     const agent = buildAgent({
       flags: { temperatureIgnored: false, pricingUnknown: false, modelUnresolved: false },
     });
     const user = text(buildExplainPrompt(agent)[1]);
-    expect(user).not.toContain('IGNORED');
+    expect(user).not.toContain('not read by the resolved model');
   });
 
-  it('states the OpenAI / gpt-5 temperature rule in the system message', () => {
+  it('tells the advisor to judge on task fit, not on parameter support', () => {
     const system = text(buildExplainPrompt(buildAgent())[0]);
     expect(system).toContain('OpenAI');
-    expect(system.toLowerCase()).toContain('temperature');
+    expect(system).toContain('Judge fitness on the task, not on parameter support');
+    // The old prompt argued from which params a model honours; it must not come back.
+    expect(system).toMatch(/Never recommend a model because of which parameters/);
   });
 
   it('renders unknown/n-a fallbacks for a pinned, unresolved, cost-unknown agent', () => {
