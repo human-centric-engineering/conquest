@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderToString } from 'react-dom/server';
 import { DndContext, useDraggable } from '@dnd-kit/core';
+import ts from 'typescript';
 
 function Handle() {
   const { attributes } = useDraggable({ id: 'x' });
@@ -68,21 +69,69 @@ describe('why the id is required', () => {
   });
 });
 
+/**
+ * Every `<DndContext>` JSX opening element in a parsed source file that has no `id` attribute.
+ *
+ * Walks the real AST rather than matching the text — an earlier version of this test used
+ * `/<DndContext\b([\s\S]*?)>/g`, which is exactly the kind of check the defect it guards against
+ * would slip past: fooled by a `>` inside an attribute value, a self-closing tag, a reformat that
+ * moves `id` across a line boundary the pattern didn't anticipate, or a JSX shape nobody tested it
+ * against — all while the underlying hydration-safety invariant is unaffected either way. The
+ * TypeScript compiler already knows what a JSX opening element and its attributes are; asking it is
+ * what `cost-log-fk-attribution.test.ts` does for the same reason, for a different defect.
+ */
+function findDndContextsMissingId(sourceFile: ts.SourceFile): string[] {
+  const missing: string[] = [];
+
+  function visit(node: ts.Node) {
+    if (
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      node.tagName.getText(sourceFile) === 'DndContext' &&
+      !node.attributes.properties.some(
+        (prop) => ts.isJsxAttribute(prop) && prop.name.getText(sourceFile) === 'id'
+      )
+    ) {
+      const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      missing.push(`line ${line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return missing;
+}
+
+function parseTsx(fileName: string, text: string): ts.SourceFile {
+  return ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+}
+
 describe('every DndContext in the admin surfaces passes one', () => {
-  // Source-level, because the defect is a MISSING prop: a rendering test can only cover the call
-  // sites someone remembered to write a test for, while this fails for any new one.
+  // AST-checked, not rendered, because the defect is a MISSING prop: a rendering test can only
+  // cover the call sites someone remembered to write one for, while this fails for any new one —
+  // and it can never fire a false negative from a reformat the way a regex over the text could.
   const FILES = [
     'components/admin/questionnaires/topics/topic-list-editor.tsx',
     'components/admin/questionnaires/version-editor.tsx',
     'components/admin/questionnaires/section-editor.tsx',
   ];
 
-  it.each(FILES)('%s opens DndContext with an id', (file) => {
-    const source = readFileSync(file, 'utf8');
-    const opens = source.match(/<DndContext[\s>]/g) ?? [];
-    expect(opens.length).toBeGreaterThan(0);
-    for (const match of source.matchAll(/<DndContext\b([\s\S]*?)>/g)) {
-      expect(match[1]).toMatch(/\sid=/);
-    }
+  it.each(FILES)('%s opens every DndContext with an id', (file) => {
+    const missing = findDndContextsMissingId(parseTsx(file, readFileSync(file, 'utf8')));
+    expect(missing).toEqual([]);
+  });
+
+  it('the checker itself catches a DndContext with no id (self-test)', () => {
+    // A synthetic file, not one of the three above — proves the walk actually flags an omission
+    // rather than vacuously passing because every real file happens to be well-formed.
+    const source = parseTsx(
+      'synthetic.tsx',
+      'function C() { return <DndContext sensors={s}><Child /></DndContext>; }'
+    );
+    expect(findDndContextsMissingId(source)).toEqual(['line 1']);
+  });
+
+  it('does not flag an unrelated JSX element that happens to have no id', () => {
+    const source = parseTsx('synthetic.tsx', 'function C() { return <SortableContext />; }');
+    expect(findDndContextsMissingId(source)).toEqual([]);
   });
 });

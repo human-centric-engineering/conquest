@@ -1073,4 +1073,15 @@ describe('the data-slot dependency, said before the run', () => {
     renderCard({ dataSlotCount: 3 });
     expect(screen.queryByText(/Consider setting up data slots first/i)).toBeNull();
   });
+
+  it('renders the link and its trailing sentence with no stray space before the comma', () => {
+    // Regression: a `{' '}` left over from an em-dash rewrite put a literal space between the
+    // link and the comma that followed it — "Set up data slots , or carry on…" — invisible to a
+    // substring match but visible on screen. Pinned on the exact text content, not a substring.
+    renderCard({ dataSlotCount: 0 });
+    const link = screen.getByRole('link', { name: /Set up data slots/i });
+    expect(link.parentElement?.textContent).toBe(
+      'Set up data slots, or carry on and re-run this afterwards to pick up the rest.'
+    );
+  });
 });

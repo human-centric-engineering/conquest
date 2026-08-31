@@ -503,7 +503,7 @@ export function RoutingAnalystCard({
                     href={`/admin/questionnaires/${questionnaireId}/v/${versionId}/data-slots`}
                   >
                     Set up data slots
-                  </a>{' '}
+                  </a>
                   , or carry on and re-run this afterwards to pick up the rest.
                 </p>
               </div>

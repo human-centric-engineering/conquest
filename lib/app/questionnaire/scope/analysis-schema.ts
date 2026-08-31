@@ -226,12 +226,26 @@ export const routingAnalysisSchema = z.object({
    * (`buildRoutingAnalysisRetryMessage` names topics, rules, gaps, summary and `fromDocument` — not
    * this), so an analyst that overran would lose the document its entire proposal twice. Slicing
    * matches `narrowProposedTopicSet`, which trims to the same bound rather than dropping the field.
+   *
+   * **No `.min(1)` — a defined-but-empty string must never THROW, only map to `undefined`.** An
+   * earlier version had `.string().trim().min(1)....optional()`, and `.optional()` only tolerates
+   * the KEY being absent; it does nothing for a key present with an invalid value. A model told to
+   * omit this field routinely emits `"plannerInstructions": ""` instead of actually dropping the
+   * key, and that failed `.min(1)` — which was not "rejected" the way an over-long string is
+   * truncated, it was `routingAnalysisSchema.safeParse()` returning `ok: false` for the WHOLE
+   * response: every topic, every rule, every gap, gone. Exactly the failure this doc comment says
+   * the field must never cause. The transform below has no validator that can fail on a defined
+   * value — it only ever maps a string to a (possibly shorter, possibly `undefined`) string — so
+   * `.optional()` stays the OUTERMOST call, same as every other optional field in this schema:
+   * moving it earlier makes Zod infer the object KEY as required-with-an-`undefined`-value instead
+   * of an omittable key, which breaks every literal that constructs a result without this field.
    */
   plannerInstructions: z
     .string()
     .trim()
-    .min(1)
-    .transform((text) => text.slice(0, ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS))
+    .transform((text) =>
+      text.length > 0 ? text.slice(0, ROUTING_ANALYSIS_MAX_PLANNER_INSTRUCTIONS) : undefined
+    )
     .optional(),
   summary: z.string().trim().min(1).max(SCOPE_RATIONALE_MAX_LENGTH),
   /** The analyst's own claim about whether the document contained routing instructions at all. */

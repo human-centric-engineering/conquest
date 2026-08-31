@@ -487,4 +487,21 @@ describe('proposed planner guidance (Extra guidance)', () => {
       );
     }
   });
+
+  it('does not fail the whole analysis when the key is PRESENT but empty (code review regression)', () => {
+    // `.optional()` only tolerates the KEY being absent — it does nothing for a key present with
+    // an invalid value. A model told to omit this field routinely emits `""` instead of actually
+    // dropping the key, and `.string().trim().min(1)....optional()` failed `.min(1)` on that,
+    // which is not "rejected" the way an over-long string is truncated — it is
+    // `routingAnalysisSchema.safeParse()` returning `ok: false` for topics, rules and gaps too.
+    const result = validateRoutingAnalysis({ ...base, plannerInstructions: '' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.plannerInstructions).toBeUndefined();
+  });
+
+  it('treats a whitespace-only value the same as absent', () => {
+    const result = validateRoutingAnalysis({ ...base, plannerInstructions: '   ' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.plannerInstructions).toBeUndefined();
+  });
 });
