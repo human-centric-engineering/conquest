@@ -5,8 +5,9 @@
  *
  * Asserts the panel renders the task-tier and agent cards, that applying a tier
  * recommendation PATCHes the settings with a partial `defaultModels` map, and
- * that accepting an agent PATCHes the per-agent fields — both followed by a
- * re-fetch of the evaluation.
+ * that accepting an agent applies everything its card shows — the per-agent
+ * fields plus the model, routed to the agent row when pinned and to the tier
+ * default when inherited — each followed by a re-fetch of the evaluation.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -65,6 +66,7 @@ function evaluation(): AgentSettingsEvaluation {
         label: 'Questionnaire Extractor',
         role: 'Parses documents',
         taskTier: 'reasoning',
+        panel: null,
         current: {
           explicitModel: null,
           resolvedModel: 'gpt-4o',
@@ -135,6 +137,53 @@ describe('AgentSettingsPanel', () => {
       })
     );
     expect(apiClient.get).toHaveBeenCalled();
+  });
+
+  it('accepting an inheriting agent also applies the model, via its tier default', async () => {
+    // The card shows gpt-4o → gpt-5.4; accepting has to actually change the model,
+    // and for an inheriting agent that means the shared tier default.
+    render(<AgentSettingsPanel initialEvaluation={evaluation()} />);
+    fireEvent.click(screen.getByRole('button', { name: /accept recommended/i }));
+
+    await waitFor(() =>
+      expect(apiClient.patch).toHaveBeenCalledWith(API.ADMIN.ORCHESTRATION.SETTINGS, {
+        body: { defaultModels: { reasoning: 'gpt-5.4' } },
+      })
+    );
+  });
+
+  it('accepting a pinned agent applies the model on the agent, not the tier', async () => {
+    const pinned = evaluation();
+    pinned.agents[0].current.explicitModel = 'gpt-4o';
+    render(<AgentSettingsPanel initialEvaluation={pinned} />);
+    fireEvent.click(screen.getByRole('button', { name: /accept recommended/i }));
+
+    await waitFor(() =>
+      expect(apiClient.patch).toHaveBeenCalledWith(API.ADMIN.ORCHESTRATION.agentById('a-ext'), {
+        body: {
+          temperature: 0.2,
+          maxTokens: 16384,
+          reasoningEffort: 'high',
+          model: 'gpt-5.4',
+        },
+      })
+    );
+    expect(apiClient.patch).not.toHaveBeenCalledWith(
+      API.ADMIN.ORCHESTRATION.SETTINGS,
+      expect.anything()
+    );
+  });
+
+  it('does not touch the model when it already matches the recommendation', async () => {
+    const matched = evaluation();
+    matched.agents[0].current.resolvedModel = 'gpt-5.4';
+    render(<AgentSettingsPanel initialEvaluation={matched} />);
+    fireEvent.click(screen.getByRole('button', { name: /accept recommended/i }));
+
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledTimes(1));
+    expect(apiClient.patch).toHaveBeenCalledWith(API.ADMIN.ORCHESTRATION.agentById('a-ext'), {
+      body: { temperature: 0.2, maxTokens: 16384, reasoningEffort: 'high' },
+    });
   });
 
   it('applies every non-optimal tier and agent via "Apply all" then refetches once', async () => {

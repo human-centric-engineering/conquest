@@ -1,16 +1,18 @@
 'use client';
 
 /**
- * Agent Settings Evaluation — admin surface to review and tune the questionnaire
- * agents' model / temperature / maxTokens / reasoning-effort settings against the
+ * Agent Settings — admin surface to review and tune the questionnaire agents'
+ * model / temperature / maxTokens / reasoning-effort settings against the
  * deterministic advisory baseline, with cost trade-offs and a one-click apply.
  *
  * Two layers (see the curated table in `lib/app/questionnaire/agent-advisory`):
  *   1. Task-tier defaults — accepting a model recommendation PATCHes
  *      `AiOrchestrationSettings.defaultModels[tier]`, so every inheriting agent
  *      moves together.
- *   2. Per-agent cards — accepting tunes temperature / maxTokens / reasoning
- *      effort on the agent row (and, for outliers, pins an override model).
+ *   2. Per-agent cards — "Accept recommended" applies everything the card shows:
+ *      temperature / maxTokens / effort on the agent row, and the model too —
+ *      pinned on the agent when the recommendation is an override or the agent
+ *      already carries a pin, otherwise routed to that agent's tier default.
  *
  * All mutations reuse the existing orchestration PATCH endpoints; after each one
  * we re-fetch the evaluation so the verdicts stay truthful.
@@ -67,16 +69,42 @@ export function AgentSettingsPanel({ initialEvaluation }: AgentSettingsPanelProp
     });
   }, []);
 
-  /** PATCH a single agent's per-agent fields (and override model when applicable). */
-  const applyAgentSettings = useCallback(async (agent: AgentSettingEvaluation): Promise<void> => {
-    const body: Record<string, unknown> = {
-      temperature: agent.recommended.temperature,
-      maxTokens: agent.recommended.maxTokens,
-      reasoningEffort: agent.recommended.reasoningEffort,
-    };
-    if (agent.recommended.isOverride) body.model = agent.recommended.model;
-    await apiClient.patch(API.ADMIN.ORCHESTRATION.agentById(agent.agentId), { body });
-  }, []);
+  /**
+   * Apply everything the agent's card shows, including the model.
+   *
+   * Temperature / maxTokens / effort are per-agent fields. The model is not: an
+   * agent normally inherits its task tier, so a recommended model change lands
+   * on the shared tier default (moving every agent on that tier) — that is what
+   * the card's model row is proposing. Two exceptions pin it on the agent row
+   * instead: a recommendation that is explicitly a per-agent override, and an
+   * agent that already carries a pinned model (correcting the pin, rather than
+   * silently moving the whole tier because one agent was pinned wrong).
+   *
+   * `tiersAlreadyApplied` is set by Apply-all, which fixes every tier default up
+   * front — without it each agent would re-PATCH the same tier default.
+   */
+  const applyAgentSettings = useCallback(
+    async (
+      agent: AgentSettingEvaluation,
+      { tiersAlreadyApplied = false }: { tiersAlreadyApplied?: boolean } = {}
+    ): Promise<void> => {
+      const body: Record<string, unknown> = {
+        temperature: agent.recommended.temperature,
+        maxTokens: agent.recommended.maxTokens,
+        reasoningEffort: agent.recommended.reasoningEffort,
+      };
+      const modelDiffers = (agent.current.resolvedModel ?? null) !== agent.recommended.model;
+      const pinOnAgent = agent.recommended.isOverride || agent.current.explicitModel !== null;
+
+      if (modelDiffers && pinOnAgent) {
+        body.model = agent.recommended.model;
+      } else if (modelDiffers && !tiersAlreadyApplied) {
+        await applyTierModel(agent.taskTier, agent.recommended.model);
+      }
+      await apiClient.patch(API.ADMIN.ORCHESTRATION.agentById(agent.agentId), { body });
+    },
+    [applyTierModel]
+  );
 
   const handleApplyTier = useCallback(
     async (tier: string, model: string) => {
@@ -144,7 +172,7 @@ export function AgentSettingsPanel({ initialEvaluation }: AgentSettingsPanelProp
       }
       for (const agent of evaluation.agents) {
         if (agent.isOptimal) continue;
-        await applyAgentSettings(agent);
+        await applyAgentSettings(agent, { tiersAlreadyApplied: true });
         saved.push(`agent:${agent.slug}`);
       }
       await refetch();
@@ -183,14 +211,28 @@ export function AgentSettingsPanel({ initialEvaluation }: AgentSettingsPanelProp
     );
   }, [evaluation]);
 
+  /** Tier sections cover the ordinary agents; panel judges get their own sections. */
   const agentsByTier = useMemo(() => {
     const map = new Map<string, AgentSettingEvaluation[]>();
     for (const agent of evaluation?.agents ?? []) {
+      if (agent.panel) continue;
       const list = map.get(agent.taskTier) ?? [];
       list.push(agent);
       map.set(agent.taskTier, list);
     }
     return map;
+  }, [evaluation]);
+
+  /** Judge panels, in table order — each renders as its own section. */
+  const judgePanels = useMemo(() => {
+    const map = new Map<string, AgentSettingEvaluation[]>();
+    for (const agent of evaluation?.agents ?? []) {
+      if (!agent.panel) continue;
+      const list = map.get(agent.panel) ?? [];
+      list.push(agent);
+      map.set(agent.panel, list);
+    }
+    return [...map.entries()];
   }, [evaluation]);
 
   if (!evaluation) {
@@ -212,9 +254,10 @@ export function AgentSettingsPanel({ initialEvaluation }: AgentSettingsPanelProp
           <h1 className="text-2xl font-semibold">Agent settings</h1>
           <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
             Review each questionnaire agent&apos;s model, temperature and reasoning effort against
-            the advisory baseline, see the cost trade-off, and apply recommended settings. Model
-            recommendations update the shared task-tier default; temperature and effort apply
-            per-agent.
+            the advisory baseline, see the cost trade-off, and apply recommended settings.
+            Recommendations follow what each agent&apos;s task needs. Temperature, max tokens and
+            effort apply to the agent; a model change lands on the shared task-tier default the
+            agent inherits, unless it is pinned on the agent itself.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -302,6 +345,35 @@ export function AgentSettingsPanel({ initialEvaluation }: AgentSettingsPanelProp
           </section>
         );
       })}
+
+      {judgePanels.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Evaluation judges</h2>
+            <p className="text-muted-foreground text-sm">
+              Design-time panels that review an authored questionnaire before launch. Each judge
+              scores one dimension, so a panel shares one set of settings.
+            </p>
+          </div>
+          {judgePanels.map(([panel, agents]) => (
+            <div key={panel} className="space-y-2">
+              <h3 className="text-muted-foreground text-sm font-medium">{panel}</h3>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {agents.map((agent) => (
+                  <AgentSettingCard
+                    key={agent.slug}
+                    agent={agent}
+                    applying={applyingKey === `agent:${agent.slug}`}
+                    saved={savedKeys.has(`agent:${agent.slug}`)}
+                    onApply={() => void handleApplyAgent(agent)}
+                    onApplyPatch={(patch) => void handleApplyPatch(agent, patch)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       <footer className="text-muted-foreground text-xs">
         Evaluated {new Date(evaluation.generatedAt).toLocaleString()} · per-call costs are rough

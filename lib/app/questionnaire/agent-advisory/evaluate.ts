@@ -6,9 +6,10 @@
  * computes: the currently-resolved model (explicit per-agent model, else the
  * task-tier default), the recommended model / temperature / maxTokens /
  * reasoning effort, a cost trade-off (blended $/M from the provider-model rows
- * plus a maxTokens-bounded per-call estimate), whether temperature is a no-op on
- * the resolved model (gpt-5 family ignores it), real 30-day spend from the cost
- * logs, and an `isOptimal` verdict.
+ * plus a maxTokens-bounded per-call estimate), real 30-day spend from the cost
+ * logs, and an `isOptimal` verdict. Model choice comes from the curated table's
+ * task-fit reasoning; whether the resolved model happens to read `temperature`
+ * is reported as a housekeeping flag only, never as a reason to switch model.
  *
  * Server-only (Prisma + settings resolver). Reads only — applying changes goes
  * through the existing settings / agent PATCH endpoints.
@@ -65,6 +66,8 @@ export interface AgentSettingEvaluation {
   label: string;
   role: string;
   taskTier: AdvisoryTaskTier;
+  /** Judge-panel label when this agent is one of a uniform panel; null otherwise. */
+  panel: string | null;
   current: {
     /** Explicit per-agent model override, or null when inheriting the tier default. */
     explicitModel: string | null;
@@ -97,7 +100,10 @@ export interface AgentSettingEvaluation {
     calls: number | null;
   };
   flags: {
-    /** Agent sets a temperature the resolved model ignores (gpt-5 family). */
+    /**
+     * Agent sets a temperature its resolved model does not read (the reasoning
+     * param profile). Informational only — it does not affect any recommendation.
+     */
     temperatureIgnored: boolean;
     /** Resolved model has no pricing row — cost figures are null. */
     pricingUnknown: boolean;
@@ -249,6 +255,7 @@ export async function evaluateAgentSettings(
       label: rec.label,
       role: rec.role,
       taskTier: rec.taskTier,
+      panel: rec.panel,
       current: {
         explicitModel,
         resolvedModel,
