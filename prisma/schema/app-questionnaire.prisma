@@ -440,6 +440,17 @@ model AppQuestionnaireConfig {
   // pre-P17 behaviour. A version that never opts in cannot reach a single new runtime code path.
   conditionalTopics Json @default("{}")
 
+  // Sectioned interviews (P21): SectionedInterviewSettings — whether the respondent works through
+  // the instrument one section at a time, where those sections come from, and how a section closes.
+  // `{ enabled, source, navigation, tangentPolicy, closeCoverage, closeMinAnswered,
+  // maxTurnsPerSection, agentOffersClose, showLockedSections }`. Narrowed by
+  // narrowSectionedInterviewSettings (lib/.../sections/settings.ts).
+  //
+  // OFF BY DEFAULT and inert by construction: with `enabled: false` — or when fewer than two
+  // sections resolve — `resolveInterviewSections` returns the empty list, `buildSectionState` yields
+  // no active section, and both orchestrators see byte-identical inputs to the pre-P21 ones.
+  sections Json @default("{}")
+
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
   // markdown, proceed-button label). Off by default; only takes effect when the platform flag

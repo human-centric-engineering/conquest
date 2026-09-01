@@ -212,6 +212,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
     },
     ...over,
   };
@@ -266,6 +267,7 @@ function makeSafeguarding(): SafeguardingSummary {
 
 import AnalyticsTab from '@/app/admin/questionnaires/[id]/v/[vid]/analytics/page';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_SECTIONED_INTERVIEW_SETTINGS } from '@/lib/app/questionnaire/sections/settings';
 
 interface RenderPageOpts {
   id?: string;

@@ -37,6 +37,7 @@ import type {
   RefLookupResult,
 } from '@/lib/app/questionnaire/views';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_SECTIONED_INTERVIEW_SETTINGS } from '@/lib/app/questionnaire/sections/settings';
 import {
   DEFAULT_HOUSE_RULES_SETTINGS,
   DEFAULT_QUESTION_FIDELITY,
@@ -274,6 +275,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     },
     intro: { enabled: false, background: '', buttonLabel: '', videoUrl: '' },
     conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+    sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
     houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
     questionFidelity: DEFAULT_QUESTION_FIDELITY,
     ...overrides,
