@@ -344,12 +344,14 @@ describe('buildPackMarkdown', () => {
             backing: '2 of 3 judges',
             judges: 'Clarity, Audience-Match',
             holdsWording: true,
+            suggestions: ['Reword to avoid the leading adjective.'],
           },
           {
             heading: 'A deletion',
             backing: '1 of 3 judges',
             judges: 'Duplicates',
             holdsWording: false,
+            suggestions: ['Remove it, Q2 already covers this ground.'],
           },
         ],
       },
@@ -588,6 +590,27 @@ describe('buildPackMarkdown', () => {
       expect(md).not.toContain('pending');
     });
 
+    it('prints the rewordings after the judges when the verdict is unticked', () => {
+      // The production route to the standalone-rewordings branch, which the fixture-level
+      // `verdict: null` test below reaches artificially: `buildPackModel` cannot emit a target
+      // that has judges and no verdict (a group always has at least one finding, so
+      // `summariseGroupActions` always yields a primary). Only the include flag gets you here.
+      const md = contested({ evaluationVerdicts: false, evaluationJudgeDetail: true });
+
+      expect(md).not.toContain('**A reword**');
+      expect(md).toContain('**Suggested rewording** (addressing the judges above):');
+      expect(md).toContain('How engaged do you feel at work?');
+      // And still after the judges, which is where they sat before verdicts existed and for the
+      // reason that has not changed: a resolution only reads as one once you have seen the
+      // disagreement it resolves.
+      expect(md.indexOf('Asks two things at once')).toBeLessThan(
+        md.indexOf('How engaged do you feel at work?')
+      );
+    });
+
+    // test-review:accept mock-realism — `verdict: null` with populated judges is a state
+    // `buildPackModel` cannot emit; these fixtures drive the serialiser's defensive fallback
+    // directly. The realistic route (evaluationVerdicts: false) is covered by the test above.
     it('prints the reconciled rewording on its own when no verdict is there to host it', () => {
       const md = buildPackMarkdown(
         model({
@@ -907,7 +930,7 @@ describe('buildPackMarkdown', () => {
                 sampledOnly: false,
                 questions: [],
                 trigger: {
-                  condition: 'The applicant discloses that they are fleeing abuse.',
+                  condition: 'The applicant discloses that they are fleeing abuse',
                   cues: ['abuse', 'fleeing'],
                 },
               },
@@ -924,6 +947,8 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain(
         'The source document asks for this when: The applicant discloses that they are fleeing abuse.'
       );
+      // One full stop, not two — the builder trims the authored condition's own.
+      expect(md).not.toContain('fleeing abuse..');
       expect(md).toContain('Today it is decided from the opening instead.');
       // The criteria that actually runs is still shown, above it.
       expect(md.indexOf('_Included when: The opening suggests vulnerability._')).toBeLessThan(
@@ -982,7 +1007,29 @@ describe('buildPackMarkdown', () => {
     });
   });
 
-  describe('scope evaluation subsection', () => {
+  describe('routing review subsection', () => {
+    it('says nothing at all about the review when the admin excluded it', () => {
+      // The bug this guards: rendering the excluded case as `hasRun: false` made the document
+      // state "This routing has not been reviewed" about a version whose routing HAD been
+      // reviewed. Silence is the only honest output for a section the admin left out.
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [],
+            rules: [],
+            settings: [],
+            evaluation: null,
+          },
+        })
+      );
+
+      expect(md).toContain('## Conditional topics');
+      expect(md).not.toContain('Review of this routing');
+      expect(md).not.toContain('has not been reviewed');
+    });
+
     const baseScope = {
       enabled: true,
       alwaysAsked: [],

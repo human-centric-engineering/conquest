@@ -183,6 +183,7 @@ export function buildPackCsv(model: PackModel): string {
           'judges',
           'is_dissent',
           'holds_rewording',
+          'suggestions',
         ]),
         ...model.evaluations.targets.flatMap((target) =>
           (target.verdict?.blocks ?? []).map((block, i) =>
@@ -194,6 +195,7 @@ export function buildPackCsv(model: PackModel): string {
               block.judges,
               i === 0 ? 'no' : 'yes',
               block.holdsWording ? 'yes' : 'no',
+              block.suggestions.join(' | '),
             ])
           )
         ),
@@ -346,64 +348,69 @@ export function buildPackCsv(model: PackModel): string {
       ...model.conditionalTopics.rules.map((rule) => row([rule.sentence])),
     ]);
 
+    // Both routing-review blocks are skipped wholesale when the admin excluded the review. A
+    // header-only block reads as "reviewed, nothing found"; an absent one reads as "not in this
+    // pack", which is what actually happened.
     const evaluation = model.conditionalTopics.evaluation;
-    blocks.push([
-      '# Routing review judge scores',
-      row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
-      ...evaluation.scores.map((judge) =>
-        row([
-          judge.dimension,
-          judge.label,
-          judge.score !== null ? String(judge.score) : '',
-          judge.diagnostic ?? '',
-          String(judge.findingCount),
-        ])
-      ),
-    ]);
+    if (evaluation) {
+      blocks.push([
+        '# Routing review judge scores',
+        row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
+        ...evaluation.scores.map((judge) =>
+          row([
+            judge.dimension,
+            judge.label,
+            judge.score !== null ? String(judge.score) : '',
+            judge.diagnostic ?? '',
+            String(judge.findingCount),
+          ])
+        ),
+      ]);
 
-    // One row per (target, judge) pair, target columns first — same "the target's text repeats"
-    // rule the design-evaluation findings block follows, for the same reason (a CSV row must
-    // stand alone under a sort/filter/pivot).
-    const scopeFindingRows = evaluation.targets.flatMap((target) =>
-      target.judges.map((judge) =>
+      // One row per (target, judge) pair, target columns first — same "the target's text repeats"
+      // rule the design-evaluation findings block follows, for the same reason (a CSV row must
+      // stand alone under a sort/filter/pivot).
+      const scopeFindingRows = evaluation.targets.flatMap((target) =>
+        target.judges.map((judge) =>
+          row([
+            target.key,
+            target.kind,
+            target.label,
+            target.removed ? 'yes' : 'no',
+            judge.dimension,
+            judge.label,
+            judge.severity,
+            severityLabelCell(judge.severity),
+            judge.status,
+            statusLabelCell(judge.status),
+            judge.proposedChange,
+            judge.rationale,
+            judge.proposedEditSummary ?? '',
+            judge.sourceQuote ?? '',
+          ])
+        )
+      );
+      blocks.push([
+        '# Routing review findings',
         row([
-          target.key,
-          target.kind,
-          target.label,
-          target.removed ? 'yes' : 'no',
-          judge.dimension,
-          judge.label,
-          judge.severity,
-          severityLabelCell(judge.severity),
-          judge.status,
-          statusLabelCell(judge.status),
-          judge.proposedChange,
-          judge.rationale,
-          judge.proposedEditSummary ?? '',
-          judge.sourceQuote ?? '',
-        ])
-      )
-    );
-    blocks.push([
-      '# Routing review findings',
-      row([
-        'target_key',
-        'target_kind',
-        'target',
-        'target_removed',
-        'dimension',
-        'judge',
-        'severity',
-        'severity_label',
-        'status',
-        'status_label',
-        'proposed_change',
-        'rationale',
-        'proposed_edit',
-        'source_quote',
-      ]),
-      ...scopeFindingRows,
-    ]);
+          'target_key',
+          'target_kind',
+          'target',
+          'target_removed',
+          'dimension',
+          'judge',
+          'severity',
+          'severity_label',
+          'status',
+          'status_label',
+          'proposed_change',
+          'rationale',
+          'proposed_edit',
+          'source_quote',
+        ]),
+        ...scopeFindingRows,
+      ]);
+    }
   }
 
   // ── Interviewer policy (F18.8) ───────────────────────────────────────────

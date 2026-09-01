@@ -260,8 +260,9 @@ describe('PackExportDialog', () => {
       const user = userEvent.setup();
       renderDialog();
 
-      // "Conditional topics" is the seventh (last) section checkbox in document order.
-      await user.click(sectionBoxes()[6]);
+      // By name, not by index. The index form said "the seventh (last) section", which stopped
+      // being true the moment an eighth was added — the exact drift this file's header warns about.
+      await user.click(screen.getByRole('checkbox', { name: /conditional topics/i }));
       await user.click(screen.getByRole('button', { name: /download/i }));
 
       expect(window.location.href).toContain('conditionalTopics=true');

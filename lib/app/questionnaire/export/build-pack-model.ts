@@ -64,6 +64,7 @@ import {
   type FindingSeverity,
 } from '@/lib/app/questionnaire/evaluation';
 import {
+  effectiveOp,
   groupContextLabel,
   groupFindingsByTarget,
   type FindingGroup,
@@ -300,6 +301,15 @@ export interface PackEvaluationVerdictBlock {
   judges: string;
   /** This block holds the reconciled wordings — see `wordingHost` for why it is not always first. */
   holdsWording: boolean;
+  /**
+   * The one-line suggestions behind this action, deduplicated.
+   *
+   * Without them a block reading "A deletion, as proposed by 1 of 3 judges — Duplicates" gives a
+   * reader no reason at all, and the default download has judge reasoning switched off, so there is
+   * no tab to open the way there is in the console. One line per distinct suggestion keeps the
+   * verdict actionable without pulling the whole argument in behind it.
+   */
+  suggestions: string[];
 }
 
 /**
@@ -560,8 +570,16 @@ export interface PackConditionalTopics {
    * reasoning as the experience-setup summary, which was written after the same bug.
    */
   settings: RoutingSettingItem[];
-  /** The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}. */
-  evaluation: PackScopeEvaluation;
+  /**
+   * The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}.
+   *
+   * **`null` means the admin excluded it**, and every serialiser skips the subsection entirely,
+   * exactly as they skip a `null` top-level section. It must NOT be conflated with
+   * `hasRun: false`, which means "this routing has never been reviewed" — a sentence the pack
+   * prints in so many words. Emitting the excluded case as `hasRun: false` would have a
+   * client-facing document assert that a reviewed routing was never looked at.
+   */
+  evaluation: PackScopeEvaluation | null;
 }
 
 /** One policy judge's verdict on one target, for the pack. */
@@ -751,6 +769,9 @@ function buildVerdict(group: FindingGroup): PackEvaluationVerdict | null {
       backing: backing(action, summary.judgeCount),
       judges: judgeNames(action.judges),
       holdsWording: action === host,
+      // Deduplicated: two judges proposing the same action often word it identically, and printing
+      // the same sentence twice under one heading reads as two separate points.
+      suggestions: [...new Set(action.findings.map((f) => f.proposedChange.trim()))],
     })),
   };
 }
@@ -791,7 +812,10 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
       counts: group.counts,
       judgeCount: group.dimensions.length,
       judges: group.findings.map((f) => {
-        const op = f.editedOverride ?? f.proposedEdit;
+        // The shared `effectiveOp`, not an inline re-implementation of the same rule. Its whole
+        // reason for being exported is that the reviewer-facing verb and the op that actually runs
+        // must not be able to diverge — and this file's premise is single-sourcing exactly that.
+        const op = effectiveOp(f);
         return {
           dimension: f.dimension,
           label: judgeLabel(f.dimension),
@@ -923,7 +947,13 @@ function buildConditionalTopicsSection(
         ? resolveDataSlotQuestions(questionPrompts, topic.members.questionKeys)
         : [],
       trigger: topic.trigger
-        ? { condition: topic.trigger.condition, cues: topic.trigger.cues }
+        ? {
+            // Trimmed of a trailing full stop: the serialisers continue the sentence ("... Today
+            // it is decided from the opening instead"), and an authored condition that already
+            // ends in one otherwise renders as "a grievance.. Today".
+            condition: topic.trigger.condition.trim().replace(/\.$/, ''),
+            cues: topic.trigger.cues,
+          }
         : null,
     };
     (isAlwaysAsked ? alwaysAsked : conditional).push(row);
@@ -937,11 +967,12 @@ function buildConditionalTopicsSection(
       sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
     })),
     settings: buildRoutingSettingRows(settings, topicLabel, include.conditionalTopicsTechnical),
+    // `null` when excluded, never `hasRun: false` — the serialisers render the latter as the
+    // sentence "This routing has not been reviewed", which about a version whose routing WAS
+    // reviewed is simply false. `null` is how every other excluded part of the model is expressed.
     evaluation: include.conditionalTopicsEvaluation
       ? buildScopeEvaluationSection(scopeEvaluationRun)
-      : // Excluded rather than absent: `hasRun: false` is how "never reviewed" is stated, and the
-        // serialisers must be able to tell "the admin left this out" from "nobody has looked".
-        { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
+      : null,
   };
 }
 

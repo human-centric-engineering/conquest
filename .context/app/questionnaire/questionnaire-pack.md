@@ -114,13 +114,20 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   `ROUTING_SETTING_DESCRIPTORS` in `lib/app/questionnaire/settings-registry.ts`, declared
   `satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>` so a new routing
   setting is a compile error until it is classified. This section previously named **four of the
-  fifteen** fields on that object — the same failure the experience-setup registry was written after,
-  missed here only because routing settings live on their own model and the original guard could not
-  reach them. Two of the eleven omissions described what the RESPONDENT experiences: whether they
-  are told which areas were chosen (`announce`) and whether they may ask for one that was not
-  (`allowRespondentAmendment`), absent from the section whose entire subject is how the interview
-  adapts to them. Same two tiers as the setup summary: `standard` always renders, `technical` (the
-  confidence floor, per-type timings, whether extra guidance is set) sits behind a sub-option.
+  fifteen** fields on that object. Same two tiers as the setup summary: `standard` always renders,
+  `technical` (the confidence floor, per-type timings, whether extra guidance is set) sits behind a
+  sub-option.
+
+  **Why a second registry, when `SETTING_DESCRIPTORS.conditionalTopics` exists.** That entry is a
+  single descriptor covering a fifteen-field nested object, so adding a routing setting is _not_ a
+  compile error there — its `rows()` body is hand-written prose and a new field simply never appears.
+  `ROUTING_SETTING_DESCRIPTORS` is keyed per field, so it is. The two overlap deliberately, the way
+  the interviewer section's appendix deliberately duplicates its one-line setup rows: the setup row
+  is the summary, this is the appendix. **They must not drift** — a pack with both sections ticked
+  prints both, and one setting described two ways reads as two settings. `maxOpeningProbes: 0` had
+  already drifted ("None — never probe" against "Capped at 0 for the whole opening") before it was
+  caught; the phrasings are now aligned. Whether the overlap should be collapsed is open — see the
+  note in [P15 follow-ups](./planning/features/f15-followups.md) if it is picked up.
 
   **A topic can say which questions it covers** (`conditionalTopicsMembers`, off by default). Without
   it the pack lists topics in one section and questions in another with nothing tying them, and a

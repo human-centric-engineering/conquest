@@ -1216,9 +1216,14 @@ const ROUTING_SETTING_DESCRIPTORS = {
     rows: (s) => [
       {
         label: 'Follow-ups in the opening',
+        // Phrased exactly as the `conditionalTopics` descriptor in SETTING_DESCRIPTORS phrases it.
+        // Both can appear in one document, and two different sentences for one setting — "None —
+        // never probe" against "Capped at 0 for the whole opening" — reads as two settings.
         value: s.limitOpeningProbes
-          ? `Capped at ${s.maxOpeningProbes} for the whole opening`
-          : 'Not capped across the opening',
+          ? s.maxOpeningProbes === 0
+            ? 'None — never probe'
+            : `Up to ${s.maxOpeningProbes} across the opening`
+          : 'Not limited',
       },
     ],
   },

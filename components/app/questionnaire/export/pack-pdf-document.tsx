@@ -589,6 +589,13 @@ function EvaluationTargetBlock({
             {`${block.heading}, as proposed by ${block.backing}`}
           </Text>
           <Text style={styles.evaluationVerdictJudges}>{block.judges}</Text>
+          {/* The suggestion itself, so a block still says WHY when judge reasoning is off — which
+              is the default download, and where the console would offer a tab. */}
+          {block.suggestions.map((suggestion, j) => (
+            <Text key={j} style={styles.evaluationFindingBody}>
+              {suggestion}
+            </Text>
+          ))}
           {/* The wordings sit inside the block they answer. Hung off whichever action leads, they
               would print proposed phrasing under "A deletion" — as if the panel wanted the question
               deleted and rewritten. */}
@@ -986,59 +993,68 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   </>
                 )}
 
-                <Text style={styles.scopeSubheading}>Review of this routing</Text>
-                <Text style={styles.evaluationIntro}>
-                  AI judge panel over the routing design above — includes findings not yet reviewed;
-                  treat as suggestions, not conclusions.
-                </Text>
-                {!model.conditionalTopics.evaluation.hasRun ? (
-                  <Text style={styles.empty}>This routing has not been reviewed.</Text>
-                ) : (
+                {/* Skipped wholesale when the admin excluded it. The "has not been reviewed" line
+                    below is about a version nobody has evaluated, and must never stand in for a
+                    download that simply left the review out. */}
+                {model.conditionalTopics.evaluation && (
                   <>
-                    <Text style={styles.scopeFacts}>
-                      {`Last run ${formatPackDate(model.conditionalTopics.evaluation.runAt) ?? 'date unknown'}  ·  ${model.conditionalTopics.evaluation.totalFindings} finding(s) across ${model.conditionalTopics.evaluation.targets.length} flagged item(s)`}
+                    <Text style={styles.scopeSubheading}>Review of this routing</Text>
+                    <Text style={styles.evaluationIntro}>
+                      AI judge panel over the routing design above — includes findings not yet
+                      reviewed; treat as suggestions, not conclusions.
                     </Text>
-                    {model.conditionalTopics.evaluation.scores.map((judge) => (
-                      <Text key={judge.dimension} style={styles.evaluationScore}>
-                        {judge.diagnostic
-                          ? `${judge.label} — unavailable: ${judge.diagnostic}`
-                          : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
-                      </Text>
-                    ))}
-
-                    {model.conditionalTopics.evaluation.targets.length === 0 ? (
-                      <Text style={styles.empty}>No findings raised.</Text>
+                    {!model.conditionalTopics.evaluation.hasRun ? (
+                      <Text style={styles.empty}>This routing has not been reviewed.</Text>
                     ) : (
-                      model.conditionalTopics.evaluation.targets.map((target) => (
-                        <View key={target.key} style={styles.evaluationTarget}>
-                          <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
-                          <Text style={styles.evaluationTargetMeta}>
-                            {[
-                              `${target.judges.length} finding(s)`,
-                              target.counts.major > 0 ? `${target.counts.major} major` : null,
-                              target.removed ? 'no longer part of the routing' : null,
-                            ]
-                              .filter(Boolean)
-                              .join('  ·  ')}
+                      <>
+                        <Text style={styles.scopeFacts}>
+                          {`Last run ${formatPackDate(model.conditionalTopics.evaluation.runAt) ?? 'date unknown'}  ·  ${model.conditionalTopics.evaluation.totalFindings} finding(s) across ${model.conditionalTopics.evaluation.targets.length} flagged item(s)`}
+                        </Text>
+                        {model.conditionalTopics.evaluation.scores.map((judge) => (
+                          <Text key={judge.dimension} style={styles.evaluationScore}>
+                            {judge.diagnostic
+                              ? `${judge.label} — unavailable: ${judge.diagnostic}`
+                              : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
                           </Text>
-                          {target.judges.map((judge, i) => (
-                            <View key={i} style={styles.evaluationFinding} wrap={false}>
-                              <Text style={styles.evaluationFindingHeader}>
-                                {judgeHeader(judge.label, judge.severity, judge.status)}
+                        ))}
+
+                        {model.conditionalTopics.evaluation.targets.length === 0 ? (
+                          <Text style={styles.empty}>No findings raised.</Text>
+                        ) : (
+                          model.conditionalTopics.evaluation.targets.map((target) => (
+                            <View key={target.key} style={styles.evaluationTarget}>
+                              <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+                              <Text style={styles.evaluationTargetMeta}>
+                                {[
+                                  `${target.judges.length} finding(s)`,
+                                  target.counts.major > 0 ? `${target.counts.major} major` : null,
+                                  target.removed ? 'no longer part of the routing' : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join('  ·  ')}
                               </Text>
-                              <Text style={styles.evaluationFindingBody}>
-                                {judge.proposedChange}
-                              </Text>
-                              <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
-                              {judge.proposedEditSummary && (
-                                <Text style={styles.scopeEvaluationEdit}>
-                                  {`Proposed edit: ${judge.proposedEditSummary}`}
-                                </Text>
-                              )}
+                              {target.judges.map((judge, i) => (
+                                <View key={i} style={styles.evaluationFinding} wrap={false}>
+                                  <Text style={styles.evaluationFindingHeader}>
+                                    {judgeHeader(judge.label, judge.severity, judge.status)}
+                                  </Text>
+                                  <Text style={styles.evaluationFindingBody}>
+                                    {judge.proposedChange}
+                                  </Text>
+                                  <Text style={styles.evaluationFindingBody}>
+                                    {judge.rationale}
+                                  </Text>
+                                  {judge.proposedEditSummary && (
+                                    <Text style={styles.scopeEvaluationEdit}>
+                                      {`Proposed edit: ${judge.proposedEditSummary}`}
+                                    </Text>
+                                  )}
+                                </View>
+                              ))}
                             </View>
-                          ))}
-                        </View>
-                      ))
+                          ))
+                        )}
+                      </>
                     )}
                   </>
                 )}

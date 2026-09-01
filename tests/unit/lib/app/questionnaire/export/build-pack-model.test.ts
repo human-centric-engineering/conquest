@@ -1055,6 +1055,31 @@ describe('buildPackModel', () => {
       expect(q1?.topicLabel).toBe('Onboarding');
     });
 
+    it('names the two other reaches, including the one a reader most needs', () => {
+      // "Never asked" is the case with no topic to name: a question in no topic is one nobody will
+      // ever see, and a judge's opinion of its wording is beside the point until that is fixed.
+      // Both branches were unexercised, so either could have been mislabelled silently.
+      const reachOf = (reach: 'always' | 'never', topicLabel: string | null) => {
+        const run: EvaluationRunDetail = {
+          ...EVALUATION_RUN,
+          findings: EVALUATION_RUN.findings.map((f) =>
+            f.target ? { ...f, target: { ...f.target, routingReach: reach, topicLabel } } : f
+          ),
+        };
+        return evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+      };
+
+      expect(reachOf('always', 'Background')).toMatchObject({
+        routingReach: 'Always asked',
+        topicLabel: 'Background',
+      });
+      // No topic to name, and the label stays null rather than inventing one.
+      expect(reachOf('never', null)).toMatchObject({
+        routingReach: 'Never asked — in no topic',
+        topicLabel: null,
+      });
+    });
+
     it('says nothing about routing when the version does not route', () => {
       // `routingReach` is null on every finding when Conditional Topics is off, and a questionnaire
       // that does not route must not have a routing line invented for it.
@@ -1256,20 +1281,32 @@ describe('buildPackModel', () => {
       const section = topicsSectionWith({}, topics);
       const talent = section?.conditional.find((t) => t.key === 'talent');
 
+      // The trailing full stop is trimmed: the serialisers continue the sentence ("... Today it is
+      // decided from the opening instead"), and an authored condition ending in one would render
+      // as "a redundancy round.. Today".
       expect(talent?.trigger).toEqual({
-        condition: 'The respondent discloses a redundancy round.',
+        condition: 'The respondent discloses a redundancy round',
         cues: ['redundancy', 'restructure'],
       });
       // Every other topic carries none, which is the normal case.
       expect(section?.alwaysAsked[0]?.trigger).toBeNull();
     });
 
-    it('reports the routing review as "never run" when the sub-option is off', () => {
-      // Excluded, not absent: `hasRun: false` is the shape every serialiser already handles, and
-      // it keeps "the admin left this out" indistinguishable from nothing to show — which is the
-      // right outcome for a section the admin deliberately dropped.
+    it('omits the routing review entirely when the sub-option is off, never calling it unreviewed', () => {
+      // The distinction this asserts is a correctness one, not a shape preference. The serialisers
+      // render `hasRun: false` as the sentence "This routing has not been reviewed" — so emitting
+      // the EXCLUDED case that way would have a client-facing document state, in words, that a
+      // routing which HAD been reviewed was never looked at. `null` is how every other excluded
+      // part of the model is expressed, and every serialiser skips it.
       const section = topicsSectionWith({ conditionalTopicsEvaluation: false });
-      expect(section?.evaluation.hasRun).toBe(false);
+      expect(section?.evaluation).toBeNull();
+    });
+
+    it('still reports a never-reviewed routing as never reviewed when the sub-option is on', () => {
+      // The other side of the same distinction: with the review included and no run to show, the
+      // reader is told so. `topicsSectionWith` passes `scopeEvaluationRun: null`.
+      const section = topicsSectionWith({ conditionalTopicsEvaluation: true });
+      expect(section?.evaluation).toMatchObject({ hasRun: false, targets: [] });
     });
 
     it('reports enabled: false when the version never turned it on, without dropping the topic lists', () => {
@@ -1476,14 +1513,14 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.conditionalTopics?.evaluation.scores.map((d) => d.dimension)).toEqual([
+      expect(model.conditionalTopics?.evaluation?.scores.map((d) => d.dimension)).toEqual([
         'criteria_quality',
         'rule_integrity',
         'budget_realism',
         'coverage_and_burden',
       ]);
       const byDimension = new Map(
-        model.conditionalTopics?.evaluation.scores.map((d) => [d.dimension, d])
+        model.conditionalTopics?.evaluation?.scores.map((d) => [d.dimension, d])
       );
       expect(byDimension.get('criteria_quality')).toMatchObject({
         label: 'Criteria-Quality Judge',
@@ -1515,7 +1552,7 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      const targets = model.conditionalTopics?.evaluation.targets ?? [];
+      const targets = model.conditionalTopics?.evaluation?.targets ?? [];
       expect(targets).toHaveLength(1);
       expect(targets[0]).toMatchObject({
         key: 'talent',

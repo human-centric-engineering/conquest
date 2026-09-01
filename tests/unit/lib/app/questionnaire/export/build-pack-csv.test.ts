@@ -531,7 +531,188 @@ describe('buildPackCsv', () => {
     });
   });
 
+  describe('conditional topics membership block', () => {
+    it('emits one row per (topic, question), and omits the block when nothing is included', () => {
+      // The block was added on this branch and no test produced a row of it: every topic fixture
+      // carried `questions: []`, so the `membershipRows.length > 0` guard was never true. One row
+      // per pair rather than a joined cell, because a joined cell cannot be sorted or pivoted —
+      // which is the only reason this data is in a CSV rather than only in the prose formats.
+      const withMembers = buildPackCsv(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [
+              {
+                key: 'onboarding',
+                label: 'Onboarding experience',
+                description: null,
+                alwaysAsked: true,
+                criteria: null,
+                sampledOnly: false,
+                questions: [
+                  { key: 'q1', prompt: 'How were your first two weeks?' },
+                  { key: 'q2', prompt: 'What would have helped?' },
+                ],
+                trigger: null,
+              },
+            ],
+            conditional: [],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      expect(withMembers).toContain('# Conditional topics membership');
+      expect(withMembers).toContain('topic_key,topic,question_key,question');
+      expect(withMembers).toContain(
+        'onboarding,Onboarding experience,q1,How were your first two weeks?'
+      );
+      expect(withMembers).toContain('onboarding,Onboarding experience,q2,What would have helped?');
+
+      // With membership excluded (the default), `questions` is empty and the block must not appear
+      // at all — an empty block with only a header reads as "this topic covers nothing".
+      const withoutMembers = buildPackCsv(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+      expect(withoutMembers).not.toContain('# Conditional topics membership');
+    });
+
+    it('carries a topic trigger into its own column, where the document asked for one', () => {
+      const csv = buildPackCsv(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [
+              {
+                key: 'safeguarding',
+                label: 'Safeguarding',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'The opening suggests vulnerability.',
+                sampledOnly: false,
+                questions: [],
+                trigger: {
+                  condition: 'The applicant discloses that they are fleeing abuse',
+                  cues: ['abuse'],
+                },
+              },
+            ],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      // Recorded, not acted on — but a spreadsheet filtering "which topics the document wanted
+      // triggered mid-conversation" is exactly the question this column answers.
+      expect(csv).toContain('document_trigger');
+      expect(csv).toContain('The applicant discloses that they are fleeing abuse');
+    });
+  });
+
+  describe('panel verdict block', () => {
+    it('emits one row per proposed action, marking the dissent and which holds the rewordings', () => {
+      // The block was added on this branch and no test produced a single row of it: every target
+      // fixture carried `verdict: null`, so the row callback never ran. `is_dissent` is the fact a
+      // reader loses the moment they sort — the leading action is only the first row of its target
+      // until someone sorts by judge.
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 3,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                routingReach: 'Asked when it fits',
+                topicLabel: 'Onboarding',
+                verdict: {
+                  contested: true,
+                  blocks: [
+                    {
+                      heading: 'A deletion',
+                      backing: '2 of 3 judges',
+                      judges: 'Duplicates, Goal-Match',
+                      holdsWording: false,
+                      suggestions: ['Remove it, Q2 covers this.'],
+                    },
+                    {
+                      heading: 'A reword',
+                      backing: '1 of 3 judges',
+                      judges: 'Clarity',
+                      holdsWording: true,
+                      suggestions: ['Split the double-barrelled ask.'],
+                    },
+                  ],
+                },
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 2, info: 0, total: 3 },
+                judgeCount: 3,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [],
+              },
+            ],
+          },
+        })
+      );
+
+      expect(csv).toContain('# Panel verdict');
+      expect(csv).toContain(
+        'target_key,target,action,backing,judges,is_dissent,holds_rewording,suggestions'
+      );
+      // The leading action: not dissent, and it is NOT the wording host here — the deletion won on
+      // judge count, but proposed wording belongs under the reword.
+      expect(csv).toContain(
+        'q1,Are you engaged and satisfied?,A deletion,2 of 3 judges,"Duplicates, Goal-Match",no,no,"Remove it, Q2 covers this."'
+      );
+      expect(csv).toContain(
+        'q1,Are you engaged and satisfied?,A reword,1 of 3 judges,Clarity,yes,yes,Split the double-barrelled ask.'
+      );
+    });
+  });
+
   describe('routing review blocks', () => {
+    it('emits neither review block when the admin excluded it', () => {
+      // A header-only block reads as "reviewed, nothing found". An absent one reads as "not in
+      // this pack", which is what actually happened.
+      const csv = buildPackCsv(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [],
+            rules: [],
+            settings: [],
+            evaluation: null,
+          },
+        })
+      );
+
+      expect(csv).toContain('# Conditional topics');
+      expect(csv).not.toContain('# Routing review judge scores');
+      expect(csv).not.toContain('# Routing review findings');
+    });
+
     const baseScope = {
       enabled: true,
       alwaysAsked: [],

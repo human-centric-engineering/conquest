@@ -53,14 +53,6 @@ import {
 } from '@/components/admin/questionnaires/evaluation-field';
 
 /**
- * Re-exported rather than declared here. `judgeName` moved into `group-actions.ts` when the
- * Questionnaire Pack needed the same names in a document it renders on the server, and a
- * `'use client'` module is not somewhere `lib/` can import from. Callers in this folder keep their
- * existing import site.
- */
-export { judgeName };
-
-/**
  * Accent per verb, as a rule down the left edge of its block rather than a fill.
  *
  * Colour carries a hint, never the message — every action also states itself in words in its

@@ -221,13 +221,28 @@ export function buildPackMarkdown(model: PackModel): string {
           // open with four near-identical judge paragraphs and leave the reader to work out that
           // all four were asking for the same thing.
           const verdict = include.evaluationVerdicts ? target.verdict : null;
+          // Gated on alternatives alone, matching the PDF and `EvaluationGroupVerdict`: with no
+          // proposed wording, an "unresolved by" line is a caveat about something the reader was
+          // never shown.
+          const hasRewordings = target.alternatives.length > 0;
           if (verdict) {
             for (const block of verdict.blocks) {
               lines.push(`**${block.heading}**, as proposed by ${block.backing} — ${block.judges}`);
+              // The suggestion itself, so a block still says WHY when judge reasoning is off —
+              // which is the default download, and where the console would offer a tab.
+              for (const suggestion of block.suggestions) lines.push(`  ${cell(suggestion)}`);
               // The wordings sit inside the block they answer. Hung off whichever action leads,
               // they would print proposed phrasing under "A deletion" — as if the panel wanted the
               // question deleted and rewritten.
-              if (block.holdsWording && include.evaluationRewordings) {
+              if (block.holdsWording && include.evaluationRewordings && hasRewordings) {
+                // Labelled here as it is in the PDF and the console. Unlabelled, a proposed
+                // phrasing sits among the block's judge suggestions as an anonymous bullet, and
+                // the most copy-pasted line in the appendix reads as one more opinion.
+                lines.push(
+                  target.alternatives.length === 1
+                    ? '  **Suggested rewording:**'
+                    : '  **Suggested rewordings:**'
+                );
                 pushRewordings(target);
               }
               lines.push('');
@@ -259,7 +274,7 @@ export function buildPackMarkdown(model: PackModel): string {
           // from before the verdict step, or a download with verdicts unticked. LAST, after the
           // judges, which is where they sat before verdicts existed and for the reason that has not
           // changed: a resolution only reads as one once you have seen the disagreement.
-          if (!verdict && include.evaluationRewordings && target.alternatives.length > 0) {
+          if (!verdict && include.evaluationRewordings && hasRewordings) {
             lines.push(
               target.alternatives.length === 1
                 ? '**Suggested rewording** (addressing the judges above):'
@@ -339,57 +354,61 @@ export function buildPackMarkdown(model: PackModel): string {
         lines.push('');
       }
 
+      // Skipped wholesale when the admin excluded it — the "has not been reviewed" line below is
+      // about a version nobody has evaluated, not about a download that left the review out.
       const evaluation = model.conditionalTopics.evaluation;
-      lines.push('### Review of this routing');
-      lines.push('');
-      lines.push(
-        '*AI judge panel over the routing design above — includes findings not yet reviewed; treat as suggestions, not conclusions.*'
-      );
-      lines.push('');
-      if (!evaluation.hasRun) {
-        lines.push('_This routing has not been reviewed._');
+      if (evaluation) {
+        lines.push('### Review of this routing');
         lines.push('');
-      } else {
         lines.push(
-          `Last run ${formatPackDate(evaluation.runAt) ?? 'date unknown'} · ${evaluation.totalFindings} finding(s) across ${evaluation.targets.length} flagged item(s)`
+          '*AI judge panel over the routing design above — includes findings not yet reviewed; treat as suggestions, not conclusions.*'
         );
         lines.push('');
-
-        lines.push('| Judge | Score | Findings |');
-        lines.push('| --- | --- | --- |');
-        for (const judge of evaluation.scores) {
-          const score = judge.diagnostic
-            ? `unavailable (${cell(judge.diagnostic)})`
-            : judge.score !== null
-              ? `${Math.round(judge.score * 100)}%`
-              : 'n/a';
-          lines.push(`| ${cell(judge.label)} | ${score} | ${judge.findingCount} |`);
-        }
-        lines.push('');
-
-        if (evaluation.targets.length === 0) {
-          lines.push('_No findings raised._');
+        if (!evaluation.hasRun) {
+          lines.push('_This routing has not been reviewed._');
           lines.push('');
         } else {
-          for (const target of evaluation.targets) {
-            lines.push(`#### ${cell(target.label)}`);
-            const facts = [
-              `${target.judges.length} finding(s)`,
-              target.counts.major > 0 ? `${target.counts.major} major` : null,
-              target.removed ? 'no longer part of the routing' : null,
-            ].filter((f): f is string => f !== null);
-            lines.push(`_${facts.join(' · ')}_`);
+          lines.push(
+            `Last run ${formatPackDate(evaluation.runAt) ?? 'date unknown'} · ${evaluation.totalFindings} finding(s) across ${evaluation.targets.length} flagged item(s)`
+          );
+          lines.push('');
+
+          lines.push('| Judge | Score | Findings |');
+          lines.push('| --- | --- | --- |');
+          for (const judge of evaluation.scores) {
+            const score = judge.diagnostic
+              ? `unavailable (${cell(judge.diagnostic)})`
+              : judge.score !== null
+                ? `${Math.round(judge.score * 100)}%`
+                : 'n/a';
+            lines.push(`| ${cell(judge.label)} | ${score} | ${judge.findingCount} |`);
+          }
+          lines.push('');
+
+          if (evaluation.targets.length === 0) {
+            lines.push('_No findings raised._');
             lines.push('');
-            for (const judge of target.judges) {
-              lines.push(
-                `- ${judgeLine(judge.label, judge.severity, judge.status)} — ${judge.proposedChange}`
-              );
-              lines.push(`  ${judge.rationale}`);
-              if (judge.proposedEditSummary)
-                lines.push(`  Proposed edit: ${judge.proposedEditSummary}`);
-              if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
+          } else {
+            for (const target of evaluation.targets) {
+              lines.push(`#### ${cell(target.label)}`);
+              const facts = [
+                `${target.judges.length} finding(s)`,
+                target.counts.major > 0 ? `${target.counts.major} major` : null,
+                target.removed ? 'no longer part of the routing' : null,
+              ].filter((f): f is string => f !== null);
+              lines.push(`_${facts.join(' · ')}_`);
+              lines.push('');
+              for (const judge of target.judges) {
+                lines.push(
+                  `- ${judgeLine(judge.label, judge.severity, judge.status)} — ${judge.proposedChange}`
+                );
+                lines.push(`  ${judge.rationale}`);
+                if (judge.proposedEditSummary)
+                  lines.push(`  Proposed edit: ${judge.proposedEditSummary}`);
+                if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
+              }
+              lines.push('');
             }
-            lines.push('');
           }
         }
       }
