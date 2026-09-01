@@ -33,6 +33,7 @@ import {
   Hash,
   List,
   ListChecks,
+  ListOrdered,
   Mail,
   MessageSquareText,
   PanelTop,
@@ -99,6 +100,18 @@ import {
 } from '@/lib/app/questionnaire/chat/text-scale';
 import { API } from '@/lib/api/endpoints';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import {
+  SECTION_NAVIGATIONS,
+  SECTION_NAVIGATION_LABELS,
+  SECTION_SOURCES,
+  SECTION_SOURCE_LABELS,
+  SECTION_TANGENT_POLICIES,
+  SECTION_TANGENT_POLICY_LABELS,
+} from '@/lib/app/questionnaire/sections/types';
+import {
+  MAX_TURNS_PER_SECTION,
+  type SectionedInterviewSettings,
+} from '@/lib/app/questionnaire/sections/settings';
 import {
   ACCESS_MODES,
   ACCESS_MODE_LABELS,
@@ -673,6 +686,11 @@ export function ConfigEditor({
   const [earlyFinishMinCoveragePct, setEarlyFinishMinCoveragePct] = useState(
     pctString(config.earlyFinishMinCoverage)
   );
+  // Same whole-percent-in, fraction-out treatment as the early-finish bar above: an admin types
+  // 80, the column stores 0.8. See `pctString` / `fractionFromPct`.
+  const [sectionCloseCoveragePct, setSectionCloseCoveragePct] = useState(
+    pctString(config.sections.closeCoverage)
+  );
   const [earlyFinishMinQuestions, setEarlyFinishMinQuestions] = useState(
     String(config.earlyFinishMinQuestions)
   );
@@ -791,6 +809,8 @@ export function ConfigEditor({
   );
   // Respondent intro / splash (admin opt-in): the whole block edited as one object.
   const [intro, setIntro] = useState<IntroSettings>(config.intro);
+  // Sectioned interviews (P21): the whole block edited as one object, like `intro` above.
+  const [sections, setSections] = useState<SectionedInterviewSettings>(config.sections);
   /**
    * Conditional Topics' master switch — the ONLY part of Conditional Topics editable here.
    *
@@ -863,6 +883,8 @@ export function ConfigEditor({
     setQuestionFidelity(config.questionFidelity);
     setHouseRules(config.houseRules);
     setIntro(config.intro);
+    setSections(config.sections);
+    setSectionCloseCoveragePct(pctString(config.sections.closeCoverage));
     setConditionalTopicsEnabled(config.conditionalTopics.enabled);
   }, [config]);
 
@@ -1216,6 +1238,12 @@ export function ConfigEditor({
           background: intro.background.trim(),
           buttonLabel: intro.buttonLabel.trim(),
           videoUrl: intro.videoUrl.trim(),
+        },
+        // Sectioned interviews. Sent whole. Nothing else writes this blob, so unlike
+        // `conditionalTopics` below there is no second editor to race with.
+        sections: {
+          ...sections,
+          closeCoverage: fractionFromPct(sectionCloseCoveragePct, config.sections.closeCoverage),
         },
         captureMode,
         // Capture off → send no fields (exactly how the runtime reads "don't collect"), keeping the
@@ -1636,6 +1664,267 @@ export function ConfigEditor({
                   Set up topics and conditions
                 </Link>
               </Button>
+            </div>
+          </SettingsGroup>
+
+          {/* ── Sectioned interviews (P21) — whether the conversation is one continuous run over the
+             whole instrument, or bounded to one section at a time with a tab strip and a per-section
+             close. Sits beside Conditional topics deliberately: that decides WHICH parts apply to a
+             respondent, this decides the ORDER they meet them in. ── */}
+          <SettingsGroup
+            collapse={collapseApi}
+            icon={ListOrdered}
+            accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+            id="sectioned-interview"
+            title="Work through it in sections"
+            description="Break the conversation into sections the respondent moves between, instead of one continuous run through the whole questionnaire."
+            headerAction={
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
+                <span className={sections.enabled ? 'text-foreground' : 'text-muted-foreground'}>
+                  {sections.enabled ? 'On' : 'Off'}
+                </span>
+                <Switch
+                  checked={sections.enabled}
+                  onCheckedChange={(v) => setSections((x) => ({ ...x, enabled: v }))}
+                  disabled={busy}
+                  aria-label="Work through the questionnaire in sections"
+                />
+              </label>
+            }
+          >
+            <div className="space-y-4">
+              <p className="text-muted-foreground text-sm">
+                {sections.enabled ? (
+                  <>
+                    The respondent sees the sections as tabs, and the conversation stays inside the
+                    one they are in. Each section opens with its own opening question.
+                  </>
+                ) : (
+                  <>
+                    One continuous conversation over the whole questionnaire, which is how every
+                    questionnaire has always run.
+                  </>
+                )}{' '}
+                <FieldHelp title="Working through it in sections">
+                  A long questionnaire answered in one unbroken run gives the respondent nothing to
+                  finish and no place to stop. With this on, the conversation is bounded to one
+                  section at a time, they can see which areas are done and which are still to come,
+                  and each section ends with a clear point at which they move on. Needs at least two
+                  sections to resolve; below that the questionnaire runs unsectioned exactly as it
+                  does now.
+                </FieldHelp>
+              </p>
+
+              {sections.enabled && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5 sm:max-w-sm">
+                    <Label className="text-sm font-medium">
+                      Where the sections come from{' '}
+                      <FieldHelp title="Where the sections come from">
+                        Leave this on “Work it out” unless you have a reason not to. It uses your
+                        conditional topics when they are switched on, because a topic already knows
+                        both its questions and its data slots; otherwise it groups by the data-slot
+                        areas, and failing that by the sections in your original document.
+                      </FieldHelp>
+                    </Label>
+                    <Select
+                      value={sections.source}
+                      onValueChange={(v) =>
+                        setSections((x) => ({
+                          ...x,
+                          source: v as SectionedInterviewSettings['source'],
+                        }))
+                      }
+                      disabled={busy}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Work it out automatically</SelectItem>
+                        {SECTION_SOURCES.map((source) => (
+                          <SelectItem key={source} value={source}>
+                            {SECTION_SOURCE_LABELS[source]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5 sm:max-w-sm">
+                    <Label className="text-sm font-medium">
+                      Moving between sections{' '}
+                      <FieldHelp title="Moving between sections">
+                        “In order” holds the sequence your instrument implies: a section has to be
+                        finished before the next one opens. “Any order” turns the tabs into a menu.
+                        Either way a finished section can be reopened and added to.
+                      </FieldHelp>
+                    </Label>
+                    <Select
+                      value={sections.navigation}
+                      onValueChange={(v) =>
+                        setSections((x) => ({
+                          ...x,
+                          navigation: v as SectionedInterviewSettings['navigation'],
+                        }))
+                      }
+                      disabled={busy}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SECTION_NAVIGATIONS.map((nav) => (
+                          <SelectItem key={nav} value={nav}>
+                            {SECTION_NAVIGATION_LABELS[nav]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5 sm:max-w-sm">
+                    <Label className="text-sm font-medium">
+                      If they answer something from another section{' '}
+                      <FieldHelp title="Answers about another section">
+                        People volunteer things out of order. The default records what they said
+                        against the section it belongs to, so nothing is lost, but the interviewer
+                        stays on the current section rather than following them off it. The stricter
+                        setting ignores it entirely.
+                      </FieldHelp>
+                    </Label>
+                    <Select
+                      value={sections.tangentPolicy}
+                      onValueChange={(v) =>
+                        setSections((x) => ({
+                          ...x,
+                          tangentPolicy: v as SectionedInterviewSettings['tangentPolicy'],
+                        }))
+                      }
+                      disabled={busy}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SECTION_TANGENT_POLICIES.map((policy) => (
+                          <SelectItem key={policy} value={policy}>
+                            {SECTION_TANGENT_POLICY_LABELS[policy]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">
+                        Section is done at (%){' '}
+                        <FieldHelp title="When a section counts as done">
+                          How much of a section has to be covered before the respondent is offered
+                          the move to the next one. 100% means every question in the section is
+                          answered. Lower it to let people move on sooner. If you also set an
+                          answered-count beside this, both have to be met.
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={sectionCloseCoveragePct}
+                        onChange={(e) => setSectionCloseCoveragePct(e.target.value)}
+                        disabled={busy}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">
+                        Or this many answered{' '}
+                        <FieldHelp title="Answered-count bar">
+                          A second bar, applied on top of the percentage rather than instead of it:
+                          the section also needs at least this many questions answered. Leave it at
+                          0 unless you have a reason, so the percentage gates alone.
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={sections.closeMinAnswered}
+                        onChange={(e) =>
+                          setSections((x) => ({
+                            ...x,
+                            closeMinAnswered: Math.max(0, Number(e.target.value) || 0),
+                          }))
+                        }
+                        disabled={busy}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 sm:max-w-xs">
+                    <Label className="text-sm font-medium">
+                      Most turns in one section{' '}
+                      <FieldHelp title="Most turns in one section">
+                        A safety net, and worth setting if you are running sections in order. A
+                        section containing a required question the respondent will not answer can
+                        never satisfy the bars above, and without a cap here they can neither finish
+                        it nor leave it. Reaching this always lets them move on. 0 means no limit.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={MAX_TURNS_PER_SECTION}
+                      step={1}
+                      value={sections.maxTurnsPerSection}
+                      onChange={(e) =>
+                        setSections((x) => ({
+                          ...x,
+                          maxTurnsPerSection: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      disabled={busy}
+                    />
+                  </div>
+
+                  <label className="flex cursor-pointer items-start gap-2 text-sm select-none">
+                    <Switch
+                      checked={sections.agentOffersClose}
+                      onCheckedChange={(v) => setSections((x) => ({ ...x, agentOffersClose: v }))}
+                      disabled={busy}
+                      aria-label="Let the interviewer offer to move on"
+                    />
+                    <span>
+                      Let the interviewer offer to move on{' '}
+                      <FieldHelp title="Interviewer offers to move on">
+                        With this on, the interviewer says when a section is covered and names the
+                        one that follows, as well as the button appearing. Without it the button
+                        appears on its own, and someone who is not watching for it will keep
+                        answering a section that is already finished. Either way, once a section has
+                        nothing left to ask the interviewer says so rather than going quiet.
+                      </FieldHelp>
+                    </span>
+                  </label>
+
+                  <label className="flex cursor-pointer items-start gap-2 text-sm select-none">
+                    <Switch
+                      checked={sections.showLockedSections}
+                      onCheckedChange={(v) => setSections((x) => ({ ...x, showLockedSections: v }))}
+                      disabled={busy}
+                      aria-label="Show sections not yet reached"
+                    />
+                    <span>
+                      Show sections they have not reached yet{' '}
+                      <FieldHelp title="Sections not yet reached">
+                        Shows the whole path greyed out, so the respondent can see the shape of what
+                        is coming. Turning it off reveals each section only as they get to it, which
+                        makes a long questionnaire feel unbounded.
+                      </FieldHelp>
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
           </SettingsGroup>
 

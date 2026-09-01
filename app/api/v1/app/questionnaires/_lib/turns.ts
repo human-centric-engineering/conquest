@@ -40,6 +40,13 @@ export interface TurnWriteInput {
   /** Data Slots feature: the `AppDataSlot.id` this turn targeted (data-slot mode); `null` otherwise.
    *  Counted across recent turns to detect when a slot has been asked repeatedly (re-ask/park). */
   targetedDataSlotId?: string | null;
+  /**
+   * Sectioned interviews (P21): the section this exchange belongs to.
+   *
+   * Omitted (and so stored null) on every unsectioned session, which is what makes the transcript,
+   * the inspector and the report chapters fall back to the flat view by construction.
+   */
+  sectionKey?: string | null;
   /** The capabilities dispatched this turn, in order. */
   toolCalls: ToolCallRecord[];
   /** The `AppAnswerSlot.id`s this turn created or updated — back-stamped with the turn id. */
@@ -143,6 +150,7 @@ async function writeTurn(input: TurnWriteInput): Promise<string> {
         ...(input.targetedDataSlotId !== undefined
           ? { targetedDataSlotId: input.targetedDataSlotId }
           : {}),
+        ...(input.sectionKey !== undefined ? { sectionKey: input.sectionKey } : {}),
         toolCalls: jsonInput(input.toolCalls),
         sideEffectAnswerIds: jsonInput(input.sideEffectAnswerIds),
         ...(input.sideEffectDataSlotIds

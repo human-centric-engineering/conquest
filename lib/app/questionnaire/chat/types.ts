@@ -15,6 +15,14 @@ export interface QuestionnaireTurn {
   role: 'user' | 'assistant';
   content: string;
   /**
+   * Sectioned interviews (P21): the section this exchange belongs to.
+   *
+   * Absent on every unsectioned session and on every turn recorded before P21, which is exactly
+   * what makes the live chat and the downloads fall back to one flat conversation with no branch:
+   * a filter on "no key" matches nothing to hide, and a grouping on "no key" yields one group.
+   */
+  sectionKey?: string | null;
+  /**
    * Side-band notices surfaced with this (assistant) turn — the seriousness / support /
    * contradiction callouts rendered inline beneath it. Attached to the turn (rather than held
    * as one transient banner) so they persist as the conversation scrolls on AND replay on

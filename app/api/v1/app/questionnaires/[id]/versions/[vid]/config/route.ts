@@ -125,6 +125,7 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
       respondentReport,
       cohortReport,
       intro,
+      sections,
       milestoneBannerThresholds,
       ...scalars
     } = body;
@@ -137,6 +138,7 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
       ...(respondentReport !== undefined ? { respondentReport: jsonInput(respondentReport) } : {}),
       ...(cohortReport !== undefined ? { cohortReport: jsonInput(cohortReport) } : {}),
       ...(intro !== undefined ? { intro: jsonInput(intro) } : {}),
+      ...(sections !== undefined ? { sections: jsonInput(sections) } : {}),
       ...(milestoneBannerThresholds !== undefined
         ? { milestoneBannerThresholds: jsonInput(milestoneBannerThresholds) }
         : {}),

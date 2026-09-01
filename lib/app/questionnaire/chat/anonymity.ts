@@ -22,6 +22,7 @@
  */
 
 import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
+import { narrowSectionedInterviewSettings } from '@/lib/app/questionnaire/sections/settings';
 import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
 import {
   ACCESS_MODES,
@@ -207,6 +208,22 @@ export async function resolveInlineCorrectionForVersion(versionId: string): Prom
 export async function resolveSessionResumeEnabledForVersion(versionId: string): Promise<boolean> {
   const version = await loadVersionSurface(versionId);
   return version?.config?.sessionResumeEnabled ?? DEFAULT_QUESTIONNAIRE_CONFIG.sessionResumeEnabled;
+}
+
+/**
+ * Resolve whether a launched version runs in SECTIONS (P21).
+ *
+ * Resolved server-side and handed to the surface as a prop for the same reason
+ * {@link resolveAnswerPanelScopeForVersion} is: the tab strip changes the layout from the first
+ * paint, and a strip that appears a moment after the conversation reads as a glitch.
+ *
+ * It also means an unsectioned questionnaire — which is every questionnaire that has not opted in —
+ * makes NO extra request at all. The strip's own endpoint is then only called by a surface that
+ * actually has sections to draw. Absent config → OFF.
+ */
+export async function resolveSectionedForVersion(versionId: string): Promise<boolean> {
+  const version = await loadVersionSurface(versionId);
+  return narrowSectionedInterviewSettings(version?.config?.sections).enabled;
 }
 
 /**

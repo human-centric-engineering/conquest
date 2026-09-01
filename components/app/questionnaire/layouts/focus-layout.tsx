@@ -46,6 +46,14 @@ export function FocusLayout({ slots, state }: RespondentLayoutProps) {
   // (Broadsheet's move) or fold the history away (Horizon's).
   const chatSurface = (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* P21: a compact part-of menu rather than a full strip — a seven-tab bar is exactly the
+          chrome this layout exists to remove. Kept on the surface rather than in the lifecycle
+          strip's trailing cluster so it sits with the conversation it bounds; the container gives
+          it the `menu` variant either way, by reading this layout's own placement. */}
+      <div className="flex items-center justify-between gap-2 empty:hidden">
+        {slots.sectionTabs}
+        {slots.sectionClose}
+      </div>
       {slots.completionOffer}
       <ConversationFrame
         className="min-h-0 flex-1"

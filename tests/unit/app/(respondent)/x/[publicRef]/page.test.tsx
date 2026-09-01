@@ -79,6 +79,9 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveShowProgressPercentTextForVersion: vi.fn(),
   resolveChatTextScaleIndexForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
+  // P21: resolved server-side so the tab strip is present in the first paint. Defaults false here,
+  // which is what every questionnaire that never opted in resolves to.
+  resolveSectionedForVersion: vi.fn().mockResolvedValue(false),
 }));
 
 // The chrome is rendered by the page now, not inherited from a layout. Stubbed to a pass-through

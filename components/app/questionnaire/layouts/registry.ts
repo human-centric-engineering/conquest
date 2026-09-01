@@ -73,6 +73,18 @@ export const LAYOUT_REGISTRY = {
       answersPanel: { kind: 'region', region: 'right column of the split (lg and up)' },
       answersDrawer: { kind: 'overlay', via: 'sheet' },
 
+      /* Sectioned interviews (P21) */
+      // Room and a two-column split: the tabs are chrome and belong with the chrome, directly above
+      // the conversation they bound.
+      sectionTabs: {
+        kind: 'region',
+        region: 'above the conversation card, below the lifecycle strip',
+      },
+      sectionClose: {
+        kind: 'region',
+        region: 'foot of the conversation card, beside the composer',
+      },
+
       /* Finishing */
       completionOffer: { kind: 'region', region: 'above the conversation and the form' },
       finalCheck: { kind: 'overlay', via: 'modal' },
@@ -122,6 +134,19 @@ export const LAYOUT_REGISTRY = {
         because: 'review lives in the sheet at every width, so no panel rides beside the column',
       },
       answersDrawer: { kind: 'overlay', via: 'sheet' },
+
+      /* Sectioned interviews (P21) */
+      // This layout strips chrome on purpose, so a permanent seven-tab strip would reintroduce
+      // exactly what it exists to remove. The tabs collapse into the trailing cluster beside the
+      // review trigger — already this layout's pattern for anything it will not keep on screen.
+      sectionTabs: {
+        kind: 'region',
+        region: 'lifecycle strip, trailing cluster (a compact part-of menu)',
+      },
+      sectionClose: {
+        kind: 'region',
+        region: 'foot of the conversation card, beneath the composer',
+      },
 
       /* Finishing */
       completionOffer: { kind: 'region', region: 'above the conversation and the form' },
@@ -192,6 +217,16 @@ export const LAYOUT_REGISTRY = {
         because: 'the margin carries the composer, so review lives in the sheet at every width',
       },
       answersDrawer: { kind: 'overlay', via: 'sheet' },
+
+      /* Sectioned interviews (P21) */
+      // The margin already holds the two things the respondent DOES — answer, and finish. Choosing
+      // which area to work in is a third, so it joins them there rather than floating above the
+      // document, which is the thing they read.
+      sectionTabs: { kind: 'region', region: 'the margin, above the completion offer' },
+      sectionClose: {
+        kind: 'region',
+        region: 'the margin, with the composer and the completion offer',
+      },
 
       /* Finishing */
       // In the margin with the composer, not above the document: answering and finishing are the two
@@ -267,6 +302,15 @@ export const LAYOUT_REGISTRY = {
           'a running list of every answer is the accumulation this layout exists to fold away; review lives in the sheet at every width',
       },
       answersDrawer: { kind: 'overlay', via: 'sheet' },
+
+      /* Sectioned interviews (P21) */
+      // Behind the same kind of gesture as the history, and for the same reason: a permanent list
+      // of seven areas is precisely the accumulated wall this layout exists to fold away. Legal
+      // because `overlay` is availability, not omission — one gesture away is a design decision.
+      sectionTabs: { kind: 'overlay', via: 'gesture' },
+      // The exception that stays on screen. It is an action on the CURRENT question, not a record
+      // of past ones, so folding it away would be folding away the way forward.
+      sectionClose: { kind: 'region', region: 'above the stage, with the completion offer' },
 
       /* Finishing */
       // Above the stage rather than in the margin (Broadsheet) — there is no margin here, and a

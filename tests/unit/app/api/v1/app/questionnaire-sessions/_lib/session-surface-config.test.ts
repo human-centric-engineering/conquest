@@ -122,6 +122,7 @@ describe('loadSessionSurfaceConfig', () => {
                     reasoningStreamDwellMs: true,
                     reasoningStreamPerItemMs: true,
                     showProgressPercentText: true,
+                    sections: true,
                   },
                 },
               },
@@ -152,6 +153,7 @@ describe('loadSessionSurfaceConfig', () => {
           reasoningStreamDwellMs: 2000,
           reasoningStreamPerItemMs: 330,
           showProgressPercentText: true,
+          sections: true,
         },
       });
       findUnique.mockResolvedValue(dbRow);
@@ -176,6 +178,7 @@ describe('loadSessionSurfaceConfig', () => {
         reasoningStreamDwellMs: 2000,
         reasoningStreamPerItemMs: 330,
         showProgressPercentText: true,
+        sections: true,
       });
     });
 
@@ -233,6 +236,7 @@ describe('loadSessionSurfaceConfig', () => {
         reasoningStreamDwellMs: 1500,
         reasoningStreamPerItemMs: 250,
         showProgressPercentText: true,
+        sections: true,
       };
       findUnique.mockResolvedValue(makeDbRow({ config: expectedConfig }));
 

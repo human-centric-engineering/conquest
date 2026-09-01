@@ -67,6 +67,19 @@ import {
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 import { CHAT_TEXT_SIZES } from '@/lib/app/questionnaire/chat/text-scale';
+import {
+  SECTION_NAVIGATIONS,
+  SECTION_SOURCES,
+  SECTION_TANGENT_POLICIES,
+} from '@/lib/app/questionnaire/sections/types';
+import {
+  MAX_SECTION_CLOSE_ANSWERED,
+  MAX_SECTION_CLOSE_COVERAGE,
+  MAX_TURNS_PER_SECTION,
+  MIN_SECTION_CLOSE_ANSWERED,
+  MIN_SECTION_CLOSE_COVERAGE,
+  MIN_TURNS_PER_SECTION,
+} from '@/lib/app/questionnaire/sections/settings';
 import { resolveIntroVideo } from '@/lib/app/questionnaire/intro/video';
 import { BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
 
@@ -430,6 +443,31 @@ const introSettingsSchema = z
   .strict();
 
 /**
+ * Sectioned interviews (P21). Sent whole, like every other settings block here.
+ *
+ * A full replace rather than a merge, and that is the reason it rides `updateConfigSchema` instead
+ * of taking the separate patch path `conditionalTopics` takes: nothing but the config editor writes
+ * this blob, so there is no second writer to merge against.
+ */
+const sectionedInterviewSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    source: z.enum(['auto', ...SECTION_SOURCES]),
+    navigation: z.enum(SECTION_NAVIGATIONS),
+    tangentPolicy: z.enum(SECTION_TANGENT_POLICIES),
+    closeCoverage: z.number().min(MIN_SECTION_CLOSE_COVERAGE).max(MAX_SECTION_CLOSE_COVERAGE),
+    closeMinAnswered: z
+      .number()
+      .int()
+      .min(MIN_SECTION_CLOSE_ANSWERED)
+      .max(MAX_SECTION_CLOSE_ANSWERED),
+    maxTurnsPerSection: z.number().int().min(MIN_TURNS_PER_SECTION).max(MAX_TURNS_PER_SECTION),
+    agentOffersClose: z.boolean(),
+    showLockedSections: z.boolean(),
+  })
+  .strict();
+
+/**
  * PATCH a version's configuration. All fields optional (partial save); at least
  * one required. Numbers are bounded to sane authoring ranges; nullable budget/cap
  * fields use `null` to mean "no cap" (an omitted key leaves the stored value).
@@ -541,6 +579,8 @@ export const updateConfigSchema = z
     cohortReport: cohortReportSettingsSchema.optional(),
     // Respondent intro / splash screen. Sent whole when present.
     intro: introSettingsSchema.optional(),
+    // Sectioned interviews. Sent whole when present.
+    sections: sectionedInterviewSettingsSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

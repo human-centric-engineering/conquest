@@ -16,14 +16,15 @@ import {
   resolveAnonymousForVersion,
   resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
+  resolveChatTextScaleIndexForVersion,
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
+  resolveReasoningDwellForVersion,
+  resolveReasoningPlacementForVersion,
   resolveRespondentChromeForVersion,
-  resolveChatTextScaleIndexForVersion,
   resolveRespondentDesignForVersion,
   resolveRespondentLayoutForVersion,
-  resolveReasoningPlacementForVersion,
-  resolveReasoningDwellForVersion,
+  resolveSectionedForVersion,
   resolveSessionResumeEnabledForVersion,
   resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
@@ -119,6 +120,7 @@ export default async function PublicQuestionnairePage({
     glossary,
     glossaryAppendix,
     showProgressPercentText,
+    sectioned,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -139,6 +141,9 @@ export default async function PublicQuestionnairePage({
     resolveGlossaryForHints(versionId),
     resolveGlossaryAppendixForVersion(versionId),
     resolveShowProgressPercentTextForVersion(versionId),
+    // P21: resolved here so the tab strip is present from the first paint, and so an
+    // unsectioned questionnaire never calls the strip endpoint at all.
+    resolveSectionedForVersion(versionId),
   ]);
   // The cross-device "continue with your code" footer is for the public anonymous path only — admin
   // preview and frictionless-invite links resume by other means, so it would only confuse there.
@@ -204,6 +209,7 @@ export default async function PublicQuestionnairePage({
               respondentLayout={respondentLayout}
               chatTextScaleIndex={chatTextScaleIndex}
               answerPanelScope={answerPanelScope}
+              sectioned={sectioned}
               reasoningPlacement={reasoningPlacement}
               reasoningDwellMs={reasoningDwell.dwellMs}
               reasoningPerItemMs={reasoningDwell.perItemMs}

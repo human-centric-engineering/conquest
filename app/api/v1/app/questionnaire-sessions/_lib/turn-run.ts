@@ -54,6 +54,13 @@ export async function persistTurn(opts: {
   /** Data Slots feature: the `AppDataSlot.id` this turn targeted (data-slot mode) — drives the
    *  per-slot re-ask/park counter. Null for question/sweep/offer turns. */
   targetedDataSlotId?: string | null;
+  /** Sectioned interviews (P21): the section this exchange belongs to. Omitted when unsectioned. */
+  sectionKey?: string | null;
+  /**
+   * Sectioned interviews (P21): the run state to bank, with this turn already charged to the
+   * active section. Omitted when unsectioned, leaving the column null.
+   */
+  sectionRun?: unknown;
   toolCalls: ToolCallRecord[];
   /** Side-band notices this turn surfaced — persisted on the turn for inline replay on resume. */
   warnings?: SessionWarning[];
@@ -222,7 +229,10 @@ export async function persistTurn(opts: {
     opts.pendingContradiction !== undefined ||
     opts.raisedContradictions !== undefined ||
     opts.raisedMilestones !== undefined ||
-    opts.progressFloorPct !== undefined
+    opts.progressFloorPct !== undefined ||
+    // P21. Without this the run would be silently dropped on every ordinary turn: it is the only
+    // one of these that changes EVERY turn, while the four above are occasional.
+    opts.sectionRun !== undefined
   ) {
     await prisma.appQuestionnaireSession.update({
       where: { id: opts.sessionId },
@@ -242,6 +252,9 @@ export async function persistTurn(opts: {
           : {}),
         ...(opts.raisedMilestones !== undefined ? { raisedMilestones: opts.raisedMilestones } : {}),
         ...(opts.progressFloorPct !== undefined ? { progressFloorPct: opts.progressFloorPct } : {}),
+        ...(opts.sectionRun !== undefined
+          ? { sectionRun: opts.sectionRun as Prisma.InputJsonValue }
+          : {}),
       },
     });
   }
@@ -260,6 +273,7 @@ export async function persistTurn(opts: {
     ...(opts.targetedDataSlotId !== undefined
       ? { targetedDataSlotId: opts.targetedDataSlotId }
       : {}),
+    ...(opts.sectionKey !== undefined ? { sectionKey: opts.sectionKey } : {}),
     toolCalls: opts.toolCalls,
     sideEffectAnswerIds,
     sideEffectDataSlotIds,

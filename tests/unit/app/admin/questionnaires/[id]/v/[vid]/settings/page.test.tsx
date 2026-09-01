@@ -268,6 +268,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
     },
     ...over,
   };
@@ -311,6 +312,7 @@ function makeDemoClientApiRow(
 
 import SettingsTab from '@/app/admin/questionnaires/[id]/v/[vid]/settings/page';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_SECTIONED_INTERVIEW_SETTINGS } from '@/lib/app/questionnaire/sections/settings';
 
 /** A question in the version graph — only `key` and `prompt` matter to the maps under test. */
 const QUESTION_STUB: VersionGraphView['sections'][number]['questions'][number] = {

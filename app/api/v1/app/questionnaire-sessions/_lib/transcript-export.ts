@@ -80,6 +80,8 @@ export async function loadTranscriptExport(
       status: true,
       respondentUserId: true,
       publicRef: true,
+      // P21: resolving the section headings needs the version the session ran on.
+      versionId: true,
       createdAt: true,
       updatedAt: true,
       version: {
@@ -102,7 +104,14 @@ export async function loadTranscriptExport(
       // Verbatim conversation, oldest-first — the transcript body.
       turns: {
         orderBy: { ordinal: 'asc' },
-        select: { userMessage: true, agentResponse: true, createdAt: true },
+        select: {
+          userMessage: true,
+          agentResponse: true,
+          createdAt: true,
+          // Sectioned interviews (P21): resolved to a label below, so the download reads as one
+          // conversation per section. Null on every unsectioned session.
+          sectionKey: true,
+        },
       },
       // Latest completion event → the completion timestamp for the header.
       events: {
@@ -134,6 +143,34 @@ export async function loadTranscriptExport(
 
   const demoClient = row.version.questionnaire.demoClient;
 
+  // P21: section key → respondent-facing label, for the transcript's section headings.
+  //
+  // Resolved from the version's CURRENT topics and sections rather than snapshotted per turn: an
+  // export taken today should read by the names the questionnaire has today. An unresolvable key
+  // falls back to the key itself, which is at least a stable divider — dropping the heading would
+  // silently merge two sections into one block.
+  //
+  // Two queries, and only when a turn actually carries a key, so an unsectioned session pays
+  // nothing at all.
+  const sectionLabels = new Map<string, string>();
+  if (row.turns.some((t) => t.sectionKey)) {
+    const [topics, docSections] = await Promise.all([
+      prisma.appQuestionnaireTopic.findMany({
+        where: { versionId: row.versionId },
+        select: { key: true, label: true },
+      }),
+      prisma.appQuestionnaireSection.findMany({
+        where: { versionId: row.versionId },
+        select: { id: true, title: true },
+      }),
+    ]);
+    for (const topic of topics) sectionLabels.set(topic.key, topic.label);
+    // Document-sourced sections key on the section id. Added second and only where the key is free,
+    // so a topic never loses to a section that happens to share an identifier.
+    for (const sec of docSections)
+      if (!sectionLabels.has(sec.id)) sectionLabels.set(sec.id, sec.title);
+  }
+
   return {
     session: { id: row.id, respondentUserId: row.respondentUserId },
     questionnaireId: row.version.questionnaire.id,
@@ -157,6 +194,11 @@ export async function loadTranscriptExport(
       userMessage: t.userMessage,
       agentResponse: t.agentResponse,
       at: t.createdAt.toISOString(),
+      // The stored key resolved to the section's label. Deliberately resolved from the version's
+      // CURRENT topics rather than snapshotted per turn: a renamed section should read by its
+      // current name in an export taken today. An unresolvable key falls back to the key itself,
+      // which is at least a stable divider, rather than dropping the heading entirely.
+      ...(t.sectionKey ? { sectionLabel: sectionLabels.get(t.sectionKey) ?? t.sectionKey } : {}),
     })),
   };
 }

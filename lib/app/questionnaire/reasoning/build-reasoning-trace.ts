@@ -230,6 +230,15 @@ export function buildReasoningTrace(
       label: "We've reached the end of the questions",
       tone: 'neutral',
     });
+  } else if (response.kind === 'section_covered') {
+    // P21: nothing was selected, because there was nothing left in this part to select. The trace
+    // says which part ended rather than falling silent, which would read as a turn that did nothing.
+    steps.push({
+      kind: 'selection',
+      label: "That's this part covered",
+      ...(response.nextLabel ? { detail: `${response.nextLabel} is next.` } : {}),
+      tone: 'neutral',
+    });
   } else if (response.kind === 'contradiction_probe') {
     steps.push({
       kind: 'selection',

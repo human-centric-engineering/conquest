@@ -64,6 +64,7 @@ import {
 import { CHAT_TEXT_SIZE_LABELS } from '@/lib/app/questionnaire/chat/text-scale';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import type { ConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
+import { SECTION_SOURCE_LABELS } from '@/lib/app/questionnaire/sections/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
 /* ── Tiers & groups ───────────────────────────────────────────────────────── */
@@ -695,6 +696,59 @@ export const SETTING_DESCRIPTORS = {
           label: 'Planner instructions',
           tier: 'technical',
           value: setOrNot(c.conditionalTopics.plannerInstructions),
+        },
+      ];
+    },
+  },
+  sections: {
+    group: 'Respondent experience',
+    tier: 'standard',
+    rows: (c) => {
+      // Off is the default and the pre-P21 behaviour: one continuous conversation over the whole
+      // instrument. The only honest row is the switch itself; the rest describes an interview that
+      // is actually being broken into parts.
+      if (!c.sections.enabled) {
+        return [{ label: 'Sectioned interview', value: 'Disabled' }];
+      }
+      return [
+        { label: 'Sectioned interview', value: 'Enabled' },
+        {
+          label: 'Sections come from',
+          value:
+            c.sections.source === 'auto'
+              ? 'Worked out automatically'
+              : SECTION_SOURCE_LABELS[c.sections.source],
+        },
+        {
+          label: 'Moving between sections',
+          value: c.sections.navigation === 'sequential' ? 'In order' : 'Any order',
+        },
+        {
+          label: 'Answers about another section',
+          value: c.sections.tangentPolicy === 'capture' ? 'Recorded, not followed' : 'Not recorded',
+        },
+        {
+          // The two bars read as one setting because BOTH have to be met, so a reader shown only the
+          // coverage figure would believe a section closes as soon as it is reached.
+          label: 'Section counts as done at',
+          value:
+            c.sections.closeMinAnswered > 0
+              ? `${asPercent(c.sections.closeCoverage)} covered, and ${c.sections.closeMinAnswered} answered`
+              : asPercent(c.sections.closeCoverage),
+        },
+        {
+          label: 'Maximum turns per section',
+          value:
+            c.sections.maxTurnsPerSection > 0 ? String(c.sections.maxTurnsPerSection) : 'No limit',
+        },
+        {
+          label: 'Interviewer offers to move on',
+          value: yesNo(c.sections.agentOffersClose),
+        },
+        {
+          label: 'Sections not yet reached',
+          tier: 'technical',
+          value: c.sections.showLockedSections ? 'Shown, locked' : 'Hidden',
         },
       ];
     },

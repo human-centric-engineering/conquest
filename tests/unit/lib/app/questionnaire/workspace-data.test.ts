@@ -68,6 +68,7 @@ import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_SECTIONED_INTERVIEW_SETTINGS } from '@/lib/app/questionnaire/sections/settings';
 import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       questionFidelity: DEFAULT_QUESTION_FIDELITY,
       conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
     },
     ...over,
   };

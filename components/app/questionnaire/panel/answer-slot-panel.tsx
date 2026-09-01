@@ -109,6 +109,14 @@ export interface AnswerSlotPanelProps {
    */
   newlyFilledKeys?: readonly string[];
   /**
+   * Sectioned interviews (P21): bumped when the respondent moves to a different section.
+   *
+   * The list is already filtered to the new section by the time this changes, so bringing it "into
+   * focus" is a scroll back to the TOP of its own container rather than to a particular slot: the
+   * whole list is new. A monotonic counter rather than a boolean, so two moves in a row each fire.
+   */
+  focusSignal?: number;
+  /**
    * Force-hide the native scrollbar on the scroll area even when the minimap isn't shown. The
    * mobile review drawer sets this: touch scrolling needs no visible bar, and a native scrollbar
    * would otherwise appear beside the minimap-governed list. Desktop leaves it off so question
@@ -429,6 +437,7 @@ export function AnswerSlotPanel({
   canRevisit = false,
   onRefine,
   newlyFilledKeys,
+  focusSignal,
   hideNativeScrollbar = false,
   headerInsetEnd = false,
   correction,
@@ -483,6 +492,19 @@ export function AnswerSlotPanel({
       ),
     [groups]
   );
+
+  // P21: a section move re-filters the whole list, so focus is the top of it. Skips the first
+  // render (there is no move to follow) and no-ops when the panel is not laid out, exactly as
+  // `scrollToSlot` does — on the three layouts that omit the panel this never runs at all.
+  const focusSignalSeen = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal === undefined || focusSignal === focusSignalSeen.current) return;
+    focusSignalSeen.current = focusSignal;
+    const container = scrollRef.current;
+    if (!container || container.offsetHeight === 0) return;
+    container.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+    setAnnounce('Showing the answers captured in this section.');
+  }, [focusSignal, prefersReducedMotion]);
 
   // Scroll the list (its own container, never the window) to a slot, focus it, and pulse it.
   const scrollToSlot = useCallback(

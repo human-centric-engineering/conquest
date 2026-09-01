@@ -33,6 +33,8 @@ export interface SessionSurfaceConfig {
     reasoningStreamPlacement: string;
     reasoningStreamDwellMs: number;
     reasoningStreamPerItemMs: number;
+    /** P21: the sectioned-interview settings blob, narrowed by the caller. */
+    sections: unknown;
     showProgressPercentText: boolean;
   } | null;
 }
@@ -64,6 +66,7 @@ export async function loadSessionSurfaceConfig(
               reasoningStreamPlacement: true,
               reasoningStreamDwellMs: true,
               reasoningStreamPerItemMs: true,
+              sections: true,
               showProgressPercentText: true,
             },
           },

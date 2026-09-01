@@ -128,6 +128,23 @@ export const RESPONDENT_SLOTS = [
    * (a `border-t` is right in a shared card and wrong on a composer that is a card of its own).
    */
   'composer',
+  /**
+   * Sectioned interviews (P21): the strip of sections the respondent moves between.
+   *
+   * Renders nothing on an unsectioned interview, which is most of them. A slot rather than
+   * something the transcript draws for itself, because the four layouts genuinely disagree about
+   * it: Classic and Broadsheet have room for a strip, Focus strips chrome by design, and Horizon
+   * exists to fold accumulated context away — a permanent list of seven areas is precisely what it
+   * puts behind a gesture.
+   */
+  'sectionTabs',
+  /**
+   * Sectioned interviews (P21): the "finish this section and move on" control.
+   *
+   * Essential, unlike {@link RESPONDENT_SLOTS} `sectionTabs`' sibling reasoning would suggest of a
+   * mere navigation aid: under `sequential` navigation this is the ONLY way past section one.
+   */
+  'sectionClose',
   /** The raw form surface (`presentationMode` `form` / `both`). */
   'formView',
   /** The live captured-answers panel. */
@@ -241,6 +258,13 @@ export type SlotPlacement =
  */
 export const ESSENTIAL_SLOTS = [
   'releaseNotice',
+  // P21. Both are here on the strength of "can the respondent finish, correctly, without it", and
+  // in a sectioned interview the answer is no for each: without `sectionClose` a sequential run
+  // cannot get past section one, and without `sectionTabs` a free-navigation run has no route to
+  // another section. `overlay` remains legal for both — Horizon folds the tabs behind a gesture —
+  // so this forbids deleting the only way through, not folding it away.
+  'sectionTabs',
+  'sectionClose',
   'history',
   'currentExchange',
   'composer',

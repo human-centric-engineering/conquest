@@ -10,6 +10,10 @@ import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type ConditionalTopicsSettings,
 } from '@/lib/app/questionnaire/scope/types';
+import {
+  DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
+  type SectionedInterviewSettings,
+} from '@/lib/app/questionnaire/sections/settings';
 
 /**
  * Narrow a stored string to one of a `const`-tuple enum's members, falling back to
@@ -1805,6 +1809,16 @@ export type QuestionnaireConfigShape = {
    * decides. Off by default — see {@link DEFAULT_CONDITIONAL_TOPICS_SETTINGS}.
    */
   conditionalTopics: ConditionalTopicsSettings;
+  /**
+   * Sectioned interviews (P21): whether the respondent works through the instrument one section at
+   * a time, with a tab strip, a bounded conversation and a per-section close. Off by default — see
+   * {@link DEFAULT_SECTIONED_INTERVIEW_SETTINGS}.
+   *
+   * Orthogonal to {@link conditionalTopics}, and the pair is worth holding apart: Conditional Topics
+   * decides WHAT applies to a respondent, this decides the ORDER they meet it in and where the
+   * boundaries fall. Sectioned mode reads the resolved scope and can only ever narrow it further.
+   */
+  sections: SectionedInterviewSettings;
 };
 
 /**
@@ -1893,4 +1907,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,
   conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
 };

@@ -47,6 +47,9 @@ export function state(input: {
   sensitivityNotes?: string[];
   sessionId?: string;
   costPressure?: 'soft';
+  /** Sectioned interviews (P21): the active section's targeting pool and its labels. */
+  sectionQuestions?: TurnState['sectionQuestions'];
+  sectionMeta?: TurnState['sectionMeta'];
 }): TurnState {
   return {
     sessionId: input.sessionId ?? 'sess-1',
@@ -61,6 +64,8 @@ export function state(input: {
     ...(input.sensitivityLevel !== undefined ? { sensitivityLevel: input.sensitivityLevel } : {}),
     ...(input.sensitivityNotes !== undefined ? { sensitivityNotes: input.sensitivityNotes } : {}),
     ...(input.costPressure ? { costPressure: input.costPressure } : {}),
+    ...(input.sectionQuestions !== undefined ? { sectionQuestions: input.sectionQuestions } : {}),
+    ...(input.sectionMeta !== undefined ? { sectionMeta: input.sectionMeta } : {}),
   };
 }
 

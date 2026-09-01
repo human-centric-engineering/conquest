@@ -23,6 +23,7 @@ import {
   runTurn,
   SELECTION_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator';
+import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import {
   decision,
   finding,
@@ -1083,5 +1084,103 @@ describe('runTurn — extraction and sensitivity detection overlap', () => {
     expect(calls.serious).toHaveLength(0);
     expect(result.abuse).toBeUndefined();
     expect(result.sensitivity?.detected).toBe(true);
+  });
+});
+
+describe('sectioned interviews (P21): the end of a section is not the end of the interview', () => {
+  /**
+   * Four questions, the first two forming the active section, both answered.
+   *
+   * The selector is handed the SECTION's questions, so its terminal verdict is about the section.
+   * The whole interview is only half covered, which is what tells the orchestrator the verdict it
+   * just received cannot mean "the questionnaire is finished".
+   */
+  function sectionedState(over: Parameters<typeof state>[0] extends infer T ? Partial<T> : never) {
+    return state({
+      questions: [q({ id: 'q1' }), q({ id: 'q2' }), q({ id: 'q3' }), q({ id: 'q4' })],
+      answered: [
+        { questionId: 'q1', confidence: 0.9 },
+        { questionId: 'q2', confidence: 0.9 },
+      ],
+      sectionQuestions: [q({ id: 'q1' }), q({ id: 'q2' })],
+      sectionMeta: { key: 'about', label: 'About you', nextLabel: 'Your work' },
+      ...over,
+    });
+  }
+
+  const SECTION_ENDED = {
+    select: { decision: { kind: 'complete' as const, rationale: 'section covered', costUsd: 0 } },
+  };
+
+  it('answers a section-scoped "complete" with the section, never with COMPLETE_MESSAGE', async () => {
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(sectionedState({}), invokers);
+
+    expect(result.response.kind).toBe('section_covered');
+    expect(result.response).toMatchObject({ sectionKey: 'about', nextLabel: 'Your work' });
+    if (result.response.kind === 'section_covered') {
+      expect(result.response.text).toBe(
+        "That's everything for About you. Ready to move on to Your work?"
+      );
+    }
+    expect(result.targetedQuestionId).toBeNull();
+  });
+
+  it('reports the part as covered without offering when the version says the agent must not', async () => {
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(
+      sectionedState({
+        config: { sections: { ...DEFAULT_QUESTIONNAIRE_CONFIG.sections, agentOffersClose: false } },
+      }),
+      invokers
+    );
+
+    if (result.response.kind !== 'section_covered') throw new Error('expected section_covered');
+    expect(result.response.text).toBe("That's everything for About you.");
+  });
+
+  it('never offers a move on the last section, whatever the setting says', async () => {
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(
+      sectionedState({ sectionMeta: { key: 'work', label: 'Your work', nextLabel: null } }),
+      invokers
+    );
+
+    if (result.response.kind !== 'section_covered') throw new Error('expected section_covered');
+    expect(result.response.text).toBe("That's everything for Your work.");
+    expect(result.response.nextLabel).toBeNull();
+  });
+
+  it('still finishes the whole interview when the session cap is reached', async () => {
+    // The cap is a WHOLE-INTERVIEW termination, assessed before the selector is ever consulted.
+    // Re-reading it as "this part is covered" would leave a capped sectioned session unable to
+    // finish at all, so the offer has to survive the section wiring.
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(
+      sectionedState({ config: { maxQuestionsPerSession: 1 } }),
+      invokers
+    );
+
+    expect(result.response.kind).toBe('offer');
+  });
+
+  it('leaves an unsectioned interview on the terminal messages exactly as before', async () => {
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'q1' }), q({ id: 'q2' })],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+      }),
+      invokers
+    );
+
+    expect(result.response.kind).toBe('complete');
+    if (result.response.kind === 'complete') expect(result.response.text).toBe(COMPLETE_MESSAGE);
+  });
+
+  it('the selector is handed the section pool, not the whole interview', async () => {
+    const { invokers, calls } = stubInvokers(SECTION_ENDED);
+    await runTurn(sectionedState({}), invokers);
+    expect(calls.select[0].questions.map((qn) => qn.id)).toEqual(['q1', 'q2']);
   });
 });

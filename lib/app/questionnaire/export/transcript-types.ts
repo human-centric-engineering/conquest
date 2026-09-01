@@ -32,6 +32,14 @@ export interface TranscriptTurnView {
   text: string;
   /** ISO timestamp the underlying turn was recorded. */
   at: string;
+  /**
+   * Sectioned interviews (P21): the section this line belongs to, already resolved to its
+   * respondent-facing label.
+   *
+   * Absent on every unsectioned session and on every turn recorded before P21, so a renderer that
+   * groups on it yields ONE group with no heading — which is the flat transcript, unchanged.
+   */
+  sectionLabel?: string;
 }
 
 /** Everything the transcript renderers need for one session, fully resolved. */

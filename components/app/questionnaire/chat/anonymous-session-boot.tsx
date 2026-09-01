@@ -109,6 +109,8 @@ interface AnonymousSessionBootProps {
    * the layout is right on the first paint.
    */
   answerPanelScope?: AnswerSlotPanelScope;
+  /** Sectioned interviews (P21): whether this version runs in sections. Forwarded verbatim. */
+  sectioned?: boolean;
   /**
    * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
    * `undefined`/null when off. Resolved server-side from the version toggle and
@@ -257,6 +259,7 @@ export function AnonymousSessionBoot({
   respondentLayout,
   chatTextScaleIndex,
   answerPanelScope,
+  sectioned,
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
@@ -520,6 +523,7 @@ export function AnonymousSessionBoot({
       respondentLayout={respondentLayout}
       chatTextScaleIndex={chatTextScaleIndex}
       answerPanelScope={answerPanelScope}
+      sectioned={sectioned}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
       reasoningPlacement={reasoningPlacement}

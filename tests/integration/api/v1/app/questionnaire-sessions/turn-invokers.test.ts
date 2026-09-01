@@ -83,6 +83,7 @@ import {
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { DEFAULT_CONDITIONAL_TOPICS_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_SECTIONED_INTERVIEW_SETTINGS } from '@/lib/app/questionnaire/sections/settings';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -175,6 +176,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       conditionalTopics: DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      sections: DEFAULT_SECTIONED_INTERVIEW_SETTINGS,
     },
     questions: [
       {

@@ -48,6 +48,9 @@ export const SURFACE_CONFIG_SELECT = {
   reasoningStreamPlacement: true,
   reasoningStreamDwellMs: true,
   reasoningStreamPerItemMs: true,
+  // P21: whether this version runs in sections. Read so a page can tell the surface up front,
+  // rather than every respondent session paying a round-trip to learn the feature is off.
+  sections: true,
 } as const;
 
 /** The shape {@link loadVersionSurface} resolves to; `null` when the version doesn't exist. */
@@ -75,6 +78,7 @@ export interface VersionSurface {
     reasoningStreamPlacement: string;
     reasoningStreamDwellMs: number;
     reasoningStreamPerItemMs: number;
+    sections: unknown;
   } | null;
 }
 

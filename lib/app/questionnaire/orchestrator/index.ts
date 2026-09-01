@@ -12,6 +12,7 @@ export {
   DETECT_SENSITIVITY_TOOL_SLUG,
   COMPLETE_MESSAGE,
   NONE_MESSAGE,
+  sectionCoveredMessage,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 export {
   runDataSlotTurn,

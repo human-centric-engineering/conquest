@@ -22,6 +22,7 @@ import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_l
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
 import { indexForTextSize } from '@/lib/app/questionnaire/chat/text-scale';
+import { narrowSectionedInterviewSettings } from '@/lib/app/questionnaire/sections/settings';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
@@ -139,6 +140,11 @@ export default async function QuestionnaireSessionPage({
     ANSWER_SLOT_PANEL_SCOPES,
     DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
   );
+  // Sectioned interviews (P21). Resolved here, like the panel scope above, so the tab strip is
+  // present in the SSR paint rather than appearing a moment later — and so a questionnaire that
+  // never opted in makes no request to the strip endpoint at all.
+  const sectioned = narrowSectionedInterviewSettings(row.config?.sections).enabled;
+
   // Voice and attachments each need the version's per-questionnaire opt-in, so the affordance
   // shows only when the author turned it on.
   const voiceConfigured = row.config?.voiceEnabled ?? false;
@@ -234,6 +240,7 @@ export default async function QuestionnaireSessionPage({
           respondentLayout={respondentLayout}
           chatTextScaleIndex={chatTextScaleIndex}
           answerPanelScope={answerPanelScope}
+          sectioned={sectioned}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
           reasoningPlacement={reasoningPlacement}

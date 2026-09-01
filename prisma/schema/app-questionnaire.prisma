@@ -440,6 +440,17 @@ model AppQuestionnaireConfig {
   // pre-P17 behaviour. A version that never opts in cannot reach a single new runtime code path.
   conditionalTopics Json @default("{}")
 
+  // Sectioned interviews (P21): SectionedInterviewSettings — whether the respondent works through
+  // the instrument one section at a time, where those sections come from, and how a section closes.
+  // `{ enabled, source, navigation, tangentPolicy, closeCoverage, closeMinAnswered,
+  // maxTurnsPerSection, agentOffersClose, showLockedSections }`. Narrowed by
+  // narrowSectionedInterviewSettings (lib/.../sections/settings.ts).
+  //
+  // OFF BY DEFAULT and inert by construction: with `enabled: false` — or when fewer than two
+  // sections resolve — `resolveInterviewSections` returns the empty list, `buildSectionState` yields
+  // no active section, and both orchestrators see byte-identical inputs to the pre-P21 ones.
+  sections Json @default("{}")
+
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
   // markdown, proceed-button label). Off by default; only takes effect when the platform flag
@@ -1032,16 +1043,16 @@ model AppQuestionnaireRoundItem {
 /// `respondentUserId` is a plain String, no @relation (UG-1, as on
 /// AppQuestionnaireInvitation); null until F4.6 binds real respondent sessions.
 model AppQuestionnaireSession {
-  id                   String   @id @default(cuid())
+  id                   String  @id @default(cuid())
   versionId            String
   // Short, human-readable support reference shown to the respondent ("Ref: 7F3K-9M2P"). Stored as
   // the raw 8-char Crockford base32 (no dash; the UI groups it), generated at creation by every
   // create path (session-ref.ts). A respondent quotes it when reporting a bad experience so an
   // admin can look the session up and re-evaluate its saved turns. Nullable + @unique: Postgres
   // permits many NULLs under a unique index, so rows predating this column simply carry none.
-  publicRef            String?  @unique
-  status               String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
-  isPreview            Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
+  publicRef            String? @unique
+  status               String  @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
+  isPreview            Boolean @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId     String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
   // Invitations: the invitation this session was booted from (frictionless token flow), or null
   // for a walk-up/public/authenticated-direct session. Plain String, no @relation (UG-1) — and
@@ -1085,14 +1096,14 @@ model AppQuestionnaireSession {
   selectedPersonaKey   String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
-  abuseStrikes         Int      @default(0)
+  abuseStrikes         Int     @default(0)
   // Sensitivity awareness / safeguarding: the session's running-max disclosure severity
   // (null until first detection; "low" | "medium" | "high" — SENSITIVITY_SEVERITIES) and an
   // append-only array of remembered disclosures (SensitivityNote[]). The summaries are threaded
   // into the phraser so every later question stays gentle. Carries careful, non-graphic summaries
   // only; never surfaced raw to analytics or event metadata.
   sensitivityLevel     String?
-  sensitivityNotes     Json     @default("[]")
+  sensitivityNotes     Json    @default("[]")
   // Probe-confirm contradiction flow: when a `probe`-mode contradiction is detected, the conflicting
   // answer/data-slot is NOT overwritten — instead the interviewer asks a reconciliation question and
   // the finding is parked here (PendingContradiction shape: slotKeys, explanation, suggestedProbe?,
@@ -1104,23 +1115,23 @@ model AppQuestionnaireSession {
   // contradiction phase suppresses any freshly-detected conflict whose canonical slot-key set is
   // already here — no re-probe, no re-alert — whether or not it was ever reconciled. PII-free by design
   // (identity + how it ended only; never the explanation/statement/values). Defaults to an empty list.
-  raisedContradictions Json     @default("[]")
+  raisedContradictions Json    @default("[]")
   // "Don't nag" ledger for completeness milestones: percent-complete thresholds (number[]) already
   // banner-shown this session — the orchestrator fires a threshold once, on first crossing, and never
   // again even if displayCoverage later dips (e.g. an answer is invalidated). Defaults to empty.
-  raisedMilestones     Json     @default("[]")
+  raisedMilestones     Json    @default("[]")
   // F17.33. Presentation state, NEVER a measurement: the highest whole-percent progress figure this
   // session has ever displayed. The bar shows max(computed, this), so a scope widening — the plan
   // landing, or a respondent amendment — can never make it run backwards. Banked on the TURN path
   // beside raisedMilestones; the read path applies it and never writes. Nothing analytic, no report
   // and no export reads it. Capped below 100 (see resolveDisplayedProgress): only the true computed
   // figure may ever claim completion.
-  progressFloorPct     Int      @default(0)
+  progressFloorPct     Int     @default(0)
   // F17.33 ledger: topic keys whose members have already been re-read against the transcript after
   // the scope widened (string[]). A topic seated mid-interview may have been answered before it was
   // in scope, so its questions are read back out of the conversation once — and once only, which is
   // what this records. Empty on every session that never widened.
-  rescannedTopicKeys   Json     @default("[]")
+  rescannedTopicKeys   Json    @default("[]")
   // Conditional Topics (P17): the INTERVIEW PLAN — which topics this respondent's interview covers,
   // which were excluded and why, and what they were told (InterviewPlan — lib/.../scope/types.ts).
   // Written ONCE by the Scope Planner when the opening topics are covered, then frozen apart from
@@ -1131,8 +1142,19 @@ model AppQuestionnaireSession {
   // the auditable record of HOW the plan was reached (prompt, model output, confidence, candidates)
   // lives in the AppAiRun snapshot, so this column only has to carry the decision itself.
   interviewPlan        Json?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+
+  // Sectioned interviews (P21): SectionRun — which section this respondent is in, and the state of
+  // each one. `{ v: 1, activeKey, sections: [{ key, status, openedAtTurn, closedAtTurn,
+  // closeReason, reopenCount, turnsSpent }] }`. Narrowed by narrowSectionRun
+  // (lib/.../sections/run.ts).
+  //
+  // Null means "not sectioned", which is the permanent state of every questionnaire that never
+  // turns the feature on and the pre-first-turn state of one that did. A Json column rather than a
+  // table for the same reason as `interviewPlan` above: it is read every turn from a row already
+  // loaded, and never queried across sessions.
+  sectionRun Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   version          AppQuestionnaireVersion          @relation(fields: [versionId], references: [id], onDelete: Cascade)
   answers          AppAnswerSlot[]
@@ -1865,6 +1887,7 @@ model AppQuestionnaireTurn {
   agentResponse         String   @db.Text // composed agent reply streamed back
   targetedQuestionId    String? // AppQuestionSlot.id asked for; null = completion/offer turn
   targetedDataSlotId    String? // AppDataSlot.id targeted this turn (data-slot mode); null otherwise — drives the per-slot re-ask/park counter
+  sectionKey            String? // Sectioned interviews (P21): the InterviewSection this exchange belongs to. Null on every unsectioned session and every turn recorded before P21, which is what makes the transcript, the inspector and the report chapters degrade to the flat view by construction.
   toolCalls             Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
   sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)

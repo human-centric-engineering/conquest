@@ -780,6 +780,8 @@ export const API = {
       surface: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/surface`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
+      /** Section strip — read the tabs (GET) or move between sections (POST `{ action, key }`) (P21). */
+      sections: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/sections`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */
       status: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/status`,
       /** Pause/resume/abandon a session (POST `{ action }`) — pause/resume signed-in only; `abandon` also allowed for an anonymous token holder (backs "Start new"). */

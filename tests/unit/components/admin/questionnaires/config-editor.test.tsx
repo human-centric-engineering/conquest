@@ -1930,3 +1930,80 @@ describe('ConfigEditor — interviewer strategy', () => {
     });
   });
 });
+
+describe('sectioned interviews (P21)', () => {
+  /** Turn the feature on and reveal the rest of the group. */
+  function enableSections() {
+    fireEvent.click(
+      screen.getByRole('switch', { name: /work through the questionnaire in sections/i })
+    );
+  }
+
+  it('hides every section setting until the feature is switched on', () => {
+    setup();
+    expect(screen.queryByText(/where the sections come from/i)).not.toBeInTheDocument();
+    enableSections();
+    expect(screen.getByText(/where the sections come from/i)).toBeInTheDocument();
+  });
+
+  it('sends the whole settings blob, with the percent converted back to a fraction', () => {
+    const { specs } = setup();
+    enableSections();
+
+    fireEvent.change(selectWithOptions(['auto', 'topics', 'themes', 'document']), {
+      target: { value: 'themes' },
+    });
+    fireEvent.change(selectWithOptions(['sequential', 'free']), { target: { value: 'free' } });
+    fireEvent.change(selectWithOptions(['capture', 'stay']), { target: { value: 'stay' } });
+    fireEvent.change(numberNear(/section is done at/i), { target: { value: '60' } });
+    fireEvent.change(numberNear(/or this many answered/i), { target: { value: '3' } });
+    fireEvent.change(numberNear(/most turns in one section/i), { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('switch', { name: /let the interviewer offer to move on/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /show sections not yet reached/i }));
+
+    clickSave();
+    expect(bodyOf(specs).sections).toEqual({
+      enabled: true,
+      source: 'themes',
+      navigation: 'free',
+      tangentPolicy: 'stay',
+      // Edited as a whole percent, stored as the fraction the runtime reads.
+      closeCoverage: 0.6,
+      closeMinAnswered: 3,
+      maxTurnsPerSection: 12,
+      // Both default to true, so one click each flips them off.
+      agentOffersClose: false,
+      showLockedSections: false,
+    });
+  });
+
+  it('keeps the saved coverage when the percent field is cleared', () => {
+    const { specs } = setup({
+      sections: { ...DEFAULT_QUESTIONNAIRE_CONFIG.sections, enabled: true, closeCoverage: 0.75 },
+    });
+    fireEvent.change(numberNear(/section is done at/i), { target: { value: '' } });
+    clickSave();
+    expect((bodyOf(specs).sections as { closeCoverage: number }).closeCoverage).toBe(0.75);
+  });
+
+  it('renders the stored settings rather than the defaults', () => {
+    setup({
+      sections: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.sections,
+        enabled: true,
+        source: 'document',
+        navigation: 'free',
+        tangentPolicy: 'stay',
+        closeCoverage: 0.4,
+        closeMinAnswered: 2,
+        maxTurnsPerSection: 8,
+      },
+    });
+    expect(selectWithOptions(['auto', 'topics', 'themes', 'document']).value).toBe('document');
+    expect(selectWithOptions(['sequential', 'free']).value).toBe('free');
+    expect(selectWithOptions(['capture', 'stay']).value).toBe('stay');
+    expect(numberNear(/section is done at/i).value).toBe('40');
+    expect(numberNear(/or this many answered/i).value).toBe('2');
+    expect(numberNear(/most turns in one section/i).value).toBe('8');
+  });
+});

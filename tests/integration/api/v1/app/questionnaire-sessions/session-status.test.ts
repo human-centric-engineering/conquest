@@ -126,6 +126,16 @@ function ctx(
     byId: new Map(),
     meta: {},
     scope: inertScope(),
+    // P21: unsectioned, which is what every version that never opted in resolves to.
+    sectionState: {
+      active: false,
+      sections: [],
+      run: null,
+      activeSection: null,
+      isSectionOpening: false,
+      close: null,
+      allClosed: false,
+    },
   };
 }
 

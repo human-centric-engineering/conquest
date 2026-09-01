@@ -212,6 +212,7 @@ export async function copyVersionGraph(
         intro: jsonInput(source.config.intro),
         milestoneBannerThresholds: jsonInput(source.config.milestoneBannerThresholds),
         conditionalTopics: jsonInput(source.config.conditionalTopics),
+        sections: jsonInput(source.config.sections),
       },
     });
   }

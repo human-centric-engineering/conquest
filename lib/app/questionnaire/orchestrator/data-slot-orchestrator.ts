@@ -30,6 +30,7 @@ import {
   applyIntents,
   ASSESS_SERIOUSNESS_TOOL_SLUG,
   DETECT_SENSITIVITY_TOOL_SLUG,
+  sectionCoveredMessage,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 import {
   runContradictionPhase,
@@ -244,7 +245,10 @@ export async function runDataSlotTurn(
   /** Optional progress reporter (P20 Phase 2) — see the identical parameter on `runTurn`. */
   onStage?: StageEmitter
 ): Promise<TurnResult> {
-  const dataSlots = state.dataSlots ?? [];
+  // P21: TARGETING reads the active section's slots; everything that MEASURES (the submit gate,
+  // the coverage figure, the panel) keeps reading the whole interview below. Absent when
+  // unsectioned, so this is the full list exactly as before.
+  const dataSlots = state.sectionDataSlots ?? state.dataSlots ?? [];
   const events: ChatEvent[] = [];
   const toolCalls: ToolCallRecord[] = [];
   const answerUpserts: AnswerSlotIntent[] = [];
@@ -542,11 +546,20 @@ export async function runDataSlotTurn(
   }
 
   // Background deliverable: completion is gated on ALL questions being answered.
+  //
+  // P21: `effective.questions` here is the WHOLE interview even when the conversation is bounded to
+  // one section, because this is the SUBMIT GATE. The section-bounded twins below are what the
+  // sweep and the must-ask hoist pick from — see `sectionQuestions` on TurnContextBase.
   const answeredIds = new Set(effective.answered.map((a) => a.questionId));
   const remainingQuestions = unansweredQuestions({
     questions: effective.questions,
     answered: effective.answered,
   });
+  // The questions this SECTION still owes, for the late-stage sweep. Identical to
+  // `remainingQuestions` when the interview is not sectioned.
+  const sectionRemainingQuestions = state.sectionQuestions
+    ? unansweredQuestions({ questions: state.sectionQuestions, answered: effective.answered })
+    : remainingQuestions;
   // Question fidelity (P18): must-ask questions still below their satisfaction floor. Deliberately
   // NOT folded into `remainingQuestions` — data-slot mode's submit gate is count-based ("every
   // question has an answer"), and making that floor-aware wholesale would tighten completion for
@@ -558,6 +571,12 @@ export async function runDataSlotTurn(
   }).filter(
     (qn) => resolveQuestionFidelity(qn.fidelity, state.config.questionFidelity) === 'must_ask'
   );
+  // P21: the hoist may only fire for a must-ask in the section being worked. One waiting in section
+  // three must not interrupt section one — it fires when its own ground is reached, which is
+  // precisely what the hoist already promises within a theme, applied one level up.
+  const sectionMustAsk = state.sectionQuestions
+    ? outstandingMustAsk.filter((qn) => state.sectionQuestions?.some((sq) => sq.key === qn.key))
+    : outstandingMustAsk;
 
   const allQuestionsAnswered =
     remainingQuestions.length === 0 &&
@@ -665,7 +684,7 @@ export async function runDataSlotTurn(
   // questions a theme should have answered slip through). Rather than wait for the end-of-run
   // sweep, ask the next required question now whenever every data slot is filled OR the question
   // coverage lags the data-slot coverage by more than {@link BALANCED_QUESTION_LAG}.
-  const requiredRemaining = remainingQuestions.filter((qn) => qn.required);
+  const requiredRemaining = sectionRemainingQuestions.filter((qn) => qn.required);
 
   // Question fidelity (P18): a `must_ask` question must actually be PUT to the respondent, so it
   // can't be left to the abstraction layer to infer. But firing it the moment it becomes eligible
@@ -678,7 +697,7 @@ export async function runDataSlotTurn(
   // filled tangentially at LOW confidence still needs asking, and only the floor-aware view knows
   // that. The end-of-run sweep remains the backstop for anything this never catches.
   const unfilledKeys = new Set(unfilled.map((slot) => slot.key));
-  const mustAskReady = outstandingMustAsk.filter((qn) => {
+  const mustAskReady = sectionMustAsk.filter((qn) => {
     const owningSlots = dataSlots.filter((slot) => slot.mappedQuestionKeys?.includes(qn.key));
     // A question no data slot claims has no topic to wind up — ask it as soon as it's eligible.
     if (owningSlots.length === 0) return true;
@@ -770,9 +789,25 @@ export async function runDataSlotTurn(
         : isTransition
           ? `Moving on to a new area: ${next.theme}.`
           : 'Staying with this topic to go a little deeper.';
+  } else if (sectionRemainingQuestions.length === 0 && state.sectionMeta) {
+    // P21: this SECTION's slots are all filled and its questions are all answered, but the
+    // interview is not finished. Falling through to `remainingQuestions[0]` here asked a question
+    // from a part the respondent has not reached and tagged the turn with the part they are in.
+    // The honest reply is that this part is covered.
+    const { key, label, nextLabel } = state.sectionMeta;
+    toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
+    response = {
+      kind: 'section_covered',
+      text: sectionCoveredMessage(label, nextLabel, state.config.sections.agentOffersClose),
+      sectionKey: key,
+      nextLabel,
+    };
+    targetedQuestionId = null;
+    selectionRationale = `Everything in ${label} has been covered.`;
   } else {
     // Every data slot is filled, but a background question is still open → ask it directly.
-    const next = remainingQuestions[0];
+    // P21: this section's, so the sweep does not wander into ground the respondent has not reached.
+    const next = sectionRemainingQuestions[0] ?? remainingQuestions[0];
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;

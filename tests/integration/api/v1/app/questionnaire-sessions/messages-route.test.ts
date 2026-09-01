@@ -2822,3 +2822,126 @@ describe('turn stage status frames', () => {
     expect(frames.map((f) => f.event)).toContain('content');
   });
 });
+
+describe('sectioned interviews (P21)', () => {
+  /** One resolved section, shaped as the turn context hands it over. */
+  function section(key: string, label: string, ordinal: number) {
+    return {
+      key,
+      label,
+      ordinal,
+      source: 'topics' as const,
+      questionKeys: ['q1'],
+      dataSlotKeys: [] as string[],
+    };
+  }
+
+  /** A turn context whose interview is sectioned, with `over` patching the section state. */
+  function sectionedContext(over: Record<string, unknown> = {}) {
+    return loadedContext({
+      sectionState: {
+        active: true,
+        sections: [section('a', 'About you', 0), section('b', 'Your work', 1)],
+        run: {
+          v: 1,
+          activeKey: 'a',
+          sections: [
+            {
+              key: 'a',
+              status: 'in_progress',
+              openedAtTurn: 0,
+              closedAtTurn: null,
+              closeReason: null,
+              reopenCount: 0,
+              turnsSpent: 0,
+            },
+          ],
+        },
+        activeSection: section('a', 'About you', 0),
+        isSectionOpening: true,
+        close: null,
+        allClosed: false,
+        ...over,
+      },
+    });
+  }
+
+  it('gives the phraser the section, its position and the one that follows', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sectionedContext());
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: {
+        section?: {
+          label: string;
+          position: number;
+          total: number;
+          isOpening: boolean;
+          nextLabel?: string;
+        };
+      };
+    };
+    expect(arg.input.section).toEqual({
+      label: 'About you',
+      position: 1,
+      total: 2,
+      isOpening: true,
+      nextLabel: 'Your work',
+    });
+  });
+
+  it('omits nextLabel on the last section', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      sectionedContext({ activeSection: section('b', 'Your work', 1) })
+    );
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { section?: { position: number; nextLabel?: string } };
+    };
+    expect(arg.input.section?.position).toBe(2);
+    expect(arg.input.section?.nextLabel).toBeUndefined();
+  });
+
+  it('tags the persisted turn with its section and banks the run with the turn charged to it', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sectionedContext());
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const persisted = runMock.persistTurn.mock.calls[0][0] as {
+      sectionKey?: string;
+      sectionRun?: { activeKey: string | null; sections: { key: string; turnsSpent: number }[] };
+    };
+    expect(persisted.sectionKey).toBe('a');
+    expect(persisted.sectionRun?.activeKey).toBe('a');
+    expect(persisted.sectionRun?.sections.find((s) => s.key === 'a')?.turnsSpent).toBe(1);
+  });
+
+  it('opens the active section from scratch when the stored run is absent', async () => {
+    // A session that predates the feature carries no run at all. The turn must still be charged
+    // rather than dropped, so the route seeds an empty one.
+    ctxMock.buildTurnContext.mockResolvedValue(sectionedContext({ run: null }));
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const persisted = runMock.persistTurn.mock.calls[0][0] as {
+      sectionKey?: string;
+      sectionRun?: { activeKey: string | null; sections: { key: string; turnsSpent: number }[] };
+    };
+    expect(persisted.sectionKey).toBe('a');
+    expect(persisted.sectionRun?.activeKey).toBe('a');
+    expect(persisted.sectionRun?.sections.find((s) => s.key === 'a')?.turnsSpent).toBe(1);
+  });
+
+  it('sends no section block and tags no section when the interview is not sectioned', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      sectionedContext({ active: false, activeSection: null })
+    );
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { section?: unknown };
+    };
+    expect(arg.input.section).toBeUndefined();
+    const persisted = runMock.persistTurn.mock.calls[0][0] as { sectionKey?: string };
+    expect(persisted.sectionKey).toBeUndefined();
+  });
+});

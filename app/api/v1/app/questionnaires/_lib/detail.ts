@@ -58,6 +58,7 @@ import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/s
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
 import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
+import { narrowSectionedInterviewSettings } from '@/lib/app/questionnaire/sections/settings';
 import type {
   ConfigView,
   QuestionnaireDetail,
@@ -159,6 +160,7 @@ export const CONFIG_SELECT = {
   cohortReport: true,
   intro: true,
   conditionalTopics: true,
+  sections: true,
 } as const;
 
 type ConfigRow = {
@@ -218,6 +220,7 @@ type ConfigRow = {
   cohortReport: Prisma.JsonValue;
   intro: Prisma.JsonValue;
   conditionalTopics: Prisma.JsonValue;
+  sections: Prisma.JsonValue;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -407,6 +410,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     cohortReport: narrowCohortReportSettings(row.cohortReport),
     intro: narrowIntroSettings(row.intro),
     conditionalTopics: narrowConditionalTopicsSettings(row.conditionalTopics),
+    sections: narrowSectionedInterviewSettings(row.sections),
     saved: true,
   };
 }
