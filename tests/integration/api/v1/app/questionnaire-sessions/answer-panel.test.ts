@@ -579,4 +579,207 @@ describe('loadAnswerPanelState', () => {
       expect(loaded?.view.sections[0].slots).toHaveLength(2);
     });
   });
+
+  describe('sectioned interviews (P21)', () => {
+    /**
+     * Two document sections with sections turned on. Two is the floor the resolver enforces
+     * (MIN_RESOLVED_SECTIONS), so a one-section fixture would silently leave the feature off and
+     * the assertions below would pass for the wrong reason.
+     */
+    function sectionedRow(over: Record<string, unknown> = {}) {
+      return row({
+        version: {
+          config: {
+            answerSlotPanelScope: 'full_progress',
+            presentationMode: 'chat',
+            sections: { enabled: true, source: 'document' },
+          },
+          sections: [
+            {
+              id: 'sec-1',
+              ordinal: 0,
+              title: 'About you',
+              questions: [
+                {
+                  key: 'name',
+                  prompt: 'Your name?',
+                  type: 'free_text',
+                  typeConfig: null,
+                  required: true,
+                  weight: 1,
+                },
+              ],
+            },
+            {
+              id: 'sec-2',
+              ordinal: 1,
+              title: 'Your work',
+              questions: [
+                {
+                  key: 'role',
+                  prompt: 'Your role?',
+                  type: 'free_text',
+                  typeConfig: null,
+                  required: false,
+                  weight: 1,
+                },
+              ],
+            },
+          ],
+          dataSlots: [],
+        },
+        ...over,
+      });
+    }
+
+    /** Every slot key the panel rendered, across its sections. */
+    function renderedKeys(view: { sections: { slots: { slotKey: string }[] }[] }): string[] {
+      return view.sections.flatMap((s) => s.slots.map((slot) => slot.slotKey));
+    }
+
+    it('shows only the first section before the respondent has taken a turn', async () => {
+      findUnique.mockResolvedValue(sectionedRow({ sectionRun: null }));
+      const loaded = await loadAnswerPanelState('sess-1');
+      expect(renderedKeys(loaded!.view)).toEqual(['name']);
+    });
+
+    it('follows the stored run to the active section', async () => {
+      findUnique.mockResolvedValue(
+        sectionedRow({
+          sectionRun: {
+            v: 1,
+            activeKey: 'sec-2',
+            sections: [
+              { key: 'sec-1', status: 'closed', closedAtTurn: 2, closeReason: 'respondent' },
+              { key: 'sec-2', status: 'in_progress', openedAtTurn: 2 },
+            ],
+          },
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1');
+      expect(renderedKeys(loaded!.view)).toEqual(['role']);
+    });
+
+    it('drops the filter entirely once every section is closed', async () => {
+      // A finished interview is reviewed whole. Falling back to section one here would show a
+      // fraction of the record with nothing on screen saying so.
+      findUnique.mockResolvedValue(
+        sectionedRow({
+          sectionRun: {
+            v: 1,
+            activeKey: null,
+            sections: [
+              { key: 'sec-1', status: 'closed', closedAtTurn: 2, closeReason: 'respondent' },
+              { key: 'sec-2', status: 'closed', closedAtTurn: 4, closeReason: 'cap' },
+            ],
+          },
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1');
+      expect(renderedKeys(loaded!.view)).toEqual(['name', 'role']);
+    });
+
+    it('falls back to the first section when the run has no active key but sections remain open', async () => {
+      findUnique.mockResolvedValue(
+        sectionedRow({
+          sectionRun: {
+            v: 1,
+            activeKey: null,
+            sections: [{ key: 'sec-1', status: 'in_progress', openedAtTurn: 0 }],
+          },
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1');
+      expect(renderedKeys(loaded!.view)).toEqual(['name']);
+    });
+
+    it('leaves an unsectioned interview byte-identical', async () => {
+      findUnique.mockResolvedValue(sectionedRow({ sectionRun: null }));
+      const sectioned = await loadAnswerPanelState('sess-1');
+      findUnique.mockResolvedValue(
+        sectionedRow({
+          sectionRun: null,
+          version: {
+            ...sectionedRow().version,
+            config: { answerSlotPanelScope: 'full_progress', presentationMode: 'chat' },
+          },
+        })
+      );
+      const plain = await loadAnswerPanelState('sess-1');
+      expect(renderedKeys(sectioned!.view)).toEqual(['name']);
+      expect(renderedKeys(plain!.view)).toEqual(['name', 'role']);
+    });
+
+    it('narrows the data-slot groups to the active section too', async () => {
+      findUnique.mockResolvedValue(
+        sectionedRow({
+          sectionRun: {
+            v: 1,
+            activeKey: 'work',
+            sections: [
+              { key: 'about', status: 'closed', closedAtTurn: 2, closeReason: 'respondent' },
+              { key: 'work', status: 'in_progress', openedAtTurn: 2 },
+            ],
+          },
+          version: {
+            config: {
+              answerSlotPanelScope: 'full_progress',
+              presentationMode: 'chat',
+              sections: { enabled: true, source: 'themes' },
+            },
+            sections: [
+              {
+                id: 'sec-1',
+                ordinal: 0,
+                title: 'All of it',
+                questions: [
+                  {
+                    key: 'name',
+                    prompt: 'Your name?',
+                    type: 'free_text',
+                    typeConfig: null,
+                    required: true,
+                    weight: 1,
+                  },
+                  {
+                    key: 'role',
+                    prompt: 'Your role?',
+                    type: 'free_text',
+                    typeConfig: null,
+                    required: false,
+                    weight: 1,
+                  },
+                ],
+              },
+            ],
+            dataSlots: [
+              {
+                key: 'full_name',
+                name: 'Full name',
+                description: 'Their name.',
+                theme: 'about',
+                ordinal: 0,
+                weight: 1,
+                questions: [{ questionSlot: { key: 'name', prompt: 'Your name?', ordinal: 0 } }],
+              },
+              {
+                key: 'job_title',
+                name: 'Job title',
+                description: 'Their role.',
+                theme: 'work',
+                ordinal: 1,
+                weight: 1,
+                questions: [{ questionSlot: { key: 'role', prompt: 'Your role?', ordinal: 1 } }],
+              },
+            ],
+          },
+          dataSlotFills: [],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      expect(loaded?.view.dataSlotGroups?.flatMap((g) => g.slots.map((s) => s.key))).toEqual([
+        'job_title',
+      ]);
+    });
+  });
 });

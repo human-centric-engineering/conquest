@@ -10,4 +10,7 @@
 export * from '@/lib/app/questionnaire/sections/types';
 export * from '@/lib/app/questionnaire/sections/settings';
 export * from '@/lib/app/questionnaire/sections/resolve';
+export * from '@/lib/app/questionnaire/sections/run';
+export * from '@/lib/app/questionnaire/sections/state';
+export * from '@/lib/app/questionnaire/sections/view';
 export * from '@/lib/app/questionnaire/sections/close';

@@ -76,6 +76,9 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
       warnings: true,
       reasoning: true,
       questionCardKey: true,
+      // Sectioned interviews (P21): tags both bubbles of an exchange, so the live chat can show one
+      // section at a time and the downloads can group by it. Null on every unsectioned session.
+      sectionKey: true,
     },
   });
 
@@ -84,7 +87,13 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
   const turns: QuestionnaireTurn[] = [];
   for (const row of rows) {
     if (row.userMessage.trim().length > 0) {
-      turns.push({ role: 'user', content: row.userMessage });
+      turns.push({
+        role: 'user',
+        content: row.userMessage,
+        // Both halves of an exchange carry the same key: they are one turn, and a filter that split
+        // them would show an answer with no question above it.
+        ...(row.sectionKey ? { sectionKey: row.sectionKey } : {}),
+      });
     }
     const warnings = warningsSchema.parse(row.warnings);
     const reasoning = reasoningSchema.parse(row.reasoning);
@@ -96,6 +105,7 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(reasoning.length > 0 ? { reasoning } : {}),
       ...(card ? { card } : {}),
+      ...(row.sectionKey ? { sectionKey: row.sectionKey } : {}),
     });
   }
   return turns;

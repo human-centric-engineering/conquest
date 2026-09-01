@@ -96,6 +96,14 @@ export function HorizonLayout({ slots, state }: RespondentLayoutProps) {
   // here for the composer to scroll away from the respondent.
   const chatSurface = (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* P21. The tabs are a gesture here, for the same reason the history is: a permanent list of
+          seven areas is precisely the accumulation this layout folds away. The close control is the
+          exception and stays on screen — it is an action on the CURRENT question, not a record of
+          past ones, and folding it away would fold away the way forward. */}
+      <div className="flex items-center justify-between gap-2 empty:hidden">
+        {slots.sectionTabs}
+        {slots.sectionClose}
+      </div>
       {slots.completionOffer}
       <ConversationFrame className="min-h-0 flex-1" transcript={stage} composer={slots.composer} />
     </div>

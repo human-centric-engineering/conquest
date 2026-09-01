@@ -38,6 +38,7 @@ import {
   type SessionScope,
 } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
+import { buildSectionState, type SectionState } from '@/lib/app/questionnaire/sections/state';
 import { countOpeningProbes, type OpeningProbeBudget } from '@/lib/app/questionnaire/scope/probe';
 import type {
   DataSlotAnsweredView,
@@ -217,6 +218,15 @@ export interface LoadedTurnContext {
    * never opted in, and nothing downstream behaves differently in that case.
    */
   scope: SessionScope;
+  /**
+   * Sectioned interviews (P21): which section this turn is bounded to, and whether it may close.
+   *
+   * `base.questions`, `base.dataSlots` and {@link slots} are ALREADY bounded by it, exactly as they
+   * are already filtered by {@link scope}. Carried so the route can persist the run, the prompt
+   * builder can open a section, and the surfaces can draw the tab strip. `active` is false for every
+   * version that never opted in, and nothing downstream behaves differently in that case.
+   */
+  sectionState: SectionState;
 }
 
 /** Pull the interviewer-relevant string fields out of the opaque `audience` Json. */
@@ -281,6 +291,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Null on every ordinary session, and before the planner has run on an adaptive one —
       // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
       interviewPlan: true,
+      // P21: the section run state, read every turn from the row already loaded.
+      sectionRun: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -311,6 +323,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
             select: {
               id: true,
               ordinal: true,
+              // P21: the label a document-sourced interview section carries. Cheap, and the only
+              // thing the section resolver needs that this select did not already have.
+              title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
                 select: {
@@ -537,6 +552,75 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
     : dataSlots;
 
+  // ── Sectioned interviews (P21) ────────────────────────────────────────────────────────────────
+  // The second choke point, and deliberately AFTER scope rather than beside it: sections decide the
+  // ORDER and the BOUNDARY, scope decides what applies at all, and a section can only ever narrow
+  // what scope already allowed. Feeding it the unscoped lists plus the resolved scope keeps that
+  // one-way relationship explicit instead of implied by call order.
+  //
+  // `sectionState.active` is false for every version that never opted in AND every one resolving to
+  // fewer than two sections, and while it is false nothing below changes a thing.
+  const sectionState = buildSectionState({
+    config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...config },
+    settings: config.sections,
+    topics: scope.topics,
+    conditionalTopicsEnabled: scope.settings.enabled,
+    dataSlots,
+    documentSections: session.version.sections.map((sec) => ({
+      id: sec.id,
+      title: sec.title,
+      ordinal: sec.ordinal,
+    })),
+    questions,
+    answered,
+    ...(scope.scope.active
+      ? {
+          scope: {
+            questionKeys: scope.scope.questionKeys,
+            dataSlotKeys: scope.scope.dataSlotKeys,
+          },
+        }
+      : {}),
+    storedRun: session.sectionRun,
+    sessionId: session.id,
+  });
+
+  // The section boundary. Deliberately carried ALONGSIDE the scoped lists rather than replacing
+  // them, and that distinction is the whole of invariant 2: **sections decide what is asked next,
+  // never what counts as done.**
+  //
+  // `questions` / `dataSlots` stay scope-level, so the submit gate, the weighted coverage, the
+  // progress bar and the milestone ledger all keep measuring the WHOLE interview. Narrowing them
+  // here would have made a session offer to submit the moment its first section was covered, and
+  // shown 100% while six sections were still to come.
+  //
+  // The two lists below are for TARGETING only: which data slot to pursue, which question to sweep,
+  // when a must-ask fires. Absent (undefined, not empty) when the interview is not sectioned, so
+  // every consumer's `?? questions` fallback restores the pre-P21 behaviour exactly.
+  //
+  // Also NOT bounded: `answered`, `existingAnswers` and `recentMessages`. What the respondent
+  // already said does not stop being true because they moved to another section, and the extractor
+  // needs the whole picture to read a correction against.
+  const inSection = sectionState.activeSection;
+  const sectionQuestionKeys = inSection ? new Set(inSection.questionKeys) : null;
+  const sectionDataSlotKeys = inSection ? new Set(inSection.dataSlotKeys) : null;
+  const sectionedQuestions = sectionQuestionKeys
+    ? scopedQuestions.filter((q) => sectionQuestionKeys.has(q.key))
+    : scopedQuestions;
+  const sectionedDataSlots = sectionDataSlotKeys
+    ? scopedDataSlots.filter((d) => sectionDataSlotKeys.has(d.key))
+    : scopedDataSlots;
+  // P21: what the active section is called, and what follows it. Read only to compose the
+  // section-covered reply. `ordinal` is a contiguous index over the resolved list, so the next
+  // section is simply the next entry.
+  const sectionMeta = inSection
+    ? {
+        key: inSection.key,
+        label: inSection.label,
+        nextLabel: sectionState.sections[inSection.ordinal + 1]?.label ?? null,
+      }
+    : null;
+
   // F17.33: the denominator for the PROGRESS FIGURE — deliberately NOT the same list as the gate's.
   //
   // `plan === null` on an enabled version is the pre-planner state: the always-run phases are in
@@ -654,6 +738,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // by the display path only; every gate above uses `questions` / `scopedQuestions`.
       progressQuestions,
       progressFloorPct: session.progressFloorPct,
+      // P21: the targeting pools. Undefined when unsectioned — see the note above the filter.
+      ...(inSection ? { sectionQuestions: sectionedQuestions } : {}),
+      ...(inSection ? { sectionDataSlots: sectionedDataSlots } : {}),
+      ...(sectionMeta ? { sectionMeta } : {}),
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps
@@ -665,5 +753,6 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     byId,
     meta,
     scope,
+    sectionState,
   };
 }

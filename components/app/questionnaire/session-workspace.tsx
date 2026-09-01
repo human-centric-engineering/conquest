@@ -24,6 +24,7 @@
  * than a hope — see it, and `.context/app/questionnaire/respondent-layouts.md`, for the mechanism.
  */
 
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ClipboardList } from 'lucide-react';
 
@@ -59,6 +60,8 @@ import { HandoffCard } from '@/components/app/questionnaire/experiences/handoff-
 import { StitchedContinuation } from '@/components/app/questionnaire/experiences/stitched-continuation';
 import { VIEW_META } from '@/components/app/questionnaire/layouts/view-meta';
 import { resolveLayout } from '@/components/app/questionnaire/layouts/registry';
+import { SectionTabStrip } from '@/components/app/questionnaire/sections/section-tab-strip';
+import { SectionCloseControl } from '@/components/app/questionnaire/sections/section-close-control';
 import type { RespondentSlots } from '@/components/app/questionnaire/layouts/types';
 import { hasConversationHistory } from '@/lib/app/questionnaire/chat/exchange';
 import { stepScaleIndex } from '@/lib/app/questionnaire/chat/text-scale';
@@ -157,6 +160,14 @@ export interface SessionWorkspaceProps {
    * layout is correct on first paint instead of reflowing when the first fetch lands.
    */
   answerPanelScope?: AnswerSlotPanelScope;
+  /**
+   * Sectioned interviews (P21): whether this version runs in sections.
+   *
+   * Resolved server-side and passed in for the same reason `answerPanelScope` is: the tab strip
+   * changes the layout from the first paint. It also keeps every questionnaire that never opted in
+   * from paying a round-trip to the strip endpoint just to be told the feature is off.
+   */
+  sectioned?: boolean;
   /** SSR-resolved full form view (forForm) for `form`/`both` modes; omit for anonymous. */
   initialFormView?: AnswerPanelView;
   /**
@@ -240,6 +251,7 @@ export function SessionWorkspace({
   respondentLayout,
   chatTextScaleIndex,
   answerPanelScope = 'full_progress',
+  sectioned = false,
   initialFormView,
   reasoningPlacement,
   reasoningDwellMs,
@@ -273,6 +285,7 @@ export function SessionWorkspace({
     autoStart,
     presentationMode,
     answerPanelScope,
+    sectioned,
     inlineCorrectionEnabled,
     readOnly,
     intro,
@@ -286,6 +299,11 @@ export function SessionWorkspace({
     phase,
     stream,
     panel,
+    sections,
+    onSelectSection,
+    onCloseSection,
+    sectionFocusKey,
+    clearSectionFocus,
     lifecycle,
     form,
     views,
@@ -334,6 +352,23 @@ export function SessionWorkspace({
     onConclude,
     goToView,
   } = state;
+
+  // Bumped on every section move. With the panel on screen it drives the scroll-to-top above; on
+  // the three layouts that fold review into the sheet it lights the review trigger instead.
+  const [sectionFocusSignal, setSectionFocusSignal] = useState(0);
+  const [sectionReviewPending, setSectionReviewPending] = useState(false);
+  useEffect(() => {
+    if (sectionFocusKey === null) return;
+    if (panelInline) setSectionFocusSignal((n) => n + 1);
+    else setSectionReviewPending(true);
+    clearSectionFocus();
+  }, [sectionFocusKey, panelInline, clearSectionFocus]);
+
+  // Cleared the moment they look, not on a timer: the marker says "there is something in here you
+  // have not seen", and opening the sheet is what makes that untrue.
+  useEffect(() => {
+    if (reviewOpen) setSectionReviewPending(false);
+  }, [reviewOpen]);
 
   /* ---------------------------------------------------------------------- */
   /* Whole-surface takeovers                                                 */
@@ -437,6 +472,21 @@ export function SessionWorkspace({
   // does. Read here rather than styled in the layout because a layout places nodes it did not build
   // — it cannot reach inside the composer and tell the textarea to grow.
   const composerFills = placements.composer.kind === 'region' && placements.composer.fills === true;
+
+  /* ── Sectioned interviews (P21): two placement reads ───────────────────────────────────────
+     1. The tab VARIANT. A layout that folds the tabs behind a gesture (Horizon) or tucks them into
+        the lifecycle strip's trailing cluster (Focus) wants the compact menu; Classic and
+        Broadsheet have room for the full strip.
+     2. What "bring the section's answers into focus" MEANS here. With the panel on screen it is a
+        scroll to the top of the freshly-filtered list. On the three layouts that keep review in the
+        sheet there is nothing on screen to scroll, and force-opening the sheet on every tab click
+        would fight the explicit reason each of them folds review away — so the review trigger is
+        marked as having something new instead, and the respondent opens it when they choose. */
+  const sectionTabsVariant =
+    placements.sectionTabs.kind === 'overlay' ||
+    (placements.sectionTabs.kind === 'region' && placements.sectionTabs.region.includes('trailing'))
+      ? 'menu'
+      : 'strip';
   // And does that region want the composer PRESENT in the room it was given, or tucked into a
   // corner of it? Broadsheet's bare margin and Horizon's one-question stage both say present, and
   // get the bordered box at prose height with its controls inside; Classic and Focus say tucked,
@@ -491,7 +541,13 @@ export function SessionWorkspace({
       // switcher, and the switcher's labels are the ones worth keeping: it is the row's subject and
       // its words are what tell the respondent where they are. Review is a single secondary action
       // with a distinctive icon and an `aria-label` that survives the collapse.
-      className={cn('rounded-full max-sm:w-9 max-sm:px-0', panelInline && 'lg:hidden')}
+      className={cn(
+        'rounded-full max-sm:w-9 max-sm:px-0',
+        panelInline && 'lg:hidden',
+        // P21: this layout has no panel, and the respondent has just moved section. A ring rather
+        // than a forced-open sheet — see the placement-read note above.
+        sectionReviewPending && 'ring-primary ring-2 ring-offset-1'
+      )}
       onClick={() => setReviewOpen(true)}
       aria-haspopup="dialog"
       aria-expanded={reviewOpen}
@@ -681,6 +737,7 @@ export function SessionWorkspace({
         reasoningPlacement={reasoningPlacement}
         stitchedHistory={stitchedHistory}
         stitchedSeamLabel={stitchedSeamLabel}
+        sectionKey={sections.view.active ? sections.view.activeKey : null}
       />
     ) : null,
 
@@ -710,6 +767,34 @@ export function SessionWorkspace({
         attachmentInputEnabled={attachmentInputEnabled}
         fillHeight={composerFills}
         prominent={composerProminent}
+      />
+    ),
+
+    /* ── Sectioned interviews (P21) ─────────────────────────────────────────────────────────
+       Both render `null` on an unsectioned questionnaire (the strip's `active` is false), so every
+       layout places them unconditionally and most questionnaires draw neither.
+
+       The VARIANT is read from this layout's own placement rather than from the viewport: an
+       `overlay` placement means this layout folds accumulated context away (Horizon), and a
+       trailing-cluster region means it strips chrome (Focus). Both want the compact menu; the two
+       layouts with room for a strip get the strip. Same idiom as `composerFills` /
+       `composerProminent` above — the container reads the declaration and the node cooperates. */
+    sectionTabs: (
+      <SectionTabStrip
+        view={sections.view}
+        onSelect={onSelectSection}
+        // Moving mid-stream would strand the reply that is still arriving.
+        canSelect={stream.canSend && !sections.moving}
+        variant={sectionTabsVariant}
+      />
+    ),
+
+    sectionClose: (
+      <SectionCloseControl
+        view={sections.view}
+        onClose={onCloseSection}
+        canClose={stream.canSend}
+        busy={sections.moving}
       />
     ),
 
@@ -743,6 +828,7 @@ export function SessionWorkspace({
           canRevisit={stream.canSend}
           onRefine={handleRefine}
           newlyFilledKeys={newlyFilledKeys}
+          focusSignal={sectionFocusSignal}
           correction={correction}
           className="hidden lg:flex"
         />

@@ -43,6 +43,9 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
   // detail none of them means to own.
   const chatColumn = (
     <div className={cn('flex min-h-0 flex-col gap-3', !showPanel && 'h-full')}>
+      {/* P21: the section strip is chrome, and Classic has the room, so it sits above the card it
+          bounds rather than inside it. Renders nothing on an unsectioned questionnaire. */}
+      {slots.sectionTabs}
       {slots.completionOffer}
       <ConversationFrame
         className="min-h-0 flex-1"
@@ -55,6 +58,9 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
         }
         composer={slots.composer}
       />
+      {/* P21: beside the answer box, because finishing a section is the other thing the respondent
+          DOES here — and below the card, so it never competes with the composer for its width. */}
+      {slots.sectionClose}
     </div>
   );
 

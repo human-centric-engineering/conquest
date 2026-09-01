@@ -14,16 +14,17 @@ import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
-  resolveAttachmentsEnabledForVersion,
-  resolveInlineCorrectionForVersion,
   resolveAnswerPanelScopeForVersion,
-  resolvePresentationModeForVersion,
-  resolveRespondentChromeForVersion,
+  resolveAttachmentsEnabledForVersion,
   resolveChatTextScaleIndexForVersion,
-  resolveRespondentDesignForVersion,
-  resolveRespondentLayoutForVersion,
+  resolveInlineCorrectionForVersion,
+  resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
+  resolveRespondentChromeForVersion,
+  resolveRespondentDesignForVersion,
+  resolveRespondentLayoutForVersion,
+  resolveSectionedForVersion,
   resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
@@ -123,6 +124,7 @@ export default async function ExperienceRunPage({
     glossary,
     glossaryAppendix,
     showProgressPercentText,
+    sectioned,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -141,6 +143,9 @@ export default async function ExperienceRunPage({
     resolveGlossaryForHints(versionId),
     resolveGlossaryAppendixForVersion(versionId),
     resolveShowProgressPercentTextForVersion(versionId),
+    // P21: resolved here so the tab strip is present from the first paint, and so an
+    // unsectioned questionnaire never calls the strip endpoint at all.
+    resolveSectionedForVersion(versionId),
   ]);
 
   // `px-4` matches the chrome's own container padding, so the conversation's left and right edges
@@ -172,6 +177,7 @@ export default async function ExperienceRunPage({
             respondentLayout={respondentLayout}
             chatTextScaleIndex={chatTextScaleIndex}
             answerPanelScope={answerPanelScope}
+            sectioned={sectioned}
             reasoningPlacement={reasoningPlacement}
             reasoningDwellMs={reasoningDwell.dwellMs}
             reasoningPerItemMs={reasoningDwell.perItemMs}

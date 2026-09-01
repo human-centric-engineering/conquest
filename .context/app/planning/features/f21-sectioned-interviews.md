@@ -221,16 +221,34 @@ Nothing else resolves sections, and the new section-filtered loaders must satisf
 leak-guard test (`tests/unit/lib/app/questionnaire/scope/leak-guard.test.ts` reads source and fails
 on an unscoped loader).
 
-- **Data-slot mode** (`runDataSlotTurn`): the candidate pool for `pickNextDataSlot` and for the
-  adaptive `selectNextDataSlot` is pre-filtered to `active.dataSlotKeys`. The theme linger-and-bridge
-  rhythm still runs, now inside the section. The **must-ask hoist** and the **late-stage sweep** are
-  scoped to the section too: a `must_ask` question in section 3 must not fire while the respondent is
-  in section 1.
-- **Question mode** (`runTurn`): `SelectionContext.questions` is filtered to `active.questionKeys`
-  before the strategy runs, so all four strategies inherit the boundary for free, `adaptive`
-  included (its pgvector ranking is over the filtered pool).
+### The bound is a SECOND list, never a narrowing of the first
+
+This is the sharpest thing the build turned up, and it was a real defect before it was a rule.
+
+The obvious implementation is to narrow `base.questions` and `base.dataSlots` at the choke point and
+let everything downstream inherit the bound. That is wrong, and it breaks invariant 2 immediately:
+those two lists are read by the **submit gate**, the weighted coverage, the progress bar and the
+milestone ledger as well as by targeting. Narrowed, a session offers to submit the moment its FIRST
+section is covered, and the bar reads 100% with six sections still to come.
+
+So `buildTurnContext` carries `sectionQuestions` / `sectionDataSlots` **alongside** the scoped lists,
+absent (not empty) when the interview is not sectioned. The rule for a reader is one line:
+
+> Read the section list where a question is being **chosen**. Read the full list wherever completion,
+> coverage or progress is being **measured**.
+
+- **Data-slot mode** (`runDataSlotTurn`): the targeting pool, the **late-stage sweep** and the
+  **must-ask hoist** read the section pool, so a `must_ask` waiting in section 3 cannot interrupt
+  section 1, which is the same promise the hoist already makes within a theme, applied one level up. The
+  submit gate (`allQuestionsAnswered`) and the coverage figure keep reading the whole interview.
+- **Question mode** (`runTurn`): only the `invokers.selectNext(...)` call is handed the section pool,
+  so all four strategies inherit the boundary for free (`adaptive` included, whose pgvector ranking
+  then runs over that pool). `assessCompletion` above it is untouched.
 - **Extraction**: `dataSlotCandidates` still carry the whole version under `capture`; under `stay`
   the out-of-section results are dropped in `persistTurn`.
+- **Not bounded at all**: `answered`, `existingAnswers` and `recentMessages`. What the respondent
+  already said does not stop being true because they moved on, and the extractor needs the whole
+  picture to read a correction against.
 
 ## 8. A fresh opening question per section
 
@@ -379,7 +397,20 @@ This is a deliberate softening of the original requirement, and it is recorded h
 silently implemented: on three of four layouts the answers come into focus **when the respondent
 looks at them**, not the instant the section changes.
 
-### 10.4 The rest of the switch
+### 10.4 The strip is resolved server-side, not discovered by fetching
+
+`sectioned` is resolved on the server (`resolveSectionedForVersion`, off the already-cached surface
+row) and passed to `SessionWorkspace` as a prop, exactly as `answerPanelScope` is, for the reason
+that setting records: the layout differs from the first paint, and a tab strip that appears a moment
+after the conversation reads as a glitch.
+
+It also means the strip's own endpoint is called ONLY by a surface that has sections to draw. The
+first build had the hook fetch on mount unconditionally, which put an extra round-trip on every
+respondent session of every questionnaire, to be told the feature was off. The existing
+`session-workspace` tests caught it by asserting an exact fetch count, and the right fix was the
+cause rather than the assertion.
+
+### 10.5 The rest of the switch
 
 Switching sections is one client action in `useSessionWorkspace`, which already owns every hook and
 gate: POST the open action, refetch the panel and the tab model, run the focus gesture above, swap
@@ -396,7 +427,7 @@ the transcript to that section's turns, and fire the kickoff turn if the section
 - **Inspector**: `TurnInspectorDrawer` follows the active section for free once the transcript is
   filtered. Its header gains the section name.
 
-### 10.5 What the layout tests must gain
+### 10.6 What the layout tests must gain
 
 `tests/unit/components/app/questionnaire/layouts/registry.test.tsx` already renders each layout with
 a sentinel per slot and asserts every `region`-placed slot reaches the DOM, and
@@ -448,6 +479,13 @@ because that is container logic reading a declaration, and no layout renders it.
   bar section-local, is worse: it would reset visibly at every boundary.
 - **A theme-sourced section set inherits the generator's labels.** They were written to group a
   panel, not to head a chapter. Some will read oddly as tab labels until an admin edits them.
+- **The answer panel's own header counts the section it is showing, and does not yet say so.**
+  Question mode reads "3 of 5 answered" over the active section's rows while the top bar reads the
+  whole interview, so the two figures can look inconsistent to a careless reader. This is the same
+  two-figures trade as the tabs, one level down, and it is the honest count of what is on screen.
+  Left as-is deliberately rather than half-fixed: the copy change ("3 of 5 in this section") is a
+  wording decision, and inventing one mid-build is how a surface ends up with three ways of saying
+  the same thing. Recorded so it is picked up on purpose.
 
 ## 14. Validation and tests
 

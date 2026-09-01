@@ -113,6 +113,27 @@ export interface QuestionComposeInput {
   /** True for the first question of the session (nothing to acknowledge yet). */
   isOpening: boolean;
   /**
+   * Sectioned interviews (P21): the section this turn is bounded to, when the interview is
+   * sectioned. Absent on every unsectioned interview, where the whole block collapses to nothing.
+   */
+  section?: {
+    /** The respondent-facing label, used in the transition line and the boundary rule. */
+    label: string;
+    /** Human position, for a transition that tells them where they are ("2 of 5"). */
+    position: number;
+    total: number;
+    /**
+     * True when nothing has been said in this section yet, so this turn opens it.
+     *
+     * Distinct from {@link isOpening}, which is the first message of the whole conversation. Both
+     * are true on the first turn of the first section; only this one is true at the top of section
+     * two, and the guidance differs because "this is the very first message" is then a lie.
+     */
+    isOpening: boolean;
+    /** The section that follows this one, when the respondent is about to be offered the move. */
+    nextLabel?: string;
+  };
+  /**
    * Seriousness / abuse gate: the respondent's last message was flagged non-serious (hostile,
    * rude, a joke at the interviewer's expense, or otherwise not a real answer) and has been set
    * aside. When true, the phraser parries it gracefully — acknowledge, deflect with light good
@@ -394,44 +415,55 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       'and re-ask the question sincerely. Keep the whole thing short and easy — one or two light ' +
       'sentences of acknowledgement/parry, then the question. Do NOT moralise about being serious ' +
       '(a separate notice already handles that) and do NOT sound wounded or passive-aggressive.'
-    : input.isOpening
-      ? openOpening
-        ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
-          'Open with a short, neutral scene-setting line (no performed emotion or pleasantries about ' +
-          'how nice it is to talk), then extend the broad, open invitation described under ' +
-          'interviewer_strategy below — give them genuine room to talk freely rather than asking a ' +
-          'single narrow question. There is no prior answer to acknowledge. Do not tell them to ' +
-          '"send a message to begin" — you are starting the conversation.'
-        : 'This is the very first message of the conversation — be proactive and set the scene. ' +
-          'Open with a short, neutral scene-setting line ("Let\'s start by…", "To begin, we\'ll ' +
-          'explore…") — no performed emotion or pleasantries about how nice it is to talk — and then ' +
-          'ease straight into this first question with a single, light, easy-to-answer ask. There is ' +
-          'no prior answer to acknowledge. Do not tell them to "send a message to begin" — you are ' +
-          'starting the conversation.'
-      : input.isReask
-        ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
-          (input.currentUnderstanding
-            ? `So far you understand: "${input.currentUnderstanding}". Briefly NAME why you are ` +
-              'circling back — refer to what they touched on so the follow-up feels purposeful, not ' +
-              'repetitive ("Earlier you mentioned …, and I want to make sure I follow…"). Then, do ' +
-              'NOT repeat the same broad question — ask a SHARPER, narrower follow-up that targets ' +
-              'the specific piece still missing. '
-            : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
-              'specifically than before. ') +
-          (input.isFinalAttempt
-            ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
-              "say, that's completely fine and you'll move on."
-            : '')
-        : input.isTransition
-          ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
-            'ask about it — like a skilled interviewer changing subject without it feeling abrupt.'
-          : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
-            'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
-            'If their last answer was brief or surface-level, do not move on or pile on more ' +
-            'questions: gently invite them to say a little more about what they just shared, with ' +
-            'ONE light follow-up ("What made you say that?", "Can you give an example?") — and where ' +
-            'it is not obvious, briefly say why you are keen to hear more, so the nudge feels ' +
-            'purposeful rather than repetitive.';
+    : // A later section opening. Checked BEFORE `isOpening` would be, except that the two are
+      // mutually exclusive here: the first section's first turn IS the conversation's first
+      // message and takes the branch below, which already sets the scene from nothing.
+      input.section?.isOpening && !input.isOpening
+      ? `You are moving into a new part of the conversation: "${input.section.label}" (part ` +
+        `${input.section.position} of ${input.section.total}). Mark the move in ONE short, plain ` +
+        'sentence so they know where they are, without ceremony and without summarising what they ' +
+        'just finished — a listing of everything they said reads as a receipt, not a conversation. ' +
+        'Then open this new area properly: a broad, easy invitation into it rather than a narrow ' +
+        'first question. Do not thank them for the previous section or congratulate them on ' +
+        'progress.'
+      : input.isOpening
+        ? openOpening
+          ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
+            'Open with a short, neutral scene-setting line (no performed emotion or pleasantries about ' +
+            'how nice it is to talk), then extend the broad, open invitation described under ' +
+            'interviewer_strategy below — give them genuine room to talk freely rather than asking a ' +
+            'single narrow question. There is no prior answer to acknowledge. Do not tell them to ' +
+            '"send a message to begin" — you are starting the conversation.'
+          : 'This is the very first message of the conversation — be proactive and set the scene. ' +
+            'Open with a short, neutral scene-setting line ("Let\'s start by…", "To begin, we\'ll ' +
+            'explore…") — no performed emotion or pleasantries about how nice it is to talk — and then ' +
+            'ease straight into this first question with a single, light, easy-to-answer ask. There is ' +
+            'no prior answer to acknowledge. Do not tell them to "send a message to begin" — you are ' +
+            'starting the conversation.'
+        : input.isReask
+          ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
+            (input.currentUnderstanding
+              ? `So far you understand: "${input.currentUnderstanding}". Briefly NAME why you are ` +
+                'circling back — refer to what they touched on so the follow-up feels purposeful, not ' +
+                'repetitive ("Earlier you mentioned …, and I want to make sure I follow…"). Then, do ' +
+                'NOT repeat the same broad question — ask a SHARPER, narrower follow-up that targets ' +
+                'the specific piece still missing. '
+              : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
+                'specifically than before. ') +
+            (input.isFinalAttempt
+              ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
+                "say, that's completely fine and you'll move on."
+              : '')
+          : input.isTransition
+            ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
+              'ask about it — like a skilled interviewer changing subject without it feeling abrupt.'
+            : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
+              'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
+              'If their last answer was brief or surface-level, do not move on or pile on more ' +
+              'questions: gently invite them to say a little more about what they just shared, with ' +
+              'ONE light follow-up ("What made you say that?", "Can you give an example?") — and where ' +
+              'it is not obvious, briefly say why you are keen to hear more, so the nudge feels ' +
+              'purposeful rather than repetitive.';
 
   const system = joinSections(
     section(
@@ -485,6 +517,27 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       )
     ),
     section('this_turn', turnGuidance),
+    // Sectioned interviews (P21): the boundary. Placed after `this_turn` so it governs the
+    // transition line above, and before `interviewer_strategy` so the arc still shapes HOW the
+    // question is asked — the boundary decides WHAT may be asked, which is a different question.
+    //
+    // Collapses to '' on every unsectioned interview, so no version that never opted in carries a
+    // single extra token.
+    section(
+      'section_boundary',
+      input.section
+        ? joinSections(
+            `This conversation is being worked through in parts, and you are currently in "${input.section.label}" ` +
+              `(part ${input.section.position} of ${input.section.total}). Stay inside it.`,
+            'If they raise something that belongs to a different part, acknowledge it briefly and ' +
+              'genuinely — "that matters, and we will come to it" — and then return to this part. ' +
+              'Do NOT follow them into it, and do NOT start asking about it. What they said is ' +
+              'recorded either way; you simply are not pursuing it yet.',
+            'Never tell them a part is finished, and never offer to move on, unless this turn ' +
+              'explicitly instructs you to. Deciding that is not yours to do.'
+          )
+        : ''
+    ),
     // Interviewer strategy (when enabled): a more specific override of the default questioning
     // approach in `rules`/`this_turn` above — placed after them so it governs (later sections win,
     // same as tone). Collapses to '' when disabled, leaving the default voice untouched.

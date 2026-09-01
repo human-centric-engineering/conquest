@@ -58,7 +58,7 @@ import {
   effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
-import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import { terminalDecision, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
 import type { StageEmitter } from '@/lib/app/questionnaire/orchestrator/stage-progress';
@@ -92,6 +92,27 @@ export const COMPLETE_MESSAGE =
   "Thanks — that's everything we need. You can submit your responses whenever you're ready.";
 export const NONE_MESSAGE =
   "We've reached the end of the available questions. Thanks for your answers.";
+
+/**
+ * Sectioned interviews (P21): what to say when THIS section has nothing left to ask.
+ *
+ * `agentOffersClose` is the version's decision about whether the interviewer offers the move or
+ * simply reports the part is covered and leaves the move to the respondent's own control. The
+ * difference is a real one: an author running a facilitated session may want the respondent to
+ * decide when to leave a part, and an interviewer that keeps proposing it is pressure.
+ *
+ * The last section never offers, whatever the setting says: there is nowhere to move on to, and
+ * the whole-interview completion offer is the affordance that matters there.
+ */
+export function sectionCoveredMessage(
+  label: string,
+  nextLabel: string | null,
+  offersClose: boolean
+): string {
+  const covered = `That's everything for ${label}.`;
+  if (!offersClose || nextLabel === null) return covered;
+  return `${covered} Ready to move on to ${nextLabel}?`;
+}
 
 /** Look up a question's display prompt; empty when the loader didn't populate it. */
 function promptFor(questions: QuestionView[], questionId: string): string {
@@ -488,8 +509,17 @@ export async function runTurn(
     targetedQuestionId = null;
   } else {
     // Not ready to offer — pick the next question.
+    //
+    // P21: the selector sees the ACTIVE SECTION's questions, so every strategy is bounded by the
+    // section for free — `adaptive` included, whose pgvector ranking then runs over the same pool.
+    // `effective` itself is left alone: step 5 above already assessed completion over the whole
+    // interview, which is the invariant (sections decide what is asked next, never what counts as
+    // done). Undefined when unsectioned, so this is `effective` exactly as before.
     onStage?.('choosing');
-    const out = await invokers.selectNext(effective);
+    const sectionQuestions = effective.sectionQuestions;
+    const out = await invokers.selectNext(
+      sectionQuestions ? { ...effective, questions: sectionQuestions } : effective
+    );
     const decision = out.decision;
     if (decision.kind === 'ask') {
       costUsd += decision.costUsd;
@@ -500,6 +530,21 @@ export async function runTurn(
       })
     );
 
+    // P21: the selector was handed THIS SECTION's questions, so a terminal verdict from it is a
+    // verdict about the SECTION. `terminalDecision` over the WHOLE interview is what separates the
+    // two: null there means the interview is genuinely not finished, so the only thing that ended
+    // was the part being worked. Without this check the reply was COMPLETE_MESSAGE - "that's
+    // everything we need" - at the end of part one, on the feature's default settings.
+    //
+    // Asking the whole-interview question rather than trusting `sectionScoped` alone is what keeps
+    // `maxQuestionsPerSession` working: a session that hit its cap terminates for real, and that
+    // verdict must not be re-read as "this part is covered".
+    const sectionEnded =
+      sectionQuestions !== undefined &&
+      decision.kind !== 'ask' &&
+      state.sectionMeta !== undefined &&
+      terminalDecision({ ...effective, round: effective.selectionRound }) === null;
+
     if (decision.kind === 'ask') {
       response = {
         kind: 'question',
@@ -508,6 +553,16 @@ export async function runTurn(
       };
       targetedQuestionId = decision.questionId;
       selectionRationale = decision.rationale;
+    } else if (sectionEnded && state.sectionMeta) {
+      const { key, label, nextLabel } = state.sectionMeta;
+      response = {
+        kind: 'section_covered',
+        text: sectionCoveredMessage(label, nextLabel, state.config.sections.agentOffersClose),
+        sectionKey: key,
+        nextLabel,
+      };
+      targetedQuestionId = null;
+      selectionRationale = `Every question in ${label} has been answered.`;
     } else if (decision.kind === 'complete') {
       response = { kind: 'complete', text: COMPLETE_MESSAGE };
       targetedQuestionId = null;

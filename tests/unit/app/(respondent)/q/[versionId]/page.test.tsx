@@ -46,6 +46,9 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveReasoningDwellForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
   resolveSessionResumeEnabledForVersion: vi.fn(),
+  // P21: resolved server-side so the tab strip is present in the first paint. Off here, which
+  // is what every questionnaire that never opted in resolves to.
+  resolveSectionedForVersion: vi.fn().mockResolvedValue(false),
   resolveShowProgressPercentTextForVersion: vi.fn(),
   resolveChatTextScaleIndexForVersion: vi.fn(),
 }));

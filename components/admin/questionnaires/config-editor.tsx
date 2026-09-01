@@ -1898,9 +1898,11 @@ export function ConfigEditor({
                     <span>
                       Let the interviewer offer to move on{' '}
                       <FieldHelp title="Interviewer offers to move on">
-                        With this on, the interviewer says when a section is covered, as well as the
-                        button appearing. Without it the button appears silently, and someone who is
-                        not watching for it will keep answering a section that is already finished.
+                        With this on, the interviewer says when a section is covered and names the
+                        one that follows, as well as the button appearing. Without it the button
+                        appears on its own, and someone who is not watching for it will keep
+                        answering a section that is already finished. Either way, once a section has
+                        nothing left to ask the interviewer says so rather than going quiet.
                       </FieldHelp>
                     </span>
                   </label>

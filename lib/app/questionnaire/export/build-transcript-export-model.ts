@@ -36,6 +36,8 @@ export interface TranscriptTurnInput {
   agentResponse: string;
   /** ISO timestamp the turn was recorded. */
   at: string;
+  /** Sectioned interviews (P21): the section's respondent-facing label. Absent when unsectioned. */
+  sectionLabel?: string;
 }
 
 /** The plain inputs the DB seam hands the builder. */
@@ -78,10 +80,20 @@ function flattenTurns(turns: TranscriptTurnInput[]): TranscriptTurnView[] {
   const lines: TranscriptTurnView[] = [];
   for (const turn of turns) {
     if (turn.userMessage.trim().length > 0) {
-      lines.push({ speaker: 'respondent', text: turn.userMessage, at: turn.at });
+      lines.push({
+        speaker: 'respondent',
+        text: turn.userMessage,
+        at: turn.at,
+        ...(turn.sectionLabel ? { sectionLabel: turn.sectionLabel } : {}),
+      });
     }
     if (turn.agentResponse.trim().length > 0) {
-      lines.push({ speaker: 'interviewer', text: turn.agentResponse, at: turn.at });
+      lines.push({
+        speaker: 'interviewer',
+        text: turn.agentResponse,
+        at: turn.at,
+        ...(turn.sectionLabel ? { sectionLabel: turn.sectionLabel } : {}),
+      });
     }
   }
   return lines;

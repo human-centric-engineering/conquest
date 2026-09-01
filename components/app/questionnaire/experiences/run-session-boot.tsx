@@ -66,6 +66,8 @@ export interface RunSessionBootProps {
    * the layout is right on the first paint.
    */
   answerPanelScope?: AnswerSlotPanelScope;
+  /** Sectioned interviews (P21): whether this version runs in sections. Forwarded verbatim. */
+  sectioned?: boolean;
   reasoningPlacement?: ReasoningPlacement | null;
   reasoningDwellMs?: number;
   reasoningPerItemMs?: number;
@@ -99,6 +101,7 @@ export function RunSessionBoot({
   respondentLayout,
   chatTextScaleIndex,
   answerPanelScope,
+  sectioned,
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
@@ -167,6 +170,7 @@ export function RunSessionBoot({
       respondentLayout={respondentLayout}
       chatTextScaleIndex={chatTextScaleIndex}
       answerPanelScope={answerPanelScope}
+      sectioned={sectioned}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
       reasoningPlacement={reasoningPlacement}

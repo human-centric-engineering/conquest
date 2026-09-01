@@ -50,6 +50,19 @@ export interface ChatHistoryProps {
    * seam divider (the author chose the seamless marker); `undefined` means not stitched at all.
    */
   stitchedSeamLabel?: string | null;
+  /**
+   * Sectioned interviews (P21): show only the history belonging to this section.
+   *
+   * Undefined on every unsectioned interview, where the whole history renders as it always has.
+   * The CURRENT exchange is deliberately never filtered — a respondent can only speak in the active
+   * section, so the live end of the conversation is in it by construction, and filtering it would
+   * risk blanking the screen on a turn whose tag has not landed yet.
+   *
+   * A turn carrying no key at all (recorded before P21, or before this session was sectioned) is
+   * KEPT rather than hidden: it is part of the conversation, and hiding it would make the transcript
+   * lie about what was said.
+   */
+  sectionKey?: string | null;
   className?: string;
 }
 
@@ -59,6 +72,7 @@ export function ChatHistory({
   reasoningPlacement,
   stitchedHistory,
   stitchedSeamLabel,
+  sectionKey,
   className,
 }: ChatHistoryProps) {
   const { turns } = stream;
@@ -68,7 +82,10 @@ export function ChatHistory({
   const { historyEnd } = useConversation();
 
   const segments = stitchedHistory?.segments ?? [];
-  const settled = turns.slice(0, historyEnd);
+  const settled = turns
+    .slice(0, historyEnd)
+    // P21: this section's history. A no-op when unsectioned, and an untagged turn is kept.
+    .filter((turn) => !sectionKey || !turn.sectionKey || turn.sectionKey === sectionKey);
 
   // Nothing behind the current exchange: render no box at all rather than an empty one, so a
   // column that spaces its children with a gap does not open a gap around nothing. The container

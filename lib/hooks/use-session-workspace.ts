@@ -31,6 +31,7 @@ import { useRouter } from 'next/navigation';
 import { useHorizontalSwipe } from '@/lib/hooks/use-horizontal-swipe';
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
+import { useSectionStrip } from '@/lib/hooks/use-section-strip';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
 import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { useLocalStorage } from '@/lib/hooks/use-local-storage';
@@ -97,6 +98,8 @@ export interface UseSessionWorkspaceOptions {
   autoStart?: boolean;
   presentationMode?: PresentationMode;
   answerPanelScope?: AnswerSlotPanelScope;
+  /** Sectioned interviews (P21): whether this version runs in sections. Resolved server-side. */
+  sectioned?: boolean;
   /**
    * Does the chosen layout put the answer panel back on screen at `lg`?
    *
@@ -148,6 +151,21 @@ export interface SessionWorkspaceState {
   /* Composed data hooks */
   stream: ReturnType<typeof useQuestionnaireSessionStream>;
   panel: ReturnType<typeof useAnswerPanel>;
+  /** Sectioned interviews (P21). Inert (`view.active` false) on an unsectioned questionnaire. */
+  sections: ReturnType<typeof useSectionStrip>;
+  /** Move to a section: opens it, brings its answers into focus, and opens it in conversation. */
+  onSelectSection: (key: string) => void;
+  /** Finish the active section and hand the run to the next one. */
+  onCloseSection: () => void;
+  /**
+   * The section just moved to, for the surface to bring into focus. Null once handled.
+   *
+   * Published rather than acted on here because "into focus" is layout-dependent: with the panel on
+   * screen it is a scroll and a pulse, and on the three layouts that fold review into the sheet it
+   * is a marker on the review trigger instead.
+   */
+  sectionFocusKey: string | null;
+  clearSectionFocus: () => void;
   lifecycle: ReturnType<typeof useSessionLifecycle>;
   form: ReturnType<typeof useFormAnswers>;
 
@@ -215,6 +233,7 @@ export function useSessionWorkspace({
   chatTextScaleIndex = DEFAULT_CHAT_TEXT_SCALE_INDEX,
   presentationMode = 'both',
   answerPanelScope = 'full_progress',
+  sectioned = false,
   inlineCorrectionEnabled = false,
   readOnly = false,
   intro = null,
@@ -386,9 +405,16 @@ export function useSessionWorkspace({
   // "clarify in chat" (which leaves `heldProbe` intact so the affordance stays "finish anyway").
   const [finalCheckOpen, setFinalCheckOpen] = useState(false);
 
+  // Held in a ref for the same reason `panelRefetchRef` is: `onTurnSettled` is created before the
+  // hook that fills it, and reading it directly would be a use-before-declaration.
+  const sectionRefetchRef = useRef<(() => void) | null>(null);
+
   const onTurnSettled = useCallback(() => {
     panelRefetchRef.current?.();
     lifecycleRefetchRef.current?.();
+    // The close gate is re-assessed every turn, so the strip changes on exactly the same cadence
+    // as the panel: a section becomes closeable BECAUSE a turn landed.
+    sectionRefetchRef.current?.();
     // A settled turn is the respondent answering the probe (or moving on) — the server resolves the
     // parked contradiction, so drop the held state; the next submit re-sweeps cleanly.
     setHeldProbe(null);
@@ -400,6 +426,26 @@ export function useSessionWorkspace({
     accessToken,
     initialView: initialPanel,
     enabled: !readOnly,
+  });
+
+  /* ── Sectioned interviews (P21) ─────────────────────────────────────────────────────────────
+     The strip, and the choreography of moving between sections. `onMoved` is where the four
+     things a section switch has to do are sequenced; see `handleSectionMove` below for why the
+     focus half of it branches on the LAYOUT rather than doing the same thing everywhere. */
+  const sectionKickoffRef = useRef<((key: string) => void) | null>(null);
+  const sections = useSectionStrip({
+    sessionId,
+    accessToken,
+    // Off for every version that never opted in, so the endpoint is only called by a surface that
+    // actually has a strip to draw. The read-only admin viewer holds no respondent credential.
+    enabled: !readOnly && sectioned,
+    onMoved: (activeKey) => {
+      // The captured answers move with the conversation, so both reads refresh together — the same
+      // pairing `onTurnSettled` already makes for the panel and the lifecycle status.
+      panelRefetchRef.current?.();
+      lifecycleRefetchRef.current?.();
+      if (activeKey) sectionKickoffRef.current?.(activeKey);
+    },
   });
 
   const stream = useQuestionnaireSessionStream({
@@ -474,6 +520,7 @@ export function useSessionWorkspace({
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.
   useEffect(() => {
     panelRefetchRef.current = panel.refetch;
+    sectionRefetchRef.current = sections.refetch;
     lifecycleRefetchRef.current = lifecycle.refetch;
   });
 
@@ -826,6 +873,49 @@ export function useSessionWorkspace({
         ? 'handoff'
         : 'complete';
 
+  /* ── Sectioned interviews: the move ────────────────────────────────────────────────────────
+     Switching section is four things, and this hook owns three of them:
+
+     1. tell the server (the hook posts it and returns the redrawn strip),
+     2. refresh the panel and the lifecycle status (`onMoved`, above), and
+     3. open the section in conversation when nothing has been said in it yet.
+
+     The fourth — bringing that section's captured answers into FOCUS — is deliberately NOT here.
+     Three of the four layouts omit `answersPanel` entirely and keep review in the sheet at every
+     width, so what "into focus" means depends on the layout's own placement, which is resolved in
+     `SessionWorkspace`. The hook publishes {@link sectionFocusKey} and the component decides.
+
+     Step 3 is what makes a section open with its own opening question: an untouched section has no
+     turns, so the kickoff fires and the interviewer sets the new scene. A section already worked in
+     resumes silently, because an opening question over ground already covered would read the
+     conversation back at the respondent. */
+  const { kickoff: streamKickoff } = stream;
+  const [sectionFocusKey, setSectionFocusKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    sectionKickoffRef.current = (key: string) => {
+      setSectionFocusKey(key);
+      const tab = sections.view.sections.find((t) => t.key === key);
+      if (tab?.status === 'not_started') void streamKickoff();
+    };
+  }, [sections.view.sections, streamKickoff]);
+
+  const clearSectionFocus = useCallback(() => setSectionFocusKey(null), []);
+
+  const onSelectSection = useCallback(
+    (key: string) => {
+      // A tap on the section already active is a no-op rather than a re-open: re-opening would
+      // stamp a reopen on a section nobody left.
+      if (key === sections.view.activeKey) return;
+      sections.open(key);
+    },
+    [sections]
+  );
+
+  const onCloseSection = useCallback(() => {
+    if (sections.view.activeKey) sections.close(sections.view.activeKey);
+  }, [sections]);
+
   return {
     phase,
 
@@ -849,6 +939,11 @@ export function useSessionWorkspace({
 
     stream,
     panel,
+    sections,
+    onSelectSection,
+    onCloseSection,
+    sectionFocusKey,
+    clearSectionFocus,
     lifecycle,
     form,
 

@@ -16,6 +16,9 @@
 
 import { prisma } from '@/lib/db/client';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { resolveInterviewSections } from '@/lib/app/questionnaire/sections/resolve';
+import { narrowSectionRun } from '@/lib/app/questionnaire/sections/run';
+import { narrowSectionedInterviewSettings } from '@/lib/app/questionnaire/sections/settings';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
 import { respondentReasons, sharedReason } from '@/lib/app/questionnaire/scope/reasons';
 import { narrowConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
@@ -116,6 +119,8 @@ export async function loadAnswerPanelState(
               // actually having, not the whole bank. Seeing "12 of 70 answered" after a complete
               // run is the single most confidence-destroying way this feature could fail.
               conditionalTopics: true,
+              // Sectioned interviews (P21): whether, and how, this version is broken into parts.
+              sections: true,
             },
           },
           // Data Slots feature: the version's data slots (rendered when dataSlotMode), each with the
@@ -128,6 +133,8 @@ export async function loadAnswerPanelState(
               name: true,
               description: true,
               theme: true,
+              // P21: the section resolver orders themes by the lowest ordinal each one holds.
+              ordinal: true,
               // Conditional Topics (P17): a `light` topic contributes its two HIGHEST-weight data
               // slots, so scope and the F17.33 reason join both need this to agree about which two.
               weight: true,
@@ -138,6 +145,7 @@ export async function loadAnswerPanelState(
             orderBy: { ordinal: 'asc' },
             select: {
               id: true,
+              ordinal: true,
               title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
@@ -184,6 +192,9 @@ export async function loadAnswerPanelState(
       turns: { select: { id: true, ordinal: true } },
       // Conditional Topics (P17): the frozen decision about which topics this interview covers.
       interviewPlan: true,
+      // Sectioned interviews (P21): which section the respondent is in, so the panel shows the
+      // answers for THAT section rather than the whole interview at once.
+      sectionRun: true,
       versionId: true,
     },
   });
@@ -211,6 +222,71 @@ export async function loadAnswerPanelState(
     weightByDataSlotKey,
   });
 
+  // ── Sectioned interviews (P21) ────────────────────────────────────────────────────────────
+  // The panel follows the conversation: when the interview is sectioned it shows the answers for
+  // the ACTIVE section, not the whole instrument. Resolved through the same functions the turn
+  // context uses, over the scope just resolved above, so the panel and the interviewer can never
+  // disagree about which section is in play.
+  //
+  // `activeSectionKeys` is null on every unsectioned interview, and every filter below is a no-op
+  // in that case — the panel is byte-identical to how it rendered before P21.
+  const sectionSettings = narrowSectionedInterviewSettings(row.version.config?.sections);
+  const sectionsResolved = resolveInterviewSections(
+    {
+      settings: sectionSettings,
+      topics: scoped.topics,
+      conditionalTopicsEnabled: narrowConditionalTopicsSettings(
+        row.version.config?.conditionalTopics
+      ).enabled,
+      dataSlots: row.version.dataSlots.map((d) => ({
+        key: d.key,
+        theme: d.theme,
+        ordinal: d.ordinal,
+      })),
+      documentSections: row.version.sections.map((sec) => ({
+        id: sec.id,
+        title: sec.title,
+        ordinal: sec.ordinal,
+      })),
+      questions: row.version.sections.flatMap((sec) =>
+        sec.questions.map((q) => ({ key: q.key, sectionId: sec.id }))
+      ),
+      ...(scoped.scope.active
+        ? {
+            scope: {
+              questionKeys: scoped.scope.questionKeys,
+              dataSlotKeys: scoped.scope.dataSlotKeys,
+            },
+          }
+        : {}),
+    },
+    new Map(row.version.dataSlots.map((d) => [d.key, d.questions.map((q) => q.questionSlot.key)]))
+  );
+  const storedRun = narrowSectionRun(row.sectionRun);
+  // Which section the panel shows, and the three states worth telling apart:
+  //
+  //  - no run yet (the respondent has not taken a turn): the first section, which is where the
+  //    conversation is about to start;
+  //  - a run with an active section: that one;
+  //  - a run whose active section is NULL, which means every section has been closed: **no filter
+  //    at all**. Someone reviewing a finished interview wants their whole record, and falling back
+  //    to section one here would show them a fraction of it with nothing saying so.
+  const allSectionsClosed =
+    storedRun !== null &&
+    storedRun.activeKey === null &&
+    sectionsResolved.every(
+      (sec) => storedRun.sections.find((e) => e.key === sec.key)?.status === 'closed'
+    );
+  const activeSectionKey =
+    sectionsResolved.length === 0 || allSectionsClosed
+      ? null
+      : (storedRun?.activeKey ?? sectionsResolved[0]?.key ?? null);
+  const activeSection = activeSectionKey
+    ? (sectionsResolved.find((sec) => sec.key === activeSectionKey) ?? null)
+    : null;
+  const sectionQuestionKeys = activeSection ? new Set(activeSection.questionKeys) : null;
+  const sectionDataSlotKeys = activeSection ? new Set(activeSection.dataSlotKeys) : null;
+
   // F17.33: why each area the plan ADDED is here, in words for the respondent. The panel is where
   // someone notices their interview changing — the interviewer's announcement is said once and
   // scrolls away, while these rows are still on screen an hour later. Empty on every ordinary
@@ -231,6 +307,8 @@ export async function loadAnswerPanelState(
       title: s.title,
       slots: s.questions
         .filter((q) => isQuestionInScope(scoped.scope, q.key))
+        // P21: and to the section they are in. A no-op when unsectioned.
+        .filter((q) => sectionQuestionKeys === null || sectionQuestionKeys.has(q.key))
         .map((q) => ({
           slotKey: q.key,
           prompt: q.prompt,
@@ -280,9 +358,10 @@ export async function loadAnswerPanelState(
   // The form surface is always question-based (P-presentation): even when data slots are on,
   // it edits the underlying questions directly, so it keeps the question sections and never
   // swaps in the data-slot groups. The chat panel still shows the data-slot abstraction.
-  const scopedDataSlots = row.version.dataSlots.filter((d) =>
-    isDataSlotInScope(scoped.scope, d.key)
-  );
+  const scopedDataSlots = row.version.dataSlots
+    .filter((d) => isDataSlotInScope(scoped.scope, d.key))
+    // P21: and to the active section. A no-op when unsectioned.
+    .filter((d) => sectionDataSlotKeys === null || sectionDataSlotKeys.has(d.key));
   if (!forForm && dataSlotMode && scopedDataSlots.length > 0) {
     // Breadth inputs, built once: which questions are answered (+ their confidence), each
     // question's prompt + version order, and whether the panel may itemise the mapped questions

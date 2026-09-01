@@ -97,8 +97,13 @@ export function BroadsheetLayout({ slots, state }: RespondentLayoutProps) {
           No card around it: the composer draws its own bordered surface, so wrapping it in another
           would be two rectangles saying the same thing. */}
       <div className="flex min-h-0 flex-col gap-3">
+        {/* P21: the margin already holds the two things the respondent DOES — answer, and finish.
+            Choosing which area to work in is a third, so it joins them here rather than floating
+            above the document, which is the thing they read. */}
+        {slots.sectionTabs}
         {slots.completionOffer}
         {slots.composer ? <div className="min-h-0 flex-1">{slots.composer}</div> : null}
+        {slots.sectionClose}
       </div>
     </div>
   );

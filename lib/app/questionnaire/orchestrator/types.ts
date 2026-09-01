@@ -150,6 +150,29 @@ export interface TurnState {
    * behaviour, and the only behaviour on a version that never opted in).
    */
   progressQuestions?: QuestionView[];
+  /**
+   * Sectioned interviews (P21): what the active section is called, and what follows it.
+   *
+   * Present exactly when {@link sectionQuestions} is. Read only to compose the section-covered
+   * reply, never to decide anything.
+   */
+  sectionMeta?: { key: string; label: string; nextLabel: string | null };
+  /**
+   * Sectioned interviews (P21): the questions in the ACTIVE section, for targeting only.
+   *
+   * Absent (not empty) on every unsectioned interview, so every consumer's `?? questions` fallback
+   * restores the pre-P21 behaviour exactly.
+   *
+   * This is deliberately a SECOND list rather than a narrowing of {@link questions}, and the
+   * distinction is invariant 2 of the feature: sections decide what is asked next, never what
+   * counts as done. Narrowing `questions` would make the submit gate fire when the first section
+   * was covered and the progress bar read 100% with six sections still to come. Read it where a
+   * question is being CHOSEN (the sweep, the must-ask hoist, the selector); read `questions`
+   * wherever completion, coverage or progress is being MEASURED.
+   */
+  sectionQuestions?: QuestionView[];
+  /** The data slots in the active section. Same contract as {@link sectionQuestions}. */
+  sectionDataSlots?: DataSlotTarget[];
   /** Distinct questions answered before this turn (coverage view). */
   answered: AnsweredView[];
   /** Every answer captured so far, **oldest → newest** (the contradiction look-back keeps the tail). */
@@ -462,6 +485,25 @@ export type TurnResponse =
   | { kind: 'offer'; input: OfferComposeInput }
   | { kind: 'complete'; text: string }
   | { kind: 'none'; text: string }
+  | {
+      /**
+       * Sectioned interviews (P21): this SECTION has nothing left to ask, but the interview does.
+       *
+       * A distinct kind rather than `complete`, because the selector is handed the ACTIVE SECTION's
+       * questions and therefore returns its terminal verdict about the SECTION. Answering that with
+       * `complete` told a respondent the questionnaire was finished at the end of part one, with
+       * every later part still to come. The route streams `text` verbatim, exactly as it does for
+       * `complete` and `none`.
+       *
+       * `nextLabel` is the section that follows, or null on the last one. Whether the message
+       * actually OFFERS the move (rather than just stating the part is covered) is the version's
+       * `sections.agentOffersClose` decision, resolved when the text is composed.
+       */
+      kind: 'section_covered';
+      text: string;
+      sectionKey: string;
+      nextLabel: string | null;
+    }
   | {
       /**
        * Probe-confirm contradiction flow: ask the respondent a reconciliation question for a

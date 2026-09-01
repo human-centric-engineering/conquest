@@ -54,6 +54,10 @@ function dsState(input: {
   existingAnswers?: TurnState['existingAnswers'];
   selectionRound?: number;
   config?: Partial<TurnState['config']>;
+  /** Sectioned interviews (P21): the active section's targeting pools and its labels. */
+  sectionQuestions?: TurnState['sectionQuestions'];
+  sectionDataSlots?: TurnState['sectionDataSlots'];
+  sectionMeta?: TurnState['sectionMeta'];
 }): TurnState {
   return {
     ...state({
@@ -68,6 +72,9 @@ function dsState(input: {
     dataSlotAnswered: input.dataSlotAnswered ?? [],
     activeDataSlotKey: input.activeDataSlotKey ?? null,
     ...(input.dataSlotAttempts ? { dataSlotAttempts: input.dataSlotAttempts } : {}),
+    ...(input.sectionQuestions !== undefined ? { sectionQuestions: input.sectionQuestions } : {}),
+    ...(input.sectionDataSlots !== undefined ? { sectionDataSlots: input.sectionDataSlots } : {}),
+    ...(input.sectionMeta !== undefined ? { sectionMeta: input.sectionMeta } : {}),
   };
 }
 
@@ -1685,5 +1692,53 @@ describe('runDataSlotTurn — extraction and sensitivity detection overlap', () 
 
     expect(result.sideEffects.dataSlotFills).toHaveLength(1);
     expect(result.sideEffects.dataSlotFills?.[0]?.dataSlotKey).toBe('d1');
+  });
+});
+
+describe('runDataSlotTurn — sectioned interviews (P21)', () => {
+  it('reports the part covered instead of sweeping a question out of another part', async () => {
+    // Section one's slot is filled and its question answered; section two still owes both. The
+    // sweep used to reach past the boundary for `q2` and tag the turn with section one.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' }), q({ id: 'q2' })],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'About', mappedQuestionKeys: ['q1'] }),
+          ds({ id: 'd2', key: 'd2', theme: 'Work', mappedQuestionKeys: ['q2'] }),
+        ],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+        sectionQuestions: [q({ id: 'q1' })],
+        sectionDataSlots: [ds({ id: 'd1', key: 'd1', theme: 'About', mappedQuestionKeys: ['q1'] })],
+        sectionMeta: { key: 'about', label: 'About you', nextLabel: 'Your work' },
+      }),
+      invokers
+    );
+
+    expect(result.response.kind).toBe('section_covered');
+    if (result.response.kind === 'section_covered') {
+      expect(result.response.sectionKey).toBe('about');
+      expect(result.response.text).toBe(
+        "That's everything for About you. Ready to move on to Your work?"
+      );
+    }
+    expect(result.targetedQuestionId).toBeNull();
+  });
+
+  it('still sweeps the remaining question when the interview is not sectioned', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' }), q({ id: 'q2' })],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'About', mappedQuestionKeys: ['q1'] })],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+      }),
+      invokers
+    );
+
+    expect(result.response.kind).toBe('question');
+    expect(result.targetedQuestionId).toBe('q2');
   });
 });

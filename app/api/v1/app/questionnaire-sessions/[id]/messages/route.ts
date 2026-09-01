@@ -73,6 +73,12 @@ import {
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import {
+  openSection,
+  reconcileSectionRun,
+  recordTurnInSection,
+} from '@/lib/app/questionnaire/sections/run';
+import { INERT_SECTION_STATE } from '@/lib/app/questionnaire/sections/state';
 import { ensureVersionSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { ensureVersionDataSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { narrowExtractionCandidates } from '@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates';
@@ -576,6 +582,35 @@ async function handleMessage(
       ...(costPressure ? { costPressure } : {}),
     };
 
+    // ── Sectioned interviews (P21) ───────────────────────────────────────────────────────────
+    // The phraser input for the section boundary, computed once and spread into whichever phrasing
+    // call site fires — the same shape and the same reasoning as `strategyPhraserInput` below.
+    //
+    // Empty object on every unsectioned interview, so the prompt carries no section block at all
+    // and a version that never opted in is byte-identical to how it ran before P21.
+    // `?? INERT_SECTION_STATE` rather than a bare read: the field is required by the type and
+    // always present from `buildTurnContext`, but a turn must never break over a DERIVED field
+    // whose absence simply means "not sectioned". Same direction `narrowSectionRun` takes.
+    const sectionState = loaded.sectionState ?? INERT_SECTION_STATE;
+    const activeSection = sectionState.activeSection;
+    const nextSection = activeSection
+      ? sectionState.sections[activeSection.ordinal + 1]
+      : undefined;
+    const sectionPhraserInput =
+      sectionState.active && activeSection
+        ? {
+            section: {
+              label: activeSection.label,
+              position: activeSection.ordinal + 1,
+              total: sectionState.sections.length,
+              isOpening: sectionState.isSectionOpening,
+              // The section that follows, when there is one. `ordinal` is a contiguous index over
+              // the resolved list, so this is simply the next entry.
+              ...(nextSection ? { nextLabel: nextSection.label } : {}),
+            },
+          }
+        : {};
+
     // Interviewer strategy phraser input — computed once per turn (state/userMessage are turn
     // constants) and spread into whichever phrasing call site fires. Coverage is a simple
     // answered/total ratio (enough to phase the funnel); `respondentTerse` flags a short latest
@@ -1005,6 +1040,7 @@ async function handleMessage(
             lastUserMessage: userMessage,
             isReask: r.isReask,
             isOpening: state.selectionRound === 0,
+            ...sectionPhraserInput,
             questionsAsked: state.selectionRound,
             isTransition: r.isTransition,
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
@@ -1124,6 +1160,7 @@ async function handleMessage(
             lastUserMessage: userMessage,
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
+            ...sectionPhraserInput,
             questionsAsked: state.selectionRound,
             fidelity: fidelityLevel,
             ...(questionCard ? { answerControlShown: true } : {}),
@@ -1226,6 +1263,26 @@ async function handleMessage(
                 dataSlotFills: result.sideEffects.dataSlotFills ?? [],
                 dataSlotKeyToId,
                 targetedDataSlotId,
+              }
+            : {}),
+          // Sectioned interviews (P21): tag the turn with the section it was spent in, and bank the
+          // run with that turn charged to the section's budget. Both omitted when unsectioned, so
+          // the columns stay null and every reader falls back to the flat view.
+          ...(sectionState.active && activeSection
+            ? {
+                sectionKey: activeSection.key,
+                // The fallback seeds a real entry per resolved section rather than an empty run:
+                // `openSection` and `recordTurnInSection` both map over EXISTING entries, so an
+                // empty one would leave the turn uncharged and the per-section turn cap unable to
+                // ever release a stuck respondent.
+                sectionRun: recordTurnInSection(
+                  openSection(
+                    sectionState.run ?? reconcileSectionRun(null, sectionState.sections),
+                    activeSection.key,
+                    state.selectionRound
+                  ),
+                  activeSection.key
+                ),
               }
             : {}),
         });
