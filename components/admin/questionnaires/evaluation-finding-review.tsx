@@ -65,7 +65,11 @@ import {
   MAX_APPLY_INSTRUCTION,
 } from '@/lib/app/questionnaire/evaluation';
 import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
-import type { EvaluationFindingView, FindingTargetKind } from '@/lib/app/questionnaire/views';
+import type {
+  EvaluationFindingView,
+  FindingDestinationView,
+  FindingTargetKind,
+} from '@/lib/app/questionnaire/views';
 import {
   findingReviewStatusBadge,
   findingSeverityBadge,
@@ -110,8 +114,43 @@ interface Props {
    * judge said this.
    */
   lead?: 'target' | 'dimension';
+  /**
+   * Every section title on the live structure, in order: the destinations a drafted question can
+   * be redirected into. Only ever read for an `add_question`; empty (or omitted) hides the picker,
+   * which is right for a version with no sections, since there is nothing to choose between.
+   */
+  sectionTitles?: string[];
   /** Called with the server's updated view; `meta` is present after a successful apply. */
   onUpdate: (next: EvaluationFindingView, meta?: ApplyMeta) => void;
+}
+
+/**
+ * Where a drafted question will land, as a sentence a reviewer can act on.
+ *
+ * Said in words rather than left to a chip, because the fact worth conveying is not the section's
+ * name but whether anyone *chose* it. A judge that named a section made a judgement the reviewer
+ * can weigh; a default is the apply engine appending to whatever section happens to be last, which
+ * the reviewer should probably override and could not previously even see.
+ */
+function destinationSentence(dest: FindingDestinationView, terminal: boolean): string | null {
+  if (dest.origin === 'none') {
+    return terminal
+      ? null
+      : 'This questionnaire has no sections, so there is nowhere to put it yet. Add a section first.';
+  }
+  const where =
+    dest.sectionPosition === null
+      ? `“${dest.sectionTitle}”`
+      : `“${dest.sectionTitle}” (section ${dest.sectionPosition})`;
+  if (dest.origin === 'chosen') {
+    // Past tense once the finding is terminal. `chosen` comes from the op's own `sectionKey`,
+    // which is the title apply resolved against, so this stays true after the fact.
+    return terminal ? `Went into ${where}.` : `Goes into ${where}.`;
+  }
+  // A default is re-derived against the structure as it is NOW, so on a terminal finding it would
+  // name whichever section is last today rather than where the question actually went, in a tense
+  // that promises a future that already happened. Nothing recorded the real answer, so say nothing.
+  return terminal ? null : `No section was suggested, so it would go at the end of ${where}.`;
 }
 
 /**
@@ -124,7 +163,7 @@ interface Props {
  * do it. Every one is now declarative and names its subject, so it can only be read as a
  * description of the consequence: "Replaces this question's wording with the suggested version."
  */
-function effectOf(op: ProposedEdit): string {
+function effectOf(op: ProposedEdit, destination: FindingDestinationView | null): string {
   switch (op.op) {
     case 'replace_prompt':
       return "Replaces this question's wording with the suggested version.";
@@ -146,8 +185,16 @@ function effectOf(op: ProposedEdit): string {
       return "Replaces the questionnaire's goal statement.";
     case 'edit_audience':
       return `Updates the audience description (${Object.keys(op.audience).join(', ')}).`;
-    case 'add_question':
-      return `Adds this as a new ${QUESTION_TYPE_LABELS[op.type]} question.`;
+    case 'add_question': {
+      // The section is named here as well as on the draft block above, and deliberately: this is
+      // the sentence directly under the button, and it is the last thing read before a click that
+      // writes a question into a section the reviewer never picked.
+      const base = `Adds this as a new ${QUESTION_TYPE_LABELS[op.type]} question`;
+      if (!destination || destination.origin === 'none') return `${base}.`;
+      return destination.origin === 'chosen'
+        ? `${base} in “${destination.sectionTitle}”.`
+        : `${base} at the end of “${destination.sectionTitle}”.`;
+    }
   }
 }
 
@@ -261,16 +308,24 @@ async function sendJson(
  * discarded — the silent substitution the whole AI leg exists to prevent, and invisible afterwards
  * because the result panel would show no steer at all.
  */
-const inFlightSteerSaves = new Set<Promise<unknown>>();
+const inFlightCardWrites = new Set<Promise<unknown>>();
 
 /**
- * Resolve once every open instruction box has finished saving.
+ * Resolve once every card-level write has finished.
  *
- * Awaited by the batch bar before it applies. Rejections are swallowed — a steer that failed to
- * save is the card's error to show, and it must not stop the reviewer applying the rest.
+ * Awaited by the batch bar before it applies. Rejections are swallowed: a write that failed is the
+ * card's error to show, and it must not stop the reviewer applying the rest.
+ *
+ * It covers two writes, not one. The steer save above is the original. The second is a section
+ * redirect, which is the same race with a worse ending: the redirect stores an `editedOverride`
+ * that the batch reads to decide WHERE to create the question, so a batch POST that overtakes it
+ * writes the question into the section the reviewer just moved it out of, and then stamps the
+ * finding applied. The steer race loses a sentence; this one silently puts a question somewhere
+ * the reviewer explicitly said it should not go, and there is no second chance at a terminal
+ * finding.
  */
-export function whenSteersSettled(): Promise<void> {
-  return Promise.allSettled([...inFlightSteerSaves]).then(() => undefined);
+export function whenCardWritesSettled(): Promise<void> {
+  return Promise.allSettled([...inFlightCardWrites]).then(() => undefined);
 }
 
 export function FindingReviewCard({
@@ -279,6 +334,7 @@ export function FindingReviewCard({
   versionId,
   runId,
   lead = 'target',
+  sectionTitles = [],
   onUpdate,
 }: Props) {
   const [busy, setBusy] = useState<null | 'accept' | 'decline'>(null);
@@ -287,8 +343,10 @@ export function FindingReviewCard({
   // button in the instant between the blur and the click landing on it, silently swallowing the
   // click that caused the save in the first place.
   const [savingSteer, setSavingSteer] = useState(false);
-  /** The blur-started save a decision on this card must land after. See {@link decide}. */
-  const inFlightSteerSave = useRef<Promise<unknown> | null>(null);
+  /** Kept apart from `busy` for the same reason `savingSteer` is: it must not disable Accept. */
+  const [redirecting, setRedirecting] = useState(false);
+  /** The card write a decision here must land after (a steer save or a redirect). See {@link decide}. */
+  const inFlightCardWrite = useRef<Promise<unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The steer, held locally so typing is not a round trip per keystroke. `finding.applyInstruction`
   // is the server's copy; this is the draft of it.
@@ -334,14 +392,23 @@ export function FindingReviewCard({
    * Nothing happens on click any more, so promising that it does would be the same lie the old
    * per-finding Apply told, just earlier.
    */
-  const effect = op ? (finding.applicable === 'apply' || addOp ? effectOf(op) : null) : null;
+  const effect = op
+    ? finding.applicable === 'apply' || addOp
+      ? effectOf(op, finding.destination)
+      : null
+    : null;
+
+  // The view's destination, and the sentence for it, held apart: a terminal finding whose section
+  // was defaulted has a destination but nothing honest to say about it (see `destinationSentence`).
+  const dest = finding.destination;
+  const destination = dest ? destinationSentence(dest, isTerminal) : null;
 
   const dirty = instruction.trim() !== (finding.applyInstruction ?? '');
 
   /**
    * Persist the steer on its own, without touching the decision.
    *
-   * Registered in {@link inFlightSteerSaves} for its whole life, so the batch bar can wait for it,
+   * Registered in {@link inFlightCardWrites} for its whole life, so the batch bar can wait for it,
    * and held in a ref so a decision on this card can sequence behind it rather than racing it.
    */
   async function saveInstruction() {
@@ -352,16 +419,58 @@ export function FindingReviewCard({
       action: 'set_instruction',
       instruction,
     });
-    inFlightSteerSave.current = save;
-    inFlightSteerSaves.add(save);
+    inFlightCardWrite.current = save;
+    inFlightCardWrites.add(save);
     try {
       const res = await save;
       setSavingSteer(false);
       if (!res.ok) return setError(res.message);
       onUpdate(res.data as EvaluationFindingView);
     } finally {
-      inFlightSteerSaves.delete(save);
-      if (inFlightSteerSave.current === save) inFlightSteerSave.current = null;
+      inFlightCardWrites.delete(save);
+      if (inFlightCardWrite.current === save) inFlightCardWrite.current = null;
+    }
+  }
+
+  /**
+   * Send the drafted question somewhere else.
+   *
+   * Written as an `editedOverride` through the existing `edit` action rather than as a new kind of
+   * write: an admin-edited op already takes precedence at apply, which is exactly what redirecting
+   * means. The whole op is resent with `sectionKey` swapped, so nothing else about the judge's
+   * draft is disturbed, and the server's response carries the re-derived destination back.
+   *
+   * Not a decision: choosing where a question would go is not the same as agreeing it should exist,
+   * and a picker that silently accepted the finding would take that choice away from the reviewer.
+   */
+  async function redirect(sectionKey: string) {
+    // Compared against what the control DISPLAYS, not against `addOp.sectionKey`. They differ
+    // exactly when the destination was defaulted: the select shows the last section while the op
+    // names none, so comparing to the op would treat re-picking the visible entry as a change and
+    // write an override identical in effect to the judge's draft, stamping the finding as
+    // reviewer-edited when the reviewer changed nothing.
+    if (!addOp || sectionKey === finding.destination?.sectionTitle) return;
+    setRedirecting(true);
+    setError(null);
+    // Registered and held exactly as a steer save is, and for a sharper version of the same
+    // reason: the batch bar awaits these before it applies, and a decision on this card sequences
+    // behind them. Unregistered, a reviewer who moves a question and immediately presses "Apply
+    // accepted changes" races their own redirect, and the batch can read the finding before the
+    // override commits and create the question in the section they just moved it out of.
+    const save = sendJson(findingPath, 'PATCH', {
+      action: 'edit',
+      editedOverride: { ...addOp, sectionKey },
+    });
+    inFlightCardWrite.current = save;
+    inFlightCardWrites.add(save);
+    try {
+      const res = await save;
+      setRedirecting(false);
+      if (!res.ok) return setError(res.message);
+      onUpdate(res.data as EvaluationFindingView);
+    } finally {
+      inFlightCardWrites.delete(save);
+      if (inFlightCardWrite.current === save) inFlightCardWrite.current = null;
     }
   }
 
@@ -380,7 +489,7 @@ export function FindingReviewCard({
     // second it would overwrite the card with the pre-decision view — the reviewer's Accept looking
     // like it never registered, and the run tally under-counting it. Sequencing behind it makes the
     // decision's response the last word.
-    await inFlightSteerSave.current;
+    await inFlightCardWrite.current;
     // `instruction` only rides along when there is something unsaved to send. Omitting the key
     // (rather than sending null) is what stops an accept from clearing a steer saved earlier.
     const body: { action: string; instruction?: string } =
@@ -510,6 +619,47 @@ export function FindingReviewCard({
               <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1.5 text-sm')}>
                 {addOp.guidelines}
               </p>
+            )}
+
+            {/* Where it lands, with the questionnaire's other sections one click away.
+                A drafted question is the only suggestion on this panel that creates something
+                rather than changing something named, so it is the only one whose PLACE the card
+                has to supply: every other op inherits its position from the question it acts on.
+                Read-only once the finding is terminal, since the placement is then history. */}
+            {dest && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                {destination && <p className="text-muted-foreground text-sm">{destination}</p>}
+                {/* Only offered when there is a real choice to make. One section is where the
+                    question is going whatever anyone picks, and a picker with a single entry
+                    invites a decision that does not exist. */}
+                {!isTerminal && sectionTitles.length > 1 && (
+                  <select
+                    aria-label="Section for the new question"
+                    value={dest.sectionTitle ?? ''}
+                    onChange={(e) => void redirect(e.target.value)}
+                    disabled={redirecting}
+                    className="border-border bg-background text-foreground rounded border px-1.5 py-0.5 text-xs disabled:opacity-60"
+                  >
+                    {/* A destination the judge named that no longer exists is still the current
+                        value, so it needs an entry to be selected. Without one the control would
+                        silently display the first live section and the reviewer would read a
+                        placement nothing had chosen. */}
+                    {dest.sectionTitle !== null && !sectionTitles.includes(dest.sectionTitle) && (
+                      <option value={dest.sectionTitle}>{dest.sectionTitle} (missing)</option>
+                    )}
+                    {/* Keyed by index, not by title: extraction routinely produces two sections
+                        called "Other", and a title key would collide. The duplicate is still
+                        offered, because hiding it would silently remove a section the reviewer can
+                        see in the editor; picking it resolves ambiguously, which `stale` already
+                        blocks at Apply. */}
+                    {sectionTitles.map((title, i) => (
+                      <option key={`${i}-${title}`} value={title}>
+                        {title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             )}
           </div>
         )}

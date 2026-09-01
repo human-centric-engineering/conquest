@@ -920,6 +920,7 @@ function makeFinding(over: Partial<EvaluationFindingView> = {}): EvaluationFindi
       type: 'free_text',
       sectionKey: 'Background',
     },
+    destination: null,
     editedOverride: null,
     applyInstruction: null,
     decidedByUserId: null,
@@ -962,6 +963,7 @@ describe('getEvaluationAddQuestionSeed', () => {
       success: true,
       data: runDetailWith([
         makeFinding({
+          destination: null,
           editedOverride: {
             op: 'add_question',
             prompt: 'Edited prompt',

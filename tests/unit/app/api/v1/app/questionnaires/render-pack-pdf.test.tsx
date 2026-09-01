@@ -180,6 +180,7 @@ function startsWithPdfMagic(buffer: Buffer): boolean {
 }
 
 const EVALUATION_RUN: EvaluationRunDetail = {
+  sectionTitles: [],
   id: 'run1',
   versionId: 'v1',
   questionnaireId: 'q1',
@@ -217,6 +218,7 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   ],
   findings: [
     {
+      destination: null,
       id: 'f1',
       dimension: 'clarity',
       ordinal: 0,
@@ -251,6 +253,7 @@ const EVALUATION_RUN: EvaluationRunDetail = {
     // A second judge on the SAME question, so the render exercises the by-target block that
     // stacks several verdicts under one printed prompt — the shape the pack now emits.
     {
+      destination: null,
       id: 'f2',
       dimension: 'audience_match',
       ordinal: 0,

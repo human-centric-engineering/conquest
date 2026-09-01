@@ -49,6 +49,7 @@ function finding(
     sourceQuote: null,
     status: 'pending',
     proposedEdit,
+    destination: null,
     editedOverride: null,
     applyInstruction: null,
     decidedByUserId: null,

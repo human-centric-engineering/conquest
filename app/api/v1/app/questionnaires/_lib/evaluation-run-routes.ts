@@ -47,7 +47,10 @@ import {
   deriveApplicability,
   deriveFindingState,
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
-import { resolveFindingTarget } from '@/app/api/v1/app/questionnaires/_lib/evaluation-target';
+import {
+  resolveAddDestination,
+  resolveFindingTarget,
+} from '@/app/api/v1/app/questionnaires/_lib/evaluation-target';
 import type {
   EvaluationDimensionSummary,
   EvaluationFindingView,
@@ -203,12 +206,14 @@ export function effectiveOp(
  *
  * `target` likewise defaults to `null` here and is stamped by the structure-carrying paths —
  * unlike `stale`, it is resolved for terminal findings too: an applied finding still needs to
- * say which question it was about.
+ * say which question it was about. `destination` follows `target`, for the same reason: a reviewer
+ * reading an applied add still wants to know where the question went.
  */
 function toFindingView(row: FindingRow): EvaluationFindingView {
   const proposedEdit = coerceProposedEdit(row.proposedEdit);
   const editedOverride = coerceProposedEdit(row.editedOverride);
   return {
+    destination: null,
     id: row.id,
     dimension: row.dimension as EvaluationDimension,
     ordinal: row.ordinal,
@@ -457,15 +462,22 @@ export async function buildScopedFindingView(
   // but naming the target isn't — an applied finding must still say which question it changed.
   const current = await loadCurrentStructureSafe(scoped.questionnaireId, scoped.versionId);
   const target = resolveFindingTarget(view.targetKey, current, scoped.snapshot);
+  // Resolved off the EFFECTIVE op, so a reviewer who has just redirected the question gets their
+  // own choice back in this response rather than the judge's original.
+  const destination = resolveAddDestination(
+    view.editedOverride ?? view.proposedEdit,
+    view.targetKey,
+    current
+  );
   if (!current || view.status === 'applied' || view.status === 'declined') {
-    return { ...view, target };
+    return { ...view, target, destination };
   }
   const derived = deriveFindingState(
     { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
     scoped.snapshot,
     current
   );
-  return { ...view, stale: derived.stale, applicable: derived.applicable, target };
+  return { ...view, stale: derived.stale, applicable: derived.applicable, target, destination };
 }
 
 /**
@@ -500,15 +512,20 @@ export async function getEvaluationRunDetail(
     const view = toFindingView(f);
     // Resolve the target for every finding (terminal ones included — see `buildScopedFindingView`).
     const target = resolveFindingTarget(view.targetKey, current, snapshot);
+    const destination = resolveAddDestination(
+      view.editedOverride ?? view.proposedEdit,
+      view.targetKey,
+      current
+    );
     if (!current || view.status === 'applied' || view.status === 'declined') {
-      return { ...view, target };
+      return { ...view, target, destination };
     }
     const derived = deriveFindingState(
       { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
       snapshot,
       current
     );
-    return { ...view, stale: derived.stale, applicable: derived.applicable, target };
+    return { ...view, stale: derived.stale, applicable: derived.applicable, target, destination };
   });
 
   return {
@@ -521,6 +538,10 @@ export async function getEvaluationRunDetail(
     // run (written before the column existed) is `null`, which means "never reconciled" — not an
     // error, and not something to backfill. Consumers fall back to the judges' own suggestions.
     reconciled: parseReconciledSuggestions(row.reconciledSuggestions),
+    // Off the LIVE structure, not the run's snapshot: this list is what the review queue offers a
+    // reviewer to redirect a drafted question into, and offering a section that has since been
+    // renamed or deleted would hand them a choice apply cannot honour.
+    sectionTitles: current?.sections.map((s) => s.title) ?? [],
   };
 }
 

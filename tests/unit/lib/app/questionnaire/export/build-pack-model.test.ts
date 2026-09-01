@@ -104,6 +104,7 @@ const GLOSSARY: GlossaryAppendixView = {
 };
 
 const EVALUATION_RUN: EvaluationRunDetail = {
+  sectionTitles: [],
   id: 'run1',
   versionId: 'v1',
   questionnaireId: 'q1',
@@ -136,6 +137,7 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   ],
   findings: [
     {
+      destination: null,
       id: 'f1',
       dimension: 'clarity',
       ordinal: 0,
@@ -168,6 +170,7 @@ const EVALUATION_RUN: EvaluationRunDetail = {
       applicable: 'manual',
     },
     {
+      destination: null,
       id: 'f2',
       dimension: 'duplicates',
       ordinal: 0,
@@ -191,6 +194,7 @@ const EVALUATION_RUN: EvaluationRunDetail = {
     // A SECOND judge on q1. The whole point of the by-target shape is that this does not
     // reprint the question — q1 appears once, with two verdicts under it.
     {
+      destination: null,
       id: 'f3',
       dimension: 'audience_match',
       ordinal: 0,

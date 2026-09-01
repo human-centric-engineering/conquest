@@ -251,6 +251,43 @@ export interface FindingTargetView {
   removed: boolean;
 }
 
+/**
+ * Where an `add_question` finding's drafted question would land if it were accepted.
+ *
+ * The coverage judge targets a gap at `goal`, so the finding's own target names no section, and
+ * `sectionKey` on the drafted op is optional. When the judge omits it the apply engine appends the
+ * question to the **last** section (see `applyAddQuestion`). That is a real placement decision that,
+ * before this, reached the reviewer nowhere at all: the card previewed the prompt, the type and
+ * the guidelines and stopped. With Conditional Topics on the stakes are higher still, because the
+ * section a question lands in is what decides which respondents are ever asked it.
+ *
+ * Derived at read time like {@link FindingTargetView}, never stored: it describes where the
+ * question would go against the structure as it is NOW, which is the only version of that answer
+ * worth showing.
+ *
+ * `null` for every op that is not `add_question`.
+ */
+export interface FindingDestinationView {
+  /** The section the question will be created in. `null` only when the version has no sections. */
+  sectionTitle: string | null;
+  /**
+   * 1-based position of that section, for a reviewer reading the questionnaire in order. `null`
+   * when the title no longer resolves to exactly one live section, which is also the condition
+   * that makes the finding {@link EvaluationFindingView.stale}, so the card already blocks Apply.
+   */
+  sectionPosition: number | null;
+  /**
+   * How the destination was arrived at.
+   *
+   * - `chosen`: the judge named a section (or the finding targets one), and that is where it goes.
+   * - `default`: nothing named one, so apply appends to the last section. The case worth saying
+   *   out loud, because nothing about the suggestion hints at it.
+   * - `none`: the version has no sections at all, so there is nowhere to put it. Apply answers
+   *   `needs_authoring`; the reviewer has to add a section first.
+   */
+  origin: 'chosen' | 'default' | 'none';
+}
+
 /** One persisted finding (F5.2 + F5.3) — client-safe projection of `AppQuestionnaireEvaluationFinding`. */
 export interface EvaluationFindingView {
   id: string;
@@ -273,6 +310,12 @@ export interface EvaluationFindingView {
   status: FindingReviewStatus;
   /** The judge's structured edit, when it attached one (F5.3); `null` when prose-only or degraded. */
   proposedEdit: ProposedEdit | null;
+  /**
+   * Where an `add_question` would land, resolved against the live structure. `null` for every
+   * other op. Reflects the EFFECTIVE op, so a reviewer who has redirected the question sees their
+   * own choice here, not the judge's.
+   */
+  destination: FindingDestinationView | null;
   /** The admin's edited op, which takes precedence over `proposedEdit` at apply (F5.3); `null` if unedited. */
   editedOverride: ProposedEdit | null;
   /**
@@ -349,6 +392,14 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
    * predates reconciliation entirely; consumers then show the judges' own suggestions unchanged.
    */
   reconciled: ReconciledSuggestion[];
+  /**
+   * Every section title on the live structure, in order, so the review queue can offer a reviewer
+   * somewhere else to put a drafted question. One list per run rather than per finding: it is the
+   * same list for all of them, and a forty-finding run should not carry forty copies of it.
+   *
+   * Empty when the version has no sections, or when the live structure could not be loaded.
+   */
+  sectionTitles: string[];
 }
 
 /**

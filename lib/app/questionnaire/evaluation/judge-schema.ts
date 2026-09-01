@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 import { FINDING_SEVERITIES, type ProposedEdit } from '@/lib/app/questionnaire/evaluation/types';
-import { QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import { QUESTION_TYPES, SECTION_TITLE_MAX } from '@/lib/app/questionnaire/types';
 import { audienceShapeSchema } from '@/lib/app/questionnaire/ingestion/extraction-schema';
 
 /**
@@ -28,8 +28,17 @@ import { audienceShapeSchema } from '@/lib/app/questionnaire/ingestion/extractio
  */
 export const MAX_FINDINGS_PER_JUDGE = 50;
 
-/** Field-length caps — generous enough for a real suggestion, bounded against abuse. */
-const TARGET_KEY_MAX = 200;
+/**
+ * Field-length caps — generous enough for a real suggestion, bounded against abuse.
+ *
+ * `TARGET_KEY_MAX` is DERIVED rather than written, because a `targetKey` addressing a section is
+ * `section:<title>`: at a flat 200 it held eight fewer characters of title than `sectionKey` did,
+ * so a 195-character title produced a key this schema rejected and a `sectionKey` it accepted, for
+ * the same section. Deriving both from {@link SECTION_TITLE_MAX} makes a title that can exist one
+ * that can always be referred to.
+ */
+const SECTION_PREFIX_LEN = 'section:'.length;
+const TARGET_KEY_MAX = SECTION_TITLE_MAX + SECTION_PREFIX_LEN;
 const PROPOSED_CHANGE_MAX = 2_000;
 const RATIONALE_MAX = 2_000;
 const SOURCE_QUOTE_MAX = 2_000;
@@ -67,7 +76,7 @@ export const proposedEditSchema = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('reorder'),
     ordinal: z.number().int().nonnegative(),
-    targetSectionKey: z.string().min(1).max(TARGET_KEY_MAX).optional(),
+    targetSectionKey: z.string().min(1).max(SECTION_TITLE_MAX).optional(),
   }),
   z.object({ op: z.literal('edit_goal'), goal: z.string().min(1).max(EDIT_TEXT_MAX) }),
   z.object({ op: z.literal('edit_audience'), audience: audienceShapeSchema }),
@@ -76,7 +85,7 @@ export const proposedEditSchema = z.discriminatedUnion('op', [
     prompt: z.string().min(1).max(EDIT_TEXT_MAX),
     type: z.enum(QUESTION_TYPES),
     key: z.string().min(1).max(KEY_MAX).optional(),
-    sectionKey: z.string().min(1).max(TARGET_KEY_MAX).optional(),
+    sectionKey: z.string().min(1).max(SECTION_TITLE_MAX).optional(),
     guidelines: z.string().min(1).max(EDIT_TEXT_MAX).optional(),
     typeConfig: z.unknown().optional(),
   }),

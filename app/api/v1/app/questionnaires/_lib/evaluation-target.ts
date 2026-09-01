@@ -17,9 +17,10 @@
  * Pure: two {@link VersionStructureInput}s in, a view out. No Prisma.
  */
 
+import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import type { StructureQuestion, VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
 import { ALWAYS_PHASES } from '@/lib/app/questionnaire/scope/types';
-import type { FindingTargetView } from '@/lib/app/questionnaire/views';
+import type { FindingDestinationView, FindingTargetView } from '@/lib/app/questionnaire/views';
 import { locateSlot } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
 
 /** The `section:` prefix a `targetKey` uses to address a section by title. */
@@ -165,4 +166,76 @@ export function resolveFindingTarget(
     ...resolveRoutingReach(located.question, live ? current : snapshot),
     removed: live === null,
   };
+}
+
+/**
+ * Where an `add_question`'s drafted question would land, resolved against the live structure.
+ *
+ * This mirrors `applyAddQuestion`'s own placement rules on purpose, and the mirroring is the point:
+ * the card is telling a reviewer what a click is about to do, so any disagreement between the two
+ * is a lie told at the moment it matters most. The rules, in the order apply applies them:
+ *
+ *  1. `op.sectionKey`, when the judge named one.
+ *  2. A `section:<title>` `targetKey`, when the finding itself targets a section.
+ *  3. Otherwise the **last** section. Nothing in the suggestion hints at this, which is why the
+ *     card says it in words rather than leaving the reviewer to find out afterwards.
+ *
+ * A named title that no longer resolves to exactly one live section keeps its name but loses its
+ * position: that is the same condition `deriveFindingState` reports as `stale`, so the card is
+ * already blocking Apply and does not need this to say so twice.
+ *
+ * One caveat the mirroring does NOT cover, and the reason it is written down rather than left to
+ * be discovered: `current` is always built from the URL's version, while `applyAddQuestion` writes
+ * into this run's reused review draft once one has been forked. No op in the set mutates the
+ * section table, so a fresh draft's sections are byte-identical and the two agree; they can drift
+ * only if someone edits sections directly on that draft (via the editor deep-link) between this
+ * read and a later apply. The write stays safe either way, because `validateSectionTarget`
+ * re-checks live state at write time. The sibling `stale`/`applicable` fields inherit the same
+ * seam and the batch-apply route documents it there.
+ *
+ * Returns `null` for every op that is not `add_question`, including `null` itself, which is a
+ * prose-only finding with nothing to place, and for a structure that could not be loaded: an
+ * unknown destination has to read as unknown, never as a claim about the questionnaire.
+ */
+export function resolveAddDestination(
+  op: ProposedEdit | null,
+  targetKey: string,
+  current: VersionStructureInput | null
+): FindingDestinationView | null {
+  if (op?.op !== 'add_question') return null;
+
+  // "Could not load" is not "has no sections". `loadCurrentStructureSafe` returns null on any DB
+  // hiccup, and collapsing that into `origin: 'none'` made the card state a falsehood about the
+  // questionnaire ("This questionnaire has no sections") on a transient failure. Worse on the PATCH
+  // path, where the destination is recomputed per request but the section list is not: a null
+  // title beside a populated list leaves the picker with no matching option, so the browser shows
+  // the first section and the reviewer reads a placement nothing chose. Say nothing instead.
+  if (!current) return null;
+
+  const sections = current.sections;
+  if (sections.length === 0) {
+    // A version that genuinely has no sections. Apply answers `needs_authoring`, and the reviewer
+    // has to author one before this suggestion can land anywhere.
+    return { sectionTitle: null, sectionPosition: null, origin: 'none' };
+  }
+
+  const named =
+    op.sectionKey ??
+    (targetKey.startsWith(SECTION_PREFIX) ? targetKey.slice(SECTION_PREFIX.length) : null);
+
+  if (named !== null) {
+    const matches = sections.filter((s) => s.title === named);
+    const idx = sections.findIndex((s) => s.title === named);
+    return {
+      sectionTitle: named,
+      // Exactly one match, or no position: a title matching two sections does not identify a place
+      // in the questionnaire, and numbering the first of them would invent a certainty apply itself
+      // refuses (it answers `op_invalid`).
+      sectionPosition: matches.length === 1 ? idx + 1 : null,
+      origin: 'chosen',
+    };
+  }
+
+  const last = sections.length - 1;
+  return { sectionTitle: sections[last].title, sectionPosition: last + 1, origin: 'default' };
 }

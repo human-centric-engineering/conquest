@@ -109,6 +109,21 @@ describe('buildJudgePrompt', () => {
     expect(clarity).not.toBe(coverage);
   });
 
+  it('makes the coverage judge say which section a gap-filling question belongs in', () => {
+    // `sectionKey` used to read "<existing section title, optional>", and optional is what the
+    // judge did with it. The placement is not open when it is omitted: `applyAddQuestion` appends
+    // the question to the LAST section, which is rarely where a gap belongs, and the reviewer had
+    // no way to see it happen. The judge has just read the whole structure, so it is the reader
+    // best placed to say.
+    const coverage = buildJudgePrompt('coverage', STRUCTURE)[0].content;
+    expect(coverage).toContain('ALWAYS set `sectionKey` when the questionnaire has sections');
+    // The consequence, spelled out. A rule the model is told the reason for is one it can apply
+    // to the case the wording did not anticipate.
+    expect(coverage).toMatch(/silently appends the question to the LAST section/);
+    // And the one case where omitting it is right, so the rule cannot be read as "invent a title".
+    expect(coverage).toMatch(/Omit it only when the questionnaire has no sections at all/i);
+  });
+
   it('serialises goal, audience, section titles, and every question with key + type', () => {
     const user = buildJudgePrompt('clarity', STRUCTURE)[1].content;
     expect(user).toContain('Understand developer onboarding friction.');

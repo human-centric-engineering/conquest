@@ -82,7 +82,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
     ignore:
       'Redundancy (Duplicates judge that), wording (Clarity), and whether existing questions are on-mission (Goal-Match). Score gaps only — what is MISSING.',
     editGuidance:
-      'For a gap, target `"goal"` and attach `"proposedEdit": { "op": "add_question", "prompt": "<the question>", "type": "<answer type>", "key": "<concise snake_case key>", "sectionKey": "<existing section title, optional>" }`. ' +
+      'For a gap, target `"goal"` and attach `"proposedEdit": { "op": "add_question", "prompt": "<the question>", "type": "<answer type>", "key": "<concise snake_case key>", "sectionKey": "<the exact title of the section it belongs in>" }`. ' +
+      'ALWAYS set `sectionKey` when the questionnaire has sections, copying one of the `## Section:` titles above exactly. A question belongs somewhere, and you have just read the whole structure, so you are the best-placed reader of it: the admin reviewing your suggestion has only your sentence to go on. Omitting it does not leave the placement open, it silently appends the question to the LAST section, which is rarely where it belongs. Omit it only when the questionnaire has no sections at all. ' +
       'Choose `type` to fit the answer the question actually invites — do NOT default to `likert`: use `free_text` for open-ended or descriptive answers ("How would you describe…", "What challenges…"); `likert` ONLY for agreement / satisfaction / frequency on a fixed scale ("Rate your morale from 1–5"); `single_choice` / `multi_choice` for a fixed option set (add the options in `typeConfig`); `numeric`, `date`, or `boolean` when the answer is a number, a date, or yes/no. ' +
       'Make `key` a short, scannable `snake_case` slug of the essential noun(s) — not the whole sentence (e.g. `work_morale`, not `how_would_you_describe_your_current_morale_at_work`). This drafts a new question for the admin to confirm.',
   },
