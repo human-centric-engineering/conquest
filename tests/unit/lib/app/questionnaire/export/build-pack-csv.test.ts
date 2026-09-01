@@ -229,7 +229,7 @@ describe('buildPackCsv', () => {
       expect(scoresIdx).toBeLessThan(evaluationIdx);
       expect(csv).toContain('dimension,judge,score,diagnostic,finding_count');
       expect(csv).toContain(
-        'target_key,target_context,target,target_type,dimension,judge,severity,status,proposed_change,rationale,source_quote'
+        'target_key,target_context,target,target_type,target_type_label,dimension,judge,severity,severity_label,status,status_label,proposed_change,rationale,source_quote'
       );
     });
 
@@ -311,12 +311,12 @@ describe('buildPackCsv', () => {
         })
       );
       expect(csv).toContain(
-        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,clarity,Clarity Judge,major,pending,Split into two questions,Asks two things at once,both engaged and satisfied'
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,clarity,Clarity Judge,major,Major,pending,Pending,Split into two questions,Asks two things at once,both engaged and satisfied'
       );
       // Unlike the PDF/Markdown packs, the target text DOES repeat per row — a CSV row has to
       // survive a sort or a pivot on its own, so blanking continuation rows would break it.
       expect(csv).toContain(
-        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,audience_match,Audience-Match Judge,minor,declined,Drop the jargon,Too technical,'
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,audience_match,Audience-Match Judge,minor,Minor,declined,Declined,Drop the jargon,Too technical,'
       );
     });
 
@@ -551,10 +551,10 @@ describe('buildPackCsv', () => {
       };
       const csv = buildPackCsv(model({ conditionalTopics: { ...baseScope, evaluation } }));
       expect(csv).toContain(
-        'target_key,target_kind,target,target_removed,dimension,judge,severity,status,proposed_change,rationale,proposed_edit,source_quote'
+        'target_key,target_kind,target,target_removed,dimension,judge,severity,severity_label,status,status_label,proposed_change,rationale,proposed_edit,source_quote'
       );
       expect(csv).toContain(
-        'talent,topic,Talent & culture,no,criteria_quality,Criteria-Quality Judge,major,pending,Make the criteria more specific,Too broad to reliably trigger this topic,Rewrite the topic’s criteria,'
+        'talent,topic,Talent & culture,no,criteria_quality,Criteria-Quality Judge,major,Major,pending,Pending,Make the criteria more specific,Too broad to reliably trigger this topic,Rewrite the topic’s criteria,'
       );
     });
   });
@@ -754,7 +754,7 @@ describe('buildPackCsv — the interviewer', () => {
     expect(csv).toContain('# Interviewer review findings');
     // A prose-only finding writes an empty proposed_edit cell, never the string "null".
     expect(csv).toContain(
-      'Never use humour.,Rule-Coherence Judge,major,pending,Narrow this rule.,It contradicts the rule above it.,'
+      'Never use humour.,Rule-Coherence Judge,major,Major,pending,Pending,Narrow this rule.,It contradicts the rule above it.,'
     );
     expect(csv).not.toContain(',null');
   });

@@ -24,15 +24,30 @@
 
 import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/renderer';
 
-import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
+import { formatPackDate, PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
   PackConditionalTopicsTopic,
   PackInterviewerPolicy,
   PackModel,
   PackSetupItem,
 } from '@/lib/app/questionnaire/export/build-pack-model';
-import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
+import { QUESTION_FIDELITY_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
+import { decidedStatusLabel, findingSeverityLabel } from '@/lib/app/questionnaire/evaluation';
 import type { InstrumentQuestion } from '@/lib/app/questionnaire/export/build-instrument-model';
+
+/**
+ * A judge's own line: who said it, how serious, and whether anyone has acted on it.
+ *
+ * Both used to print raw (`[minor · pending]`) — a machine's vocabulary in a document written for a
+ * client. `pending` is dropped: it is the state of nearly every finding in an untriaged run, so
+ * saying it on every line is a word to skip and no information. Same rule, same helper shape, as
+ * the Markdown serialiser's `judgeLine`.
+ */
+function judgeHeader(label: string, severity: string, status: string): string {
+  const decided = decidedStatusLabel(status);
+  const marks = [findingSeverityLabel(severity), decided].filter(Boolean).join(' · ');
+  return `${label}  [${marks}]`;
+}
 
 const COLORS = {
   text: '#1a1a1a',
@@ -553,6 +568,9 @@ function InterviewerPolicySection({ policy }: { policy: PackInterviewerPolicy })
         <Text style={styles.empty}>This interviewer setup has not been reviewed.</Text>
       ) : (
         <>
+          <Text style={styles.scopeFacts}>
+            {`Reviewed ${formatPackDate(evaluation.runAt) ?? 'date unknown'}  ·  ${evaluation.totalFindings} finding(s)`}
+          </Text>
           {evaluation.scores.map((judge) => (
             <Text key={judge.dimension} style={styles.evaluationScore}>
               {judge.diagnostic
@@ -578,9 +596,9 @@ function InterviewerPolicySection({ policy }: { policy: PackInterviewerPolicy })
                 </Text>
                 {target.judges.map((judge, i) => (
                   <View key={i} style={styles.evaluationFinding} wrap={false}>
-                    <Text
-                      style={styles.evaluationFindingHeader}
-                    >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                    <Text style={styles.evaluationFindingHeader}>
+                      {judgeHeader(judge.label, judge.severity, judge.status)}
+                    </Text>
                     <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
                     <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
                     {judge.proposedEditSummary && (
@@ -717,6 +735,13 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
               <Text style={styles.empty}>No evaluation has been run for this version yet.</Text>
             ) : (
               <>
+                {/* Which run this is. Markdown has carried this line all along and the PDF did
+                    not, so the format most packs are downloaded as showed a scoreboard with no
+                    way to tell whether it predated the questionnaire in front of it. */}
+                <Text style={styles.scopeFacts}>
+                  {`Last run ${formatPackDate(model.evaluations.runAt) ?? 'date unknown'}  ·  ${model.evaluations.totalFindings} finding(s) across ${model.evaluations.targets.length} flagged item(s)`}
+                </Text>
+
                 {/* The scoreboard. Findings are not repeated here — they print once, under the
                     question they are about, so a contested question reads as one item. */}
                 <Text style={styles.evaluationSubheading}>Judge scores</Text>
@@ -741,7 +766,9 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                       <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
                       <Text style={styles.evaluationTargetMeta}>
                         {[
-                          target.questionType ? `Type: ${target.questionType}` : null,
+                          target.questionType
+                            ? `Type: ${questionTypeLabel(target.questionType)}`
+                            : null,
                           `${target.judgeCount} judge(s)`,
                           target.counts.major > 0 ? `${target.counts.major} major` : null,
                           target.removed ? 'no longer in the questionnaire' : null,
@@ -751,9 +778,9 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                       </Text>
                       {target.judges.map((judge, i) => (
                         <View key={i} style={styles.evaluationFinding} wrap={false}>
-                          <Text
-                            style={styles.evaluationFindingHeader}
-                          >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                          <Text style={styles.evaluationFindingHeader}>
+                            {judgeHeader(judge.label, judge.severity, judge.status)}
+                          </Text>
                           <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
                           <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
                         </View>
@@ -856,6 +883,9 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   </Text>
                 ) : (
                   <>
+                    <Text style={styles.scopeFacts}>
+                      {`Last run ${formatPackDate(model.conditionalTopics.evaluation.runAt) ?? 'date unknown'}  ·  ${model.conditionalTopics.evaluation.totalFindings} finding(s) across ${model.conditionalTopics.evaluation.targets.length} flagged item(s)`}
+                    </Text>
                     {model.conditionalTopics.evaluation.scores.map((judge) => (
                       <Text key={judge.dimension} style={styles.evaluationScore}>
                         {judge.diagnostic
@@ -881,9 +911,9 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                           </Text>
                           {target.judges.map((judge, i) => (
                             <View key={i} style={styles.evaluationFinding} wrap={false}>
-                              <Text
-                                style={styles.evaluationFindingHeader}
-                              >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                              <Text style={styles.evaluationFindingHeader}>
+                                {judgeHeader(judge.label, judge.severity, judge.status)}
+                              </Text>
                               <Text style={styles.evaluationFindingBody}>
                                 {judge.proposedChange}
                               </Text>
@@ -908,7 +938,7 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
         {model.interviewerPolicy && <InterviewerPolicySection policy={model.interviewerPolicy} />}
 
         <View style={styles.footer} fixed>
-          <Text>{`Generated ${model.generatedAt}`}</Text>
+          <Text>{`Generated ${formatPackDate(model.generatedAt) ?? model.generatedAt}`}</Text>
           <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
         </View>
       </Page>
@@ -923,7 +953,7 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
           </Link>
         </View>
         <View style={styles.footer} fixed>
-          <Text>{`Generated ${model.generatedAt}`}</Text>
+          <Text>{`Generated ${formatPackDate(model.generatedAt) ?? model.generatedAt}`}</Text>
           <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
         </View>
       </Page>

@@ -425,14 +425,20 @@ describe('buildPackMarkdown', () => {
       const occurrences = md.split('Are you engaged and satisfied?').length - 1;
       expect(occurrences).toBe(1);
       expect(md).toContain('### Q1 · Background — Are you engaged and satisfied?');
-      expect(md).toContain('_Type: free_text · 2 judge(s) · 1 major_');
+      // The answer type in the reader's words, not the stored slug — the pack used to print
+      // "Type: free_text" in a document written for a client.
+      expect(md).toContain('_Type: Free text · 2 judge(s) · 1 major_');
 
       // Each judge is a bullet under that one heading, named (the missing fact under a
       // question heading is *which judge said this*).
-      expect(md).toContain('- **Clarity Judge** [major · pending] — Split into two questions');
+      // Severity is labelled, and `pending` is dropped: it is the state of nearly every finding
+      // in an untriaged run, so printing it on each line is a word to skip and nothing more. A
+      // decision someone actually recorded still shows.
+      expect(md).toContain('- **Clarity Judge** [Major] — Split into two questions');
       expect(md).toContain('  Asks two things at once');
       expect(md).toContain('  > engaged and satisfied');
-      expect(md).toContain('- **Audience-Match Judge** [minor · declined] — Drop the jargon');
+      expect(md).toContain('- **Audience-Match Judge** [Minor · Declined] — Drop the jargon');
+      expect(md).not.toContain('pending');
     });
 
     it('prints the reconciled rewording after the verdicts it reconciles', () => {
@@ -1019,14 +1025,16 @@ describe('buildPackMarkdown — the interviewer', () => {
         }),
       })
     );
-    expect(md).toContain('Reviewed 2026-08-11T00:00:00.000Z · 2 finding(s).');
+    // UTC, named — otherwise the same run prints as a different DAY depending on which region's
+    // server rendered the pack, on a document somebody may be reading as a record.
+    expect(md).toContain('Reviewed 11 Aug 2026, 00:00 UTC · 2 finding(s).');
     expect(md).toContain('| Rule-Coherence Judge | 82% | 1 |');
     // A judge that could not score says why; one that has no reason to give says so plainly.
     expect(md).toContain('| Arc-Fit Judge | provider timed out | 0 |');
     expect(md).toContain('| Fidelity-Calibration Judge | unavailable | 0 |');
   });
 
-  it('falls back to "recently" when a completed run carries no timestamp', () => {
+  it('says the date is unknown when a completed run carries no timestamp', () => {
     const md = buildPackMarkdown(
       model({
         interviewerPolicy: policy({
@@ -1040,7 +1048,7 @@ describe('buildPackMarkdown — the interviewer', () => {
         }),
       })
     );
-    expect(md).toContain('Reviewed recently · 0 finding(s).');
+    expect(md).toContain('Reviewed date unknown · 0 finding(s).');
   });
 
   it('groups findings under their subject, marking one the author has since deleted', () => {
@@ -1100,7 +1108,7 @@ describe('buildPackMarkdown — the interviewer', () => {
     // The reader must be able to tell a live subject from one the author has since deleted,
     // or they will go looking for a rule that is not there.
     expect(md).toContain('**A rule that no longer exists** _(since removed)_');
-    expect(md).toContain('- _Rule-Coherence Judge_ (major): Narrow this rule.');
+    expect(md).toContain('- **Rule-Coherence Judge** [Major] — Narrow this rule.');
     expect(md).toContain('  - It contradicts the always rule above it.');
     expect(md).toContain('  - Proposed: Set the rule text to "Avoid jokes about the company."');
     // A prose-only finding has no structured edit, and must not render an empty "Proposed:" line.

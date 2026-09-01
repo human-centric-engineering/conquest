@@ -112,6 +112,38 @@ has decided to share that. The interviewer section carries a judge panel of its 
 under the first reason. Each, for its own reason, is something the admin opts into deliberately per
 download rather than having to remember to opt out of.
 
+### One vocabulary, three formats
+
+Everything a reader sees is written in the words the admin console uses, and the mapping lives in
+`lib/` so a client-facing PDF cannot end up saying something the screen does not.
+
+- **Severity and review status.** `FINDING_SEVERITY_LABELS` / `FINDING_REVIEW_STATUS_LABELS`
+  (`lib/app/questionnaire/evaluation/types.ts`) are the single source; the admin badge descriptors
+  in `evaluation-status-badge.ts` take their `label` from them rather than declaring a second table.
+  The pack used to print `[minor · pending]`.
+- **`pending` is suppressed in the prose formats.** It is the state of nearly every finding in an
+  untriaged run, so printing it on every line is a word to skip and no information — the same call
+  the console's badge row makes. `decidedStatusLabel` returns `null` for it and the label for
+  everything else.
+- **Question type** goes through `questionTypeLabel()`; the pack used to print the stored
+  `single_choice` where the console shows "Multi-Choice (One Answer)".
+- **Dates** go through `formatPackDate` (`pack-brand.ts`): `11 Aug 2026, 09:12 UTC`. Always with the
+  year, unlike `formatCompactDateTime`, which drops it within the current year — right for a dense
+  admin table read today, wrong for a document filed and reopened next spring. **Pinned to UTC and
+  the zone named**, because otherwise the same run prints as a different DAY depending on which
+  region's server rendered the pack.
+- **Every panel states which run it is showing** — "Last run … · N finding(s) across N flagged
+  item(s)". Markdown carried this all along and the PDF did not, so the format most packs are
+  downloaded as showed a scoreboard with no way to tell whether it predated the questionnaire beside
+  it.
+
+**CSV is the exception, and deliberately.** It keeps the raw enum column AND adds a labelled one
+beside it (`severity` + `severity_label`, `status` + `status_label`, `target_type` +
+`target_type_label`). A CSV row exists to be sorted, filtered and pivoted, and the raw value is the
+stable key for all three — a pivot grouping on "Major" breaks the moment the label is reworded,
+while one grouping on `major` does not. `pending` is written out there too: a blank cell in a
+spreadsheet reads as missing data, not as "nothing decided yet".
+
 ### Branding
 
 The PDF and Markdown outputs carry a header with the ConQuest wordmark ("Con" ink / "Quest"

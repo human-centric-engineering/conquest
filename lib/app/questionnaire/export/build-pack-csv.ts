@@ -10,13 +10,36 @@
  */
 
 import { csvEscape } from '@/lib/api/csv';
-import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
-import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
+import { QUESTION_FIDELITY_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
+import {
+  FINDING_REVIEW_STATUS_LABELS,
+  findingSeverityLabel,
+} from '@/lib/app/questionnaire/evaluation';
+import { formatPackDate, PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 
 /** One CSV row from raw cell values. */
 function row(cells: string[]): string {
   return cells.map(csvEscape).join(',');
+}
+
+/**
+ * CSV keeps the RAW enum AND adds a labelled column beside it, rather than replacing one with the
+ * other as the prose formats do.
+ *
+ * A CSV row exists to be sorted, filtered and pivoted, and the raw value is the stable key for all
+ * three — a spreadsheet grouping on "Major" breaks the moment the label is reworded, while one
+ * grouping on `major` does not. The label column is for the human reading the same sheet, who
+ * should not have to learn the enum to read a column. `pending` is written out here, unlike in the
+ * prose formats: a blank cell in a spreadsheet reads as missing data, not as "nothing decided yet".
+ */
+function severityLabelCell(severity: string): string {
+  return findingSeverityLabel(severity);
+}
+
+function statusLabelCell(status: string): string {
+  const labels: Record<string, string> = FINDING_REVIEW_STATUS_LABELS;
+  return labels[status] ?? status;
 }
 
 /** Serialise the pack model to a CSV document — one block per included section. */
@@ -26,7 +49,7 @@ export function buildPackCsv(model: PackModel): string {
   blocks.push([
     row(['ConQuest', PACK_BRAND.tagline, PACK_BRAND.website]),
     row(['Questionnaire pack', model.title]),
-    row(['Generated', model.generatedAt]),
+    row(['Generated', formatPackDate(model.generatedAt) ?? model.generatedAt]),
   ]);
 
   if (model.meta) {
@@ -157,10 +180,13 @@ export function buildPackCsv(model: PackModel): string {
           target.context ?? '',
           target.label,
           target.questionType ?? '',
+          target.questionType ? questionTypeLabel(target.questionType) : '',
           judge.dimension,
           judge.label,
           judge.severity,
+          severityLabelCell(judge.severity),
           judge.status,
+          statusLabelCell(judge.status),
           judge.proposedChange,
           judge.rationale,
           judge.sourceQuote ?? '',
@@ -201,10 +227,13 @@ export function buildPackCsv(model: PackModel): string {
         'target_context',
         'target',
         'target_type',
+        'target_type_label',
         'dimension',
         'judge',
         'severity',
+        'severity_label',
         'status',
+        'status_label',
         'proposed_change',
         'rationale',
         'source_quote',
@@ -284,7 +313,9 @@ export function buildPackCsv(model: PackModel): string {
           judge.dimension,
           judge.label,
           judge.severity,
+          severityLabelCell(judge.severity),
           judge.status,
+          statusLabelCell(judge.status),
           judge.proposedChange,
           judge.rationale,
           judge.proposedEditSummary ?? '',
@@ -302,7 +333,9 @@ export function buildPackCsv(model: PackModel): string {
         'dimension',
         'judge',
         'severity',
+        'severity_label',
         'status',
+        'status_label',
         'proposed_change',
         'rationale',
         'proposed_edit',
@@ -359,7 +392,9 @@ export function buildPackCsv(model: PackModel): string {
           'subject',
           'reviewer',
           'severity',
+          'severity_label',
           'status',
+          'status_label',
           'proposed_change',
           'rationale',
           'proposed_edit',
@@ -370,7 +405,9 @@ export function buildPackCsv(model: PackModel): string {
               target.label,
               j.label,
               j.severity,
+              severityLabelCell(j.severity),
               j.status,
+              statusLabelCell(j.status),
               j.proposedChange,
               j.rationale,
               j.proposedEditSummary ?? '',

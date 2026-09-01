@@ -53,6 +53,31 @@ export const FINDING_SEVERITIES = ['info', 'minor', 'major'] as const;
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 
 /**
+ * How a severity is written wherever a person reads it.
+ *
+ * Here rather than beside the admin badge component because the Questionnaire Pack needs the same
+ * words and `lib/` cannot import from `components/`. The badge descriptors take their labels from
+ * this map, so the console and a client-facing PDF cannot end up calling the same value different
+ * things — the pack was printing the raw `major` / `minor` / `info` while the console showed
+ * "Major" / "Minor" / "Info".
+ */
+export const FINDING_SEVERITY_LABELS: Record<FindingSeverity, string> = {
+  info: 'Info',
+  minor: 'Minor',
+  major: 'Major',
+};
+
+/**
+ * Label a severity that arrived as a plain `string` — from a stored row, a snapshot, or any other
+ * surface where the value is not narrowed. `severity` is a plain String column, so an anomalous
+ * value must render as itself rather than as `undefined`. Same posture as `questionTypeLabel`.
+ */
+export function findingSeverityLabel(severity: string): string {
+  const labels: Record<string, string> = FINDING_SEVERITY_LABELS;
+  return labels[severity] ?? severity;
+}
+
+/**
  * The op vocabulary for a {@link ProposedEdit} — the single source of truth, the
  * `const`-tuple discipline used everywhere else in this module. F5.3's apply engine
  * switches on `op`; the judge prompt names them; a parity test asserts coverage.
@@ -154,6 +179,29 @@ export type ProposedEdit =
  */
 export const FINDING_REVIEW_STATUSES = ['pending', 'accepted', 'declined', 'applied'] as const;
 export type FindingReviewStatus = (typeof FINDING_REVIEW_STATUSES)[number];
+
+/** How a review status is written wherever a person reads it. See {@link FINDING_SEVERITY_LABELS}. */
+export const FINDING_REVIEW_STATUS_LABELS: Record<FindingReviewStatus, string> = {
+  pending: 'Pending',
+  accepted: 'Accepted',
+  declined: 'Declined',
+  applied: 'Applied',
+};
+
+/**
+ * Label a review status for a reader, or `null` for `pending`.
+ *
+ * `pending` is the state of nearly every finding in any run that has not been triaged, so writing
+ * it out on every line says nothing and costs the reader an extra word per finding to skip. The
+ * console's badge row drops it for exactly this reason; the pack's prose formats use this to do the
+ * same. A caller that needs the word regardless (a CSV column, say) reads
+ * {@link FINDING_REVIEW_STATUS_LABELS} directly.
+ */
+export function decidedStatusLabel(status: string): string | null {
+  if (status === 'pending') return null;
+  const labels: Record<string, string> = FINDING_REVIEW_STATUS_LABELS;
+  return labels[status] ?? status;
+}
 
 /**
  * How a finding can be actioned, derived at read time (F5.3) from its `proposedEdit`/override
