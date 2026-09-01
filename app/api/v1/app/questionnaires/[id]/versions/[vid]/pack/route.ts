@@ -79,6 +79,11 @@ const querySchema = z.object({
   evaluationEvidence: includeParam('false'),
   // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
   conditionalTopics: includeParam('false'),
+  // Sub-options of `conditionalTopics`, ignored when it is off. Membership is the long one (every
+  // question of every topic); the technical tier is the routing equivalent of `setupTechnical`.
+  conditionalTopicsMembers: includeParam('false'),
+  conditionalTopicsEvaluation: includeParam('true'),
+  conditionalTopicsTechnical: includeParam('false'),
   interviewerPolicy: includeParam('false'),
 });
 
@@ -105,6 +110,9 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       evaluationRewordings,
       evaluationEvidence,
       conditionalTopics,
+      conditionalTopicsMembers,
+      conditionalTopicsEvaluation,
+      conditionalTopicsTechnical,
       interviewerPolicy,
     } = validateQueryParams(searchParams, querySchema);
     const include = {
@@ -120,6 +128,9 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       evaluationRewordings,
       evaluationEvidence,
       conditionalTopics,
+      conditionalTopicsMembers,
+      conditionalTopicsEvaluation,
+      conditionalTopicsTechnical,
       interviewerPolicy,
     };
 

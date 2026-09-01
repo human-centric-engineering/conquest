@@ -16,9 +16,11 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  ROUTING_SETTING_KEYS,
   SETTING_DESCRIPTORS,
   SETTING_GROUPS,
   SETTING_KEYS,
+  buildRoutingSettingRows,
   buildSettingRows,
   type SettingDescriptor,
 } from '@/lib/app/questionnaire/settings-registry';
@@ -524,5 +526,94 @@ describe('value formatting', () => {
       },
     });
     expect(rowsOf(config).byLabel.get('House rules')).toBe('None');
+  });
+});
+
+/**
+ * The routing-side registry — the same exhaustiveness guarantee for `ConditionalTopicsSettings`.
+ *
+ * It exists because the Questionnaire Pack's Conditional topics section hand-listed four of the
+ * fifteen fields on that object, which is exactly the failure the config registry above was written
+ * after. It was missed here only because routing settings live on their own model, so the original
+ * compile-time guard never reached them.
+ */
+describe('routing settings registry', () => {
+  it('has a descriptor for every routing setting', () => {
+    const settingKeys = Object.keys(DEFAULT_CONDITIONAL_TOPICS_SETTINGS).sort();
+    const registered: string[] = [...ROUTING_SETTING_KEYS].sort();
+    // A set difference, so a failure names the forgotten key rather than just "not equal".
+    expect(settingKeys.filter((key) => !registered.includes(key))).toEqual([]);
+    expect(registered.filter((key) => !settingKeys.includes(key))).toEqual([]);
+  });
+
+  it('covers what the respondent experiences in the standard tier', () => {
+    // The two omissions that mattered most in the hand-written version: both describe what happens
+    // to the respondent, in a section whose whole subject is how the interview adapts to them.
+    const labels = buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      false
+    ).map((row) => row.label);
+
+    expect(labels).toContain('Respondent is told what was chosen');
+    expect(labels).toContain('Respondent can ask for another area');
+    expect(labels).toContain('Samples an area they did not raise');
+  });
+
+  it('keeps the tuning behind the technical tier without dropping the standard rows', () => {
+    const standard = buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      false
+    ).map((r) => r.label);
+    const technical = buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      true
+    ).map((r) => r.label);
+
+    expect(standard).not.toContain('Confidence floor for the choice');
+    expect(technical).toContain('Confidence floor for the choice');
+    // The tier widens the list; it never replaces it.
+    for (const label of standard) expect(technical).toContain(label);
+  });
+
+  it('resolves a topic key to its label, and keeps an unresolvable one visible', () => {
+    const rows = buildRoutingSettingRows(
+      { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, fallbackTopicKeys: ['talent', 'deleted-topic'] },
+      (key) => (key === 'talent' ? 'Talent & culture' : key),
+      false
+    );
+    const fallback = rows.find((r) => r.label === 'If the choice cannot be made');
+
+    // The deleted key stays as itself rather than vanishing — a stale setting is something to
+    // clean up, and silently dropping it hides the work.
+    expect(fallback?.value).toBe('Falls back to Talent & culture, deleted-topic');
+  });
+
+  it('says what happens when no fallback is set, rather than printing an empty list', () => {
+    const rows = buildRoutingSettingRows(DEFAULT_CONDITIONAL_TOPICS_SETTINGS, (key) => key, false);
+    const fallback = rows.find((r) => r.label === 'If the choice cannot be made');
+    expect(fallback?.value).toBe('Only the always-asked areas are covered');
+  });
+
+  it('emits well-formed rows for every field on the default settings', () => {
+    for (const row of buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      true
+    )) {
+      expect(row.label).toBeTruthy();
+      expect(row.value).toBeTruthy();
+    }
+  });
+
+  it('never emits the same label twice', () => {
+    const labels = buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      true
+    ).map((r) => r.label);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });

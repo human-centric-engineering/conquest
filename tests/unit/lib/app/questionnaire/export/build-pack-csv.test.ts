@@ -81,6 +81,9 @@ function model(over: Partial<PackModel> = {}): PackModel {
       evaluationRewordings: true,
       evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -461,6 +464,8 @@ describe('buildPackCsv', () => {
                 alwaysAsked: true,
                 criteria: null,
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             conditional: [
@@ -471,12 +476,12 @@ describe('buildPackCsv', () => {
                 alwaysAsked: false,
                 criteria: 'Mentions hiring difficulty.',
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
-            maxConditionalTopics: 3,
-            includeCheckTopic: true,
-            sessionBudgetSeconds: 600,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -498,7 +503,9 @@ describe('buildPackCsv', () => {
       expect(csv).toContain('"Always include ""Talent & culture"" when ""Engagement"" exists."');
     });
 
-    it('reports "no" for enabled and "no limit set" for an unset session budget', () => {
+    it('reports "no" for enabled and writes every routing setting as its own row', () => {
+      // The rows come from the routing settings registry, so this block cannot silently cover
+      // three of fifteen settings the way the hand-written version did.
       const csv = buildPackCsv(
         model({
           conditionalTopics: {
@@ -506,37 +513,44 @@ describe('buildPackCsv', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [
+              { label: 'Interview length', value: 'No limit set' },
+              {
+                label: 'Respondent is told what was chosen',
+                value: 'Yes, before those questions start',
+              },
+            ],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
       expect(csv).toContain('Enabled,no');
-      expect(csv).toContain('no limit set');
+      expect(csv).toContain('Interview length,No limit set');
+      // What the respondent actually experiences — absent from this block entirely before.
+      expect(csv).toContain('Respondent is told what was chosen');
     });
   });
 
-  describe('scope evaluation blocks', () => {
+  describe('routing review blocks', () => {
     const baseScope = {
       enabled: true,
       alwaysAsked: [],
       conditional: [],
       rules: [],
-      maxConditionalTopics: 3,
-      includeCheckTopic: false,
-      sessionBudgetSeconds: 0,
+      settings: [],
     };
 
     it('renders header-only score/finding blocks when the version has never been scope-evaluated', () => {
       const csv = buildPackCsv(
         model({ conditionalTopics: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
       );
-      expect(csv).toContain('# Scope evaluation judge scores');
-      expect(csv).toContain('# Scope evaluation findings');
+      // "Scope" is the pre-F17.29 name for this whole area; a client-facing block header is the
+      // last place it should survive.
+      expect(csv).toContain('# Routing review judge scores');
+      expect(csv).toContain('# Routing review findings');
+      expect(csv).not.toContain('Scope evaluation');
       expect(csv).toContain(
-        'dimension,judge,score,diagnostic,finding_count\r\n\r\n# Scope evaluation findings'
+        'dimension,judge,score,diagnostic,finding_count\r\n\r\n# Routing review findings'
       );
     });
 

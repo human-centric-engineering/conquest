@@ -486,6 +486,16 @@ function ScopeTopicBlock({ topic }: { topic: PackConditionalTopicsTopic }) {
       {topic.criteria && (
         <Text style={styles.scopeTopicCriteria}>{`Included when: ${topic.criteria}`}</Text>
       )}
+      {/* What the source document asked to be watched for mid-conversation. Recorded rather than
+          acted on, and said so — otherwise the document shows the approximation as the intent. */}
+      {topic.trigger && (
+        <Text style={styles.scopeTopicCriteria}>
+          {`The source document asks for this when: ${topic.trigger.condition}. Today it is decided from the opening instead.`}
+        </Text>
+      )}
+      {topic.questions.map((q) => (
+        <Text key={q.key} style={styles.dataSlotQuestion}>{`•  ${q.prompt}`}</Text>
+      ))}
     </View>
   );
 }
@@ -939,19 +949,15 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
               </Text>
             ) : (
               <>
-                <Text style={styles.scopeFacts}>
-                  {[
-                    `Up to ${model.conditionalTopics.maxConditionalTopics} conditional topic(s) per interview`,
-                    model.conditionalTopics.includeCheckTopic
-                      ? 'one area the respondent did not raise is sampled briefly'
-                      : null,
-                    model.conditionalTopics.sessionBudgetSeconds > 0
-                      ? `interviews are budgeted to about ${Math.round(model.conditionalTopics.sessionBudgetSeconds / 60)} minute(s)`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join('  ·  ')}
-                </Text>
+                {/* Derived from the routing settings registry, not hand-listed: the section named
+                    four of the fifteen settings before, and the ones it missed included whether the
+                    respondent is told what was chosen. */}
+                {model.conditionalTopics.settings.map((item, i) => (
+                  <View key={i} style={styles.setupRow}>
+                    <Text style={styles.setupLabel}>{item.label}</Text>
+                    <Text style={styles.setupValue}>{item.value}</Text>
+                  </View>
+                ))}
 
                 <Text style={styles.scopeSubheading}>Always asked</Text>
                 {model.conditionalTopics.alwaysAsked.length === 0 ? (
@@ -980,15 +986,13 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   </>
                 )}
 
-                <Text style={styles.scopeSubheading}>Scope evaluation</Text>
+                <Text style={styles.scopeSubheading}>Review of this routing</Text>
                 <Text style={styles.evaluationIntro}>
                   AI judge panel over the routing design above — includes findings not yet reviewed;
                   treat as suggestions, not conclusions.
                 </Text>
                 {!model.conditionalTopics.evaluation.hasRun ? (
-                  <Text style={styles.empty}>
-                    No scope evaluation has been run for this version yet.
-                  </Text>
+                  <Text style={styles.empty}>This routing has not been reviewed.</Text>
                 ) : (
                   <>
                     <Text style={styles.scopeFacts}>
@@ -1012,7 +1016,7 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                             {[
                               `${target.judges.length} finding(s)`,
                               target.counts.major > 0 ? `${target.counts.major} major` : null,
-                              target.removed ? 'no longer in the scope config' : null,
+                              target.removed ? 'no longer part of the routing' : null,
                             ]
                               .filter(Boolean)
                               .join('  ·  ')}

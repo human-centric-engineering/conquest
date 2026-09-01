@@ -81,7 +81,10 @@ type SubOptionKey =
   | 'evaluationVerdicts'
   | 'evaluationJudgeDetail'
   | 'evaluationRewordings'
-  | 'evaluationEvidence';
+  | 'evaluationEvidence'
+  | 'conditionalTopicsMembers'
+  | 'conditionalTopicsEvaluation'
+  | 'conditionalTopicsTechnical';
 
 type SectionKey = Exclude<keyof PackInclude, SubOptionKey>;
 
@@ -170,6 +173,26 @@ const SECTIONS = [
     label: 'Conditional topics',
     description:
       'How this questionnaire routes respondents — which topics everyone gets, which depend on their answers, and the rules that decide — explained in plain language. Off by default.',
+    subOptions: [
+      {
+        key: 'conditionalTopicsEvaluation',
+        label: 'Review of this routing',
+        description:
+          'The AI panel\u2019s scores and findings on the routing design above, including suggestions not yet reviewed.',
+      },
+      {
+        key: 'conditionalTopicsMembers',
+        label: 'Which questions each topic covers',
+        description:
+          'List every question inside each topic, so a reader can see what is not asked when an area is not selected. The longest part of the section. Off by default.',
+      },
+      {
+        key: 'conditionalTopicsTechnical',
+        label: 'Technical routing settings',
+        description:
+          'Also list the confidence floor, per-question-type timings and whether extra guidance is set. Off by default.',
+      },
+    ],
   },
   {
     key: 'interviewerPolicy',

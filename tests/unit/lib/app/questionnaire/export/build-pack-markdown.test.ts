@@ -82,6 +82,9 @@ function model(over: Partial<PackModel> = {}): PackModel {
       evaluationRewordings: true,
       evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -763,13 +766,13 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: true,
                 criteria: null,
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: true,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -795,6 +798,8 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: true,
                 criteria: null,
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             conditional: [
@@ -805,6 +810,8 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: false,
                 criteria: 'Mentions hiring difficulty.',
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
               {
                 key: 'compliance-check',
@@ -813,12 +820,19 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: false,
                 criteria: 'Sampled when nothing else pointed at compliance.',
                 sampledOnly: true,
+                questions: [],
+                trigger: null,
               },
             ],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: true,
-            sessionBudgetSeconds: 600,
+            settings: [
+              { label: 'Topics that depend on the respondent', value: 'Up to 3 per interview' },
+              { label: 'Interview length', value: '10 min' },
+              {
+                label: 'Respondent can ask for another area',
+                value: 'Yes, and it is added',
+              },
+            ],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -832,10 +846,89 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain(
         '**Compliance blind-spot check** _(sampled lightly, not asked in full)_'
       );
-      // Up to N / minutes summary line and the check-topic fact.
-      expect(md).toContain('Up to 3 conditional topic(s) per interview');
-      expect(md).toContain('one area the respondent did not raise is sampled briefly');
-      expect(md).toContain('interviews are budgeted to about 10 minute(s)');
+      // The settings render as a table from the routing registry, so this section can no longer
+      // silently cover four of the fifteen routing settings.
+      expect(md).toContain('| Topics that depend on the respondent | Up to 3 per interview |');
+      expect(md).toContain('| Interview length | 10 min |');
+      // What the respondent actually experiences — absent from the section entirely before.
+      expect(md).toContain('| Respondent can ask for another area | Yes, and it is added |');
+      // "Conditional topic" as a noun is not reintroduced right after teaching the reader
+      // "asked when it fits".
+      expect(md).not.toContain('conditional topic(s)');
+    });
+
+    it('lists the questions a topic covers, so a reader can see what is not asked', () => {
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [
+              {
+                key: 'talent',
+                label: 'Talent & culture',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'Mentions hiring difficulty.',
+                sampledOnly: false,
+                questions: [
+                  { key: 'q7', prompt: 'How easy is it to hire for your team?' },
+                  { key: 'q8', prompt: 'What makes people stay?' },
+                ],
+                trigger: null,
+              },
+            ],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      // The link the document could not previously make: topics in one section, questions in
+      // another, and nothing saying which belongs to which.
+      expect(md).toContain('  - How easy is it to hire for your team?');
+      expect(md).toContain('  - What makes people stay?');
+    });
+
+    it('says when the source document wanted a topic triggered mid-conversation', () => {
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [
+              {
+                key: 'safeguarding',
+                label: 'Safeguarding',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'The opening suggests vulnerability.',
+                sampledOnly: false,
+                questions: [],
+                trigger: {
+                  condition: 'The applicant discloses that they are fleeing abuse.',
+                  cues: ['abuse', 'fleeing'],
+                },
+              },
+            ],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      // Recorded, not acted on — and the document says which. Printing the criteria alone would
+      // show the approximation as though it were what the document asked for.
+      expect(md).toContain(
+        'The source document asks for this when: The applicant discloses that they are fleeing abuse.'
+      );
+      expect(md).toContain('Today it is decided from the opening instead.');
+      // The criteria that actually runs is still shown, above it.
+      expect(md.indexOf('_Included when: The opening suggests vulnerability._')).toBeLessThan(
+        md.indexOf('The source document asks for this when')
+      );
     });
 
     it('renders hard rules under their own heading, and omits it when there are none', () => {
@@ -846,9 +939,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -863,9 +954,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -881,9 +970,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -901,17 +988,18 @@ describe('buildPackMarkdown', () => {
       alwaysAsked: [],
       conditional: [],
       rules: [],
-      maxConditionalTopics: 3,
-      includeCheckTopic: false,
-      sessionBudgetSeconds: 0,
+      settings: [],
     };
 
     it('renders the "no run yet" fallback under its own heading when hasRun is false', () => {
       const md = buildPackMarkdown(
         model({ conditionalTopics: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
       );
-      expect(md).toContain('### Scope evaluation');
-      expect(md).toContain('_No scope evaluation has been run for this version yet._');
+      // "Scope" is the pre-F17.29 name for this whole area; a stakeholder heading is the last
+      // place it should survive.
+      expect(md).toContain('### Review of this routing');
+      expect(md).toContain('_This routing has not been reviewed._');
+      expect(md).not.toContain('Scope evaluation');
     });
 
     it('renders the judge scoreboard and one finding grouped under its target', () => {
@@ -958,7 +1046,7 @@ describe('buildPackMarkdown', () => {
         ],
       };
       const md = buildPackMarkdown(model({ conditionalTopics: { ...baseScope, evaluation } }));
-      expect(md).toContain('### Scope evaluation');
+      expect(md).toContain('### Review of this routing');
       expect(md).toContain('Criteria-Quality Judge');
       expect(md).toContain('70%');
       expect(md).toContain('Budget-Realism Judge');

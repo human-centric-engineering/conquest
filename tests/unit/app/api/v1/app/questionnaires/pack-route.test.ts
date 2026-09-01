@@ -240,6 +240,9 @@ describe('GET pack — include flags', () => {
         evaluationRewordings: true,
         evaluationEvidence: false,
         conditionalTopics: false,
+        conditionalTopicsMembers: false,
+        conditionalTopicsEvaluation: true,
+        conditionalTopicsTechnical: false,
         interviewerPolicy: false,
       },
       expect.any(String)
@@ -273,6 +276,9 @@ describe('GET pack — include flags', () => {
         evaluationRewordings: true,
         evaluationEvidence: false,
         conditionalTopics: false,
+        conditionalTopicsMembers: false,
+        conditionalTopicsEvaluation: true,
+        conditionalTopicsTechnical: false,
         interviewerPolicy: false,
       },
       expect.any(String)

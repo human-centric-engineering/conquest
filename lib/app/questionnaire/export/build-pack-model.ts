@@ -43,7 +43,12 @@ import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/type
 // The pure chat leaf — `paceProfile` reads `FUNNEL_PACE_PROFILES`, the same table the runtime uses,
 // so the pack's arc bands cannot drift from the arc the interviewer actually runs.
 import { paceProfile } from '@/lib/app/questionnaire/chat/interviewer-strategy';
-import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
+import {
+  buildRoutingSettingRows,
+  buildSettingRows,
+  type PackSetupItem,
+  type RoutingSettingItem,
+} from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   ALWAYS_PHASES,
@@ -165,6 +170,27 @@ export interface PackInclude {
    */
   conditionalTopics: boolean;
   /**
+   * Sub-option of {@link conditionalTopics}: which questions each topic actually covers.
+   *
+   * Defaults `false` because it is the longest part of the section — every question of every topic,
+   * a second pass over the instrument the pack has usually already printed in full. Worth ticking
+   * when the reader's question is "if this area is not selected for me, what am I not asked?",
+   * which the topic list alone cannot answer.
+   */
+  conditionalTopicsMembers: boolean;
+  /**
+   * Sub-option of {@link conditionalTopics}: the judge panel's review of the routing design.
+   * Defaults `true` — it is short, and a routing design shared without the review of it invites
+   * the reader to assume nobody looked.
+   */
+  conditionalTopicsEvaluation: boolean;
+  /**
+   * Sub-option of {@link conditionalTopics}: the technical tier of the routing settings — the
+   * confidence floor, the per-type time costs, whether extra guidance is set. Defaults `false`, the
+   * same split and the same reasoning as `setupTechnical`.
+   */
+  conditionalTopicsTechnical: boolean;
+  /**
    * The interviewer policy — the client's house rules, the questioning arc, and which questions are
    * asked as written — plus the F18.8 judge panel's verdict on it.
    *
@@ -197,6 +223,9 @@ export const DEFAULT_PACK_INCLUDE: PackInclude = {
   evaluationRewordings: true,
   evaluationEvidence: false,
   conditionalTopics: false,
+  conditionalTopicsMembers: false,
+  conditionalTopicsEvaluation: true,
+  conditionalTopicsTechnical: false,
   interviewerPolicy: false,
 };
 
@@ -412,6 +441,26 @@ export interface PackConditionalTopicsTopic {
   criteria: string | null;
   /** `true` when only the topic's highest-weight members are ever asked, not the whole thing. */
   sampledOnly: boolean;
+  /**
+   * The questions this topic actually covers, resolved against the version graph.
+   *
+   * Behind `include.conditionalTopicsMembers`, and empty when it is off. Without it the pack lists
+   * topics in one section and questions in another with nothing tying them, and a reader cannot
+   * answer the obvious question: if this area is not selected for me, what am I not asked?
+   *
+   * A key that no longer resolves keeps the raw key rather than being dropped — the same choice the
+   * hard rules make, so a stale membership stays visible as something to clean up.
+   */
+  questions: { key: string; prompt: string }[];
+  /**
+   * What the source document asked to be watched for DURING the conversation, when it wanted this
+   * topic added on something said rather than on how the opening went.
+   *
+   * Recorded, not acted on: the topic is still selected by its `criteria` above, exactly as every
+   * other one is. Printed because the alternative is a document that shows the approximation as
+   * though it were the intent — the gap is recorded on the topic precisely so a reviewer sees it.
+   */
+  trigger: { condition: string; cues: string[] } | null;
 }
 
 /**
@@ -501,17 +550,16 @@ export interface PackConditionalTopics {
   /** Conditional topics, in authored order. */
   conditional: PackConditionalTopicsTopic[];
   rules: PackConditionalTopicsRule[];
-  /** How many conditional topics one interview may cover at most. */
-  maxConditionalTopics: number;
   /**
-   * Whether one area the respondent did not raise is sampled briefly — the admin-facing
-   * "blind-spot check". Pack copy describes the mechanism rather than using that label: the pack
-   * is a document an admin hands to a client, where "blind spot" reads as a claim about the
-   * respondent the planner never made.
+   * Every routing setting, presented — derived from `ROUTING_SETTING_DESCRIPTORS`, not hand-listed.
+   *
+   * The section used to name four of the fifteen fields on `ConditionalTopicsSettings`, missing
+   * (among others) whether the respondent is told which areas were chosen and whether they may ask
+   * for one that was not: two facts about what the respondent EXPERIENCES, absent from the section
+   * whose whole subject is how the questionnaire adapts to them. Same registry pattern and same
+   * reasoning as the experience-setup summary, which was written after the same bug.
    */
-  includeCheckTopic: boolean;
-  /** Seconds; `0` means no time limit was set. */
-  sessionBudgetSeconds: number;
+  settings: RoutingSettingItem[];
   /** The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}. */
   evaluation: PackScopeEvaluation;
 }
@@ -849,11 +897,16 @@ function buildConditionalTopicsSection(
   topics: Topic[],
   settings: ConditionalTopicsSettings,
   dataSlots: DataSlotView[],
-  scopeEvaluationRun: ScopeEvaluationRunDetail | null
+  scopeEvaluationRun: ScopeEvaluationRunDetail | null,
+  questionPrompts: Map<string, string>,
+  include: PackInclude
 ): PackConditionalTopics {
   const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
   const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
   const alwaysAskedPhases = ALWAYS_PHASES as readonly string[];
+  // Falls back to the raw key so a setting or membership naming a since-deleted topic stays
+  // visible as something to clean up, rather than silently vanishing from the document.
+  const topicLabel = (key: string): string => topicLabels.get(key) ?? key;
 
   const alwaysAsked: PackConditionalTopicsTopic[] = [];
   const conditional: PackConditionalTopicsTopic[] = [];
@@ -866,6 +919,12 @@ function buildConditionalTopicsSection(
       alwaysAsked: isAlwaysAsked,
       criteria: isAlwaysAsked ? null : topic.criteria,
       sampledOnly: topic.depth === 'light',
+      questions: include.conditionalTopicsMembers
+        ? resolveDataSlotQuestions(questionPrompts, topic.members.questionKeys)
+        : [],
+      trigger: topic.trigger
+        ? { condition: topic.trigger.condition, cues: topic.trigger.cues }
+        : null,
     };
     (isAlwaysAsked ? alwaysAsked : conditional).push(row);
   }
@@ -877,10 +936,12 @@ function buildConditionalTopicsSection(
     rules: settings.rules.map((rule) => ({
       sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
     })),
-    maxConditionalTopics: settings.maxConditionalTopics,
-    includeCheckTopic: settings.includeCheckTopic,
-    sessionBudgetSeconds: settings.sessionBudgetSeconds,
-    evaluation: buildScopeEvaluationSection(scopeEvaluationRun),
+    settings: buildRoutingSettingRows(settings, topicLabel, include.conditionalTopicsTechnical),
+    evaluation: include.conditionalTopicsEvaluation
+      ? buildScopeEvaluationSection(scopeEvaluationRun)
+      : // Excluded rather than absent: `hasRun: false` is how "never reviewed" is stated, and the
+        // serialisers must be able to tell "the admin left this out" from "nobody has looked".
+        { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
   };
 }
 
@@ -1108,7 +1169,9 @@ export function buildPackModel(
             conditionalTopicsSource.topics,
             conditionalTopicsSource.settings,
             dataSlots,
-            conditionalTopicsSource.scopeEvaluationRun
+            conditionalTopicsSource.scopeEvaluationRun,
+            questionPrompts,
+            include
           )
         : null,
   };

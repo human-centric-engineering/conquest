@@ -289,37 +289,56 @@ export function buildPackCsv(model: PackModel): string {
       '# Conditional topics',
       row(['field', 'value']),
       row(['Enabled', model.conditionalTopics.enabled ? 'yes' : 'no']),
-      row([
-        'Max conditional topics per interview',
-        String(model.conditionalTopics.maxConditionalTopics),
-      ]),
-      row([
-        'Also samples one area the respondent did not raise',
-        model.conditionalTopics.includeCheckTopic ? 'yes' : 'no',
-      ]),
-      row([
-        'Session time budget',
-        model.conditionalTopics.sessionBudgetSeconds > 0
-          ? `${model.conditionalTopics.sessionBudgetSeconds}s`
-          : 'no limit set',
-      ]),
+      // Derived from the routing settings registry, not hand-listed: this block named three of the
+      // fifteen settings before, and the ones it missed included whether the respondent is told
+      // what was chosen.
+      ...model.conditionalTopics.settings.map((item) => row([item.label, item.value])),
     ]);
+
+    const allTopics = [
+      ...model.conditionalTopics.alwaysAsked,
+      ...model.conditionalTopics.conditional,
+    ];
 
     blocks.push([
       '# Conditional topics topics',
-      row(['key', 'label', 'description', 'always_asked', 'criteria', 'sampled_only']),
-      ...[...model.conditionalTopics.alwaysAsked, ...model.conditionalTopics.conditional].map(
-        (topic) =>
-          row([
-            topic.key,
-            topic.label,
-            topic.description ?? '',
-            topic.alwaysAsked ? 'yes' : 'no',
-            topic.criteria ?? '',
-            topic.sampledOnly ? 'yes' : 'no',
-          ])
+      row([
+        'key',
+        'label',
+        'description',
+        'always_asked',
+        'criteria',
+        'sampled_only',
+        'document_trigger',
+      ]),
+      ...allTopics.map((topic) =>
+        row([
+          topic.key,
+          topic.label,
+          topic.description ?? '',
+          topic.alwaysAsked ? 'yes' : 'no',
+          topic.criteria ?? '',
+          topic.sampledOnly ? 'yes' : 'no',
+          // What the source document asked to be watched for mid-conversation, when it did.
+          // Recorded, not acted on — the topic still runs off its criteria.
+          topic.trigger?.condition ?? '',
+        ])
       ),
     ]);
+
+    // Membership is its own block, one row per (topic, question): folded into the topics block it
+    // would either duplicate every topic row or collapse a list into one unsortable cell. Emitted
+    // only when the sub-option is on, in which case `questions` is populated.
+    const membershipRows = allTopics.flatMap((topic) =>
+      topic.questions.map((q) => row([topic.key, topic.label, q.key, q.prompt]))
+    );
+    if (membershipRows.length > 0) {
+      blocks.push([
+        '# Conditional topics membership',
+        row(['topic_key', 'topic', 'question_key', 'question']),
+        ...membershipRows,
+      ]);
+    }
 
     blocks.push([
       '# Conditional topics rules',
@@ -329,7 +348,7 @@ export function buildPackCsv(model: PackModel): string {
 
     const evaluation = model.conditionalTopics.evaluation;
     blocks.push([
-      '# Scope evaluation judge scores',
+      '# Routing review judge scores',
       row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
       ...evaluation.scores.map((judge) =>
         row([
@@ -366,7 +385,7 @@ export function buildPackCsv(model: PackModel): string {
       )
     );
     blocks.push([
-      '# Scope evaluation findings',
+      '# Routing review findings',
       row([
         'target_key',
         'target_kind',

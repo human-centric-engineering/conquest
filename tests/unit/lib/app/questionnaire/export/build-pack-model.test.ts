@@ -424,6 +424,9 @@ describe('buildPackModel', () => {
       evaluationRewordings: true,
       evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
@@ -1168,24 +1171,105 @@ describe('buildPackModel', () => {
       expect(model.conditionalTopics).toBeNull();
     });
 
-    it('carries enabled/maxConditionalTopics/includeCheckTopic/sessionBudgetSeconds straight off the settings', () => {
-      const model = buildPackModel(
+    /** The Conditional topics section, built with the given include overrides. */
+    function topicsSectionWith(over: Partial<PackInclude> = {}, topics = SCOPE_TOPICS) {
+      return buildPackModel(
         'T',
         graphOf(SECTIONS),
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        { topics, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true, ...over },
         'now'
+      ).conditionalTopics;
+    }
+
+    it('derives the routing settings from the registry rather than naming a chosen few', () => {
+      // The section used to hand-list four of the fifteen fields on `ConditionalTopicsSettings`.
+      // The two named here are the ones whose absence mattered most: they describe what the
+      // RESPONDENT experiences, in a section whose whole subject is how the interview adapts.
+      const section = topicsSectionWith();
+      const labels = section?.settings.map((row) => row.label) ?? [];
+
+      expect(section?.enabled).toBe(true);
+      expect(labels).toContain('Respondent is told what was chosen');
+      expect(labels).toContain('Respondent can ask for another area');
+      expect(labels).toContain('Topics that depend on the respondent');
+      expect(labels).toContain('If the choice cannot be made');
+    });
+
+    it('keeps the numeric tuning behind the technical sub-option', () => {
+      const standard = topicsSectionWith()?.settings.map((r) => r.label) ?? [];
+      const technical = topicsSectionWith({ conditionalTopicsTechnical: true })?.settings.map(
+        (r) => r.label
       );
-      expect(model.conditionalTopics).toMatchObject({
-        enabled: true,
-        maxConditionalTopics: 3,
-        includeCheckTopic: true,
-        sessionBudgetSeconds: 600,
+
+      expect(standard).not.toContain('Confidence floor for the choice');
+      expect(technical).toContain('Confidence floor for the choice');
+      // The standard rows are still all there — the tier widens the list, it does not replace it.
+      for (const label of standard) expect(technical).toContain(label);
+    });
+
+    it('says which questions a topic covers only when asked for them', () => {
+      // Without it the pack lists topics in one section and questions in another with nothing
+      // tying them, and a reader cannot answer "if this area is not selected, what am I not asked?"
+      expect(topicsSectionWith()?.alwaysAsked[0]?.questions).toEqual([]);
+
+      const withMembers = topicsSectionWith({ conditionalTopicsMembers: true });
+      expect(withMembers?.alwaysAsked[0]?.questions).toEqual([
+        { key: 'q1', prompt: 'Prompt for q1' },
+      ]);
+    });
+
+    it('keeps a membership key that no longer resolves, rather than dropping it', () => {
+      // Same choice the hard rules make: a stale membership stays visible as something to clean
+      // up. Dropping it would quietly shrink the list of what a topic covers.
+      const topics = SCOPE_TOPICS.map((t) =>
+        t.key === 'background'
+          ? { ...t, members: { ...t.members, questionKeys: ['q1', 'deleted-question'] } }
+          : t
+      );
+      const section = topicsSectionWith({ conditionalTopicsMembers: true }, topics);
+
+      expect(section?.alwaysAsked[0]?.questions).toEqual([
+        { key: 'q1', prompt: 'Prompt for q1' },
+        { key: 'deleted-question', prompt: 'deleted-question' },
+      ]);
+    });
+
+    it('records what the source document asked to be watched for mid-conversation', () => {
+      // Recorded, not acted on: the topic still runs off its criteria. Printed anyway, because the
+      // alternative is a document showing the approximation as though it were the intent.
+      const topics = SCOPE_TOPICS.map((t) =>
+        t.key === 'talent'
+          ? {
+              ...t,
+              trigger: {
+                condition: 'The respondent discloses a redundancy round.',
+                cues: ['redundancy', 'restructure'],
+              },
+            }
+          : t
+      );
+      const section = topicsSectionWith({}, topics);
+      const talent = section?.conditional.find((t) => t.key === 'talent');
+
+      expect(talent?.trigger).toEqual({
+        condition: 'The respondent discloses a redundancy round.',
+        cues: ['redundancy', 'restructure'],
       });
+      // Every other topic carries none, which is the normal case.
+      expect(section?.alwaysAsked[0]?.trigger).toBeNull();
+    });
+
+    it('reports the routing review as "never run" when the sub-option is off', () => {
+      // Excluded, not absent: `hasRun: false` is the shape every serialiser already handles, and
+      // it keeps "the admin left this out" indistinguishable from nothing to show — which is the
+      // right outcome for a section the admin deliberately dropped.
+      const section = topicsSectionWith({ conditionalTopicsEvaluation: false });
+      expect(section?.evaluation.hasRun).toBe(false);
     });
 
     it('reports enabled: false when the version never turned it on, without dropping the topic lists', () => {

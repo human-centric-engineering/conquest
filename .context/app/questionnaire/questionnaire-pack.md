@@ -110,18 +110,38 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   deleted — silently skipped everywhere else in this feature) falls back to the raw key rather than
   dropping the rule, so a stale rule stays visible as something to clean up.
 
-- **The interviewer** (opt-in, off by default) — how the interviewer is set up: the questioning
-  approach and pace, where the opening questions come from, the tactics in play, the arc bands
-  (derived from the same `FUNNEL_PACE_PROFILES` the runtime reads, never a hand-copied table), the
-  house rules actually in force, and which questions are put word for word. The F18.8 judge panel's
-  verdict on that setup nests inside it as **Interviewer review**, the same nesting the scope panel
-  gets inside Conditional topics and for the same reason: it is a judgement about the setup above
-  it, not a section of its own.
+  **The routing settings are derived, not hand-listed.** They come from
+  `ROUTING_SETTING_DESCRIPTORS` in `lib/app/questionnaire/settings-registry.ts`, declared
+  `satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>` so a new routing
+  setting is a compile error until it is classified. This section previously named **four of the
+  fifteen** fields on that object — the same failure the experience-setup registry was written after,
+  missed here only because routing settings live on their own model and the original guard could not
+  reach them. Two of the eleven omissions described what the RESPONDENT experiences: whether they
+  are told which areas were chosen (`announce`) and whether they may ask for one that was not
+  (`allowRespondentAmendment`), absent from the section whose entire subject is how the interview
+  adapts to them. Same two tiers as the setup summary: `standard` always renders, `technical` (the
+  confidence floor, per-type timings, whether extra guidance is set) sits behind a sub-option.
 
-  It carries its own top-level flag rather than nesting under `setup`, for two reasons. `setup` is a
-  flat list across ~15 setting groups, so hanging a verdict about three of them there would attach a
-  judgement to twelve things it never read; and `setup` defaults **true**, which would ship
-  unreviewed AI critique into every default download.
+  **A topic can say which questions it covers** (`conditionalTopicsMembers`, off by default). Without
+  it the pack lists topics in one section and questions in another with nothing tying them, and a
+  reader cannot answer the obvious question: if this area is not selected for me, what am I not
+  asked? It is off by default because it is the longest part of the section — a second pass over an
+  instrument the pack has usually already printed in full. A membership key that no longer resolves
+  keeps the raw key rather than being dropped, the same choice the hard rules make.
+
+  **A topic's `trigger` is printed, not flattened away.** When the source document asked for a topic
+  to be added on something said mid-conversation rather than on how the opening went, the product
+  still selects it from the opening criteria — and the section says so ("The source document asks for
+  this when: ... Today it is decided from the opening instead."). That gap is recorded on the topic
+  precisely so a reviewer sees it; a pack printing only the criteria would show the approximation as
+  though it were the intent.
+
+  **The judge panel is called "Review of this routing"** (`conditionalTopicsEvaluation`, on by
+  default), not "Scope evaluation". "Scope" is the pre-F17.29 name for this whole area, and a
+  heading in a client-facing document is the last place it should survive; "no longer in the scope
+  config" became "no longer part of the routing" for the same reason. CSV block headers follow
+  (`# Routing review judge scores`, `# Routing review findings`). Excluding it yields `hasRun: false`
+  rather than a missing field, so every serialiser handles it through the path it already had.
 
 Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
 so every serialiser skips it the same way. **Every section renders above the closing "About
@@ -258,7 +278,7 @@ spreadsheet.
 
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&evaluationVerdicts=&evaluationJudgeDetail=&evaluationRewordings=&evaluationEvidence=&conditionalTopics=&interviewerPolicy=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&evaluationVerdicts=&evaluationJudgeDetail=&evaluationRewordings=&evaluationEvidence=&conditionalTopics=&conditionalTopicsMembers=&conditionalTopicsEvaluation=&conditionalTopicsTechnical=&interviewerPolicy=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
 use. Each include flag is `true`/`false`; all default `true` except `evaluations`,
@@ -283,7 +303,7 @@ Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 | -------------------------- | ------------------------------------------------------------------------------------------------------- |
 | Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                            |
 | Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                      |
-| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                            |
+| Settings registries (pure) | `lib/app/questionnaire/settings-registry.ts` (config + routing)                                         |
 | CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                        |
 | Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                   |
 | PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                             |

@@ -12,7 +12,10 @@
 import { QUESTION_FIDELITY_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
 import { decidedStatusLabel, findingSeverityLabel } from '@/lib/app/questionnaire/evaluation';
 import { formatPackDate, PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
-import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
+import type {
+  PackConditionalTopicsTopic,
+  PackModel,
+} from '@/lib/app/questionnaire/export/build-pack-model';
 
 /**
  * A judge's own line: who said it, how serious, and whether anyone has acted on it.
@@ -283,16 +286,30 @@ export function buildPackMarkdown(model: PackModel): string {
       );
       lines.push('');
     } else {
-      const facts = [
-        `Up to ${model.conditionalTopics.maxConditionalTopics} conditional topic(s) per interview`,
-        model.conditionalTopics.includeCheckTopic
-          ? 'one area the respondent did not raise is sampled briefly'
-          : null,
-        model.conditionalTopics.sessionBudgetSeconds > 0
-          ? `interviews are budgeted to about ${Math.round(model.conditionalTopics.sessionBudgetSeconds / 60)} minute(s)`
-          : null,
-      ].filter((f): f is string => f !== null);
-      lines.push(facts.join(' · '));
+      /** One topic: what it is, when it applies, and (opt-in) the questions it covers. */
+      const pushTopic = (topic: PackConditionalTopicsTopic) => {
+        const suffix = topic.sampledOnly ? ' _(sampled lightly, not asked in full)_' : '';
+        lines.push(`- **${cell(topic.label)}**${suffix}`);
+        if (topic.description) lines.push(`  ${cell(topic.description)}`);
+        if (topic.criteria) lines.push(`  _Included when: ${cell(topic.criteria)}_`);
+        // What the source document asked to be watched for mid-conversation. Recorded rather than
+        // acted on, and said so — otherwise the document shows the approximation as the intent.
+        if (topic.trigger) {
+          lines.push(
+            `  _The source document asks for this when: ${cell(topic.trigger.condition)}. Today it is decided from the opening instead._`
+          );
+        }
+        for (const q of topic.questions) lines.push(`  - ${cell(q.prompt)}`);
+      };
+
+      // Derived from the routing settings registry, not hand-listed: the section named four of the
+      // fifteen settings before, and the ones it missed included whether the respondent is told
+      // what was chosen.
+      lines.push('| Setting | Value |');
+      lines.push('| --- | --- |');
+      for (const item of model.conditionalTopics.settings) {
+        lines.push(`| ${cell(item.label)} | ${cell(item.value)} |`);
+      }
       lines.push('');
 
       lines.push('### Always asked');
@@ -300,11 +317,7 @@ export function buildPackMarkdown(model: PackModel): string {
       if (model.conditionalTopics.alwaysAsked.length === 0) {
         lines.push('_None defined._');
       } else {
-        for (const topic of model.conditionalTopics.alwaysAsked) {
-          const suffix = topic.sampledOnly ? ' _(sampled lightly, not asked in full)_' : '';
-          lines.push(`- **${cell(topic.label)}**${suffix}`);
-          if (topic.description) lines.push(`  ${cell(topic.description)}`);
-        }
+        for (const topic of model.conditionalTopics.alwaysAsked) pushTopic(topic);
       }
       lines.push('');
 
@@ -313,12 +326,7 @@ export function buildPackMarkdown(model: PackModel): string {
       if (model.conditionalTopics.conditional.length === 0) {
         lines.push('_None defined._');
       } else {
-        for (const topic of model.conditionalTopics.conditional) {
-          const suffix = topic.sampledOnly ? ' _(sampled lightly, not asked in full)_' : '';
-          lines.push(`- **${cell(topic.label)}**${suffix}`);
-          if (topic.description) lines.push(`  ${cell(topic.description)}`);
-          if (topic.criteria) lines.push(`  _Included when: ${cell(topic.criteria)}_`);
-        }
+        for (const topic of model.conditionalTopics.conditional) pushTopic(topic);
       }
       lines.push('');
 
@@ -332,14 +340,14 @@ export function buildPackMarkdown(model: PackModel): string {
       }
 
       const evaluation = model.conditionalTopics.evaluation;
-      lines.push('### Scope evaluation');
+      lines.push('### Review of this routing');
       lines.push('');
       lines.push(
         '*AI judge panel over the routing design above — includes findings not yet reviewed; treat as suggestions, not conclusions.*'
       );
       lines.push('');
       if (!evaluation.hasRun) {
-        lines.push('_No scope evaluation has been run for this version yet._');
+        lines.push('_This routing has not been reviewed._');
         lines.push('');
       } else {
         lines.push(
@@ -368,7 +376,7 @@ export function buildPackMarkdown(model: PackModel): string {
             const facts = [
               `${target.judges.length} finding(s)`,
               target.counts.major > 0 ? `${target.counts.major} major` : null,
-              target.removed ? 'no longer in the scope config' : null,
+              target.removed ? 'no longer part of the routing' : null,
             ].filter((f): f is string => f !== null);
             lines.push(`_${facts.join(' · ')}_`);
             lines.push('');

@@ -386,6 +386,9 @@ describe('renderPackPdf', () => {
       evaluationRewordings: true,
       evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
