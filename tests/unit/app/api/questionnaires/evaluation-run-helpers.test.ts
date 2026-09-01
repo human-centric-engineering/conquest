@@ -151,3 +151,90 @@ describe('buildScopedFindingView — target stamping', () => {
     expect(view.target).toBeNull();
   });
 });
+
+describe('buildScopedFindingView — destination stamping', () => {
+  /** Two sections, so "the last one" is a different answer from "the only one". */
+  function twoSections(): VersionStructureInput {
+    return {
+      ...structure(),
+      sections: [...structure().sections, { title: 'Experience', questions: [] }],
+    };
+  }
+
+  const ADD = {
+    op: 'add_question' as const,
+    prompt: 'How supported did you feel?',
+    type: 'free_text' as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(buildEvaluationStructure).mockResolvedValue(twoSections());
+  });
+
+  it('leaves the destination null for an op that creates nothing', async () => {
+    // The default fixture is a `replace_prompt`, which inherits its position from the question it
+    // edits. A destination here would put a placement sentence on a card that places nothing.
+    const view = await buildScopedFindingView(scoped());
+    expect(view.destination).toBeNull();
+  });
+
+  it('reports the last section, marked as a default, when nothing named one', async () => {
+    // The wiring, not the resolver: `resolveAddDestination` is unit-tested on its own, and passing
+    // it the wrong op or the wrong structure here would still leave that green.
+    const view = await buildScopedFindingView(scoped({ targetKey: 'goal', proposedEdit: ADD }));
+    expect(view.destination).toEqual({
+      sectionTitle: 'Experience',
+      sectionPosition: 2,
+      origin: 'default',
+    });
+  });
+
+  it('reports the section the judge named', async () => {
+    const view = await buildScopedFindingView(
+      scoped({ targetKey: 'goal', proposedEdit: { ...ADD, sectionKey: 'Background' } })
+    );
+    expect(view.destination).toEqual({
+      sectionTitle: 'Background',
+      sectionPosition: 1,
+      origin: 'chosen',
+    });
+  });
+
+  it("follows the reviewer's redirect, not the judge's original", async () => {
+    // The EFFECTIVE op. This is what the redirect picker writes, and the card re-renders straight
+    // from this response. Reading `proposedEdit` here would answer a reviewer who has just moved
+    // a question with the section they moved it out of, in the same breath.
+    const view = await buildScopedFindingView(
+      scoped({
+        targetKey: 'goal',
+        proposedEdit: { ...ADD, sectionKey: 'Background' },
+        editedOverride: { ...ADD, sectionKey: 'Experience' },
+      })
+    );
+    expect(view.destination).toMatchObject({ sectionTitle: 'Experience', origin: 'chosen' });
+  });
+
+  it('stamps the destination on a terminal finding too', async () => {
+    // Same reason `target` is stamped for one: an applied add still has to say where it went.
+    const view = await buildScopedFindingView(
+      scoped({
+        status: 'applied',
+        targetKey: 'goal',
+        proposedEdit: { ...ADD, sectionKey: 'Background' },
+      })
+    );
+    expect(view.destination).toMatchObject({ sectionTitle: 'Background', origin: 'chosen' });
+  });
+
+  it('says nothing at all when the live structure could not be loaded', async () => {
+    // Not `origin: 'none'`. That reads on the card as "this questionnaire has no sections", which
+    // is a claim about the questionnaire rather than about our failure to look at it.
+    vi.mocked(buildEvaluationStructure).mockRejectedValue(new Error('structure gone'));
+    const view = await buildScopedFindingView({
+      ...scoped({ targetKey: 'goal', proposedEdit: ADD }),
+      snapshot: null,
+    });
+    expect(view.destination).toBeNull();
+  });
+});

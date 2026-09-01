@@ -6,6 +6,8 @@ import {
   validateJudgeVerdict,
   coerceProposedEdit,
 } from '@/lib/app/questionnaire/evaluation';
+import { SECTION_TITLE_MAX } from '@/lib/app/questionnaire/types';
+import { createSectionSchema } from '@/lib/app/questionnaire/authoring/schemas';
 
 const validFinding = {
   targetKey: 'q_role',
@@ -221,5 +223,71 @@ describe('coerceProposedEdit — split_question', () => {
       coerceProposedEdit({ op: 'split_question', secondPrompt: 'How long have you been in it?' })
     ).toBeNull();
     expect(coerceProposedEdit({ op: 'split_question', prompt: 'a', secondPrompt: '' })).toBeNull();
+  });
+});
+
+describe('section titles fit every field that refers to them', () => {
+  /**
+   * A title exactly as long as authoring allows. The point of these tests is that this string can
+   * make the round trip: it can be created, so every schema that names it afterwards has to hold
+   * it. The caps used to be written independently, and a title of this length was creatable,
+   * referable as `sectionKey`, and NOT referable as `targetKey`.
+   */
+  const maxTitle = 'S'.repeat(SECTION_TITLE_MAX);
+
+  const base = {
+    severity: 'minor' as const,
+    proposedChange: 'Add a question on support.',
+    rationale: 'Gap against the goal.',
+  };
+
+  it('lets authoring create a title of exactly the maximum', () => {
+    expect(createSectionSchema.safeParse({ title: maxTitle }).success).toBe(true);
+  });
+
+  it('refuses one character more, so the reference caps below are never the binding limit', () => {
+    // The direction matters. Refusing at creation keeps an over-long title out of an unbounded
+    // Postgres column; refusing only at reference time means it is already persisted and the
+    // finding that mentions it silently degrades to prose.
+    expect(createSectionSchema.safeParse({ title: `${maxTitle}X` }).success).toBe(false);
+  });
+
+  it('accepts a maximal title as an add_question sectionKey', () => {
+    const result = validateJudgeVerdict({
+      score: 0.5,
+      findings: [
+        {
+          ...base,
+          targetKey: 'goal',
+          proposedEdit: {
+            op: 'add_question',
+            prompt: 'How supported did you feel?',
+            type: 'free_text',
+            sectionKey: maxTitle,
+          },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a maximal title inside a section: targetKey, prefix and all', () => {
+    // The regression this pins. `targetKey` carries `section:<title>`, so a flat cap shared with
+    // `sectionKey` left it eight characters short of the title it was supposed to address.
+    const result = validateJudgeVerdict({
+      score: 0.5,
+      findings: [{ ...base, targetKey: `section:${maxTitle}` }],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('still bounds a targetKey that is not a section reference', () => {
+    // The cap is a real bound, not a formality: it is derived from the title limit rather than
+    // removed, so an unbounded key still fails.
+    const result = validateJudgeVerdict({
+      score: 0.5,
+      findings: [{ ...base, targetKey: 'q_'.repeat(SECTION_TITLE_MAX) }],
+    });
+    expect(result.ok).toBe(false);
   });
 });

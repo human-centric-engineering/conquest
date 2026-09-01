@@ -410,6 +410,56 @@ describe('GET evaluations — detail', () => {
     expect(findFirstArg.where).toEqual({ id: 'run-1', versionId: 'v1' });
   });
 
+  it("carries the live section list and an add_question's destination through the route", async () => {
+    // Both are derived at read time inside `getEvaluationRunDetail`, so a wiring regression (the
+    // wrong structure passed in, the field dropped from the response) leaves every unit test on
+    // the pure resolver green while the review queue silently stops saying where a drafted
+    // question would land. `versionGraphRow` declares one section, so the default lands there.
+    //
+    // One row for both `findFirst` calls this route makes: `loadScopedVersion` reads the scoping
+    // fields and `buildEvaluationStructure` reads the graph. The suite's own `beforeEach` answers
+    // both with the scoping row alone, which would leave the structure section-less and prove
+    // nothing about the wiring.
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      ...scopedVersionRow(),
+      ...versionGraphRow(),
+    });
+    prismaMock.appQuestionnaireEvaluationRun.findFirst.mockResolvedValue(
+      persistedRunRow({
+        findings: [
+          {
+            id: 'f-1',
+            dimension: 'coverage',
+            ordinal: 0,
+            targetKey: 'goal',
+            severity: 'minor',
+            proposedChange: 'Ask about support.',
+            rationale: 'Gap.',
+            sourceQuote: null,
+            status: 'pending',
+            proposedEdit: {
+              op: 'add_question',
+              prompt: 'How supported did you feel?',
+              type: 'free_text',
+            },
+          },
+        ],
+      })
+    );
+
+    const res = await DETAIL(req({}, DETAIL_URL), ctx(DETAIL_PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // The picker's options, off the live structure rather than the run's snapshot.
+    expect(body.data.sectionTitles).toEqual(['Background']);
+    expect(body.data.findings[0].destination).toEqual({
+      sectionTitle: 'Background',
+      sectionPosition: 1,
+      origin: 'default',
+    });
+  });
+
   it('degrades a malformed stored dimensionSummary to an empty array', async () => {
     // A tampered/corrupt JSON blob must not throw — parseDimensionSummary degrades to [].
     prismaMock.appQuestionnaireEvaluationRun.findFirst.mockResolvedValue(

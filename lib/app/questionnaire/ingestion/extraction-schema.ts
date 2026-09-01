@@ -18,6 +18,7 @@ import {
   QUESTION_TYPES,
   AUDIENCE_EXPERTISE_LEVELS,
   AUDIENCE_SENSITIVITY_LEVELS,
+  SECTION_TITLE_MAX,
 } from '@/lib/app/questionnaire/types';
 import { CHANGE_TYPES, TARGET_ENTITY_TYPES } from '@/lib/app/questionnaire/ingestion/types';
 
@@ -39,7 +40,11 @@ export const audienceShapeSchema = z
 
 const extractedSectionSchema = z.object({
   ordinal: z.number().int().nonnegative(),
-  title: z.string().min(1),
+  // Bounded here, not merely where a title is later referenced: a heading longer than
+  // SECTION_TITLE_MAX is a paragraph the extractor mistook for one, and once persisted every
+  // downstream reference to it (a judge's `targetKey`, a prune's `beforeJson.title`) is stuck
+  // with a value it cannot carry. The retry prompt gets a named field to correct.
+  title: z.string().min(1).max(SECTION_TITLE_MAX),
   description: z.string().optional(),
 });
 

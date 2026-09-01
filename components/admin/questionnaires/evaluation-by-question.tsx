@@ -87,6 +87,8 @@ interface Props {
    * reached — see the note at its construction in `evaluation-run-detail`.
    */
   verdictByKey: Map<string, GroupActionSummary>;
+  /** Section titles on the live structure, passed straight through to the cards. */
+  sectionTitles: string[];
   /** The single expanded card's key; `null` when all are closed. */
   openKey: string | null;
   onToggle: (key: string) => void;
@@ -127,6 +129,7 @@ function GroupCard({
   runId,
   reconciledByKey,
   verdictByKey,
+  sectionTitles,
   onToggle,
   onUpdate,
 }: CardProps) {
@@ -268,6 +271,7 @@ function GroupCard({
                 versionId={versionId}
                 runId={runId}
                 lead="dimension"
+                sectionTitles={sectionTitles}
                 onUpdate={onUpdate}
               />
             ))}

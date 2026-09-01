@@ -19,7 +19,11 @@
 
 import { z } from 'zod';
 
-import { APP_QUESTIONNAIRE_STATUSES, QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import {
+  APP_QUESTIONNAIRE_STATUSES,
+  QUESTION_TYPES,
+  SECTION_TITLE_MAX,
+} from '@/lib/app/questionnaire/types';
 import { audienceShapeSchema } from '@/lib/app/questionnaire/ingestion/extraction-schema';
 
 /** A non-empty entity id (cuid). Kept loose — existence is checked against the DB. */
@@ -45,7 +49,7 @@ export const updateVersionStatusSchema = z.object({
 
 /** POST a new section. `ordinal` defaults to "append" (resolved in the route) when omitted. */
 export const createSectionSchema = z.object({
-  title: z.string().min(1),
+  title: z.string().min(1).max(SECTION_TITLE_MAX),
   description: z.string().min(1).nullable().optional(),
   ordinal: z.number().int().nonnegative().optional(),
 });
@@ -53,7 +57,7 @@ export const createSectionSchema = z.object({
 /** PATCH an existing section. At least one editable field required. */
 export const updateSectionSchema = z
   .object({
-    title: z.string().min(1).optional(),
+    title: z.string().min(1).max(SECTION_TITLE_MAX).optional(),
     description: z.string().min(1).nullable().optional(),
   })
   .refine((b) => b.title !== undefined || b.description !== undefined, {

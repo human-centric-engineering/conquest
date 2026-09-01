@@ -324,6 +324,7 @@ function makeEvaluationFindingView(
     sourceQuote: null,
     status: 'pending',
     proposedEdit: null,
+    destination: null,
     editedOverride: null,
     applyInstruction: null,
     decidedByUserId: null,
@@ -377,6 +378,7 @@ function makeEvaluationRunDetail(
     error: null,
     findings: [makeEvaluationFindingView()],
     reconciled: [],
+    sectionTitles: [],
     ...overrides,
   };
 }

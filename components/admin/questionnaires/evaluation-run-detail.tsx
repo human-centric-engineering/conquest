@@ -66,7 +66,7 @@ import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-sta
 import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
 import {
   FindingReviewCard,
-  whenSteersSettled,
+  whenCardWritesSettled,
 } from '@/components/admin/questionnaires/evaluation-finding-review';
 import { EvaluationRunHeadline } from '@/components/admin/questionnaires/evaluation-run-headline';
 import { EvaluationByQuestion } from '@/components/admin/questionnaires/evaluation-by-question';
@@ -290,7 +290,7 @@ export function EvaluationRunDetail({
       // finding before the PATCH committed and apply the judge's wording with the reviewer's
       // sentence discarded: the exact silent substitution the AI leg exists to prevent, and
       // invisible afterwards, since the result panel would report no steer at all.
-      await whenSteersSettled();
+      await whenCardWritesSettled();
 
       const res = await fetch(
         API.APP.QUESTIONNAIRES.versionEvaluationApply(questionnaireId, versionId, run.id),
@@ -761,6 +761,7 @@ export function EvaluationRunDetail({
           runId={run.id}
           reconciledByKey={reconciledByKey}
           verdictByKey={verdictByKey}
+          sectionTitles={runState.sectionTitles}
           openKey={openKey}
           onToggle={(key) => setOpenKey((prev) => (prev === key ? null : key))}
           onUpdate={handleUpdate}
@@ -820,6 +821,7 @@ export function EvaluationRunDetail({
                       questionnaireId={questionnaireId}
                       versionId={versionId}
                       runId={run.id}
+                      sectionTitles={runState.sectionTitles}
                       onUpdate={handleUpdate}
                     />
                   ))}

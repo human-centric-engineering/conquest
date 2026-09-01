@@ -1091,6 +1091,25 @@ export type HouseRulesSettings = {
  * The text bound also does useful authoring work — it is long enough for an instruction plus a
  * caveat, and short enough that "one rule per rule" is the path of least resistance.
  */
+/**
+ * Longest a section title may be, at every point one is CREATED.
+ *
+ * Chosen as a bound on mis-extraction rather than as a limit on authors: the longest section title
+ * in this codebase is 44 characters and the usual run is 20 to 45, so 200 is four to five times any
+ * genuine heading. A span that long is not a title an author wrote, it is a paragraph the extractor
+ * mistook for one, and the honest moment to refuse it is before it reaches the column.
+ *
+ * It exists because the caps around it were guarding a value nothing bounded. `AppQuestionnaire
+ * Section.title` is an unbounded Postgres `String`, and both creating schemas were `min(1)` with no
+ * ceiling, while the design-evaluation judge contract capped every REFERENCE to a title at 200. The
+ * reference side cannot be the constraint: a title that outgrows it is already persisted by then,
+ * and the finding that mentions it silently degrades to prose.
+ *
+ * The evaluation judge schema derives its own caps from this so the two can never disagree; see
+ * `evaluation/judge-schema.ts`, where `targetKey` must additionally hold the `section:` prefix.
+ */
+export const SECTION_TITLE_MAX = 200;
+
 export const MAX_HOUSE_RULES = 20;
 export const HOUSE_RULE_TEXT_MAX = 400;
 export const HOUSE_RULE_TRIGGER_MAX = 160;

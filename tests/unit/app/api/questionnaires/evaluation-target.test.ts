@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveFindingTarget } from '@/app/api/v1/app/questionnaires/_lib/evaluation-target';
-import type { VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
+import {
+  resolveAddDestination,
+  resolveFindingTarget,
+} from '@/app/api/v1/app/questionnaires/_lib/evaluation-target';
+import type { ProposedEdit, VersionStructureInput } from '@/lib/app/questionnaire/evaluation';
 
 /** A two-section structure so section membership and position both have something to prove. */
 function structure(overrides?: Partial<VersionStructureInput>): VersionStructureInput {
@@ -259,5 +262,101 @@ describe('resolveFindingTarget — routing reach', () => {
         topicLabel: null,
       });
     }
+  });
+});
+
+describe('resolveAddDestination', () => {
+  /** The coverage judge's shape: a gap targeted at `goal`, with a drafted question attached. */
+  function addOp(over: Partial<Extract<ProposedEdit, { op: 'add_question' }>> = {}): ProposedEdit {
+    return {
+      op: 'add_question',
+      prompt: 'How supported did you feel?',
+      type: 'free_text',
+      ...over,
+    };
+  }
+
+  it('names the section the judge chose, with its position', () => {
+    const dest = resolveAddDestination(addOp({ sectionKey: 'Background' }), 'goal', structure());
+    expect(dest).toEqual({ sectionTitle: 'Background', sectionPosition: 1, origin: 'chosen' });
+  });
+
+  it('reports the LAST section, flagged as a default, when the judge named none', () => {
+    // The whole point of the field. `applyAddQuestion` appends to the last section when nothing
+    // names one, and before this the reviewer had no way to know that: the card previewed the
+    // prompt, the type and the guidelines and said nothing about where it would land.
+    const dest = resolveAddDestination(addOp(), 'goal', structure());
+    expect(dest).toEqual({ sectionTitle: 'Experience', sectionPosition: 2, origin: 'default' });
+  });
+
+  it('honours a section-targeted finding when the op names no section', () => {
+    // The second of apply's three rules (`resolveTargetSectionTitle`). Reading only `sectionKey`
+    // here would call this a default and tell the reviewer it lands in "Experience".
+    const dest = resolveAddDestination(addOp(), 'section:Background', structure());
+    expect(dest).toEqual({ sectionTitle: 'Background', sectionPosition: 1, origin: 'chosen' });
+  });
+
+  it('prefers the op over the target when both name a section', () => {
+    // Apply checks `sectionKey` first, so anything else here would be a card that promises one
+    // destination and writes into another.
+    const dest = resolveAddDestination(
+      addOp({ sectionKey: 'Experience' }),
+      'section:Background',
+      structure()
+    );
+    expect(dest?.sectionTitle).toBe('Experience');
+  });
+
+  it('keeps the name but drops the position when the section is gone', () => {
+    // Also the condition `deriveFindingState` reports as stale, so the card is already blocking
+    // Apply. Naming it anyway is what tells the reviewer WHICH section went missing.
+    const dest = resolveAddDestination(addOp({ sectionKey: 'Deleted' }), 'goal', structure());
+    expect(dest).toEqual({ sectionTitle: 'Deleted', sectionPosition: null, origin: 'chosen' });
+  });
+
+  it('drops the position when the title matches two sections', () => {
+    // Apply refuses an ambiguous title (`op_invalid`), so numbering the first of them would show a
+    // certainty the apply engine itself does not have.
+    const twice = structure({
+      sections: [
+        { title: 'Background', questions: [] },
+        { title: 'Background', questions: [] },
+      ],
+    });
+    const dest = resolveAddDestination(addOp({ sectionKey: 'Background' }), 'goal', twice);
+    expect(dest).toEqual({ sectionTitle: 'Background', sectionPosition: null, origin: 'chosen' });
+  });
+
+  it('says there is nowhere to put it when the version has no sections', () => {
+    // Apply answers `needs_authoring`. Reporting a default section here would name one that does
+    // not exist.
+    const dest = resolveAddDestination(addOp(), 'goal', structure({ sections: [] }));
+    expect(dest).toEqual({ sectionTitle: null, sectionPosition: null, origin: 'none' });
+  });
+
+  it('still says nowhere when the version has no sections but the judge named one', () => {
+    // Apply calls this `target_gone` rather than `needs_authoring`, but both are refusals and
+    // neither is a place. Naming the judge's dead section would offer the reviewer a destination
+    // that cannot exist on a questionnaire with no sections at all.
+    const dest = resolveAddDestination(
+      addOp({ sectionKey: 'Background' }),
+      'goal',
+      structure({ sections: [] })
+    );
+    expect(dest).toEqual({ sectionTitle: null, sectionPosition: null, origin: 'none' });
+  });
+
+  it('says NOTHING, rather than "no sections", when the structure could not be loaded', () => {
+    // Not `origin: 'none'`. The card renders that as "This questionnaire has no sections", which
+    // is a claim about the questionnaire; a failed load is a fact about us. `loadCurrentStructure
+    // Safe` returns null on any DB hiccup, so this is a live path, not a theoretical one.
+    expect(resolveAddDestination(addOp(), 'goal', null)).toBeNull();
+  });
+
+  it('is null for any other op, and for a prose-only finding', () => {
+    // A destination on a `replace_prompt` would render a placement sentence on a card that creates
+    // nothing; every other op inherits its position from the question it acts on.
+    expect(resolveAddDestination({ op: 'delete_question' }, 'q_role', structure())).toBeNull();
+    expect(resolveAddDestination(null, 'goal', structure())).toBeNull();
   });
 });

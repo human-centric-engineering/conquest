@@ -609,6 +609,86 @@ gone/ambiguous title and `needs_authoring` only when the version has no sections
 suffixed against the version's keys; then create the slot + stamp the finding applied in one
 transaction. Same fork-lineage convergence as the in-place ops.
 
+### Where the question would go, said before it goes there
+
+The section resolution above is three rules deep, and until F5.3's placement pass **none of it
+reached the reviewer**. The card previewed the drafted prompt, its type and its guidelines, and the
+sentence under the button read "Adds this as a new Free text question." A coverage gap targets
+`goal`, so nothing on the finding named a section either. Accepting a suggestion therefore meant
+accepting a placement nobody had seen. And when the judge named no section, "the last section" is
+a placement nobody had _chosen_.
+
+It matters more than tidiness. With [Conditional Topics](./conditional-topics.md) on, the section a
+question lands in is what decides which respondents are ever asked it. The finding view already
+carries `routingReach` for existing targets on exactly that reasoning; a question being added had no
+equivalent.
+
+Three parts:
+
+1. **`resolveAddDestination`** (`_lib/evaluation-target.ts`) mirrors `applyAddQuestion`'s rules and
+   returns `{ sectionTitle, sectionPosition, origin }` on the finding view, derived at read time
+   against the **live** structure like `resolveFindingTarget` beside it. `origin` is the load-bearing
+   field: `chosen` (someone picked it), `default` (apply will append to the last section), `none`
+   (no sections exist, so apply answers `needs_authoring`). A named title that no longer resolves to
+   exactly one section keeps its name and loses its position, which is the same condition
+   `deriveFindingState` already reports as `stale`.
+
+   The mirroring is the point. The card is telling a reviewer what a click is about to do, so any
+   drift between the two is a lie told at the moment it matters most. Two limits on it are worth
+   knowing. A structure that **could not be loaded** returns `null`, not `origin: 'none'`: the card
+   renders `none` as "this questionnaire has no sections", which is a claim about the
+   questionnaire, whereas a failed load is a fact about us. And `current` is always built from the
+   URL's version while apply writes into the run's reused review draft once one has been forked, so
+   the two can drift if someone edits sections on that draft between the read and the apply. No op
+   in the set mutates sections, so they agree in practice, and the write stays safe either way
+   because `validateSectionTarget` re-checks live state. The sibling `stale`/`applicable` fields
+   inherit the same seam.
+
+2. **The card says it**, in the draft block ("Goes into “Background” (section 2)" / "No section was
+   suggested, so it would go at the end of “Wrap-up”") and again in `effectOf` under the button,
+   which is the last thing read before the click.
+
+   Tense follows the finding. Once it is terminal a `chosen` destination becomes "Went into
+   “Background”", which stays true because `chosen` comes from the op's own `sectionKey` and that
+   is the title apply resolved against. A `default` says **nothing** at all once terminal: it is
+   re-derived against the structure as it is now, so it would name whichever section is last today
+   rather than where the question actually went. Nothing records the real answer, and silence beats
+   a confident wrong one.
+
+3. **The reviewer can redirect it.** A `<select>` of the run's `sectionTitles` writes an
+   `editedOverride` through the existing `edit` action, because an admin-edited op is already what
+   takes precedence at apply. Redirecting is deliberately **not** a decision: choosing where a
+   question would go is not agreeing that it should exist. The picker is hidden when there is one
+   section or none, and a since-deleted destination stays selectable so the reviewer can see which
+   section went missing rather than being shown a live one nobody chose.
+
+   The redirect joins `inFlightCardWrites` (formerly the steer-only `inFlightSteerSaves`), which
+   the batch bar drains through `whenCardWritesSettled()` and a decision on the card sequences
+   behind. This is the steer race with a worse ending: the redirect stores the very override the
+   batch reads to decide **where** to create the question, so an unregistered write let a reviewer
+   who moved a question and immediately pressed "Apply accepted changes" have it created in the
+   section they had just moved it out of, and then stamped applied. The steer race loses a
+   sentence; this one loses the placement, and a terminal finding offers no second chance.
+
+`sectionTitles` lives on `EvaluationRunDetail`, not on each finding: it is the same list for all of
+them, and a forty-finding run should not carry forty copies of it.
+
+**One cap, at the point of creation.** Section titles were bounded nowhere they are made (an
+unbounded Postgres `String`, `min(1)` in both the ingest and authoring schemas) and capped at 200
+everywhere they are referenced, which is the wrong way round: by the time a reference refuses a
+title it is already persisted, and the finding naming it degrades to prose. `SECTION_TITLE_MAX`
+(`questionnaire/types.ts`) now bounds it where it is created, and the judge contract derives its
+caps from that. The derivation matters because a `targetKey` addressing a section is
+`section:<title>`: at a flat 200 it held eight fewer characters than `sectionKey` did for the same
+string, so a 195-character title was creatable, referable one way and not the other. 200 is four to
+five times any real heading (the longest in this codebase is 44 characters), so it bounds
+mis-extraction rather than authors.
+
+The coverage judge's prompt was also changed from `"<existing section title, optional>"` to an
+instruction to **always** set `sectionKey` when the questionnaire has sections, and it is told the
+consequence of omitting it (the silent append to the last section) rather than just the rule. The
+judge has just read the whole structure, so it is the reader best placed to say where a gap belongs.
+
 The judge is prompted to attach a concise `snake_case` `key` and to pick a `type` that fits the
 answer (free_text for open-ended, likert only for fixed scales, etc.) rather than defaulting to
 likert. Independently, the shared key deriver (`slugifyKey`) now drops grammatical stopwords and

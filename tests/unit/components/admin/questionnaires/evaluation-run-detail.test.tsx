@@ -44,6 +44,7 @@ function finding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingVi
     sourceQuote: null,
     status: 'pending',
     proposedEdit: { op: 'delete_question' },
+    destination: null,
     editedOverride: null,
     applyInstruction: null,
     decidedByUserId: null,
@@ -56,7 +57,10 @@ function finding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingVi
   };
 }
 
-function run(findings: EvaluationFindingView[]): EvaluationRunDetailView {
+function run(
+  findings: EvaluationFindingView[],
+  sectionTitles: string[] = []
+): EvaluationRunDetailView {
   return {
     id: 'run1',
     status: 'completed',
@@ -68,6 +72,7 @@ function run(findings: EvaluationFindingView[]): EvaluationRunDetailView {
       { dimension: 'duplicates', score: 0.8, findingCount: findings.length, diagnostic: null },
     ],
     reconciled: [],
+    sectionTitles,
     triggeredByUserId: null,
     startedAt: '2026-06-05T00:00:00.000Z',
     completedAt: '2026-06-05T00:00:01.000Z',
@@ -82,11 +87,12 @@ function run(findings: EvaluationFindingView[]): EvaluationRunDetailView {
 async function renderQueue(
   findings: EvaluationFindingView[],
   canApply = true,
-  dataSlotsAvailable = false
+  dataSlotsAvailable = false,
+  sectionTitles: string[] = []
 ) {
   const result = render(
     <EvaluationRunDetail
-      run={run(findings)}
+      run={run(findings, sectionTitles)}
       questionnaireId="qn1"
       versionId="v1"
       canApply={canApply}
@@ -495,6 +501,200 @@ describe('EvaluationRunDetail review queue', () => {
     await renderQueue([addQuestionFinding()]);
     expect(screen.getByText(/Suggested new question · Free text/)).toBeInTheDocument();
     expect(screen.getByText('How big is your team?')).toBeInTheDocument();
+  });
+
+  describe('where a drafted question would go', () => {
+    // The coverage judge targets a gap at `goal`, so nothing on the finding names a section, and
+    // `applyAddQuestion` falls back to appending to the LAST one. Before this the card previewed
+    // the prompt, the type and the guidelines and said nothing about the placement at all. The
+    // reviewer accepted a question without being told where it landed.
+
+    const SECTIONS = ['Background', 'Experience', 'Wrap-up'];
+
+    function withDestination(
+      over: Partial<EvaluationFindingView['destination'] & object>,
+      finding: Partial<EvaluationFindingView> = {}
+    ) {
+      return addQuestionFinding({
+        destination: {
+          sectionTitle: SECTIONS[SECTIONS.length - 1],
+          sectionPosition: SECTIONS.length,
+          origin: 'default',
+          ...over,
+        },
+        ...finding,
+      });
+    }
+
+    it('names the section the judge chose, and says so under the button too', async () => {
+      await renderQueue(
+        [withDestination({ sectionTitle: 'Background', sectionPosition: 1, origin: 'chosen' })],
+        true,
+        false,
+        SECTIONS
+      );
+      expect(screen.getByText('Goes into “Background” (section 1).')).toBeInTheDocument();
+      // The sentence under Accept is the last thing read before the click that writes it. It
+      // embeds `effectOf` mid-sentence ("Applying the run then adds this as a new…"), so the
+      // match is case-insensitive on the fragment rather than on the standalone capital.
+      expect(
+        screen.getByText(/adds this as a new Free text question in “Background”\./i)
+      ).toBeInTheDocument();
+    });
+
+    it('says out loud when nothing chose the section', async () => {
+      // The case the whole field exists for. "Adds this as a new Free text question." was true and
+      // told the reviewer nothing about the section it was about to be appended to.
+      await renderQueue([withDestination({})], true, false, SECTIONS);
+      expect(
+        screen.getByText(
+          'No section was suggested, so it would go at the end of “Wrap-up” (section 3).'
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/adds this as a new Free text question at the end of “Wrap-up”\./i)
+      ).toBeInTheDocument();
+    });
+
+    it('tells the reviewer to author a section when there is nowhere to put it', async () => {
+      // Apply answers `needs_authoring` here, and that reason never reached the card.
+      await renderQueue(
+        [withDestination({ sectionTitle: null, sectionPosition: null, origin: 'none' })],
+        true,
+        false,
+        []
+      );
+      expect(screen.getByText(/no sections, so there is nowhere to put it/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Section for the new question')).not.toBeInTheDocument();
+    });
+
+    it('lets the reviewer send it somewhere else, without deciding the finding', async () => {
+      // Redirect is not agreement. It rides the existing `edit` action, because an admin-edited op
+      // is already what takes precedence at apply.
+      const user = userEvent.setup();
+      await renderQueue([withDestination({})], true, false, SECTIONS);
+
+      const moved = withDestination({
+        sectionTitle: 'Experience',
+        sectionPosition: 2,
+        origin: 'chosen',
+      });
+      mockFetchOnce(moved);
+      await user.selectOptions(screen.getByLabelText('Section for the new question'), 'Experience');
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const [, opts] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(String(opts.body))).toEqual({
+        action: 'edit',
+        // The WHOLE op is resent with only the section swapped: dropping the prompt or the type
+        // here would apply a different question from the one the reviewer read.
+        editedOverride: {
+          op: 'add_question',
+          prompt: 'How big is your team?',
+          type: 'free_text',
+          sectionKey: 'Experience',
+        },
+      });
+      // Still undecided: the reviewer moved it, they did not agree to it.
+      expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
+    });
+
+    it('does not write when the reviewer re-picks the section it is already going to', async () => {
+      // A change event that changes nothing. Without the guard this fires a PATCH that stamps
+      // `decidedByUserId` and an `editedOverride` identical in effect to the judge's draft, so the
+      // finding reads as reviewer-edited on a card where the reviewer edited nothing.
+      //
+      // Deliberately the DEFAULTED case, which is the one that can go wrong: the select shows the
+      // last section while the op names none, so a guard comparing to `addOp.sectionKey` would see
+      // 'Wrap-up' against undefined and write.
+      const user = userEvent.setup();
+      await renderQueue([withDestination({})], true, false, SECTIONS);
+
+      await user.selectOptions(screen.getByLabelText('Section for the new question'), 'Wrap-up');
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a failed redirect instead of appearing to have moved it', async () => {
+      // The select shows the new section the instant it is clicked, so a silently swallowed error
+      // leaves the reviewer looking at a destination the server never accepted.
+      const user = userEvent.setup();
+      await renderQueue([withDestination({})], true, false, SECTIONS);
+
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          success: false,
+          error: { code: 'CONFLICT', message: 'Finding already applied' },
+        }),
+      });
+      await user.selectOptions(screen.getByLabelText('Section for the new question'), 'Background');
+
+      expect(await screen.findByText(/Finding already applied/)).toBeInTheDocument();
+    });
+
+    it('offers no picker when there is only one section to choose', async () => {
+      await renderQueue(
+        [withDestination({ sectionTitle: 'Background', sectionPosition: 1 })],
+        true,
+        false,
+        ['Background']
+      );
+      expect(screen.getByText(/at the end of “Background” \(section 1\)\./)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Section for the new question')).not.toBeInTheDocument();
+    });
+
+    it('keeps a since-deleted section selectable so the reviewer sees what was chosen', async () => {
+      // Naming it is the point: the finding is stale and Apply is blocked, and "which section went
+      // missing" is the fact that tells the reviewer what to do about it. Falling through to the
+      // first live section would show a placement nobody chose.
+      await renderQueue(
+        [withDestination({ sectionTitle: 'Deleted', sectionPosition: null, origin: 'chosen' })],
+        true,
+        false,
+        SECTIONS
+      );
+      expect(screen.getByText('Goes into “Deleted”.')).toBeInTheDocument();
+      // Asserted through the option's own `selected` rather than the element's `value`, so the
+      // check survives the repo's no-assertion lint rule without a cast.
+      const picker = screen.getByLabelText<HTMLSelectElement>('Section for the new question');
+      expect(within(picker).getByRole('option', { name: 'Deleted (missing)' })).toHaveProperty(
+        'selected',
+        true
+      );
+    });
+
+    it('speaks in the past tense once the question has been added', async () => {
+      // "would go" on an applied finding promises a future that already happened.
+      await renderQueue(
+        [
+          withDestination(
+            { sectionTitle: 'Background', sectionPosition: 1, origin: 'chosen' },
+            { status: 'applied' }
+          ),
+        ],
+        true,
+        false,
+        SECTIONS
+      );
+      expect(screen.getByText('Went into “Background” (section 1).')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Section for the new question')).not.toBeInTheDocument();
+    });
+
+    it('says nothing about a defaulted section once the finding is terminal', async () => {
+      // A default is re-derived against the structure as it is NOW, so after the fact it names
+      // whichever section is last today, not where the question actually went. Nothing recorded
+      // the real answer, so the honest output is silence.
+      await renderQueue([withDestination({}, { status: 'applied' })], true, false, SECTIONS);
+      expect(screen.queryByText(/would go at the end of/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Went into/)).not.toBeInTheDocument();
+    });
+
+    it('says nothing about placement on an op that creates nothing', async () => {
+      await renderQueue([finding()], true, false, SECTIONS);
+      expect(screen.queryByText(/Goes into/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Section for the new question')).not.toBeInTheDocument();
+    });
   });
 
   it('filters findings by status', async () => {
@@ -1542,6 +1742,65 @@ describe('EvaluationRunDetail batch apply', () => {
     expect(screen.getByText(/narrow the question instead of deleting it/)).toBeInTheDocument();
     // Still accepted: fixing the topic and applying again picks it up without re-triaging.
     expect(screen.getByText(/\(still accepted\)\./)).toBeInTheDocument();
+  });
+
+  it('waits for an in-flight section redirect before applying the batch', async () => {
+    // The redirect stores the `editedOverride` the batch reads to decide WHERE to create the
+    // question. Unregistered, pressing Apply in the same breath as moving a question let the batch
+    // POST overtake the PATCH, so the server read the judge's original op and created the question
+    // in the section the reviewer had just moved it out of, then stamped the finding applied.
+    // The steer save has the same race and loses a sentence; this one loses the placement, and a
+    // terminal finding offers no second chance.
+    let releaseRedirect: (v: unknown) => void = () => {};
+    const redirectLanded = new Promise((resolve) => {
+      releaseRedirect = resolve;
+    });
+
+    const moved = finding({
+      id: 'f1',
+      status: 'accepted',
+      targetKey: 'goal',
+      target: null,
+      proposedEdit: {
+        op: 'add_question',
+        prompt: 'How supported did you feel?',
+        type: 'free_text',
+      },
+      destination: { sectionTitle: 'Wrap-up', sectionPosition: 3, origin: 'default' },
+    });
+    render(
+      <EvaluationRunDetail
+        run={run([moved], ['Background', 'Experience', 'Wrap-up'])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+      />
+    );
+    // Judge view shows the card without a collapse step, as the other card tests do.
+    await switchToJudgeView();
+
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    // The redirect PATCH hangs until this test lets it finish.
+    fetchMock.mockReturnValueOnce(redirectLanded);
+    await userEvent.selectOptions(
+      screen.getByLabelText('Section for the new question'),
+      'Background'
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 1 accepted change' }));
+
+    // One call so far: the PATCH. The batch must not have gone out yet.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][1].body)).toContain('"sectionKey":"Background"');
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: batchResponse() }),
+    });
+    releaseRedirect({ ok: true, json: async () => ({ success: true, data: moved }) });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/apply');
   });
 
   it('says nothing about instructions on a batch nobody steered', async () => {
