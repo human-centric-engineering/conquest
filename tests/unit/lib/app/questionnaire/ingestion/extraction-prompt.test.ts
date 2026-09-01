@@ -336,4 +336,69 @@ describe('editorial boundary — what ingest must NOT decide', () => {
     expect(prompt).toMatch(/Add a section to group loose questions/i);
     expect(prompt).toMatch(/Infer the questionnaire's overall goal/i);
   });
+
+  describe('material that is not a question', () => {
+    // A "Bot script:" line in a growth assessor document was extracted as a question. It is fluent
+    // first-person prose, so nothing about its SHAPE distinguishes it from a real prompt. The rule
+    // has to be about what a span asks for, and the prompt is the first of the two layers that
+    // catch it (the fidelity critic is the second, on the streaming path only).
+
+    it('tells the extractor that a sentence is not automatically a question', () => {
+      expect(prompt).toMatch(/Not every sentence-shaped span is a question/i);
+    });
+
+    it('names the forms, so the model recognises them rather than guessing', () => {
+      // Matched on the labels a document actually uses. Without the labels the rule is an
+      // abstraction the model has to instantiate for itself against the very span it misread.
+      expect(prompt).toMatch(/Bot script:/i);
+      expect(prompt).toMatch(/Facilitator:/i);
+      expect(prompt).toMatch(/transition/i);
+      expect(prompt).toMatch(/For office use only/i);
+    });
+
+    it('gives the answerability test rather than only a list to pattern-match', () => {
+      // The list cannot be exhaustive: the next document will label its script something else.
+      // The test is what generalises.
+      expect(prompt).toMatch(/could a respondent answer this span/i);
+    });
+
+    it('sends answering instructions to guidelines instead of dropping them entirely', () => {
+      // "Rate each statement below" is not a question, but it IS guidance the respondent needs.
+      // Pruning it outright would lose the instruction the author wrote.
+      expect(prompt).toMatch(/"guidelines"/);
+    });
+
+    it('requires a revertible prune_question record for each removal', () => {
+      // The removal has to be reviewable. A silent drop is the failure this whole change log exists
+      // to prevent.
+      expect(prompt).toMatch(/"prune_question" change with the removed text in "beforeJson"/i);
+    });
+
+    it('names the fields a prune must carry, not just "the removed content"', () => {
+      // "Put the removed content in beforeJson" is satisfied by a bare string or a {text: …}
+      // wrapper, and both read as obedient. The revert planner disagrees: `toNewQuestion`
+      // (extraction-review/planner.ts) returns null unless `beforeJson.prompt` is a string, so the
+      // row renders in the change log and Revert answers `missing_before_json`. Nothing fails until
+      // someone presses the button, which is why the prompt has to spell the shape out. The
+      // critic-side drop path builds the same shape by hand for the same reason.
+      expect(prompt).toMatch(/"beforeJson" must be an OBJECT/);
+      expect(prompt).toMatch(/never a bare string/i);
+      expect(prompt).toMatch(/"prompt", which is mandatory/);
+      // The section half of the same rule: `planPruneSection` restores from "title".
+      expect(prompt).toMatch(/pruned SECTION is "title"/);
+    });
+
+    it('denies source numbering as evidence that a span is a question', () => {
+      // Script lines are routinely numbered alongside the questions, and a numbered bullet is the
+      // single strongest false signal available to the extractor.
+      expect(prompt).toMatch(/numbering is not evidence/i);
+    });
+
+    it('keeps the conservative default, but stops it excusing an obvious script line', () => {
+      // The two rules meet head-on: "when unsure, KEEP" would otherwise be read as a licence to
+      // keep a span the model can plainly see asks for nothing.
+      expect(prompt).toMatch(/Conservative default/);
+      expect(prompt).toMatch(/tie-breaker for genuine doubt/i);
+    });
+  });
 });

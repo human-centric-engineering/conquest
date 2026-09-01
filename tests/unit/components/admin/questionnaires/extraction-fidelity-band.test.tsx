@@ -27,6 +27,9 @@ function view(over: Partial<VersionFidelityView> = {}): VersionFidelityView {
     unattributedPromptKeys: [],
     unattributedPromptCount: 0,
     disallowedEditCount: 0,
+    droppedNonQuestionKeys: [],
+    droppedNonQuestionCount: 0,
+    retainedCount: 22,
     fileName: 'instrument.docx',
     checkedAt: '2026-08-20T10:30:00.000Z',
     verifierUnavailable: false,
@@ -159,6 +162,201 @@ describe('ExtractionFidelityBand', () => {
     expect(
       screen.getByText(/has not been re-read against the document at all/i)
     ).toBeInTheDocument();
+  });
+
+  describe('spans removed for not being questions', () => {
+    it('says what was removed and where to get it back', () => {
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 1,
+            droppedNonQuestionCount: 1,
+            droppedNonQuestionKeys: ['bot_script'],
+          })}
+        />
+      );
+
+      expect(screen.getByText(/removed because it is not a question/i)).toBeInTheDocument();
+      // The route back matters more than the fact. Without it the admin knows something vanished
+      // and has no way to judge whether it should have.
+      expect(screen.getByText(/restored from there/i)).toBeInTheDocument();
+      expect(screen.getByText('bot_script')).toBeInTheDocument();
+    });
+
+    it('stops promising nothing was changed once something was deleted', () => {
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 1,
+            droppedNonQuestionCount: 1,
+            droppedNonQuestionKeys: ['bot_script'],
+          })}
+        />
+      );
+
+      expect(screen.queryByText(/Nothing here was blocked or changed/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/can be undone below/i)).toBeInTheDocument();
+    });
+
+    it('does not also count a removed question as one left unfaithful in the draft', () => {
+      // Three flagged, two of them deleted. "3 questions looked unfaithful ... they are saved
+      // exactly as first extracted" would be false about two of the three.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 3,
+            repairOutcome: 'repair_failed',
+            droppedNonQuestionCount: 2,
+            droppedNonQuestionKeys: ['bot_script', 'section_transition'],
+          })}
+        />
+      );
+
+      expect(screen.getByText(/1 question looked unfaithful/i)).toBeInTheDocument();
+      expect(screen.queryByText(/3 questions looked unfaithful/i)).not.toBeInTheDocument();
+    });
+
+    it('drops the repair line entirely when every flag was a removal', () => {
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 2,
+            droppedNonQuestionCount: 2,
+            droppedNonQuestionKeys: ['bot_script', 'section_transition'],
+          })}
+        />
+      );
+
+      expect(screen.queryByText(/looked unfaithful/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/2 lines were removed/i)).toBeInTheDocument();
+    });
+
+    it('does not badge a removed question in the go-and-re-read list', () => {
+      // It is already named above, and it is not there to re-read.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 2,
+            repairOutcome: 'repaired',
+            flagged: [
+              { key: 'bot_script', issue: 'not_a_question', detail: null },
+              { key: 'satisfaction', issue: 'type_mismatch', detail: null },
+            ],
+            droppedNonQuestionCount: 1,
+            droppedNonQuestionKeys: ['bot_script'],
+          })}
+        />
+      );
+
+      expect(screen.getAllByText('bot_script')).toHaveLength(1);
+      expect(screen.getByText('satisfaction')).toBeInTheDocument();
+    });
+  });
+
+  describe('the count the questionnaire actually holds', () => {
+    it('names both the extracted count and what survived, when they differ', () => {
+      // The critic compared 12 against the document; the editor lists 9. Quoting only the first
+      // leaves the admin holding a number that describes nothing they can see.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            coverage: { sourceQuestionCount: 20, assessment: 'missing_questions' },
+            totalCount: 12,
+            retainedCount: 9,
+            flaggedCount: 3,
+            droppedNonQuestionCount: 3,
+            droppedNonQuestionKeys: ['bot_script', 'transition', 'how_to_answer'],
+          })}
+        />
+      );
+
+      expect(screen.getByText(/but only 12 were extracted/i)).toBeInTheDocument();
+      expect(screen.getByText(/now holds 9 questions/i)).toBeInTheDocument();
+    });
+
+    it('says nothing extra when the count never moved', () => {
+      // The overwhelming majority of ingests. A clause repeating the number just said is noise.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            coverage: { sourceQuestionCount: 20, assessment: 'missing_questions' },
+            totalCount: 12,
+            retainedCount: 12,
+          })}
+        />
+      );
+
+      expect(screen.getByText(/but only 12 were extracted/i)).toBeInTheDocument();
+      expect(screen.queryByText(/now holds/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('a removal the ceiling refused', () => {
+    it('says the removal was considered and abandoned, rather than nothing at all', () => {
+      // Four flagged as script on a 12-question document is past the ceiling, so nothing is
+      // dropped. Before this the panel said only "4 questions looked unfaithful to the document",
+      // and the abandoned removal lived in a log line no admin reads.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 4,
+            totalCount: 12,
+            retainedCount: 12,
+            flagged: [
+              { key: 'a', issue: 'not_a_question', detail: null },
+              { key: 'b', issue: 'not_a_question', detail: null },
+              { key: 'c', issue: 'not_a_question', detail: null },
+              { key: 'd', issue: 'not_a_question', detail: null },
+            ],
+            droppedNonQuestionCount: 0,
+            droppedNonQuestionKeys: [],
+          })}
+        />
+      );
+
+      expect(screen.getByText(/4 lines looked like interviewer script/i)).toBeInTheDocument();
+      expect(screen.getByText(/so none were removed/i)).toBeInTheDocument();
+      // They are still there, so the flagged badges must still name them to go and re-read.
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+
+    it('does not name a number it cannot stand behind when the snapshot was capped', () => {
+      // A long questionnaire's verdict snapshot is truncated, so the visible list understates the
+      // count. Speaking the short number would tell the admin the critic objected to less than it
+      // did, which is the wrong direction to be wrong about a removal.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 40,
+            totalCount: 140,
+            retainedCount: 140,
+            flagged: [{ key: 'a', issue: 'not_a_question', detail: null }],
+            droppedNonQuestionCount: 0,
+            droppedNonQuestionKeys: [],
+          })}
+        />
+      );
+
+      expect(screen.getByText(/Some lines looked like interviewer script/i)).toBeInTheDocument();
+      expect(screen.queryByText(/^1 line looked/i)).not.toBeInTheDocument();
+    });
+
+    it('stays quiet when the removal actually happened', () => {
+      // Mutually exclusive with the removal line: saying both would report one event twice.
+      render(
+        <ExtractionFidelityBand
+          fidelity={view({
+            flaggedCount: 1,
+            droppedNonQuestionCount: 1,
+            droppedNonQuestionKeys: ['bot_script'],
+            flagged: [{ key: 'bot_script', issue: 'not_a_question', detail: null }],
+          })}
+        />
+      );
+
+      expect(screen.queryByText(/too many to remove safely/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/removed because it is not a question/i)).toBeInTheDocument();
+    });
   });
 
   it('stays silent for a disallowed edit alone — a build signal with no admin action', () => {

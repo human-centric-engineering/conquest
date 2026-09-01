@@ -112,6 +112,71 @@ prompt (a merged matrix stem is not a quote of anything), and a repair `correct`
 replaces the whole question but records only its type/config, so a prompt the scales-and-matrix
 specialist changed on the way past is unattributed for exactly the same reason.
 
+## Not everything sentence-shaped is a question
+
+A questionnaire document almost always carries material written for whoever **runs** the interview
+rather than for the person answering it. A Merlin growth assessor document contained this, and it
+was ingested as a question:
+
+> Bot script: "That's useful. Based on what you've said I want to go deeper on [named sections].
+> I'll ask some short scored statements — quick answers are fine, first instinct is usually right."
+
+Nothing about its shape marks it out. It is fluent, first-person, sentence-length, and it sits in
+the document among the questions. The extractor had no rule that distinguished it from a prompt, so
+it became one, and every downstream stage treated it as a question the author had written: it was
+asked in conversation, it took a data slot, and it went into the report.
+
+The rule is not about shape. It is about what the span **asks for**:
+
+> Could a respondent answer this, and would their answer be data the questionnaire wants?
+
+The recognisable forms, all of which fail that test:
+
+| Form                               | Example                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Interviewer or bot script          | `Bot script: "That's useful. Based on what you've said…"`               |
+| Transition / framing               | "We'll now move on to the next section", "This should take ten minutes" |
+| An instruction about how to answer | "Quick answers are fine, first instinct is usually right"               |
+| A note aimed at the operator       | "Score 4 or above triggers a follow-up call", "For office use only"     |
+
+An instruction that sits above real questions is **answering guidance**, not rubbish: the extractor
+is told to attach it to those questions as `guidelines` rather than emit it as a question or throw
+it away.
+
+### Two layers, because one of them does not run everywhere
+
+1. **The extractor prompt** (`ingestion/extraction-prompt.ts`) states the rule and the test, names
+   the forms, and requires a revertible `prune_question` change for each removal. This runs on
+   **every** ingest path, streaming and non-streaming alike, and it is the main line of defence.
+   It also spells out the **field names** `beforeJson` must carry, which "put the removed content
+   in `beforeJson`" does not: `planPruneQuestion` restores through `toNewQuestion`, which returns
+   null unless `beforeJson.prompt` is a string (a section needs `title`). A bare string or a
+   `{ text: … }` wrapper are both obedient readings of the looser instruction, and both produce a
+   row that renders in the change log and answers `missing_before_json` when someone presses
+   revert. Nothing fails until that day, which is why the shape is stated rather than implied.
+2. **The fidelity critic** (`ingestion/verify-prompt.ts`) has a `not_a_question` issue for what the
+   extractor let through. This runs on the **streaming** paths only, which is what the admin UI
+   uses. See [the drop step](#streaming-ingest--the-verify--repair-pass) below.
+
+### What the critic must not use it for
+
+`not_a_question` is the only verdict in the pipeline that **deletes**, so its rubric spends as much
+space on what it must not flag as on what it must:
+
+- **A statement the respondent is meant to rate.** "My manager gives me useful feedback" asks
+  nothing and carries no question mark, yet paired with a scale it is exactly how a scored
+  instrument is written. Flagging that family would empty a whole psychometric questionnaire.
+- **A terse prompt.** "Job title", "Years in role". Terse is not the same as unanswerable.
+- **A question the critic thinks is weak, redundant, or badly placed.** This is the dangerous
+  misreading, because "cannot justify its place in a questionnaire" slides easily from "asks for
+  nothing" into "I would not have asked this". The second deletes questions the document really did
+  ask. Judging whether a question earns its place belongs to an author reviewing the draft, and to
+  the judge panel ([design evaluation](./design-evaluation.md)), never to ingest.
+
+The rubric also tells the critic that this verdict removes rather than re-reads, and to say `ok`
+whenever it is unsure. Leaving a script line for an author to delete costs one click; deleting a
+real question costs a question nobody knows is missing.
+
 ## The endpoint
 
 `POST /api/v1/app/questionnaires` — multipart upload of one questionnaire
@@ -281,15 +346,70 @@ The orchestrator **always** inserts a critic + repair pass between extract and c
    once over all questions + the source. It returns per-question verdicts (`ok` / `suspect`
    - an `issue`) and any detected rating-grid spans. Flags only; never rewrites. Small
      (flags-only) output, so one call stays cheap even for a long questionnaire.
-2. **Repair** — only when questions are flagged (and ≤ `REPAIR_FLAG_CEILING = 20`), dispatch
-   `app_repair_questions` (the Scales & Matrix Repair Specialist) over the **flagged subset
-   only**. It re-reads each source span and returns corrected questions (`action: 'correct'`
-   replaces in place; `action: 'merge'` collapses mis-split rows into one matrix).
-3. **Merge guard (`mergeRepairs`)** — the "never worse" core: a `correct` is accepted only
+2. **Drop (`dropNonQuestions`)** — the flags are split by what they ask for. A
+   `not_a_question` verdict says the span cannot be answered at all, and no answer type repairs
+   that, so the orchestrator removes the question itself and never sends it to the specialist.
+   Deterministic once the verdicts are in: no second model call. Each removal files a revertible
+   `prune_question` change carrying the whole question, in the shape `planPruneQuestion` reads back
+   (`prompt`, `type`, `typeConfig`, `guidelines`, `rationale`, `required`, `sectionOrdinal`,
+   `sectionTitle`), so the change log shows what went and F2.3 puts it back. Three guards, because
+   this is the only path that deletes:
+   - **A ceiling** of `max(3, floor(total × 0.25))`. Past it **nothing** is dropped and the run is
+     logged. A critic calling a quarter of an instrument "script" has misread it, and losing a
+     quarter of a questionnaire to that misreading is far worse than shipping script lines an
+     author would delete in seconds. The floor of 3 exists because the fraction alone is useless on
+     a short document: a handful is always allowed, a proportion governs everything larger.
+   - **Never empty the questionnaire.** A version with no questions cannot be launched and gives
+     the admin nothing to review.
+   - **Sections are left alone.** A section whose only member was script becomes empty rather than
+     pruned: an empty section is visible and one click to delete, whereas removing a section the
+     author expected to see is the more expensive mistake, and it is a separate editorial decision.
+3. **Repair** — only for the flags that are **not** `not_a_question` (and ≤
+   `REPAIR_FLAG_CEILING = 20`), dispatch `app_repair_questions` (the Scales & Matrix Repair
+   Specialist) over the **flagged subset only**. It re-reads each source span and returns corrected
+   questions (`action: 'correct'` replaces in place; `action: 'merge'` collapses mis-split rows into
+   one matrix).
+4. **Merge guard (`mergeRepairs`)** — the "never worse" core: a `correct` is accepted only
    if it keeps the key and its config passes the **tight write schema**; a `merge` only if
    it yields a valid `matrix` from ≥2 originals. Rejected repairs leave the original
    untouched. Accepted repairs append revertible `infer_type` / `augment_question` /
    `merge_questions` change intents. Coherence is then re-checked after the merge.
+
+Removals are reported on the `extraction_verify` provenance row as `droppedNonQuestionCount` +
+`droppedNonQuestionKeys`, and the fidelity band on the change-log surface names them first. It is
+the only finding on that panel about content that is **not** in the editor, so an admin comparing
+the draft against the document is told what they will not find rather than left to spot an absence.
+`flaggedCount` still counts every `suspect` verdict, including the removed ones, because that is the
+honest count of what the critic objected to; the band subtracts the removals from the repair line so
+a deleted question is not also reported as one "saved exactly as first extracted".
+
+Two counts, not one. `totalCount` is how many questions the critic was **given** to check, and the
+coverage assessment is an arithmetic statement about that set, so it has to keep quoting that
+number. `retainedCount` is how many the persisted version actually **holds**, counted off the final
+extraction after both the drop and the repair merge. They were the same number until a stage
+between the check and the persist could change the count, and two now can: a drop removes
+questions, and a `merge` repair collapses mis-split rows into one matrix. It is stored rather than
+derived by subtracting the drops, because subtraction is only right for the drop; a run that merged
+four rows and removed nothing would report four questions the version does not have. The coverage
+line names both, so an admin is never handed a count that describes nothing they can see:
+
+> The document looks like it contains 20 questions, but only 12 were extracted. The questionnaire
+> now holds 9 questions, after the changes below.
+
+`retainedCount` is omitted from the row when it equals `totalCount`, and a row that omits it reads
+back as `totalCount` rather than zero. A legacy row written before the field existed retained
+everything it checked, and reporting zero would tell an admin the questionnaire is empty.
+
+### When the ceiling refuses the removal
+
+Past the ceiling nothing is dropped, and that used to reach the admin as an ordinary "N questions
+looked unfaithful to the document" line, which is true and says nothing about the removal that was
+considered and abandoned. The band now says so directly, and it is mutually exclusive with the
+removal line above: it renders only when the critic flagged `not_a_question` and **nothing** was
+dropped. The count is read off the verdict snapshot rather than stored, which keeps it a
+presentation decision; because that snapshot is capped on a long questionnaire, the number is spoken
+only when the list is demonstrably whole and the line says "Some lines" otherwise. Understating how
+much the critic objected to is the wrong way to be wrong about a deletion.
 
 **Fail-soft throughout:** a missing/failing verifier or repair agent, a repair that doesn't
 validate, or > 20 flags (systemic) all fall back to persisting the raw extraction — the

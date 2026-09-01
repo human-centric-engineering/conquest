@@ -29,6 +29,8 @@ function cleanInput(overrides: Partial<FidelityDetailInput> = {}): FidelityDetai
     coverage: null,
     disallowedEditCount: 0,
     unattributedPromptKeys: [],
+    droppedNonQuestionKeys: [],
+    retainedCount: 22,
     fileName: 'instrument.docx',
     ...overrides,
   };
@@ -141,6 +143,8 @@ describe('readFidelityDetail', () => {
       coverage: { sourceQuestionCount: 22, assessment: 'matches' },
       disallowedEditCount: 0,
       unattributedPromptKeys: ['register_owner'],
+      droppedNonQuestionKeys: [],
+      retainedCount: 22,
       fileName: 'instrument.docx',
     });
 
@@ -251,6 +255,116 @@ describe('readFidelityDetail', () => {
   });
 });
 
+describe('removed non-questions', () => {
+  const CHECKED_AT = new Date('2026-08-20T10:30:00.000Z');
+
+  it('omits both keys entirely when nothing was removed', () => {
+    // The omit-when-empty contract: a present key means something happened, so a clean row must
+    // not carry a zero that a reader has to compare against.
+    const detail = buildFidelityDetail(cleanInput());
+    expect(detail).not.toHaveProperty('droppedNonQuestionCount');
+    expect(detail).not.toHaveProperty('droppedNonQuestionKeys');
+  });
+
+  it('writes the count and the names when spans were removed', () => {
+    // Names, not just a number. This is the one signal about content that is NOT in the editor:
+    // an admin given "2 were removed" has to diff the draft against the document to find which.
+    const detail = buildFidelityDetail(
+      cleanInput({ droppedNonQuestionKeys: ['bot_script', 'section_transition'] })
+    );
+    expect(detail.droppedNonQuestionCount).toBe(2);
+    expect(detail.droppedNonQuestionKeys).toEqual(['bot_script', 'section_transition']);
+  });
+
+  it('round-trips through the reader', () => {
+    // Writer and reader live in one module precisely because a field added to one and forgotten
+    // in the other is invisible on a provenance row.
+    const view = readFidelityDetail({
+      detail: buildFidelityDetail(cleanInput({ droppedNonQuestionKeys: ['bot_script'] })),
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: CHECKED_AT,
+    });
+    expect(view?.droppedNonQuestionCount).toBe(1);
+    expect(view?.droppedNonQuestionKeys).toEqual(['bot_script']);
+  });
+
+  it('reads a legacy row, written before anything was ever removed, as having removed nothing', () => {
+    // Every field on this reader is catch()-ed for exactly this: an older row is an honest record
+    // of what an older build knew, and must not degrade the rest of the panel to a blank.
+    const view = readFidelityDetail({
+      detail: { flaggedCount: 1, totalCount: 22, repairOutcome: 'repaired' },
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: CHECKED_AT,
+    });
+    expect(view?.droppedNonQuestionCount).toBe(0);
+    expect(view?.droppedNonQuestionKeys).toEqual([]);
+    expect(view?.repairOutcome).toBe('repaired');
+  });
+
+  it('reports a stored count even when the names are missing or unreadable', () => {
+    // Falling back to the list length here would say "nothing was deleted" about an ingest that
+    // deleted two questions.
+    const view = readFidelityDetail({
+      detail: {
+        flaggedCount: 2,
+        totalCount: 22,
+        repairOutcome: 'none_flagged',
+        droppedNonQuestionCount: 2,
+        droppedNonQuestionKeys: 'not-an-array',
+      },
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: CHECKED_AT,
+    });
+    expect(view?.droppedNonQuestionCount).toBe(2);
+    expect(view?.droppedNonQuestionKeys).toEqual([]);
+  });
+});
+
+describe('what the version actually holds', () => {
+  const CHECKED_AT = new Date('2026-08-20T10:30:00.000Z');
+
+  it('omits the retained count when nothing changed it', () => {
+    // Same omit-when-nothing-to-say contract as the signals above: an ingest that retained
+    // everything it checked has no second number worth a key.
+    const detail = buildFidelityDetail(cleanInput({ totalCount: 22, retainedCount: 22 }));
+    expect(detail).not.toHaveProperty('retainedCount');
+  });
+
+  it('writes it when a drop or a merge moved the count', () => {
+    const detail = buildFidelityDetail(cleanInput({ totalCount: 22, retainedCount: 19 }));
+    expect(detail.retainedCount).toBe(19);
+    // `totalCount` still says what the critic was GIVEN. Overwriting it would destroy the only
+    // record of the set the coverage assessment was actually made against.
+    expect(detail.totalCount).toBe(22);
+  });
+
+  it('reads a legacy row as having retained everything it checked', () => {
+    // Zero here would tell an admin the questionnaire is empty. Every row written before this
+    // field existed retained what it checked, so `totalCount` is the honest fallback.
+    const view = readFidelityDetail({
+      detail: { flaggedCount: 1, totalCount: 22, repairOutcome: 'repaired' },
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: CHECKED_AT,
+    });
+    expect(view?.retainedCount).toBe(22);
+  });
+
+  it('round-trips a moved count through the reader', () => {
+    const view = readFidelityDetail({
+      detail: buildFidelityDetail(cleanInput({ totalCount: 22, retainedCount: 19 })),
+      outputSnapshot: [],
+      status: 'succeeded',
+      createdAt: CHECKED_AT,
+    });
+    expect(view?.retainedCount).toBe(19);
+    expect(view?.totalCount).toBe(22);
+  });
+});
+
 describe('hasFidelityFindings', () => {
   function view(over: Partial<ReturnType<typeof readFidelityDetail>> = {}) {
     const base = readFidelityDetail({
@@ -261,6 +375,8 @@ describe('hasFidelityFindings', () => {
         coverage: { sourceQuestionCount: 22, assessment: 'matches' },
         disallowedEditCount: 0,
         unattributedPromptKeys: [],
+        droppedNonQuestionKeys: [],
+        retainedCount: 22,
         fileName: 'clean.docx',
       }),
       outputSnapshot: [],
@@ -294,6 +410,12 @@ describe('hasFidelityFindings', () => {
     expect(hasFidelityFindings(view({ flaggedCount: 1 }))).toBe(true);
     expect(hasFidelityFindings(view({ unattributedPromptCount: 1 }))).toBe(true);
     expect(hasFidelityFindings(view({ verifierUnavailable: true }))).toBe(true);
+  });
+
+  it('speaks up when spans were removed, even with nothing else to report', () => {
+    // The only finding about content that is no longer in the editor. Staying quiet would leave an
+    // admin comparing the draft to the document with no idea anything had been taken out.
+    expect(hasFidelityFindings(view({ droppedNonQuestionCount: 1 }))).toBe(true);
   });
 
   it('stays quiet for a disallowed edit alone — that is a build signal, not an admin one', () => {

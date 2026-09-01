@@ -4,9 +4,10 @@
  *
  * ## Why it lives here and not on its own tab
  *
- * Two of its three findings are about edits MISSING from the table below it. "This question was
- * reworded and no change record says so" is only legible next to the log that would have recorded
- * it — on its own page it is a sentence about nothing.
+ * Most of its findings are about the table below it. "This question was reworded and no change
+ * record says so" is only legible next to the log that would have recorded it — on its own page it
+ * is a sentence about nothing. The removed non-questions are the same: the change log is where
+ * their content lives and where they are put back.
  *
  * ## Read-only, and quiet by default
  *
@@ -44,13 +45,68 @@ function coverageLine(view: VersionFidelityView): string | null {
       : coverage.assessment === 'missing_questions'
         ? `The document looks like it contains ${claimed} questions, but only ${view.totalCount} were extracted.`
         : `The document looks like it contains ${claimed} questions, but ${view.totalCount} were extracted.`;
-  return said;
+  return `${said}${retainedClause(view)}`;
 }
 
-/** What happened to the flagged questions, in words an admin can act on. */
+/**
+ * The second half of the coverage sentence, when the questionnaire no longer holds the number the
+ * first half just quoted.
+ *
+ * The comparison the critic made is a comparison against what it was GIVEN, so the first half has
+ * to keep quoting `totalCount` or the arithmetic stops being the arithmetic anyone performed.
+ * Rewriting that number to the post-drop one would produce sentences like "the document looks like
+ * it contains 9 questions, but 9 were extracted" on an `extra_questions` read, which says nothing
+ * and reads as a bug.
+ *
+ * So the line names both: what was extracted and checked, then what survived. Without this an
+ * admin reads "12 were extracted" on a panel whose own removal line sits above it and whose editor
+ * lists 9, and has to work out for themselves which number describes the thing in front of them.
+ */
+function retainedClause(view: VersionFidelityView): string {
+  if (view.retainedCount === view.totalCount) return '';
+  const n = view.retainedCount;
+  return ` The questionnaire now holds ${n} question${n === 1 ? '' : 's'}, after the changes below.`;
+}
+
+/**
+ * The critic said some questions were not questions, and none of them were removed.
+ *
+ * This is the drop ceiling firing: past `max(3, 25%)` the pipeline removes nothing at all, on the
+ * grounds that a critic calling a quarter of an instrument "script" has misread it. That bail-out
+ * was a `log.warn` and nothing else, so the admin surface said only "N questions looked unfaithful
+ * to the document" through {@link repairLine}'s default branch, which is true and tells them
+ * nothing about the removal that was considered and abandoned.
+ *
+ * Read off the verdict snapshot rather than a stored count, so it stays a presentation decision.
+ * The snapshot is capped on a long questionnaire, which is why the number is spoken only when the
+ * snapshot is demonstrably whole; a partial list would understate it, and understating how much
+ * the critic objected to is the wrong way to be wrong here.
+ */
+function abandonedDropLine(view: VersionFidelityView): string | null {
+  if (view.droppedNonQuestionCount > 0) return null;
+  const n = view.flagged.filter((f) => f.issue === 'not_a_question').length;
+  if (n === 0) return null;
+  const subject =
+    view.flagged.length === view.flaggedCount ? `${n} line${n === 1 ? '' : 's'}` : 'Some lines';
+  const they = subject === 'Some lines' || n !== 1 ? 'They are' : 'It is';
+  return `${subject} looked like interviewer script rather than questions, but that is too many to remove safely, so none were removed. ${they} still in the questionnaire, listed below.`;
+}
+
+/**
+ * What happened to the flagged questions that are STILL IN the questionnaire, in words an admin
+ * can act on.
+ *
+ * The removed non-questions are flagged too, since `flaggedCount` is every `suspect` verdict and
+ * that is the honest count of what the critic objected to. But they were deleted rather than
+ * repaired, and the line above already says so. Counting them again here would tell an admin that
+ * three questions "are saved exactly as first extracted" when only one of them is saved at all.
+ *
+ * Subtraction rather than a second stored count: the two can then never disagree, and a legacy row
+ * with no drops subtracts zero and reads exactly as it always did.
+ */
 function repairLine(view: VersionFidelityView): string | null {
-  if (view.flaggedCount === 0) return null;
-  const n = view.flaggedCount;
+  const n = view.flaggedCount - view.droppedNonQuestionCount;
+  if (n <= 0) return null;
   const subject = `${n} question${n === 1 ? '' : 's'}`;
   switch (view.repairOutcome) {
     case 'repaired':
@@ -74,6 +130,13 @@ export function ExtractionFidelityBand({ fidelity }: ExtractionFidelityBandProps
   const coverage = coverageLine(fidelity);
   const repair = repairLine(fidelity);
   const unattributed = fidelity.unattributedPromptCount;
+  const dropped = fidelity.droppedNonQuestionCount;
+  const abandonedDrop = abandonedDropLine(fidelity);
+  // The flagged badges name questions to go and re-read. A removed one is not there to re-read,
+  // and it is already named in its own list above, so listing it here sends the admin looking for
+  // something that no longer exists.
+  const removedKeys = new Set(fidelity.droppedNonQuestionKeys);
+  const stillFlagged = fidelity.flagged.filter((q) => !removedKeys.has(q.key));
 
   return (
     <section
@@ -96,7 +159,10 @@ export function ExtractionFidelityBand({ fidelity }: ExtractionFidelityBandProps
               ) : (
                 'the source document'
               )}
-              . Nothing here was blocked or changed — it is what the check noticed.
+              .{' '}
+              {fidelity.droppedNonQuestionCount > 0
+                ? 'Nothing here was blocked, and everything it changed can be undone below.'
+                : 'Nothing here was blocked or changed — it is what the check noticed.'}
             </p>
           </div>
 
@@ -111,6 +177,52 @@ export function ExtractionFidelityBand({ fidelity }: ExtractionFidelityBandProps
                 against the document at all.
               </span>
             </p>
+          )}
+
+          {/* The removal that was considered and abandoned. Sits where the removal itself would
+              have, and is mutually exclusive with it: this renders only when nothing was dropped.
+              Without it the ceiling bail-out reaches the admin as an ordinary "looked unfaithful"
+              line, which is the one reading that leaves them thinking the critic had no opinion. */}
+          {abandonedDrop && (
+            <p className="text-sm">
+              {abandonedDrop}{' '}
+              <span className="text-muted-foreground">
+                When that many are flagged at once it is usually the critic misreading the document,
+                a page of statements to rate being the common way, so removing them is not safe
+                enough to do without you. Delete any that really are script in the editor.
+              </span>
+            </p>
+          )}
+
+          {/* Said before anything else, because it is the only finding about something that is
+              NOT in the editor. An admin reading the other lines is comparing what they can see
+              against the document; this one tells them what they will not find. */}
+          {dropped > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-sm">
+                {dropped === 1
+                  ? 'One line was removed because it is not a question.'
+                  : `${dropped} lines were removed because they are not questions.`}{' '}
+                <span className="text-muted-foreground">
+                  Documents often carry lines written for whoever runs the interview rather than for
+                  the person answering: a script the interviewer reads out, a move to the next
+                  section, a note about how to answer. They read like sentences, so they can be
+                  picked up as questions. {dropped === 1 ? 'It is' : 'They are'} listed in the
+                  change log below and can be restored from there.
+                </span>
+              </p>
+              {fidelity.droppedNonQuestionKeys.length > 0 && (
+                <ul className="flex flex-wrap gap-1.5">
+                  {fidelity.droppedNonQuestionKeys.map((key) => (
+                    <li key={key}>
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {key}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           {coverage && (
@@ -129,9 +241,9 @@ export function ExtractionFidelityBand({ fidelity }: ExtractionFidelityBandProps
           {/* The flagged questions themselves, when the run's snapshot still carries them. The
               count above is authoritative — a long questionnaire's snapshot is capped — so this
               list is an aid to finding them, never the statement of how many there are. */}
-          {fidelity.flagged.length > 0 && (
+          {stillFlagged.length > 0 && (
             <ul className="flex flex-wrap gap-1.5">
-              {fidelity.flagged.map((q) => (
+              {stillFlagged.map((q) => (
                 <li key={q.key}>
                   <Badge variant="outline" className="font-mono text-xs" title={q.detail ?? ''}>
                     {q.key}
