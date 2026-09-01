@@ -872,6 +872,18 @@ describe('buildPackMarkdown — the interviewer', () => {
     expect(buildPackMarkdown(model())).not.toContain('## The interviewer');
   });
 
+  it('renders above the closing "About ConQuest" blurb, not after it', () => {
+    // It used to be appended after the sign-off, which put a whole appendix below the line where
+    // the document says it has ended. Asserting the ORDER rather than mere presence is the point:
+    // the previous tests all passed while the section was unreachable to a reader.
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+
+    expect(md.indexOf('## The interviewer')).toBeGreaterThan(-1);
+    expect(md.indexOf('## The interviewer')).toBeLessThan(md.indexOf('## About ConQuest'));
+    // And the sign-off is genuinely last, so nothing else has slipped below it either.
+    expect(md.trimEnd().endsWith('](https://conquestinsights.com)')).toBe(true);
+  });
+
   it('renders the approach, pace, opening and tactics as a fact list', () => {
     const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
     expect(md).toContain('## The interviewer');

@@ -5,12 +5,17 @@
  * `renderToBuffer` by the route's render helper, never mounted in the browser). Sibling to the
  * brand-free {@link file://./instrument-pdf-document.tsx}: same question-block styling, but this one
  * carries the ConQuest wordmark/tagline/website in the header and a closing "About ConQuest" page —
- * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of
- * meta / experience-setup / data-slots / questions / definitions / evaluations / conditional topics the
- * model includes (`null` fields are simply skipped). Evaluations and conditional topics render last,
- * right before the closing page — the appendix position. The F17.21 scope-evaluation judge panel's
- * verdict renders as the last subsection of conditional topics, after the hard rules — a judgement about
- * the routing design above it, not a section of its own.
+ * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of meta /
+ * experience-setup / data-slots / questions / definitions / evaluations / conditional topics /
+ * interviewer policy the model includes (`null` fields are simply skipped). The three opt-in
+ * appendices render last, right before the closing page — the appendix position.
+ *
+ * Two judge panels render nested inside the thing they judge rather than as sections of their own:
+ * the F17.21 scope panel closes conditional topics, after the hard rules, and the F18.8 policy panel
+ * closes the interviewer section. That interviewer section did not exist here at all until
+ * recently — the model built it and the Markdown and CSV serialisers rendered it, so ticking the box
+ * produced a section in two formats out of three and nothing in the one most packs are downloaded
+ * as. Anything added to a serialiser belongs in all three.
  *
  * No font is registered — `@react-pdf/renderer` ships Helvetica by default and no other document in
  * this app registers a custom font, so the wordmark is approximated with Helvetica-Bold + the brand
@@ -22,6 +27,7 @@ import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/rendere
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
   PackConditionalTopicsTopic,
+  PackInterviewerPolicy,
   PackModel,
   PackSetupItem,
 } from '@/lib/app/questionnaire/export/build-pack-model';
@@ -450,6 +456,149 @@ function ScopeTopicBlock({ topic }: { topic: PackConditionalTopicsTopic }) {
   );
 }
 
+/**
+ * The interviewer-policy appendix — how the interviewer is set up, and the panel's verdict on it.
+ *
+ * The PDF carried no interviewer section at all until this existed: the model built it and the
+ * Markdown and CSV serialisers both rendered it, so an admin who ticked the section got it in two
+ * formats out of three and silence in the one the pack is mostly downloaded as.
+ *
+ * Structured as the Markdown block is, and deliberately so — the two are read as the same document
+ * in different clothes, and a reader comparing them should not have to work out whether a heading
+ * they remember is missing or merely moved.
+ */
+function InterviewerPolicySection({ policy }: { policy: PackInterviewerPolicy }) {
+  const facts = [
+    `Questioning approach: ${policy.approachLabel}`,
+    policy.paceLabel ? `Pace: ${policy.paceLabel}` : null,
+    `Opening questions: ${policy.openingSource}`,
+    policy.tacticLabels.length > 0 ? `Tactics: ${policy.tacticLabels.join(', ')}` : null,
+  ].filter(Boolean);
+
+  const evaluation = policy.evaluation;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>The interviewer</Text>
+      {!policy.conversational ? (
+        <Text style={styles.empty}>
+          This questionnaire is filled in as a form, so none of the interviewer settings apply.
+        </Text>
+      ) : (
+        <>
+          <Text style={styles.scopeFacts}>{facts.join('  ·  ')}</Text>
+
+          {policy.arcBands.length > 0 && (
+            <>
+              <Text style={styles.scopeSubheading}>How the questioning narrows</Text>
+              {policy.arcBands.map((band, i) => (
+                <View key={i} style={styles.scopeTopic} wrap={false}>
+                  <Text style={styles.scopeTopicLabel}>{band.label}</Text>
+                  <Text style={styles.scopeTopicDescription}>{band.detail}</Text>
+                </View>
+              ))}
+            </>
+          )}
+
+          <Text style={styles.scopeSubheading}>House rules</Text>
+          {!policy.houseRulesEnabled || policy.houseRules.length === 0 ? (
+            <Text style={styles.empty}>No house rules are in force for this questionnaire.</Text>
+          ) : (
+            policy.houseRules.map((rule, i) => (
+              <View key={i} style={styles.scopeTopic} wrap={false}>
+                <Text style={styles.scopeTopicLabel}>{rule.kind}</Text>
+                {rule.trigger && (
+                  <Text style={styles.scopeTopicMeta}>{`When asked about: ${rule.trigger}`}</Text>
+                )}
+                <Text style={styles.scopeTopicDescription}>{rule.text}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.scopeSubheading}>Questions asked as written</Text>
+          {!policy.fidelityEnabled ? (
+            <Text style={styles.empty}>Every question is asked conversationally.</Text>
+          ) : (
+            <>
+              {policy.fidelityDistribution
+                .filter((d) => d.count > 0)
+                .map((d) => (
+                  <Text
+                    key={d.level}
+                    style={styles.evaluationScore}
+                  >{`${d.label}: ${d.count}`}</Text>
+                ))}
+              {policy.mustAskQuestions.length > 0 && (
+                <>
+                  <Text style={styles.scopeFacts}>Put to the respondent word for word:</Text>
+                  {policy.mustAskQuestions.map((q) => (
+                    <Text key={q.key} style={styles.scopeRule}>{`•  ${q.prompt}`}</Text>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {/* The panel's verdict, nested inside the policy it is about — the same nesting the scope
+          panel gets inside Conditional topics, and for the same reason: it is a judgement about the
+          setup above it, not a section of its own. */}
+      <Text style={styles.scopeSubheading}>Interviewer review</Text>
+      <Text style={styles.evaluationIntro}>
+        AI judge panel over the interviewer setup above — includes findings not yet reviewed; treat
+        as suggestions, not conclusions.
+      </Text>
+      {!evaluation.hasRun ? (
+        <Text style={styles.empty}>This interviewer setup has not been reviewed.</Text>
+      ) : (
+        <>
+          {evaluation.scores.map((judge) => (
+            <Text key={judge.dimension} style={styles.evaluationScore}>
+              {judge.diagnostic
+                ? `${judge.label} — unavailable: ${judge.diagnostic}`
+                : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
+            </Text>
+          ))}
+
+          {evaluation.targets.length === 0 ? (
+            <Text style={styles.empty}>No findings raised.</Text>
+          ) : (
+            evaluation.targets.map((target) => (
+              <View key={target.key} style={styles.evaluationTarget}>
+                <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+                <Text style={styles.evaluationTargetMeta}>
+                  {[
+                    `${target.judges.length} finding(s)`,
+                    target.counts.major > 0 ? `${target.counts.major} major` : null,
+                    target.removed ? 'no longer part of the interviewer setup' : null,
+                  ]
+                    .filter(Boolean)
+                    .join('  ·  ')}
+                </Text>
+                {target.judges.map((judge, i) => (
+                  <View key={i} style={styles.evaluationFinding} wrap={false}>
+                    <Text
+                      style={styles.evaluationFindingHeader}
+                    >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                    <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
+                    <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
+                    {judge.proposedEditSummary && (
+                      <Text style={styles.scopeEvaluationEdit}>
+                        {`Proposed edit: ${judge.proposedEditSummary}`}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            ))
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
 export interface PackPdfDocumentProps {
   model: PackModel;
 }
@@ -755,6 +904,8 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
             )}
           </View>
         )}
+
+        {model.interviewerPolicy && <InterviewerPolicySection policy={model.interviewerPolicy} />}
 
         <View style={styles.footer} fixed>
           <Text>{`Generated ${model.generatedAt}`}</Text>

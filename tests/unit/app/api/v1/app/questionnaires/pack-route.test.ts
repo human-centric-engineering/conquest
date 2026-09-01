@@ -76,6 +76,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes', () =
   loadLatestScopeEvaluationRun: vi.fn(async () => null),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes', () => ({
+  loadLatestPolicyEvaluationRun: vi.fn(async () => null),
+}));
+
 vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
   loadAcceptedGlossaryEntries: vi.fn(async () => []),
 }));
@@ -119,6 +123,7 @@ import {
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
+import { loadLatestPolicyEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes';
 import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
 import { buildPackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
@@ -283,6 +288,33 @@ describe('GET pack — include flags', () => {
       expect.objectContaining({ setup: true, setupTechnical: true }),
       expect.any(String)
     );
+  });
+
+  it('threads interviewerPolicy=true through and loads the latest policy-evaluation run', async () => {
+    await GET(
+      makeRequest(QN_ID, VID, { format: 'md', interviewerPolicy: 'true' }),
+      ADMIN_SESSION,
+      makeContext()
+    );
+
+    expect(loadLatestPolicyEvaluationRun).toHaveBeenCalledWith(VID);
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      null,
+      null,
+      null,
+      expect.objectContaining({ interviewerPolicy: true }),
+      expect.any(String)
+    );
+  });
+
+  it('skips the policy-evaluation query entirely when interviewerPolicy is off', async () => {
+    // The default. The section costs a round trip that the common download must not pay.
+    await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
+    expect(loadLatestPolicyEvaluationRun).not.toHaveBeenCalled();
   });
 
   it('skips loading the glossary appendix when definitions=false', async () => {

@@ -540,6 +540,43 @@ describe('renderPackPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('actually puts the interviewer section in the PDF when it is included', async () => {
+    // Not a smoke test. The PDF serialiser carried NO interviewer section at all while the model
+    // built one and the other two serialisers rendered it, so an admin who ticked the box got it in
+    // Markdown and CSV and silence in the format the pack is mostly downloaded as. A
+    // "starts with %PDF" assertion passed throughout.
+    //
+    // Byte length is the assertion available here (react-pdf hands back a buffer, not a tree), and
+    // it is enough: the same model with the section excluded must produce a smaller document. A
+    // section that renders nothing produces two identical sizes, which is exactly the bug.
+    const modelWith = (interviewerPolicy: boolean) =>
+      buildPackModel(
+        'Interviewer Pack',
+        graphOf([]),
+        [],
+        null,
+        null,
+        null,
+        null,
+        { ...DEFAULT_PACK_INCLUDE, interviewerPolicy },
+        '2026-08-10T00:00:00.000Z'
+      );
+
+    const withSection = modelWith(true);
+    const withoutSection = modelWith(false);
+
+    expect(withSection.interviewerPolicy).not.toBeNull();
+    expect(withoutSection.interviewerPolicy).toBeNull();
+
+    const [included, excluded] = await Promise.all([
+      renderPackPdf(withSection),
+      renderPackPdf(withoutSection),
+    ]);
+
+    expect(startsWithPdfMagic(included)).toBe(true);
+    expect(included.byteLength).toBeGreaterThan(excluded.byteLength);
+  }, 30000);
+
   it('renders the "no scope evaluation run yet" state when conditionalTopics is included but no run exists', async () => {
     const model = buildPackModel(
       'Unscored Pack',

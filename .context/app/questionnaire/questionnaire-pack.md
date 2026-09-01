@@ -3,11 +3,12 @@
 The admin can download a **branded, shareable artifact** covering everything about how a
 questionnaire is set up — title/version/goals, the question structure, the semantic data slots
 (with their linked questions), the definitions/glossary, the experience-setup summary, (opt-in) the
-latest F5.1–F5.3 design-evaluation run's judge findings, and (opt-in) the
-[Conditional Topics](./conditional-topics.md) routing logic in plain language — as a PDF, CSV, or Markdown
-file. The admin picks which of those seven sections to include from a dialog opened by the
-**Questionnaire pack** button in the workspace header; five are ticked by default, "Evaluation
-findings" and "Conditional topics" are not (see below).
+latest F5.1–F5.3 design-evaluation run's judge findings, (opt-in) the
+[Conditional Topics](./conditional-topics.md) routing logic in plain language, and (opt-in) the
+[interviewer policy](./interviewer-policy-evaluation.md) with the F18.8 panel's verdict on it — as a
+PDF, CSV, or Markdown file. The admin picks which of those eight sections to include from a dialog
+opened by the **Questionnaire pack** button in the workspace header; five are ticked by default,
+"Evaluation findings", "Conditional topics" and "The interviewer" are not (see below).
 
 Distinct from the brand-free [blank instrument export](./admin-ui.md) (F14.9): the instrument is
 the design-time reviewer copy of just the questions, deliberately unbranded. The Pack is the
@@ -83,17 +84,33 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   deleted — silently skipped everywhere else in this feature) falls back to the raw key rather than
   dropping the rule, so a stale rule stays visible as something to clean up.
 
-Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
-so every serialiser skips it the same way.
+- **The interviewer** (opt-in, off by default) — how the interviewer is set up: the questioning
+  approach and pace, where the opening questions come from, the tactics in play, the arc bands
+  (derived from the same `FUNNEL_PACE_PROFILES` the runtime reads, never a hand-copied table), the
+  house rules actually in force, and which questions are put word for word. The F18.8 judge panel's
+  verdict on that setup nests inside it as **Interviewer review**, the same nesting the scope panel
+  gets inside Conditional topics and for the same reason: it is a judgement about the setup above
+  it, not a section of its own.
 
-**Why `evaluations` and `conditionalTopics` default off, unlike the other five:** the Pack is the
+  It carries its own top-level flag rather than nesting under `setup`, for two reasons. `setup` is a
+  flat list across ~15 setting groups, so hanging a verdict about three of them there would attach a
+  judgement to twelve things it never read; and `setup` defaults **true**, which would ship
+  unreviewed AI critique into every default download.
+
+Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
+so every serialiser skips it the same way. **Every section renders above the closing "About
+ConQuest" blurb** — the interviewer block was for a while emitted after it in Markdown, which put a
+whole appendix below the line where the document says it has ended.
+
+**Why `evaluations`, `conditionalTopics` and `interviewerPolicy` default off, unlike the other five:** the Pack is the
 external/showcase artifact — built to hand to a client or stakeholder. Judge findings are unreviewed
 AI critique of the questionnaire (`this question is redundant`, `off-mission`, etc.), and shipping
 that by accident in a document meant to showcase the questionnaire would be an easy, embarrassing
 mistake. The routing logic is a different kind of risk — it's the instrument's _design_, not its
 content, and not every reader needs to see how a client's respondents get routed before the admin
-has decided to share that. Both, for their own reason, are something the admin opts into
-deliberately per download rather than having to remember to opt out of.
+has decided to share that. The interviewer section carries a judge panel of its own, so it falls
+under the first reason. Each, for its own reason, is something the admin opts into deliberately per
+download rather than having to remember to opt out of.
 
 ### Branding
 
@@ -159,37 +176,44 @@ spreadsheet.
 
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=&interviewerPolicy=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
-use. Each include flag is `true`/`false`; all default `true` except `evaluations`, `conditionalTopics`,
-and `setupTechnical`, which default `false`. `setupTechnical` is a sub-option of `setup`, not an
-eighth section — it widens the setup summary rather than adding one, and is ignored when
-`setup=false`. `runtime = 'nodejs'` (react-pdf). Filename: `pack-<slug>-v<N>.<ext>`,
-`Cache-Control: no-store`. The evaluation run is only loaded (`loadLatestEvaluationRun`) when
-`evaluations=true`, and the version's topics + Conditional Topics settings are only loaded
-(`loadTopics`, `loadConditionalTopicsSettings`) when `conditionalTopics=true` — the common case skips both
-queries entirely.
+use. Each include flag is `true`/`false`; all default `true` except `evaluations`,
+`conditionalTopics`, `interviewerPolicy` and `setupTechnical`, which default `false`. A sub-option
+flag (`setupTechnical` today) is not a section — it widens the section it belongs to rather than
+adding one, and is ignored when that section is off. `runtime = 'nodejs'` (react-pdf). Filename:
+`pack-<slug>-v<N>.<ext>`, `Cache-Control: no-store`.
+
+**Each opt-in section pays for its own query and no other download does.** The design-evaluation
+run loads only when `evaluations=true`; the version's topics, Conditional Topics settings and scope
+run only when `conditionalTopics=true`; the interviewer-policy run only when
+`interviewerPolicy=true`. All three run in one `Promise.all`, so opting into several costs one round
+trip rather than three. Every one of them loads **the most recent run for the version and only
+that** (`createdAt desc`, `limit: 1`): the pack states the current position of a panel, never a run
+history.
 
 Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 
 ## Code map
 
-| Concern                    | File                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                         |
-| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                   |
-| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                         |
-| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                     |
-| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                |
-| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                          |
-| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                         |
-| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                    |
-| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                             |
-| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                            |
-| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                      |
-| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)            |
-| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`) |
+| Concern                    | File                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                           |
+| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                     |
+| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                           |
+| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                       |
+| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                  |
+| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                            |
+| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                           |
+| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                      |
+| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                               |
+| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                              |
+| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                        |
+| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)              |
+| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`)   |
+| Latest scope run load      | `app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes.ts` (`loadLatestScopeEvaluationRun`)   |
+| Latest policy run load     | `app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes.ts` (`loadLatestPolicyEvaluationRun`) |
 
 ## UI surface
 
@@ -204,11 +228,24 @@ Two entry points, both opening the same `PackExportDialog`:
   "Questionnaire pack" → **Download pack…**, kept for admins who look for downloads under an
   export menu.
 
-The dialog offers seven section checkboxes (five default-checked, "Evaluation findings" and
-"Conditional topics" default-unchecked), one nested sub-checkbox — **Technical & tuning settings**, indented under
-"Experience setup" and disabled while that parent is off — and a format select (PDF / CSV /
-Markdown). The sub-option does not count toward the "pick at least one section" gate, since it
-produces nothing on its own. Since the download URL depends on that dialog state (unlike the menu's static
+The dialog offers eight section checkboxes (five default-checked; "Evaluation findings",
+"Conditional topics" and "The interviewer" default-unchecked), any **sub-options** those sections
+declare, and a format select (PDF / CSV / Markdown).
+
+**Sub-options** are a generic `subOptions` array on the section descriptor, rendered indented under
+their parent and disabled while it is off, so each reads as a refinement of its section rather than
+as a section of its own. None of them counts toward the "pick at least one section" gate, since a
+sub-option produces nothing on its own, and the route ignores any whose parent section is excluded.
+The first was **Technical & tuning settings** under "Experience setup".
+
+**Every top-level `PackInclude` flag must have a checkbox, and that is now enforced.**
+`interviewerPolicy` shipped on the model and on the route with no row in the dialog, so the section
+existed, built correctly, serialised correctly in two formats out of three, and could not be asked
+for by anyone. `_noUnreachableSections` in `pack-export-dialog.tsx` resolves `Exclude<SectionKey,
+listed keys>` into a `Record<…, never>`, which type-checks as `{}` while the list is complete and
+fails naming the missing key the moment it is not.
+
+Since the download URL depends on that dialog state (unlike the menu's static
 `<a download>` links), Download sets `window.location.href` directly rather than using a plain
 anchor — same-origin authenticated GET, `Content-Disposition: attachment` forces the download
 without navigating away.

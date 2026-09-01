@@ -323,15 +323,10 @@ export function buildPackMarkdown(model: PackModel): string {
     }
   }
 
-  lines.push('---');
-  lines.push('');
-  lines.push(`## ${PACK_BRAND.closingHeading}`);
-  lines.push('');
-  lines.push(PACK_BRAND.closingBlurb);
-  lines.push('');
-  lines.push(`[${PACK_BRAND.website}](https://${PACK_BRAND.website})`);
-
   // ── Interviewer policy (F18.8) ───────────────────────────────────────────
+  // Above the closing blurb, with every other content section. It used to be emitted after it,
+  // which put a whole appendix below the document's sign-off — invisible to anyone who stopped
+  // reading where the document said it had ended.
   if (model.interviewerPolicy) {
     const p = model.interviewerPolicy;
     lines.push('## The interviewer');
@@ -415,6 +410,15 @@ export function buildPackMarkdown(model: PackModel): string {
       }
     }
   }
+
+  // The sign-off, last — every section above it is content, everything after it would be lost.
+  lines.push('---');
+  lines.push('');
+  lines.push(`## ${PACK_BRAND.closingHeading}`);
+  lines.push('');
+  lines.push(PACK_BRAND.closingBlurb);
+  lines.push('');
+  lines.push(`[${PACK_BRAND.website}](https://${PACK_BRAND.website})`);
 
   return `${lines.join('\n').trimEnd()}\n`;
 }
