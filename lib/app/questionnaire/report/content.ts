@@ -14,7 +14,14 @@
 import { isRecord } from '@/lib/utils';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
+import {
+  chapterHeadingOrder,
+  headingByQuestionKey,
+  UNCHAPTERED_HEADING,
+  type ReportChapter,
+} from '@/lib/app/questionnaire/report/chapters';
 
 /**
  * What the report transcript needs to lead with the questionnaire context. Carries the FULL
@@ -380,10 +387,18 @@ function confidenceSuffix(
  *
  * `includeConfidence` annotates each answer with its capture confidence (0–1) so the writer can
  * discount low-confidence items — set when `generation.discountLowConfidence` is on.
+ *
+ * `chapters` (P21) re-groups the answers by the SECTIONS the respondent actually worked through,
+ * rather than by the document sections the panel is built from. Absent for every unsectioned
+ * session, which produces exactly the transcript this produced before sectioned interviews existed.
+ * The two groupings coincide often enough to be mistaken for each other and are not the same thing:
+ * the chapters are what the respondent experienced, and the report follows that.
+ *
+ * Ignored when no chapter carries any question membership — see the guard below.
  */
 export function buildAnswerTranscript(
   model: AnswerTranscriptInput,
-  opts: { includeConfidence?: boolean } = {}
+  opts: { includeConfidence?: boolean; chapters?: readonly ReportChapter[] } = {}
 ): string {
   const lines: string[] = [];
   lines.push(`Questionnaire: ${model.questionnaireTitle}`);
@@ -391,18 +406,51 @@ export function buildAnswerTranscript(
   lines.push(...describeAudience(model.audience));
   lines.push('');
 
+  const answeredLines = (slots: readonly PanelSlotView[]): string[] =>
+    slots.flatMap((slot) => [
+      `Q: ${slot.prompt}`,
+      // Slot-aware rendering: choice answers show their respondent-facing labels (not stored option
+      // keys) and booleans honour their configured true/false labels — the same shared formatter the
+      // PDF and on-screen panel use, so the report transcript can't drift from what the respondent saw.
+      `A: ${formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}${confidenceSuffix(slot.confidence, opts.includeConfidence)}`,
+    ]);
+
+  // Chapters win only where they know something about the QUESTIONS, which is the same rule
+  // `chapterDataSlotGroups` applies on the slot side. A section set carrying no question membership
+  // at all is reachable two ways — a data-slot-mode topic set, and a `themes` set whose slots have
+  // no mapped questions — and bucketing against one would sweep every answer under the catch-all,
+  // losing the section titles this transcript carried before sections existed.
+  const chaptersKnowQuestions = opts.chapters?.some((c) => c.questionKeys.length > 0) ?? false;
+
+  if (opts.chapters && opts.chapters.length > 0 && chaptersKnowQuestions) {
+    // Bucketed by chapter, then emitted in CHAPTER order rather than the order the answers happen to
+    // sit in. Free navigation lets a respondent answer part three before part one, and a report that
+    // followed the panel's order would present the interview in an order nobody experienced.
+    const headingFor = headingByQuestionKey(opts.chapters);
+    const buckets = new Map<string, PanelSlotView[]>(
+      chapterHeadingOrder(opts.chapters).map((heading) => [heading, []])
+    );
+    for (const section of model.sections) {
+      for (const slot of section.slots) {
+        if (!slot.answered) continue;
+        const heading = headingFor.get(slot.slotKey) ?? UNCHAPTERED_HEADING;
+        buckets.get(heading)?.push(slot);
+      }
+    }
+    for (const [heading, slots] of buckets) {
+      if (slots.length === 0) continue;
+      lines.push(`## ${heading}`);
+      lines.push(...answeredLines(slots));
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }
+
   for (const section of model.sections) {
     const answered = section.slots.filter((s) => s.answered);
     if (answered.length === 0) continue;
     lines.push(`## ${section.title}`);
-    for (const slot of answered) {
-      lines.push(`Q: ${slot.prompt}`);
-      // Slot-aware rendering: choice answers show their respondent-facing labels (not stored option
-      // keys) and booleans honour their configured true/false labels — the same shared formatter the
-      // PDF and on-screen panel use, so the report transcript can't drift from what the respondent saw.
-      const conf = confidenceSuffix(slot.confidence, opts.includeConfidence);
-      lines.push(`A: ${formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}${conf}`);
-    }
+    lines.push(...answeredLines(answered));
     lines.push('');
   }
 

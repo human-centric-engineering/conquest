@@ -14,6 +14,9 @@ import { describe, it, expect } from 'vitest';
 import { buildTranscriptText } from '@/lib/app/questionnaire/export/build-transcript-text';
 import type { TranscriptExportModel } from '@/lib/app/questionnaire/export/transcript-types';
 
+/** A fixed UTC stamp — the serialiser formats it, so the tests stay deterministic. */
+const STAMP = '2026-06-01T10:00:00.000Z';
+
 function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel {
   return {
     questionnaireTitle: 'Onboarding survey',
@@ -118,5 +121,53 @@ describe('buildTranscriptText', () => {
     const text = buildTranscriptText(model());
     expect(text.endsWith('\n')).toBe(true);
     expect(text.endsWith('\n\n')).toBe(false);
+  });
+
+  // ── Sectioned interviews (P21) ─────────────────────────────────────────────────────────────────
+
+  it('divides a sectioned conversation under upper-cased section headings', () => {
+    const text = buildTranscriptText(
+      model({
+        turns: [
+          {
+            speaker: 'interviewer',
+            text: 'Tell me about your context.',
+            at: STAMP,
+            sectionLabel: 'Context',
+          },
+          {
+            speaker: 'respondent',
+            text: 'We are twelve people.',
+            at: STAMP,
+            sectionLabel: 'Context',
+          },
+          { speaker: 'interviewer', text: 'And the problem?', at: STAMP, sectionLabel: 'Problem' },
+        ],
+      })
+    );
+    expect(text).toContain('CONTEXT');
+    expect(text).toContain('PROBLEM');
+    // The heading is announced once per visit, not once per line.
+    expect(text.match(/CONTEXT/g)).toHaveLength(1);
+  });
+
+  it('announces a section again when the respondent comes back to it', () => {
+    const text = buildTranscriptText(
+      model({
+        turns: [
+          { speaker: 'respondent', text: 'a', at: STAMP, sectionLabel: 'Context' },
+          { speaker: 'respondent', text: 'b', at: STAMP, sectionLabel: 'Problem' },
+          { speaker: 'respondent', text: 'c', at: STAMP, sectionLabel: 'Context' },
+        ],
+      })
+    );
+    expect(text.match(/CONTEXT/g)).toHaveLength(2);
+  });
+
+  it('renders an unsectioned conversation with no headings at all', () => {
+    const text = buildTranscriptText(model());
+    expect(text).not.toContain('CONTEXT');
+    // The only rules are the intro's; the conversation itself is undivided.
+    expect(text.match(/─{60}/g)).toHaveLength(1);
   });
 });

@@ -108,4 +108,35 @@ describe('renderTranscriptPdf', () => {
     );
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
+
+  it('renders a sectioned conversation, including a section the respondent came back to', async () => {
+    // Sectioned interviews (P21). The heading branch is a whole extra element type inside the turn
+    // map, and a revisit renders it twice — the shape most likely to trip the layout engine.
+    const pdf = await renderTranscriptPdf(
+      model({
+        turns: [
+          {
+            userMessage: '',
+            agentResponse: 'Tell me about your context.',
+            at: '2026-06-01T09:55:00.000Z',
+            sectionLabel: 'Context',
+          },
+          {
+            userMessage: 'Twelve people.',
+            agentResponse: 'And the problem?',
+            at: '2026-06-01T10:00:00.000Z',
+            sectionLabel: 'Problem',
+          },
+          {
+            userMessage: 'Actually, one more thing about the team.',
+            agentResponse: 'Go on.',
+            at: '2026-06-01T10:02:00.000Z',
+            sectionLabel: 'Context',
+          },
+        ],
+      })
+    );
+    expect(pdf.byteLength).toBeGreaterThan(0);
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
 });

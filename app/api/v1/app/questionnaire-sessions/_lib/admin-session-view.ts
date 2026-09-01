@@ -24,6 +24,9 @@ import {
   type ScopeDecisionSource,
   type TopicDepth,
 } from '@/lib/app/questionnaire/scope/types';
+import { resolveSessionSections } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-sections';
+import { narrowSectionRun, sectionEntry } from '@/lib/app/questionnaire/sections/run';
+import type { SectionCloseReason, SectionStatus } from '@/lib/app/questionnaire/sections/types';
 
 /** One topic on the plan, resolved to its label so the viewer never shows a bare key. */
 export interface AdminPlannedTopicView {
@@ -76,6 +79,54 @@ export interface AdminInterviewPlanView {
   estimatedSeconds: number | null;
 }
 
+/**
+ * One section on the admin timeline — Sectioned interviews (P21).
+ *
+ * The operator's question here is not "what did they answer" (the transcript says that) but "where
+ * did this run get stuck". A section that was opened twenty turns ago, never closed, and cost more
+ * than the six after it is the shape of a stalled interview, and until this existed the only record
+ * of it was a Json blob nobody reads by accident.
+ */
+export interface AdminSectionTimelineEntry {
+  key: string;
+  /** The section's respondent-facing label, or the key when the version no longer carries it. */
+  label: string;
+  /** 1-based position in the run. */
+  position: number;
+  status: SectionStatus;
+  /** Turn the section was first opened at; 0 before any turn landed in it. */
+  openedAtTurn: number;
+  /** Turn it was closed at, or null while open. */
+  closedAtTurn: number | null;
+  closeReason: SectionCloseReason | null;
+  reopenCount: number;
+  /**
+   * Turns charged to this section's budget, across every visit.
+   *
+   * The counted figure off the run, NOT a count of tagged rows: it is what `maxTurnsPerSection`
+   * measures against, so it is the number that explains why a capped section released when it did.
+   */
+  turnsSpent: number;
+  /** Summed spend across the turns tagged with this section; null when no turn recorded a cost. */
+  costUsd: number | null;
+  /**
+   * True when this section no longer resolves on the version — it was renamed away, or the topic
+   * behind it was deleted after this interview ran.
+   *
+   * Kept and shown rather than dropped, for the reason the run reconciler keeps the entry: turns
+   * were tagged with it, and a timeline that omitted it would leave those turns belonging to
+   * nothing while claiming to account for the whole run.
+   */
+  stale: boolean;
+}
+
+/** The section timeline for one session, or absent when the interview was not sectioned. */
+export interface AdminSectionTimelineView {
+  entries: AdminSectionTimelineEntry[];
+  /** The section the run was in when it stopped, or null when it never started / all closed. */
+  activeKey: string | null;
+}
+
 /** Metadata for the admin session viewer — gates the surface and renders its header. */
 export interface AdminSessionView {
   /** The questionnaire the session's version belongs to (admin ownership check). */
@@ -98,6 +149,29 @@ export interface AdminSessionView {
    * are "no decision was made", which is what the viewer says.
    */
   plan: AdminInterviewPlanView | null;
+  /**
+   * Sectioned interviews (P21): what happened in each part of the interview, or null.
+   *
+   * Null for every unsectioned session, which is every session that predates the feature and every
+   * version that never opted in — so the viewer renders exactly what it rendered before by
+   * construction rather than by a branch someone has to remember. Also null when the caller passed
+   * `sectionTimeline: false`, meaning it never asked rather than that there was nothing to find.
+   */
+  sectionTimeline: AdminSectionTimelineView | null;
+}
+
+/** What a caller wants loaded beyond the metadata every caller needs. */
+export interface AdminSessionViewOptions {
+  /**
+   * Resolve the section timeline (P21). Default true, for the viewer page that renders it.
+   *
+   * Opt OUT when the caller only needs the ownership check and the redaction fields. Resolving a
+   * timeline costs a full `buildTurnContext` plus a grouped read over the turns, and a caller that
+   * discards the result pays all of it — which is the same defect, pointed the other way, that
+   * gating on `sectionRun` was added to fix. Explicit rather than inferred: a default of false
+   * would silently empty the viewer the first time someone forgot to ask.
+   */
+  sectionTimeline?: boolean;
 }
 
 /**
@@ -105,7 +179,11 @@ export interface AdminSessionView {
  * redaction mirrors {@link loadSessionExport}: in anonymous mode the respondent's name is never
  * queried, so an anonymous session's viewer carries no identity.
  */
-export async function loadAdminSessionView(sessionId: string): Promise<AdminSessionView | null> {
+export async function loadAdminSessionView(
+  sessionId: string,
+  options: AdminSessionViewOptions = {}
+): Promise<AdminSessionView | null> {
+  const { sectionTimeline: wantSectionTimeline = true } = options;
   const row = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: {
@@ -115,6 +193,11 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
       versionId: true,
       respondentUserId: true,
       interviewPlan: true,
+      // Sectioned interviews (P21): the CHEAP GATE on the timeline below, not the timeline's data.
+      // Null on every unsectioned session, so an ordinary session never pays the context build that
+      // resolving the labels costs. Phase C learned this the expensive way, when the respondent
+      // strip fetched on mount to be told the feature was off.
+      sectionRun: true,
       version: {
         select: {
           versionNumber: true,
@@ -140,6 +223,12 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
   }
 
   const plan = await resolvePlanView(row.versionId, row.interviewPlan);
+  // Only a session that actually banked a run can have a timeline, only that session pays for one
+  // to be resolved, and only a caller that will render it asks in the first place.
+  const sectionTimeline =
+    wantSectionTimeline && narrowSectionRun(row.sectionRun)
+      ? await resolveSectionTimeline(sessionId)
+      : null;
 
   return {
     questionnaireId: row.version.questionnaireId,
@@ -152,7 +241,78 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
     anonymous,
     respondentName,
     plan,
+    sectionTimeline,
   };
+}
+
+/**
+ * Resolve the section timeline for one session, or null when it was not sectioned.
+ *
+ * Goes through {@link resolveSessionSections} rather than reading `sectionRun` directly: the run
+ * stores keys, and labels + order live on the version. See that module for why paying a context
+ * build is the right trade here.
+ *
+ * The cost figures come from the TURN ROWS, not from the run, because the run has no notion of
+ * spend. A section whose turns all predate cost capture reads null rather than zero — "we did not
+ * record it" and "it was free" are different claims, and only one of them is true.
+ */
+async function resolveSectionTimeline(sessionId: string): Promise<AdminSectionTimelineView | null> {
+  const resolved = await resolveSessionSections(sessionId);
+  if (!resolved.active || resolved.run === null) return null;
+
+  const run = resolved.run;
+
+  // One grouped read for every section's spend. Turns with a null `sectionKey` (an exchange
+  // belonging to no section) group under null and are simply never looked up.
+  const spend = await prisma.appQuestionnaireTurn.groupBy({
+    by: ['sectionKey'],
+    where: { sessionId },
+    _sum: { costUsd: true },
+  });
+  const costByKey = new Map<string, number | null>();
+  for (const group of spend) {
+    if (group.sectionKey === null) continue;
+    costByKey.set(group.sectionKey, group._sum.costUsd);
+  }
+
+  const entries: AdminSectionTimelineEntry[] = resolved.sections.map((section, index) => {
+    const entry = sectionEntry(run, section.key);
+    return {
+      key: section.key,
+      label: section.label,
+      position: index + 1,
+      status: entry?.status ?? 'not_started',
+      openedAtTurn: entry?.openedAtTurn ?? 0,
+      closedAtTurn: entry?.closedAtTurn ?? null,
+      closeReason: entry?.closeReason ?? null,
+      reopenCount: entry?.reopenCount ?? 0,
+      turnsSpent: entry?.turnsSpent ?? 0,
+      costUsd: costByKey.get(section.key) ?? null,
+      stale: false,
+    };
+  });
+
+  // Entries the reconciler kept for sections that stopped resolving. Appended in run order after
+  // the live ones, which is where the reconciler itself puts them.
+  const live = new Set(resolved.sections.map((s) => s.key));
+  for (const entry of run.sections) {
+    if (live.has(entry.key)) continue;
+    entries.push({
+      key: entry.key,
+      label: entry.key,
+      position: entries.length + 1,
+      status: entry.status,
+      openedAtTurn: entry.openedAtTurn,
+      closedAtTurn: entry.closedAtTurn,
+      closeReason: entry.closeReason,
+      reopenCount: entry.reopenCount,
+      turnsSpent: entry.turnsSpent,
+      costUsd: costByKey.get(entry.key) ?? null,
+      stale: true,
+    });
+  }
+
+  return { entries, activeKey: run.activeKey };
 }
 
 /**

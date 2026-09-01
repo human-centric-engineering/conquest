@@ -338,10 +338,133 @@ authority and the controls it refused were drawn from that same view.
 
 ---
 
+## The artefacts
+
+Three things a sectioned interview leaves behind, all of which read as the flat
+artefact when nothing was sectioned.
+
+### The transcript, in both formats
+
+`withSectionHeadings` is the shared rule, read by the plain-text serialiser and
+the React-PDF document alike, so a download taken in either format divides the
+conversation identically. Copy-to-clipboard rides the text endpoint and gets it
+for free.
+
+The rule is **not** a group-by, and the difference is load-bearing: a heading is
+emitted whenever a line's label differs from the last one **printed**. Under
+`free` navigation a respondent may work in part one, move to part three, and come
+back — two genuine visits, minutes apart. A grouping would merge them into one
+block and misreport when things were said. The heading repeats because the visit
+repeated.
+
+An unlabelled line emits nothing and does not clear the tracker, so a session
+that turned sections on part-way through does not re-announce the section its
+early turns interrupted.
+
+### The report, in chapters
+
+`buildReportChapters` turns the resolved sections plus the run into an ordered
+list, and three things follow from it:
+
+1. The **answer transcript** the writer reads is bucketed by chapter rather than
+   by document section, and emitted in **chapter order** — a respondent may
+   answer part three before part one, and a report that followed the panel's
+   order would present the interview in an order nobody experienced. As with the
+   slots below, a section set carrying no question membership at all (a
+   data-slot-mode topic set; a `themes` set whose slots have no mapped questions)
+   is ignored rather than bucketed against, so the document titles survive.
+2. The **data-slot context** is re-bucketed the same way. Under a
+   `themes`-sourced section set this is a no-op by construction. A section set
+   that carries no slot membership at all — every `document`-sourced one, since
+   `fromDocument` groups questions only — is left alone rather than swept into
+   the catch-all, because chapters that know nothing about the slots have
+   nothing to say about them.
+3. The writer is told the **shape** and asked to follow it, and is explicitly
+   licensed to merge two parts or drop one it has nothing to say about. A chapter
+   written to fill a heading is worse than no chapter.
+
+**A part never reached is a third kind of gap**, and the prompt states it next to
+the other two so the writer can keep them apart. A question the respondent
+SKIPPED was put to them and declined. An area Conditional Topics EXCLUDED was
+judged not to apply and the respondent was told so. A part NEVER REACHED applied,
+was offered, and the interview stopped before it — which licenses a sentence
+neither of the others does: it is worth coming back to. Left unstated, a report
+over a half-finished sectioned interview reads as a complete assessment of a
+smaller instrument.
+
+Reached but unfinished counts as **covered**. The respondent was there and their
+answers are in hand, so the honest result is a thin chapter, not an absent one.
+
+Content belonging to no chapter is kept under a trailing "Other answers" heading
+rather than dropped. This is not defensive tidiness: a `themes`- or
+`document`-sourced section set groups only what its grouping knows about, so a
+question in no theme genuinely belongs to no part of the run, and its answers are
+still the respondent's.
+
+### The admin session timeline
+
+`SectionTimelineCard` sits beside the interview plan on the session viewer, and
+answers the question the transcript cannot: where did this run get stuck. Opened,
+finished, came-back-to, turns spent, and spend per section.
+
+Turns come from the run's **counted** `turnsSpent`, because that is the figure
+`maxTurnsPerSection` measures against and therefore the one that explains why a
+capped section released when it did. Spend comes from the **turn rows**, because
+the run has no notion of cost — and a section whose turns predate cost capture
+reads as unknown rather than as zero, since "we did not record it" and "it was
+free" are different claims.
+
+A section the version no longer carries is shown, marked, rather than dropped.
+Turns were tagged with it, and hiding the row would leave them belonging to
+nothing while the timeline claimed to account for the whole run.
+
+**Whether a section was opened is read off its STATUS, never off `openedAtTurn`.**
+The runtime stamps that field with `selectionRound`, which counts the turns
+_before_ the one being written, while turn rows carry a 1-based `ordinal` — so
+the section every respondent starts in is stamped 0 while its first exchange is
+turn 1. A card testing `openedAtTurn > 0` therefore reported a finished section
+with six turns and recorded spend as "never opened". The status carries no such
+arithmetic. A zero stamp is described in words rather than printed, because the
+one number the row must not claim is "turn 0".
+
+For the same reason the "where it stopped" marker is withheld from a part whose
+status is `not_started`. `buildSectionState` SYNTHESISES an active key when the
+stored run carries none (`run.activeKey ?? nextOpenSectionKey(...)`), so a
+session that banked a run without taking a turn resolves its first section as
+active — and marking it would put "Not reached" and "Where it stopped" on one
+row.
+
+### Both artefacts are gated on the stored blob, not on the resolver
+
+Resolving a session's sections after the fact goes through `buildTurnContext`,
+which is not cheap. Both callers therefore read `sectionRun` — null on every
+unsectioned session — from a row they were already loading, and only pay for the
+resolution when there is something to resolve. This is the same defect phase C
+found on the respondent strip, which fetched on mount to be told the feature was
+off, and it is worth stating as a rule: **never pay to be told the feature is
+off.**
+
+The rule has a second edge. `loadAdminSessionView` takes a
+`{ sectionTimeline }` option because the admin transcript route calls it for the
+ownership check and the redaction fields alone and never returns a timeline —
+resolving one would buy a turn-context build per download and discard it. The
+option defaults to TRUE rather than false: a default of false would silently
+empty the viewer the first time someone forgot to ask, and a wasted read is a
+cheaper mistake than a missing panel.
+
+---
+
 ## Explicitly not built
 
-- No per-section report chapters. `sectionKey` on the turn is the hook a later
-  feature would use.
+- **No section grouping on the raw answer appendix.** The questions-and-answers
+  recap appended beneath a report renders the panel's own sections. That is what
+  the respondent saw in the panel, and regrouping it would mean carrying the
+  chapter list on the stored report row and through the PDF. Recorded as a
+  decision, not an oversight; the AI chapters above it already follow the run.
+- **No chapters on the run-level (journey) report.** A run spans several legs,
+  each of which may be sectioned differently or not at all. Merging their chapter
+  lists would collide keys and impose an order no respondent experienced. That
+  report keeps its per-leg headings.
 - No section-level analytics or cohort aggregation.
 - No author-drawn sections. Sections are always derived from a grouping the
   version already has; there is no editor for them.

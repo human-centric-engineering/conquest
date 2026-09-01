@@ -7,6 +7,11 @@
  * questionnaire context + run details, then the conversation — each turn labelled
  * ("Interviewer" / the respondent) and timestamped.
  *
+ * Sectioned interviews (P21): a section heading is drawn wherever `withSectionHeadings` says one
+ * falls — the same rule the plain-text serialiser reads, so a download taken in either format
+ * divides the conversation identically. A turn with no section label draws no heading, so every
+ * unsectioned session renders exactly as it did before.
+ *
  * Sibling to the F7.4 {@link SessionPdfDocument} (the *answers* export): same branding
  * (accent rule + pre-fetched logo data URI), different body — the verbatim conversation
  * instead of captured slot values. A null logo simply renders no image.
@@ -18,6 +23,7 @@
 import { Document, Page, Text, View, Image, StyleSheet } from '@react-pdf/renderer';
 
 import type { TranscriptExportModel } from '@/lib/app/questionnaire/export/transcript-types';
+import { withSectionHeadings } from '@/lib/app/questionnaire/export/transcript-sections';
 import {
   formatTranscriptStamp,
   humaniseSessionStatus,
@@ -101,6 +107,22 @@ const styles = StyleSheet.create({
   },
   turn: {
     marginBottom: 12,
+  },
+  // Sectioned interviews (P21). A rule above and generous space before it, so a section boundary
+  // reads as a division of the conversation rather than as one more turn with a bold label. The
+  // first heading carries the same top margin as the rest: it sits below the intro's own rule, and
+  // singling it out would make the first section look like part of the header.
+  sectionHeading: {
+    marginTop: 10,
+    marginBottom: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+  },
+  sectionHeadingText: {
+    fontSize: 11,
+    fontFamily: 'Helvetica-Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   turnHeader: {
     flexDirection: 'row',
@@ -212,22 +234,34 @@ export function TranscriptPdfDocument({ model }: TranscriptPdfDocumentProps) {
         {model.turns.length === 0 ? (
           <Text style={styles.empty}>No conversation was recorded for this session.</Text>
         ) : (
-          model.turns.map((turn, i) => {
+          withSectionHeadings(model.turns).map(({ turn, heading }, i) => {
             const interviewer = turn.speaker === 'interviewer';
             const label = interviewer ? model.interviewerLabel : model.respondentLabel;
             return (
-              <View key={i} style={styles.turn} wrap={false}>
-                <View style={styles.turnHeader}>
-                  <Text style={[styles.speaker, { color: interviewer ? accent : COLORS.text }]}>
-                    {label}
+              // The heading and the line it introduces are one non-breaking unit, so a section never
+              // opens at the foot of a page with its first exchange stranded overleaf.
+              <View key={i} wrap={false}>
+                {heading && (
+                  <View style={[styles.sectionHeading, { borderTopColor: accent }]}>
+                    <Text style={[styles.sectionHeadingText, { color: accent }]}>{heading}</Text>
+                  </View>
+                )}
+                <View style={styles.turn}>
+                  <View style={styles.turnHeader}>
+                    <Text style={[styles.speaker, { color: interviewer ? accent : COLORS.text }]}>
+                      {label}
+                    </Text>
+                    <Text style={styles.timestamp}>{formatTranscriptStamp(turn.at)}</Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.body,
+                      { borderLeftColor: interviewer ? accent : COLORS.hairline },
+                    ]}
+                  >
+                    {turn.text.trim()}
                   </Text>
-                  <Text style={styles.timestamp}>{formatTranscriptStamp(turn.at)}</Text>
                 </View>
-                <Text
-                  style={[styles.body, { borderLeftColor: interviewer ? accent : COLORS.hairline }]}
-                >
-                  {turn.text.trim()}
-                </Text>
               </View>
             );
           })

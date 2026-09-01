@@ -246,6 +246,15 @@ from the delivered report: a re-run never changes what the respondent sees until
    is distinct from `completionPct`, which drives the deterministic
    [partial-report caveat](#storage-ai-modes) and is still never given to the model.
 
+   **Sectioned interviews (P21) reshape both halves of this.** When the session was run in named
+   parts, `buildAnswerTranscript` and the data-slot context are bucketed into those parts instead of
+   the panel's document sections, the prompt gains a block naming the parts in run order, and a part
+   the interview never reached is stated as a **third** kind of gap — distinct from a question the
+   respondent skipped (the coverage block above) and an area Conditional Topics ruled out. Gated on
+   the session's stored `sectionRun`, so an unsectioned report pays nothing and its prompt is
+   unchanged. See
+   [`sectioned-interviews.md`](./sectioned-interviews.md#the-report-in-chapters).
+
    The DB load (steps + transcript + data-slot block + completion % + coverage) is split from the generation core:
    `generateRespondentReport(sessionId)` builds the inputs, then delegates to the exported
    `generateReportFromInputs(inputs)` (KB → agent → research rounds → completion → formatter → appendix).

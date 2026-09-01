@@ -12,6 +12,7 @@
  */
 
 import type { TranscriptExportModel } from '@/lib/app/questionnaire/export/transcript-types';
+import { withSectionHeadings } from '@/lib/app/questionnaire/export/transcript-sections';
 import {
   formatTranscriptStamp,
   humaniseSessionStatus,
@@ -59,17 +60,14 @@ export function buildTranscriptText(model: TranscriptExportModel): string {
     lines.push('No conversation was recorded for this session.');
   } else {
     // Sectioned interviews (P21): a heading whenever the section changes, so the download reads as
-    // one conversation per section. Tracked as "the label last printed" rather than by grouping the
-    // list, because a reopened section genuinely appears twice and the transcript must say so —
-    // collapsing the two visits into one block would misreport when things were said.
-    let lastSection: string | undefined;
-    for (const turn of model.turns) {
-      if (turn.sectionLabel && turn.sectionLabel !== lastSection) {
+    // one conversation per section. The rule itself lives in `withSectionHeadings`, shared with the
+    // PDF document so the two renderers cannot drift on where a heading falls.
+    for (const { turn, heading } of withSectionHeadings(model.turns)) {
+      if (heading) {
         lines.push(RULE);
-        lines.push(turn.sectionLabel.toUpperCase());
+        lines.push(heading.toUpperCase());
         lines.push(RULE);
         lines.push('');
-        lastSection = turn.sectionLabel;
       }
       const label = turn.speaker === 'interviewer' ? model.interviewerLabel : model.respondentLabel;
       lines.push(`[${formatTranscriptStamp(turn.at)}] ${label}:`);

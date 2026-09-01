@@ -40,6 +40,16 @@ import {
 } from '@/lib/app/questionnaire/report/settings';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import {
+  buildReportChapters,
+  chapterDataSlotGroups,
+  type ReportChapter,
+} from '@/lib/app/questionnaire/report/chapters';
+import {
+  resolveSessionSections,
+  NO_SESSION_SECTIONS,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/session-sections';
+import { narrowSectionRun } from '@/lib/app/questionnaire/sections/run';
+import {
   runReportResearch,
   type ReportResearchResult,
 } from '@/lib/app/questionnaire/report/research';
@@ -306,6 +316,58 @@ function clampInfluence(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
 }
 
+/**
+ * The framing for an interview run in parts — Sectioned interviews (P21).
+ *
+ * Two jobs, and they are separable but belong together because the second only makes sense given
+ * the first.
+ *
+ * **The shape.** The respondent met this instrument as a sequence of named parts, so the report is
+ * asked to follow that sequence. This is a request about structure, not content: the writer still
+ * decides what each chapter says, and is explicitly allowed to merge or drop a part it has nothing
+ * to say about, because a chapter written to fill a heading is worse than no chapter.
+ *
+ * **The parts never reached.** This is a THIRD kind of gap, and the writer already holds two. A
+ * question the respondent SKIPPED was put to them and declined. An area Conditional Topics
+ * EXCLUDED was judged not to apply and the respondent was told so. A part NEVER REACHED applied,
+ * was offered, and the interview stopped before it — which licenses a sentence neither of the
+ * others does: it is worth coming back to. Left unstated, a report over a half-finished sectioned
+ * interview reads as a complete assessment of a smaller instrument.
+ */
+function sectionChapterRules(chapters: readonly ReportChapter[]): string {
+  const covered = chapters.filter((c) => c.covered);
+  const missed = chapters.filter((c) => !c.covered);
+  const parts: string[] = [
+    'THE SHAPE OF THIS INTERVIEW. The respondent worked through this questionnaire in named parts, ' +
+      'in this order:\n' +
+      chapters
+        .map((c) => `${c.position}. ${c.label}${c.covered ? '' : ' — NOT REACHED'}`)
+        .join('\n'),
+    'Structure your report to follow those parts, in that order, so it reads back the way they ' +
+      'experienced it. Use the part names as your section headings where they fit. You are not ' +
+      'obliged to write one section per part: merge two parts that belong together, and leave out a ' +
+      'part you have nothing worth saying about. A section written only to fill a heading is worse ' +
+      'than no section at all.',
+  ];
+  if (missed.length > 0) {
+    parts.push(
+      'NOT COVERED — the interview ended before reaching these parts. This is NOT the same as the ' +
+        'respondent having nothing to say: they were never asked. Do not write about them, do not ' +
+        'infer their position, and do not present the report as a complete picture. You SHOULD say ' +
+        'plainly that these parts were not covered, and it is appropriate to suggest returning to ' +
+        'them.\n' +
+        missed.map((c) => `- ${c.label}`).join('\n')
+    );
+  }
+  if (covered.length === 0) {
+    parts.push(
+      'No part of this interview was completed. Keep the report correspondingly short and say so ' +
+        'directly rather than writing at length from almost nothing.'
+    );
+  }
+  return parts.join('\n\n');
+}
+
 /** Assemble the report agent's system + user messages. */
 function buildReportMessages(opts: {
   agentInstructions: string;
@@ -337,6 +399,11 @@ function buildReportMessages(opts: {
    */
   notAssessed?: readonly NotAssessedTopic[];
   /**
+   * Sectioned interviews (P21): the parts this interview was run in, and which were never reached.
+   * Absent for every unsectioned session, in which case no shape block is emitted at all.
+   */
+  chapters?: readonly ReportChapter[];
+  /**
    * Open-vs-close reconciliation (C9): the three views of the interview the writer is asked to hold
    * against each other. Absent → no block, and the prompt is exactly as it was before.
    */
@@ -359,6 +426,7 @@ function buildReportMessages(opts: {
     includesAppendedData,
     coverage,
     notAssessed,
+    chapters,
     reconciliation,
     glossary,
   } = opts;
@@ -388,6 +456,10 @@ function buildReportMessages(opts: {
   // Immediately after it, the other kind of gap: what nobody asked. Ordering is deliberate — the
   // writer reads "skipped" and "never asked" side by side, which is the only way to keep them apart.
   if (notAssessed && notAssessed.length > 0) system.push(notAssessedRules(notAssessed));
+  // The third kind of gap, and the shape that produced it. After the other two on purpose: the
+  // writer has to be able to tell a part it never reached from an area that was ruled out, and the
+  // only way to keep three gaps apart is to state them together.
+  if (chapters && chapters.length > 0) system.push(sectionChapterRules(chapters));
   // And then the comparison those two gaps bound: what they said they needed, what they asked for,
   // and what was actually measured. Seated after the scope blocks on purpose — the writer must know
   // which areas were never assessed BEFORE being asked to reconcile, or it will read a missing
@@ -503,6 +575,16 @@ export interface ReportGenerationInputs {
    * non-adaptive session, which produces exactly the prompt this did before P17.
    */
   notAssessed?: NotAssessedTopic[];
+  /**
+   * Sectioned interviews (P21): the parts the interview was run in, in run order, each marked with
+   * whether the respondent ever reached it.
+   *
+   * Absent for every unsectioned session — which is every session that predates P21 and every
+   * version that never opted in — and its absence produces exactly the report this produced before
+   * sections existed. The admin preview omits it too: a synthesised respondent has no run, and
+   * inventing one would put a shape on a sample that no real session had.
+   */
+  chapters?: ReportChapter[];
   /**
    * Open-vs-close reconciliation (C9): what the respondent said they needed, what they asked for,
    * and what the assessment measured, held apart so the writer can be told to compare them.
@@ -634,6 +716,11 @@ export async function generateRespondentReportWithSettings(
     where: { id: sessionId },
     select: {
       versionId: true,
+      // Sectioned interviews (P21): the CHEAP GATE on the chapter resolution below, not its data.
+      // Null on every unsectioned session, so an ordinary report never pays for a section list it
+      // has no use for. Phase C learned this the expensive way, when the respondent strip fetched on
+      // mount to be told the feature was off.
+      sectionRun: true,
       version: { select: { questionnaire: { select: { demoClientId: true } } } },
     },
   });
@@ -655,6 +742,16 @@ export async function generateRespondentReportWithSettings(
   });
   // Surface confidence on both surfaces only when the admin opted into discounting low-confidence items.
   const includeConfidence = settings.generation.discountLowConfidence;
+
+  // Sectioned interviews (P21): the parts this respondent worked through, if any. Empty for every
+  // unsectioned session, and every builder below then behaves exactly as it did before — the
+  // grouping falls back to the document sections and no shape block reaches the writer.
+  const sectioned = narrowSectionRun(meta.sectionRun)
+    ? await resolveSessionSections(sessionId)
+    : NO_SESSION_SECTIONS;
+  const chapters = sectioned.active ? buildReportChapters(sectioned.sections, sectioned.run) : [];
+  const chapterOpt = chapters.length > 0 ? { chapters } : {};
+
   const transcript = buildAnswerTranscript(
     {
       questionnaireTitle: loaded.questionnaireTitle,
@@ -663,9 +760,17 @@ export async function generateRespondentReportWithSettings(
       audience: loaded.audience,
       sections: panel.sections,
     },
+    { includeConfidence, ...chapterOpt }
+  );
+  // The data slots are re-bucketed rather than passed a flag, because the block builder groups by
+  // whatever `theme` it is handed and re-grouping upstream keeps that builder unaware of sections
+  // entirely. Under a `themes`-sourced section set this is a no-op by construction.
+  const dataSlotContext = buildDataSlotContextBlock(
+    chapters.length > 0
+      ? chapterDataSlotGroups(loaded.dataSlotGroups, chapters)
+      : loaded.dataSlotGroups,
     { includeConfidence }
   );
-  const dataSlotContext = buildDataSlotContextBlock(loaded.dataSlotGroups, { includeConfidence });
   // Completion at submission (frozen — a completed session takes no more answers). Drives the
   // partial-report caveat when a session was submitted early. No slots → treat as fully complete.
   const completionPct =
@@ -700,6 +805,9 @@ export async function generateRespondentReportWithSettings(
     // What the interview never asked about. The honest half of an adaptive instrument's record: a
     // report that silently omits what it skipped is a report that implies it looked everywhere.
     ...((loaded.notAssessed?.length ?? 0) > 0 ? { notAssessed: loaded.notAssessed } : {}),
+    // The parts the interview was run in, and the ones it never reached. Omitted entirely when the
+    // interview was not sectioned, so the prompt is byte-identical to what it was before P21.
+    ...chapterOpt,
     ...(reconciliation ? { reconciliation } : {}),
   });
 }
@@ -723,6 +831,7 @@ export async function generateReportFromInputs(
     sessionId,
     coverage,
     notAssessed,
+    chapters,
     reconciliation,
     preview = false,
     onProgress,
@@ -896,6 +1005,7 @@ export async function generateReportFromInputs(
     })(),
     ...(coverage ? { coverage } : {}),
     ...(notAssessed && notAssessed.length > 0 ? { notAssessed } : {}),
+    ...(chapters && chapters.length > 0 ? { chapters } : {}),
     ...(reconciliation ? { reconciliation } : {}),
     ...(inputs.glossary && inputs.glossary.length > 0 ? { glossary: inputs.glossary } : {}),
   });

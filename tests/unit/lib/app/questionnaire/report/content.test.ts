@@ -26,6 +26,7 @@ import {
   type AnswerTranscriptInput,
 } from '@/lib/app/questionnaire/report/content';
 import type { PanelSlotView, PanelSectionView } from '@/lib/app/questionnaire/panel/types';
+import { UNCHAPTERED_HEADING, type ReportChapter } from '@/lib/app/questionnaire/report/chapters';
 import type { ExportDataSlotGroup } from '@/lib/app/questionnaire/export/types';
 
 function slot(over: Partial<PanelSlotView> = {}): PanelSlotView {
@@ -382,6 +383,138 @@ describe('buildUnansweredQuestionsBlock', () => {
 
   it('returns an empty string for no sections at all', () => {
     expect(buildUnansweredQuestionsBlock([])).toBe('');
+  });
+});
+
+describe('buildAnswerTranscript, grouped into chapters (P21)', () => {
+  const base: AnswerTranscriptInput = {
+    questionnaireTitle: 'Pulse',
+    goal: null,
+    audience: null,
+    sections: [],
+  };
+
+  /** Two document sections whose questions cut across the run's parts. */
+  const sections: PanelSectionView[] = [
+    {
+      sectionId: 's1',
+      title: 'Document section one',
+      slots: [
+        slot({ slotKey: 'q1', prompt: 'Context?', value: 'Twelve people' }),
+        slot({ slotKey: 'q2', prompt: 'Problem?', value: 'Churn' }),
+      ],
+    },
+    {
+      sectionId: 's2',
+      title: 'Document section two',
+      slots: [slot({ slotKey: 'q3', prompt: 'Appetite?', value: 'High' })],
+    },
+  ];
+
+  const chapters: ReportChapter[] = [
+    {
+      key: 'ctx',
+      label: 'Context',
+      position: 1,
+      covered: true,
+      questionKeys: ['q1'],
+      dataSlotKeys: [],
+    },
+    {
+      key: 'prob',
+      label: 'Problem',
+      position: 2,
+      covered: true,
+      questionKeys: ['q2', 'q3'],
+      dataSlotKeys: [],
+    },
+  ];
+
+  it('groups answers under the parts the respondent worked through, not the document sections', () => {
+    const text = buildAnswerTranscript({ ...base, sections }, { chapters });
+    expect(text).toContain('## Context');
+    expect(text).toContain('## Problem');
+    expect(text).not.toContain('Document section one');
+  });
+
+  it('emits the chapters in run order even when the answers arrived in another', () => {
+    // Free navigation lets a respondent answer part two before part one. The report follows the
+    // interview's shape, not the order the panel happens to hold.
+    const outOfOrder: PanelSectionView[] = [
+      { sectionId: 's2', title: 'Two', slots: [slot({ slotKey: 'q3', value: 'High' })] },
+      { sectionId: 's1', title: 'One', slots: [slot({ slotKey: 'q1', value: 'Twelve' })] },
+    ];
+    const text = buildAnswerTranscript({ ...base, sections: outOfOrder }, { chapters });
+    expect(text.indexOf('## Context')).toBeLessThan(text.indexOf('## Problem'));
+  });
+
+  it('keeps an answer belonging to no part under the catch-all rather than dropping it', () => {
+    const text = buildAnswerTranscript(
+      {
+        ...base,
+        sections: [
+          { sectionId: 's1', title: 'One', slots: [slot({ slotKey: 'stray', prompt: 'Stray?' })] },
+        ],
+      },
+      { chapters }
+    );
+    expect(text).toContain(`## ${UNCHAPTERED_HEADING}`);
+    expect(text).toContain('Q: Stray?');
+  });
+
+  it('omits a part with no answers rather than printing an empty heading', () => {
+    const text = buildAnswerTranscript(
+      {
+        ...base,
+        sections: [
+          { sectionId: 's1', title: 'One', slots: [slot({ slotKey: 'q1', value: 'Twelve' })] },
+        ],
+      },
+      { chapters }
+    );
+    expect(text).toContain('## Context');
+    expect(text).not.toContain('## Problem');
+  });
+
+  it('still skips unanswered slots inside a chapter', () => {
+    const text = buildAnswerTranscript(
+      {
+        ...base,
+        sections: [
+          {
+            sectionId: 's1',
+            title: 'One',
+            slots: [
+              slot({ slotKey: 'q1', prompt: 'Context?', value: 'Twelve' }),
+              slot({ slotKey: 'q2', prompt: 'Problem?', answered: false, value: null }),
+            ],
+          },
+        ],
+      },
+      { chapters }
+    );
+    expect(text).toContain('Q: Context?');
+    expect(text).not.toContain('Q: Problem?');
+  });
+
+  it('falls back to the document sections when no chapter knows anything about the questions', () => {
+    // The question-side twin of the `chapterDataSlotGroups` guard. A data-slot-mode topic set, and a
+    // `themes` set whose slots have no mapped questions, both yield chapters with empty
+    // `questionKeys` — and bucketing against one would sweep every answer under "Other answers",
+    // losing the section titles the transcript carried before sections existed.
+    const slotsOnly = chapters.map((c) => ({ ...c, questionKeys: [] }));
+    const text = buildAnswerTranscript({ ...base, sections }, { chapters: slotsOnly });
+    expect(text).toContain('## Document section one');
+    expect(text).toContain('## Document section two');
+    expect(text).not.toContain(UNCHAPTERED_HEADING);
+    expect(text).not.toContain('## Context');
+  });
+
+  it('falls back to the document sections when no chapters are supplied', () => {
+    // The unsectioned path, which is every session predating P21. Byte-identical to before.
+    const text = buildAnswerTranscript({ ...base, sections });
+    expect(text).toContain('## Document section one');
+    expect(text).not.toContain('## Context');
   });
 });
 
