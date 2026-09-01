@@ -31,6 +31,7 @@ import {
   type QuestionFidelityLevel,
 } from '@/lib/app/questionnaire/types';
 import type {
+  EvaluationFindingView,
   EvaluationRunDetail,
   ScopeEvaluationRunDetail,
   ScopeFindingTargetKind,
@@ -42,7 +43,12 @@ import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/type
 // The pure chat leaf — `paceProfile` reads `FUNNEL_PACE_PROFILES`, the same table the runtime uses,
 // so the pack's arc bands cannot drift from the arc the interviewer actually runs.
 import { paceProfile } from '@/lib/app/questionnaire/chat/interviewer-strategy';
-import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
+import {
+  buildRoutingSettingRows,
+  buildSettingRows,
+  type PackSetupItem,
+  type RoutingSettingItem,
+} from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   ALWAYS_PHASES,
@@ -58,10 +64,23 @@ import {
   type FindingSeverity,
 } from '@/lib/app/questionnaire/evaluation';
 import {
+  effectiveOp,
   groupContextLabel,
   groupFindingsByTarget,
+  type FindingGroup,
   type SeverityCounts,
 } from '@/lib/app/questionnaire/evaluation/group-findings';
+import {
+  ACTION_NOUNS,
+  backing,
+  judgeNames,
+  summariseGroupActions,
+  wordingHost,
+} from '@/lib/app/questionnaire/evaluation/group-actions';
+import {
+  describeProposedEdit,
+  destinationSentence,
+} from '@/lib/app/questionnaire/evaluation/describe-edit';
 import {
   SCOPE_EVALUATION_DIMENSIONS,
   SCOPE_EVALUATION_DIMENSION_SPECS,
@@ -113,6 +132,36 @@ export interface PackInclude {
    */
   evaluations: boolean;
   /**
+   * Sub-option of {@link evaluations}: the panel's verdict per flagged subject — what it wants done,
+   * how many judges are behind it, and where they disagreed. Defaults **`true`**: it is the
+   * shortest and most useful thing the appendix can say, and the console has led with it since the
+   * by-question view landed.
+   */
+  evaluationVerdicts: boolean;
+  /**
+   * Sub-option of {@link evaluations}: every judge's own suggestion and reasoning, beneath the
+   * subject it is about.
+   *
+   * Defaults **`false`**, which is a deliberate change to what this section used to produce. Full
+   * reasoning is the bulk of the appendix — a contested question runs to about a page — and with the
+   * verdict now printed above it, most readers of a pack want the conclusion rather than four
+   * near-identical arguments for it. An admin who wants the arguments ticks this.
+   */
+  evaluationJudgeDetail: boolean;
+  /**
+   * Sub-option of {@link evaluations}: the cross-judge reconciled phrasings, and the judges no
+   * phrasing satisfies. Defaults `true` — a proposed wording is the most actionable line in the
+   * appendix, and it is one or two lines per contested question.
+   */
+  evaluationRewordings: boolean;
+  /**
+   * Sub-option of {@link evaluations}: the span of the questionnaire each judge cited as evidence.
+   * Defaults `false` — judges routinely quote the prompt the finding already sits under, so it is
+   * mostly the same sentence printed twice. The console suppresses a quote that merely restates its
+   * target; the pack makes it an opt-in instead, since it has no card to compare against.
+   */
+  evaluationEvidence: boolean;
+  /**
    * The routing logic — which topics are always asked, which are conditional (and on what
    * criteria), and the hard rules — explained in plain language for a stakeholder audience. Defaults
    * `false`, like `evaluations`: it is the routing *design*, not the questionnaire content, and not
@@ -121,6 +170,27 @@ export interface PackInclude {
    * `buildConditionalTopicsSection`.
    */
   conditionalTopics: boolean;
+  /**
+   * Sub-option of {@link conditionalTopics}: which questions each topic actually covers.
+   *
+   * Defaults `false` because it is the longest part of the section — every question of every topic,
+   * a second pass over the instrument the pack has usually already printed in full. Worth ticking
+   * when the reader's question is "if this area is not selected for me, what am I not asked?",
+   * which the topic list alone cannot answer.
+   */
+  conditionalTopicsMembers: boolean;
+  /**
+   * Sub-option of {@link conditionalTopics}: the judge panel's review of the routing design.
+   * Defaults `true` — it is short, and a routing design shared without the review of it invites
+   * the reader to assume nobody looked.
+   */
+  conditionalTopicsEvaluation: boolean;
+  /**
+   * Sub-option of {@link conditionalTopics}: the technical tier of the routing settings — the
+   * confidence floor, the per-type time costs, whether extra guidance is set. Defaults `false`, the
+   * same split and the same reasoning as `setupTechnical`.
+   */
+  conditionalTopicsTechnical: boolean;
   /**
    * The interviewer policy — the client's house rules, the questioning arc, and which questions are
    * asked as written — plus the F18.8 judge panel's verdict on it.
@@ -135,8 +205,11 @@ export interface PackInclude {
 }
 
 /**
- * The export dialog's default checkbox state — every section except `evaluations` and
- * `conditionalTopics`, and the standard settings tier only.
+ * The export dialog's default checkbox state.
+ *
+ * Every top-level section except the three opt-in appendices, the standard settings tier only, and
+ * each appendix's sub-options set to the shape that reads best when someone does tick it: the
+ * conclusions, not the arguments for them.
  */
 export const DEFAULT_PACK_INCLUDE: PackInclude = {
   meta: true,
@@ -146,7 +219,14 @@ export const DEFAULT_PACK_INCLUDE: PackInclude = {
   setup: true,
   setupTechnical: false,
   evaluations: false,
+  evaluationVerdicts: true,
+  evaluationJudgeDetail: false,
+  evaluationRewordings: true,
+  evaluationEvidence: false,
   conditionalTopics: false,
+  conditionalTopicsMembers: false,
+  conditionalTopicsEvaluation: true,
+  conditionalTopicsTechnical: false,
   interviewerPolicy: false,
 };
 
@@ -178,6 +258,75 @@ export interface PackEvaluationJudgeView {
   proposedChange: string;
   rationale: string;
   sourceQuote: string | null;
+  /**
+   * Plain-English rendering of the structured edit, from the shared `describeProposedEdit` — the
+   * same sentence the console prints under the button that performs it.
+   *
+   * `null` for a prose-only finding. The design panel was the only one of the three without this,
+   * so a drafted question reached the pack as the judge's prose description of it while the console
+   * showed the drafted prompt, its answer type and where it would land.
+   */
+  proposedEditSummary: string | null;
+  /**
+   * Where an `add_question` would put its drafted question, as a sentence. `null` for every other
+   * op, for a run that predates destination resolution, and for a terminal finding whose section
+   * was never explicitly chosen — see `destinationSentence`, which returns `null` rather than
+   * naming whichever section happens to be last today.
+   */
+  destination: string | null;
+  /**
+   * The reviewer's own instruction for how this change should be made, when they wrote one.
+   *
+   * The one thing on a finding written by a person rather than by a model, and the pack was
+   * dropping it: a reader saw the judge's suggestion with no sign that a human had already said
+   * "keep it under fifteen words" about it.
+   */
+  applyInstruction: string | null;
+}
+
+/**
+ * One proposed course of action and the judges behind it, resolved for printing.
+ *
+ * Fully resolved on purpose — heading, backing and judge names are strings here, not a
+ * `GroupAction` for each serialiser to phrase for itself. Three serialisers phrasing "2 of 3
+ * judges" independently is three chances to disagree with the console about what the panel said.
+ */
+export interface PackEvaluationVerdictBlock {
+  /** "A reword" — the action as a noun, for use as a heading over the block. */
+  heading: string;
+  /** "2 of 3 judges" / "all 3 judges" / "1 judge". Denominator is the judges that flagged THIS
+   *  target, never the seven on the panel: the others had nothing to say about it. */
+  backing: string;
+  /** The judges proposing it, by display name without the " Judge" noun. */
+  judges: string;
+  /** This block holds the reconciled wordings — see `wordingHost` for why it is not always first. */
+  holdsWording: boolean;
+  /**
+   * The one-line suggestions behind this action, deduplicated.
+   *
+   * Without them a block reading "A deletion, as proposed by 1 of 3 judges — Duplicates" gives a
+   * reader no reason at all, and the default download has judge reasoning switched off, so there is
+   * no tab to open the way there is in the console. One line per distinct suggestion keeps the
+   * verdict actionable without pulling the whole argument in behind it.
+   */
+  suggestions: string[];
+}
+
+/**
+ * What the panel is actually asking be done about one target.
+ *
+ * The pack printed severity tallies and a list of judges and left the reader to work out, from
+ * three or four prose paragraphs, that all of them were asking for the same thing. The console has
+ * led with this since the by-question view landed; it is built here by the same
+ * `summariseGroupActions`, so the document and the screen cannot reach different verdicts.
+ *
+ * `null` only when the group has no findings, which cannot happen for a target that exists.
+ */
+export interface PackEvaluationVerdict {
+  /** Every proposed action, best-supported first. More than one means the panel did not agree. */
+  blocks: PackEvaluationVerdictBlock[];
+  /** The panel proposed more than one course of action, and the reader is being asked to arbitrate. */
+  contested: boolean;
 }
 
 /**
@@ -199,6 +348,21 @@ export interface PackEvaluationTarget {
   label: string;
   /** The answer type for a question target; `null` otherwise (and for gap groups). */
   questionType: string | null;
+  /**
+   * Who is actually asked this question, in the product's words — "Always asked", "Asked when it
+   * fits", "Never asked — in no topic". `null` whenever Conditional Topics is off for the version,
+   * so a questionnaire that does not route says nothing about routing.
+   *
+   * This is the one line that connects the pack's two opt-in appendices. Without it the document
+   * describes a routing design in one section and critiques questions in another, and a reader
+   * weighing "delete this question" cannot see that only some respondents are ever asked it. The
+   * console has carried it on the finding card for exactly that reason.
+   */
+  routingReach: string | null;
+  /** The owning topic(s), joined. `null` exactly when {@link routingReach} is. */
+  topicLabel: string | null;
+  /** What the panel wants done, and whether it agreed — see {@link PackEvaluationVerdict}. */
+  verdict: PackEvaluationVerdict | null;
   /** Drafted new questions rather than judgements about something that exists — see `group-findings`. */
   gap: boolean;
   /** The target is gone from the live structure (named from the run's snapshot). */
@@ -287,6 +451,26 @@ export interface PackConditionalTopicsTopic {
   criteria: string | null;
   /** `true` when only the topic's highest-weight members are ever asked, not the whole thing. */
   sampledOnly: boolean;
+  /**
+   * The questions this topic actually covers, resolved against the version graph.
+   *
+   * Behind `include.conditionalTopicsMembers`, and empty when it is off. Without it the pack lists
+   * topics in one section and questions in another with nothing tying them, and a reader cannot
+   * answer the obvious question: if this area is not selected for me, what am I not asked?
+   *
+   * A key that no longer resolves keeps the raw key rather than being dropped — the same choice the
+   * hard rules make, so a stale membership stays visible as something to clean up.
+   */
+  questions: { key: string; prompt: string }[];
+  /**
+   * What the source document asked to be watched for DURING the conversation, when it wanted this
+   * topic added on something said rather than on how the opening went.
+   *
+   * Recorded, not acted on: the topic is still selected by its `criteria` above, exactly as every
+   * other one is. Printed because the alternative is a document that shows the approximation as
+   * though it were the intent — the gap is recorded on the topic precisely so a reviewer sees it.
+   */
+  trigger: { condition: string; cues: string[] } | null;
 }
 
 /**
@@ -376,19 +560,26 @@ export interface PackConditionalTopics {
   /** Conditional topics, in authored order. */
   conditional: PackConditionalTopicsTopic[];
   rules: PackConditionalTopicsRule[];
-  /** How many conditional topics one interview may cover at most. */
-  maxConditionalTopics: number;
   /**
-   * Whether one area the respondent did not raise is sampled briefly — the admin-facing
-   * "blind-spot check". Pack copy describes the mechanism rather than using that label: the pack
-   * is a document an admin hands to a client, where "blind spot" reads as a claim about the
-   * respondent the planner never made.
+   * Every routing setting, presented — derived from `ROUTING_SETTING_DESCRIPTORS`, not hand-listed.
+   *
+   * The section used to name four of the fifteen fields on `ConditionalTopicsSettings`, missing
+   * (among others) whether the respondent is told which areas were chosen and whether they may ask
+   * for one that was not: two facts about what the respondent EXPERIENCES, absent from the section
+   * whose whole subject is how the questionnaire adapts to them. Same registry pattern and same
+   * reasoning as the experience-setup summary, which was written after the same bug.
    */
-  includeCheckTopic: boolean;
-  /** Seconds; `0` means no time limit was set. */
-  sessionBudgetSeconds: number;
-  /** The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}. */
-  evaluation: PackScopeEvaluation;
+  settings: RoutingSettingItem[];
+  /**
+   * The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}.
+   *
+   * **`null` means the admin excluded it**, and every serialiser skips the subsection entirely,
+   * exactly as they skip a `null` top-level section. It must NOT be conflated with
+   * `hasRun: false`, which means "this routing has never been reviewed" — a sentence the pack
+   * prints in so many words. Emitting the excluded case as `hasRun: false` would have a
+   * client-facing document assert that a reviewed routing was never looked at.
+   */
+  evaluation: PackScopeEvaluation | null;
 }
 
 /** One policy judge's verdict on one target, for the pack. */
@@ -532,6 +723,59 @@ function buildQuestionPromptMap(graph: VersionGraphView): Map<string, string> {
  * console must not disagree about what counts as one subject (drafted questions splitting into
  * their own gap group is exactly the kind of rule that would drift if written twice).
  */
+/**
+ * Who is asked this target's question, in the product's vocabulary rather than the code's.
+ *
+ * The same three phrasings the console's finding card uses. "Never asked" is the case with no topic
+ * to name and the one a reader most needs: a question in no topic is one nobody will ever see, and
+ * a judge's opinion of its wording is beside the point until that is fixed.
+ *
+ * `null` when Conditional Topics is off (the resolver leaves `routingReach` null), so a
+ * questionnaire that does not route says nothing about routing.
+ */
+function routingReachOf(findings: readonly EvaluationFindingView[]): string | null {
+  const target = findings[0]?.target;
+  if (!target?.routingReach) return null;
+  switch (target.routingReach) {
+    case 'always':
+      return 'Always asked';
+    case 'conditional':
+      return 'Asked when it fits';
+    case 'never':
+      return 'Never asked — in no topic';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The panel's verdict on one target, fully resolved for printing.
+ *
+ * `summariseGroupActions` is the console's own function, deliberately: a pack that reached a
+ * different verdict from the screen would be worse than one that reached none. What is added here
+ * is only the phrasing — the heading noun, the backing, the judge names, and which block the
+ * reconciled wordings belong under — so a serialiser writes strings and makes no judgements.
+ */
+function buildVerdict(group: FindingGroup): PackEvaluationVerdict | null {
+  const summary = summariseGroupActions(group);
+  if (!summary.primary) return null;
+
+  const actions = [summary.primary, ...summary.others];
+  const host = wordingHost(actions);
+  return {
+    contested: summary.contested,
+    blocks: actions.map((action) => ({
+      heading: ACTION_NOUNS[action.kind],
+      backing: backing(action, summary.judgeCount),
+      judges: judgeNames(action.judges),
+      holdsWording: action === host,
+      // Deduplicated: two judges proposing the same action often word it identically, and printing
+      // the same sentence twice under one heading reads as two separate points.
+      suggestions: [...new Set(action.findings.map((f) => f.proposedChange.trim()))],
+    })),
+  };
+}
+
 function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluations {
   if (!run) return { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] };
 
@@ -557,19 +801,38 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
       context: groupContextLabel(group),
       label: group.label,
       questionType: group.questionType,
+      // Off the group's own findings, which all address the same target and so all carry the same
+      // resolved reach. A gap group is the exception: its findings target `goal` and describe
+      // questions that do not exist yet, so there is no reach to report.
+      routingReach: group.gap ? null : routingReachOf(group.findings),
+      topicLabel: group.gap ? null : (group.findings[0]?.target?.topicLabel ?? null),
+      verdict: buildVerdict(group),
       gap: group.gap,
       removed: group.removed,
       counts: group.counts,
       judgeCount: group.dimensions.length,
-      judges: group.findings.map((f) => ({
-        dimension: f.dimension,
-        label: judgeLabel(f.dimension),
-        severity: f.severity,
-        status: f.status,
-        proposedChange: f.proposedChange,
-        rationale: f.rationale,
-        sourceQuote: f.sourceQuote,
-      })),
+      judges: group.findings.map((f) => {
+        // The shared `effectiveOp`, not an inline re-implementation of the same rule. Its whole
+        // reason for being exported is that the reviewer-facing verb and the op that actually runs
+        // must not be able to diverge — and this file's premise is single-sourcing exactly that.
+        const op = effectiveOp(f);
+        return {
+          dimension: f.dimension,
+          label: judgeLabel(f.dimension),
+          severity: f.severity,
+          status: f.status,
+          proposedChange: f.proposedChange,
+          rationale: f.rationale,
+          sourceQuote: f.sourceQuote,
+          // The EFFECTIVE op, as at apply — an admin-edited override wins over the judge's draft,
+          // so a pack describing the judge's version would describe a change that will not happen.
+          proposedEditSummary: op ? describeProposedEdit(op, f.destination) : null,
+          destination: f.destination
+            ? destinationSentence(f.destination, f.status === 'applied' || f.status === 'declined')
+            : null,
+          applyInstruction: f.applyInstruction,
+        };
+      }),
       alternatives: (reconciledByKey.get(group.key)?.alternatives ?? []).map((alt) => ({
         prompt: alt.prompt,
         addresses: alt.addresses.map(judgeLabel),
@@ -658,11 +921,16 @@ function buildConditionalTopicsSection(
   topics: Topic[],
   settings: ConditionalTopicsSettings,
   dataSlots: DataSlotView[],
-  scopeEvaluationRun: ScopeEvaluationRunDetail | null
+  scopeEvaluationRun: ScopeEvaluationRunDetail | null,
+  questionPrompts: Map<string, string>,
+  include: PackInclude
 ): PackConditionalTopics {
   const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
   const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
   const alwaysAskedPhases = ALWAYS_PHASES as readonly string[];
+  // Falls back to the raw key so a setting or membership naming a since-deleted topic stays
+  // visible as something to clean up, rather than silently vanishing from the document.
+  const topicLabel = (key: string): string => topicLabels.get(key) ?? key;
 
   const alwaysAsked: PackConditionalTopicsTopic[] = [];
   const conditional: PackConditionalTopicsTopic[] = [];
@@ -675,6 +943,18 @@ function buildConditionalTopicsSection(
       alwaysAsked: isAlwaysAsked,
       criteria: isAlwaysAsked ? null : topic.criteria,
       sampledOnly: topic.depth === 'light',
+      questions: include.conditionalTopicsMembers
+        ? resolveDataSlotQuestions(questionPrompts, topic.members.questionKeys)
+        : [],
+      trigger: topic.trigger
+        ? {
+            // Trimmed of a trailing full stop: the serialisers continue the sentence ("... Today
+            // it is decided from the opening instead"), and an authored condition that already
+            // ends in one otherwise renders as "a grievance.. Today".
+            condition: topic.trigger.condition.trim().replace(/\.$/, ''),
+            cues: topic.trigger.cues,
+          }
+        : null,
     };
     (isAlwaysAsked ? alwaysAsked : conditional).push(row);
   }
@@ -686,10 +966,13 @@ function buildConditionalTopicsSection(
     rules: settings.rules.map((rule) => ({
       sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
     })),
-    maxConditionalTopics: settings.maxConditionalTopics,
-    includeCheckTopic: settings.includeCheckTopic,
-    sessionBudgetSeconds: settings.sessionBudgetSeconds,
-    evaluation: buildScopeEvaluationSection(scopeEvaluationRun),
+    settings: buildRoutingSettingRows(settings, topicLabel, include.conditionalTopicsTechnical),
+    // `null` when excluded, never `hasRun: false` — the serialisers render the latter as the
+    // sentence "This routing has not been reviewed", which about a version whose routing WAS
+    // reviewed is simply false. `null` is how every other excluded part of the model is expressed.
+    evaluation: include.conditionalTopicsEvaluation
+      ? buildScopeEvaluationSection(scopeEvaluationRun)
+      : null,
   };
 }
 
@@ -917,7 +1200,9 @@ export function buildPackModel(
             conditionalTopicsSource.topics,
             conditionalTopicsSource.settings,
             dataSlots,
-            conditionalTopicsSource.scopeEvaluationRun
+            conditionalTopicsSource.scopeEvaluationRun,
+            questionPrompts,
+            include
           )
         : null,
   };

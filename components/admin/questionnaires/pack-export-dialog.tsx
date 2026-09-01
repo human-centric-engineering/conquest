@@ -3,15 +3,25 @@
 /**
  * PackExportDialog — download a branded Questionnaire Pack (PDF/CSV/Markdown).
  *
- * Lets the admin pick which of the pack's seven sections to include (all ticked by default except
- * "Evaluation findings" and "Conditional topics", which are opt-in — see their descriptions) and the
- * output format, then
- * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. "Experience
- * setup" carries one nested sub-option — the technical/tuning settings tier — which is indented
- * under its parent and disabled while the parent is off, so it reads as a refinement of that
- * section rather than a seventh section. Opened from
+ * Lets the admin pick which of the pack's eight sections to include (all ticked by default except
+ * "Evaluation findings", "Conditional topics" and "The interviewer", which are opt-in — see their
+ * descriptions) and the output format, then
+ * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. Opened from
  * {@link file://./definition-export-menu.tsx}'s "Download pack…" item, the same way that menu
  * already opens {@link file://./import-definition-dialog.tsx}.
+ *
+ * ## Sub-options, and why they are generic
+ *
+ * A section may carry nested sub-options, indented under it and disabled while the parent is off,
+ * so each reads as a refinement of its section rather than as a section of its own. This started as
+ * one hand-rolled case (`setupTechnical`) rendered inline in the map; it is now a `subOptions` array
+ * on the descriptor, because the pack's three opt-in appendices each need several and a fourth
+ * hand-rolled special case would be the point at which one of them was silently forgotten.
+ *
+ * Which is not hypothetical: `interviewerPolicy` shipped on `PackInclude` and on the route with no
+ * checkbox here at all, so the interviewer section could never be switched on from the UI. The
+ * `_noUnreachableSections` guard below is the compile-time answer to that — a new top-level flag
+ * fails type-check until it is given a row.
  *
  * The download URL is dynamic (it depends on the checkbox/format state), so unlike the menu's static
  * `<a download>` links, the Download button sets `window.location.href` directly — same-origin GET,
@@ -62,23 +72,37 @@ const FORMAT_LABELS: Record<PackFormat, string> = {
   md: 'Markdown',
 };
 
-interface SectionOption {
-  key:
-    | 'meta'
-    | 'questions'
-    | 'dataSlots'
-    | 'definitions'
-    | 'setup'
-    | 'evaluations'
-    | 'conditionalTopics';
+/**
+ * The flags that refine a section rather than being one. Listed here so {@link SectionKey} is the
+ * exact complement — every other `PackInclude` flag is a top-level section and must have a row.
+ */
+type SubOptionKey =
+  | 'setupTechnical'
+  | 'evaluationVerdicts'
+  | 'evaluationJudgeDetail'
+  | 'evaluationRewordings'
+  | 'evaluationEvidence'
+  | 'conditionalTopicsMembers'
+  | 'conditionalTopicsEvaluation'
+  | 'conditionalTopicsTechnical';
+
+type SectionKey = Exclude<keyof PackInclude, SubOptionKey>;
+
+interface SubOption {
+  key: SubOptionKey;
   label: string;
   description: string;
 }
 
-/** The one nested sub-option — a refinement of `setup`, not a section of its own. */
-const TECHNICAL_SETTINGS_KEY = 'setupTechnical';
+interface SectionOption {
+  key: SectionKey;
+  label: string;
+  description: string;
+  /** Refinements of this section, indented under it and inert while it is off. */
+  subOptions?: SubOption[];
+}
 
-const SECTIONS: SectionOption[] = [
+const SECTIONS = [
   {
     key: 'meta',
     label: 'Title, version & goals',
@@ -103,20 +127,104 @@ const SECTIONS: SectionOption[] = [
     key: 'setup',
     label: 'Experience setup',
     description: 'Every setting that shapes the respondent experience, grouped by area.',
+    subOptions: [
+      {
+        key: 'setupTechnical',
+        label: 'Technical & tuning settings',
+        description:
+          'Also list the numeric tuning, prompt and cost settings behind the experience — useful internally, usually noise in a client-facing pack. Off by default.',
+      },
+    ],
   },
   {
     key: 'evaluations',
     label: 'Evaluation findings',
     description:
       "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
+    subOptions: [
+      {
+        key: 'evaluationVerdicts',
+        label: "The panel's verdict per question",
+        description:
+          'What the judges want done about each flagged question, how many of them agree, and where they disagreed.',
+      },
+      {
+        key: 'evaluationRewordings',
+        label: 'Suggested rewordings',
+        description:
+          'The alternative phrasings proposed to satisfy several judges at once, and any judge no rewording satisfies.',
+      },
+      {
+        key: 'evaluationJudgeDetail',
+        label: "Every judge's reasoning",
+        description:
+          'Each judge\u2019s own suggestion and the argument for it, beneath the question it is about. The longest part of the appendix \u2014 a contested question runs to about a page. Off by default.',
+      },
+      {
+        key: 'evaluationEvidence',
+        label: 'Evidence quotes',
+        description:
+          'The span of the questionnaire each judge quoted. Often the same wording the question above it already shows. Off by default.',
+      },
+    ],
   },
   {
     key: 'conditionalTopics',
     label: 'Conditional topics',
     description:
       'How this questionnaire routes respondents — which topics everyone gets, which depend on their answers, and the rules that decide — explained in plain language. Off by default.',
+    subOptions: [
+      {
+        key: 'conditionalTopicsEvaluation',
+        label: 'Review of this routing',
+        description:
+          'The AI panel\u2019s scores and findings on the routing design above, including suggestions not yet reviewed.',
+      },
+      {
+        key: 'conditionalTopicsMembers',
+        label: 'Which questions each topic covers',
+        description:
+          'List every question inside each topic, so a reader can see what is not asked when an area is not selected. The longest part of the section. Off by default.',
+      },
+      {
+        key: 'conditionalTopicsTechnical',
+        label: 'Technical routing settings',
+        description:
+          'Also list the confidence floor, per-question-type timings and whether extra guidance is set. Off by default.',
+      },
+    ],
   },
-];
+  {
+    key: 'interviewerPolicy',
+    label: 'The interviewer',
+    description:
+      'How the interviewer is set up — the house rules in force, how the questioning narrows, which questions are put word for word — and the review of that setup. Off by default.',
+  },
+] as const satisfies readonly SectionOption[];
+
+/**
+ * Compile-time proof that every top-level `PackInclude` flag has a checkbox above.
+ *
+ * `Record<never, never>` is satisfied by `{}`, so this is inert while the list is complete; add a
+ * section flag to `PackInclude` without a row here and the exclusion resolves to that key, which
+ * makes the empty object literal a type error naming exactly what is missing. Written because
+ * `interviewerPolicy` reached production unreachable — the route accepted it, the model built it,
+ * and no surface could ask for it.
+ */
+const _noUnreachableSections: Record<
+  Exclude<SectionKey, (typeof SECTIONS)[number]['key']>,
+  never
+> = {};
+void _noUnreachableSections;
+
+/**
+ * The same list, widened for rendering.
+ *
+ * `SECTIONS` is `as const` so the guard above can read its literal key union, and that same
+ * narrowing means `subOptions` is absent from the entries that have none. Rendering wants the
+ * common shape, where it is simply `undefined`.
+ */
+const SECTION_ROWS: readonly SectionOption[] = SECTIONS;
 
 export function PackExportDialog({
   open,
@@ -127,8 +235,8 @@ export function PackExportDialog({
   const [included, setIncluded] = useState<PackInclude>(DEFAULT_PACK_INCLUDE);
   const [format, setFormat] = useState<PackFormat>('pdf');
 
-  // Only the seven SECTIONS count — `setupTechnical` on its own produces nothing to download.
-  const nothingIncluded = SECTIONS.every((section) => !included[section.key]);
+  // Only the top-level sections count — a sub-option on its own produces nothing to download.
+  const nothingIncluded = SECTION_ROWS.every((section) => !included[section.key]);
 
   function handleDownload() {
     const url = new URL(
@@ -136,10 +244,14 @@ export function PackExportDialog({
       window.location.origin
     );
     url.searchParams.set('format', format);
-    for (const section of SECTIONS) {
+    for (const section of SECTION_ROWS) {
       url.searchParams.set(section.key, String(included[section.key]));
+      // Sent whatever the parent's state is: the route ignores a sub-option whose section is off,
+      // so filtering here would only duplicate that rule in a second place.
+      for (const sub of section.subOptions ?? []) {
+        url.searchParams.set(sub.key, String(included[sub.key]));
+      }
     }
-    url.searchParams.set(TECHNICAL_SETTINGS_KEY, String(included[TECHNICAL_SETTINGS_KEY]));
     window.location.href = url.toString();
     onOpenChange(false);
   }
@@ -163,7 +275,7 @@ export function PackExportDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          {SECTIONS.map((section) => (
+          {SECTION_ROWS.map((section) => (
             <div key={section.key} className="space-y-2">
               <div className="flex items-start gap-2">
                 <Checkbox
@@ -180,32 +292,31 @@ export function PackExportDialog({
                 </Label>
               </div>
 
-              {section.key === 'setup' && (
-                <div className="ml-6 flex items-start gap-2">
+              {/* Indented and disabled with the parent, so a sub-option reads as a refinement of
+                  the section above it rather than as a section in its own right. Its stored value
+                  is left alone while disabled: unticking a section and re-ticking it should give
+                  the admin their refinements back, not silently reset them. */}
+              {(section.subOptions ?? []).map((sub) => (
+                <div key={sub.key} className="ml-6 flex items-start gap-2">
                   <Checkbox
-                    id={`pack-section-${TECHNICAL_SETTINGS_KEY}`}
-                    checked={included[TECHNICAL_SETTINGS_KEY]}
-                    disabled={!included.setup}
+                    id={`pack-section-${sub.key}`}
+                    // Marks this as a refinement rather than a section, for anything reading the
+                    // DOM. Without it the only signal is an indent, so a caller counting sections
+                    // has to hard-code which ids to skip and gets it wrong the next time one lands.
+                    data-suboption="true"
+                    checked={included[sub.key]}
+                    disabled={!included[section.key]}
                     onCheckedChange={(checked) =>
-                      setIncluded((prev) => ({
-                        ...prev,
-                        [TECHNICAL_SETTINGS_KEY]: checked === true,
-                      }))
+                      setIncluded((prev) => ({ ...prev, [sub.key]: checked === true }))
                     }
                     className="mt-0.5"
                   />
-                  <Label
-                    htmlFor={`pack-section-${TECHNICAL_SETTINGS_KEY}`}
-                    className="flex-1 font-normal"
-                  >
-                    <span className="font-medium">Technical &amp; tuning settings</span>
-                    <span className="text-muted-foreground block text-xs">
-                      Also list the numeric tuning, prompt and cost settings behind the experience —
-                      useful internally, usually noise in a client-facing pack. Off by default.
-                    </span>
+                  <Label htmlFor={`pack-section-${sub.key}`} className="flex-1 font-normal">
+                    <span className="font-medium">{sub.label}</span>
+                    <span className="text-muted-foreground block text-xs">{sub.description}</span>
                   </Label>
                 </div>
-              )}
+              ))}
             </div>
           ))}
         </div>

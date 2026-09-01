@@ -3,11 +3,12 @@
 The admin can download a **branded, shareable artifact** covering everything about how a
 questionnaire is set up — title/version/goals, the question structure, the semantic data slots
 (with their linked questions), the definitions/glossary, the experience-setup summary, (opt-in) the
-latest F5.1–F5.3 design-evaluation run's judge findings, and (opt-in) the
-[Conditional Topics](./conditional-topics.md) routing logic in plain language — as a PDF, CSV, or Markdown
-file. The admin picks which of those seven sections to include from a dialog opened by the
-**Questionnaire pack** button in the workspace header; five are ticked by default, "Evaluation
-findings" and "Conditional topics" are not (see below).
+latest F5.1–F5.3 design-evaluation run's judge findings, (opt-in) the
+[Conditional Topics](./conditional-topics.md) routing logic in plain language, and (opt-in) the
+[interviewer policy](./interviewer-policy-evaluation.md) with the F18.8 panel's verdict on it — as a
+PDF, CSV, or Markdown file. The admin picks which of those eight sections to include from a dialog
+opened by the **Questionnaire pack** button in the workspace header; five are ticked by default,
+"Evaluation findings", "Conditional topics" and "The interviewer" are not (see below).
 
 Distinct from the brand-free [blank instrument export](./admin-ui.md) (F14.9): the instrument is
 the design-time reviewer copy of just the questions, deliberately unbranded. The Pack is the
@@ -40,6 +41,32 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   closing "About ConQuest" blurb. `null` (not an empty state) when the version has never been evaluated
   is rendered as a "no evaluation has been run yet" line rather than an omitted section, so the
   toggle's meaning stays predictable regardless of whether a run exists.
+
+  **The appendix leads with what the panel WANTS DONE.** Each flagged subject opens with the
+  verdict: "A reword, as proposed by 2 of 3 judges — Clarity, Audience-Match", with every dissenting
+  action kept as the next block down ("A deletion, as proposed by 1 of 3 judges"). It is built by
+  `summariseGroupActions` — the console's own function, not a second implementation — so the
+  document and the screen cannot reach different verdicts. The appendix previously printed severity
+  tallies and a list of judges and left the reader to work out, from four prose paragraphs, that all
+  four were asking for the same thing.
+
+  The reconciled wordings sit **inside the block they answer**, chosen by the shared `wordingHost`:
+  hung off whichever action leads, a contested question where the deletion won would print proposed
+  wording under "A deletion", as if the panel wanted the question deleted and rewritten.
+
+  **Each flagged question says who is actually asked it** — "Asked when it fits: Onboarding",
+  "Never asked — in no topic" — from the finding's resolved `routingReach`. This is the one line
+  connecting the pack's two opt-in appendices: without it the document explains a routing design in
+  one section and critiques questions in another, and a reader weighing a deletion cannot see that
+  only some respondents ever reach the question. `null` whenever Conditional Topics is off, so a
+  questionnaire that does not route says nothing about routing.
+
+  **Each judge's line carries the edit, the destination and the reviewer's own instruction.**
+  `proposedEditSummary` comes from the shared `describeProposedEdit` (`evaluation/describe-edit.ts`)
+  — the same sentence the console prints under the button that performs it, resolved off the
+  EFFECTIVE op so an admin-edited override wins as it does at apply. `destination` says where a
+  drafted question would land and whether anyone chose that. `applyInstruction` is the reviewer's own
+  words, the one line on a finding written by a person rather than a model.
 
   **The appendix is grouped by question, not by judge**, and the model splits accordingly: `scores` is
   the seven-judge scoreboard (score/diagnostic/finding count, no findings) and `targets` is the work —
@@ -83,17 +110,116 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   deleted — silently skipped everywhere else in this feature) falls back to the raw key rather than
   dropping the rule, so a stale rule stays visible as something to clean up.
 
-Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
-so every serialiser skips it the same way.
+  **The routing settings are derived, not hand-listed.** They come from
+  `ROUTING_SETTING_DESCRIPTORS` in `lib/app/questionnaire/settings-registry.ts`, declared
+  `satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>` so a new routing
+  setting is a compile error until it is classified. This section previously named **four of the
+  fifteen** fields on that object. Same two tiers as the setup summary: `standard` always renders,
+  `technical` (the confidence floor, per-type timings, whether extra guidance is set) sits behind a
+  sub-option.
 
-**Why `evaluations` and `conditionalTopics` default off, unlike the other five:** the Pack is the
+  **Why a second registry, when `SETTING_DESCRIPTORS.conditionalTopics` exists.** That entry is a
+  single descriptor covering a fifteen-field nested object, so adding a routing setting is _not_ a
+  compile error there — its `rows()` body is hand-written prose and a new field simply never appears.
+  `ROUTING_SETTING_DESCRIPTORS` is keyed per field, so it is. The two overlap deliberately, the way
+  the interviewer section's appendix deliberately duplicates its one-line setup rows: the setup row
+  is the summary, this is the appendix. **They must not drift** — a pack with both sections ticked
+  prints both, and one setting described two ways reads as two settings. `maxOpeningProbes: 0` had
+  already drifted ("None — never probe" against "Capped at 0 for the whole opening") before it was
+  caught; the phrasings are now aligned. Whether the overlap should be collapsed is open — see the
+  note in [P15 follow-ups](./planning/features/f15-followups.md) if it is picked up.
+
+  **A topic can say which questions it covers** (`conditionalTopicsMembers`, off by default). Without
+  it the pack lists topics in one section and questions in another with nothing tying them, and a
+  reader cannot answer the obvious question: if this area is not selected for me, what am I not
+  asked? It is off by default because it is the longest part of the section — a second pass over an
+  instrument the pack has usually already printed in full. A membership key that no longer resolves
+  keeps the raw key rather than being dropped, the same choice the hard rules make.
+
+  **A topic's `trigger` is printed, not flattened away.** When the source document asked for a topic
+  to be added on something said mid-conversation rather than on how the opening went, the product
+  still selects it from the opening criteria — and the section says so ("The source document asks for
+  this when: ... Today it is decided from the opening instead."). That gap is recorded on the topic
+  precisely so a reviewer sees it; a pack printing only the criteria would show the approximation as
+  though it were the intent.
+
+  **The judge panel is called "Review of this routing"** (`conditionalTopicsEvaluation`, on by
+  default), not "Scope evaluation". "Scope" is the pre-F17.29 name for this whole area, and a
+  heading in a client-facing document is the last place it should survive; "no longer in the scope
+  config" became "no longer part of the routing" for the same reason. CSV block headers follow
+  (`# Routing review judge scores`, `# Routing review findings`). Excluding it yields `hasRun: false`
+  rather than a missing field, so every serialiser handles it through the path it already had.
+
+Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
+so every serialiser skips it the same way. **Every section renders above the closing "About
+ConQuest" blurb** — the interviewer block was for a while emitted after it in Markdown, which put a
+whole appendix below the line where the document says it has ended.
+
+#### Sub-options: the conclusions by default, the arguments on request
+
+Four refinements sit under "Evaluation findings", and their defaults are what makes the section
+readable rather than exhaustive:
+
+| Sub-flag                | Checkbox                         | Default | What it adds                                             |
+| ----------------------- | -------------------------------- | ------- | -------------------------------------------------------- |
+| `evaluationVerdicts`    | The panel's verdict per question | `true`  | What the judges want done, the backing, and the dissent  |
+| `evaluationRewordings`  | Suggested rewordings             | `true`  | The reconciled phrasings, and what no phrasing satisfies |
+| `evaluationJudgeDetail` | Every judge's reasoning          | `false` | Each judge's own suggestion, argument, edit and steer    |
+| `evaluationEvidence`    | Evidence quotes                  | `false` | The span each judge quoted                               |
+
+**Judge reasoning defaulting off is a deliberate change to what this section used to produce.** It
+is the bulk of the appendix — a contested question runs to about a page — and with the verdict
+printed above it, a reader handed the pack usually wants the conclusion rather than four
+near-identical arguments for it. Evidence is off for a second reason: judges routinely quote the
+prompt the finding already sits under, so it is mostly the same sentence printed twice (the console
+suppresses a quote that merely restates its target; the pack, having no card to compare against,
+makes it an opt-in instead).
+
+**When verdicts are off, the wordings move back below the judges.** They were there before verdicts
+existed, for a reason that has not changed: a resolution only reads as one once you have seen the
+disagreement. With a verdict to host them they sit inside it, which is nearer still.
+
+**Why `evaluations`, `conditionalTopics` and `interviewerPolicy` default off, unlike the other five:** the Pack is the
 external/showcase artifact — built to hand to a client or stakeholder. Judge findings are unreviewed
 AI critique of the questionnaire (`this question is redundant`, `off-mission`, etc.), and shipping
 that by accident in a document meant to showcase the questionnaire would be an easy, embarrassing
 mistake. The routing logic is a different kind of risk — it's the instrument's _design_, not its
 content, and not every reader needs to see how a client's respondents get routed before the admin
-has decided to share that. Both, for their own reason, are something the admin opts into
-deliberately per download rather than having to remember to opt out of.
+has decided to share that. The interviewer section carries a judge panel of its own, so it falls
+under the first reason. Each, for its own reason, is something the admin opts into deliberately per
+download rather than having to remember to opt out of.
+
+### One vocabulary, three formats
+
+Everything a reader sees is written in the words the admin console uses, and the mapping lives in
+`lib/` so a client-facing PDF cannot end up saying something the screen does not.
+
+- **Severity and review status.** `FINDING_SEVERITY_LABELS` / `FINDING_REVIEW_STATUS_LABELS`
+  (`lib/app/questionnaire/evaluation/types.ts`) are the single source; the admin badge descriptors
+  in `evaluation-status-badge.ts` take their `label` from them rather than declaring a second table.
+  The pack used to print `[minor · pending]`.
+- **`pending` is suppressed in the prose formats.** It is the state of nearly every finding in an
+  untriaged run, so printing it on every line is a word to skip and no information — the same call
+  the console's badge row makes. `decidedStatusLabel` returns `null` for it and the label for
+  everything else.
+- **Question type** goes through `questionTypeLabel()`; the pack used to print the stored
+  `single_choice` where the console shows "Multi-Choice (One Answer)".
+- **Dates** go through `formatPackDate` (`pack-brand.ts`): `11 Aug 2026, 09:12 UTC`. Always with the
+  year, unlike `formatCompactDateTime`, which drops it within the current year — right for a dense
+  admin table read today, wrong for a document filed and reopened next spring. **Pinned to UTC and
+  the zone named**, because otherwise the same run prints as a different DAY depending on which
+  region's server rendered the pack.
+- **Every panel states which run it is showing** — "Last run … · N finding(s) across N flagged
+  item(s)". Markdown carried this all along and the PDF did not, so the format most packs are
+  downloaded as showed a scoreboard with no way to tell whether it predated the questionnaire beside
+  it.
+
+**CSV is the exception, and deliberately.** It keeps the raw enum column AND adds a labelled one
+beside it (`severity` + `severity_label`, `status` + `status_label`, `target_type` +
+`target_type_label`). A CSV row exists to be sorted, filtered and pivoted, and the raw value is the
+stable key for all three — a pivot grouping on "Major" breaks the moment the label is reworded,
+while one grouping on `major` does not. `pending` is written out there too: a blank cell in a
+spreadsheet reads as missing data, not as "nothing decided yet".
 
 ### Branding
 
@@ -159,37 +285,46 @@ spreadsheet.
 
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&evaluationVerdicts=&evaluationJudgeDetail=&evaluationRewordings=&evaluationEvidence=&conditionalTopics=&conditionalTopicsMembers=&conditionalTopicsEvaluation=&conditionalTopicsTechnical=&interviewerPolicy=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
-use. Each include flag is `true`/`false`; all default `true` except `evaluations`, `conditionalTopics`,
-and `setupTechnical`, which default `false`. `setupTechnical` is a sub-option of `setup`, not an
-eighth section — it widens the setup summary rather than adding one, and is ignored when
-`setup=false`. `runtime = 'nodejs'` (react-pdf). Filename: `pack-<slug>-v<N>.<ext>`,
-`Cache-Control: no-store`. The evaluation run is only loaded (`loadLatestEvaluationRun`) when
-`evaluations=true`, and the version's topics + Conditional Topics settings are only loaded
-(`loadTopics`, `loadConditionalTopicsSettings`) when `conditionalTopics=true` — the common case skips both
-queries entirely.
+use. Each include flag is `true`/`false`; all default `true` except `evaluations`,
+`conditionalTopics`, `interviewerPolicy` and `setupTechnical`, which default `false`. A sub-option
+flag (`setupTechnical` today) is not a section — it widens the section it belongs to rather than
+adding one, and is ignored when that section is off. `runtime = 'nodejs'` (react-pdf). Filename:
+`pack-<slug>-v<N>.<ext>`, `Cache-Control: no-store`.
+
+**Each opt-in section pays for its own query and no other download does.** The design-evaluation
+run loads only when `evaluations=true`; the version's topics, Conditional Topics settings and scope
+run only when `conditionalTopics=true`; the interviewer-policy run only when
+`interviewerPolicy=true`. All three run in one `Promise.all`, so opting into several costs one round
+trip rather than three. Every one of them loads **the most recent run for the version and only
+that** (`createdAt desc`, `limit: 1`): the pack states the current position of a panel, never a run
+history.
 
 Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 
 ## Code map
 
-| Concern                    | File                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                         |
-| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                   |
-| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                         |
-| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                     |
-| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                |
-| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                          |
-| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                         |
-| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                    |
-| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                             |
-| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                            |
-| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                      |
-| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)            |
-| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`) |
+| Concern                    | File                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                            |
+| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                      |
+| Settings registries (pure) | `lib/app/questionnaire/settings-registry.ts` (config + routing)                                         |
+| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                        |
+| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                   |
+| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                             |
+| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                            |
+| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                       |
+| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                                |
+| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                               |
+| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                         |
+| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)               |
+| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`)    |
+| Latest scope run load      | `app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes.ts` (`loadLatestScopeEvaluationRun`)    |
+| Latest policy run load     | `app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes.ts` (`loadLatestPolicyEvaluationRun`)  |
+| Verdict + judge naming     | `lib/app/questionnaire/evaluation/group-actions.ts` (`summariseGroupActions`, `backing`, `wordingHost`) |
+| Edit descriptions (shared) | `lib/app/questionnaire/evaluation/describe-edit.ts` (`describeProposedEdit`, `destinationSentence`)     |
 
 ## UI surface
 
@@ -204,11 +339,24 @@ Two entry points, both opening the same `PackExportDialog`:
   "Questionnaire pack" → **Download pack…**, kept for admins who look for downloads under an
   export menu.
 
-The dialog offers seven section checkboxes (five default-checked, "Evaluation findings" and
-"Conditional topics" default-unchecked), one nested sub-checkbox — **Technical & tuning settings**, indented under
-"Experience setup" and disabled while that parent is off — and a format select (PDF / CSV /
-Markdown). The sub-option does not count toward the "pick at least one section" gate, since it
-produces nothing on its own. Since the download URL depends on that dialog state (unlike the menu's static
+The dialog offers eight section checkboxes (five default-checked; "Evaluation findings",
+"Conditional topics" and "The interviewer" default-unchecked), any **sub-options** those sections
+declare, and a format select (PDF / CSV / Markdown).
+
+**Sub-options** are a generic `subOptions` array on the section descriptor, rendered indented under
+their parent and disabled while it is off, so each reads as a refinement of its section rather than
+as a section of its own. None of them counts toward the "pick at least one section" gate, since a
+sub-option produces nothing on its own, and the route ignores any whose parent section is excluded.
+The first was **Technical & tuning settings** under "Experience setup".
+
+**Every top-level `PackInclude` flag must have a checkbox, and that is now enforced.**
+`interviewerPolicy` shipped on the model and on the route with no row in the dialog, so the section
+existed, built correctly, serialised correctly in two formats out of three, and could not be asked
+for by anyone. `_noUnreachableSections` in `pack-export-dialog.tsx` resolves `Exclude<SectionKey,
+listed keys>` into a `Record<…, never>`, which type-checks as `{}` while the list is complete and
+fails naming the missing key the moment it is not.
+
+Since the download URL depends on that dialog state (unlike the menu's static
 `<a download>` links), Download sets `window.location.href` directly rather than using a plain
 anchor — same-origin authenticated GET, `Content-Disposition: attachment` forces the download
 without navigating away.

@@ -8,7 +8,12 @@
  * `status` and finding `severity` are plain Strings validated at the seam, not DB enums).
  */
 
-import type { FindingSeverity, FindingReviewStatus } from '@/lib/app/questionnaire/evaluation';
+import {
+  FINDING_REVIEW_STATUS_LABELS,
+  FINDING_SEVERITY_LABELS,
+  type FindingSeverity,
+  type FindingReviewStatus,
+} from '@/lib/app/questionnaire/evaluation';
 
 type BadgeVariant = 'default' | 'secondary' | 'outline' | 'destructive';
 
@@ -25,10 +30,16 @@ export const EVALUATION_RUN_STATUS_BADGE: Record<string, BadgeDescriptor> = {
 
 export const UNKNOWN_RUN_STATUS_BADGE: BadgeDescriptor = { label: 'Unknown', variant: 'outline' };
 
+/**
+ * Colour per severity. The WORD comes from `FINDING_SEVERITY_LABELS` in `lib/`, not from here:
+ * the Questionnaire Pack prints the same values and cannot import a component module, so a second
+ * hand-written label map here is the thing that would let the console and a client-facing PDF
+ * disagree about what `major` is called.
+ */
 export const FINDING_SEVERITY_BADGE: Record<FindingSeverity, BadgeDescriptor> = {
-  major: { label: 'Major', variant: 'destructive' },
-  minor: { label: 'Minor', variant: 'secondary' },
-  info: { label: 'Info', variant: 'outline' },
+  major: { label: FINDING_SEVERITY_LABELS.major, variant: 'destructive' },
+  minor: { label: FINDING_SEVERITY_LABELS.minor, variant: 'secondary' },
+  info: { label: FINDING_SEVERITY_LABELS.info, variant: 'outline' },
 };
 
 export const UNKNOWN_SEVERITY_BADGE: BadgeDescriptor = { label: 'Unknown', variant: 'outline' };
@@ -39,10 +50,10 @@ export const UNKNOWN_SEVERITY_BADGE: BadgeDescriptor = { label: 'Unknown', varia
  * `stale`/`applicable`).
  */
 export const FINDING_REVIEW_STATUS_BADGE: Record<FindingReviewStatus, BadgeDescriptor> = {
-  pending: { label: 'Pending', variant: 'outline' },
-  accepted: { label: 'Accepted', variant: 'secondary' },
-  declined: { label: 'Declined', variant: 'outline' },
-  applied: { label: 'Applied', variant: 'default' },
+  pending: { label: FINDING_REVIEW_STATUS_LABELS.pending, variant: 'outline' },
+  accepted: { label: FINDING_REVIEW_STATUS_LABELS.accepted, variant: 'secondary' },
+  declined: { label: FINDING_REVIEW_STATUS_LABELS.declined, variant: 'outline' },
+  applied: { label: FINDING_REVIEW_STATUS_LABELS.applied, variant: 'default' },
 };
 
 export const UNKNOWN_REVIEW_STATUS_BADGE: BadgeDescriptor = {

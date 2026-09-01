@@ -65,6 +65,23 @@ the instrument in scope for one respondent) rather than the feature.
 
 ---
 
+## What the Questionnaire Pack says about this
+
+The [Questionnaire Pack](./questionnaire-pack.md) carries an opt-in **Conditional topics** section
+written for a stakeholder who has never seen the authoring surface: which areas everyone gets, which
+depend on the respondent (with the admin's own criteria), the hard rules as sentences, every routing
+setting from `ROUTING_SETTING_DESCRIPTORS`, and the judge panel's **Review of this routing**. Three
+sub-options control the depth — topic membership, the review, and the technical tier — and the whole
+section defaults off, because routing is the instrument's design rather than its content.
+
+Two things worth knowing when changing anything here:
+
+- **A new field on `ConditionalTopicsSettings` will not compile** until it is given a descriptor in
+  `lib/app/questionnaire/settings-registry.ts`. That guard exists because the pack once covered four
+  of fifteen settings, silently.
+- **A topic's `trigger` reaches the pack.** It is still not acted on, but the document now says what
+  the source asked for and that the product decides from the opening instead.
+
 ## The one invariant
 
 **Off by default, inert by construction.**

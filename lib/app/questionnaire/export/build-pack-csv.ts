@@ -10,13 +10,36 @@
  */
 
 import { csvEscape } from '@/lib/api/csv';
-import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
-import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
+import { QUESTION_FIDELITY_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
+import {
+  FINDING_REVIEW_STATUS_LABELS,
+  findingSeverityLabel,
+} from '@/lib/app/questionnaire/evaluation';
+import { formatPackDate, PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 
 /** One CSV row from raw cell values. */
 function row(cells: string[]): string {
   return cells.map(csvEscape).join(',');
+}
+
+/**
+ * CSV keeps the RAW enum AND adds a labelled column beside it, rather than replacing one with the
+ * other as the prose formats do.
+ *
+ * A CSV row exists to be sorted, filtered and pivoted, and the raw value is the stable key for all
+ * three — a spreadsheet grouping on "Major" breaks the moment the label is reworded, while one
+ * grouping on `major` does not. The label column is for the human reading the same sheet, who
+ * should not have to learn the enum to read a column. `pending` is written out here, unlike in the
+ * prose formats: a blank cell in a spreadsheet reads as missing data, not as "nothing decided yet".
+ */
+function severityLabelCell(severity: string): string {
+  return findingSeverityLabel(severity);
+}
+
+function statusLabelCell(status: string): string {
+  const labels: Record<string, string> = FINDING_REVIEW_STATUS_LABELS;
+  return labels[status] ?? status;
 }
 
 /** Serialise the pack model to a CSV document — one block per included section. */
@@ -26,7 +49,7 @@ export function buildPackCsv(model: PackModel): string {
   blocks.push([
     row(['ConQuest', PACK_BRAND.tagline, PACK_BRAND.website]),
     row(['Questionnaire pack', model.title]),
-    row(['Generated', model.generatedAt]),
+    row(['Generated', formatPackDate(model.generatedAt) ?? model.generatedAt]),
   ]);
 
   if (model.meta) {
@@ -126,7 +149,12 @@ export function buildPackCsv(model: PackModel): string {
   }
 
   if (model.evaluations) {
-    // Two blocks, mirroring the model's split: the judge scoreboard, then the findings.
+    const include = model.include;
+
+    // Blocks mirror the model's split: the judge scoreboard, the panel's verdict per subject, the
+    // proposed wordings, then the individual findings. Each is separately included, and each stands
+    // alone under a sort or a pivot — which is why the target's text repeats down every one of them
+    // rather than being named once as the prose formats do.
     blocks.push([
       '# Judge scores',
       row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
@@ -141,76 +169,121 @@ export function buildPackCsv(model: PackModel): string {
       ),
     ]);
 
-    // One row per (target, judge) pair, in questionnaire order, target columns first — so the
-    // block sorts and pivots by the thing under review rather than by which judge spoke.
-    //
-    // The target's text DOES repeat down the rows of a contested question, unlike the PDF and
-    // Markdown packs. That is deliberate: a CSV row has to stand alone to survive a sort, a
-    // filter, or a pivot, and blanking the continuation rows would break all three. The
-    // "name the question once" rule is about the documents a person reads top to bottom.
-    // `!hasRun` yields zero targets, so the block degrades to header-only — the same "nothing
-    // here" shape empty dataSlots/sections use.
-    const findingRows = model.evaluations.targets.flatMap((target) =>
-      target.judges.map((judge) =>
+    if (include.evaluationVerdicts) {
+      // One row per proposed action, so a contested question is several rows and a spreadsheet can
+      // count them. `is_dissent` is the fact a reader loses when they sort: the leading action is
+      // the first row of its target only until someone sorts by judge name.
+      blocks.push([
+        '# Panel verdict',
         row([
-          target.key,
-          target.context ?? '',
-          target.label,
-          target.questionType ?? '',
-          judge.dimension,
-          judge.label,
-          judge.severity,
-          judge.status,
-          judge.proposedChange,
-          judge.rationale,
-          judge.sourceQuote ?? '',
-        ])
-      )
-    );
-    // Alternatives are their own block: one row per proposed phrasing. Folding them into the
-    // findings rows would either duplicate every judge row or leave most of them blank.
-    const alternativeRows = model.evaluations.targets.flatMap((target) =>
-      target.alternatives.map((alt) =>
-        row([
-          target.key,
-          target.label,
-          alt.prompt,
-          alt.addresses.join('; '),
-          alt.note,
-          target.unresolvedBy.join('; '),
-        ])
-      )
-    );
-    blocks.push([
-      '# Suggested rewordings',
-      row([
-        'target_key',
-        'current_wording',
-        'suggested_wording',
-        'addresses',
-        'note',
-        'unresolved',
-      ]),
-      ...alternativeRows,
-    ]);
+          'target_key',
+          'target',
+          'action',
+          'backing',
+          'judges',
+          'is_dissent',
+          'holds_rewording',
+          'suggestions',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          (target.verdict?.blocks ?? []).map((block, i) =>
+            row([
+              target.key,
+              target.label,
+              block.heading,
+              block.backing,
+              block.judges,
+              i === 0 ? 'no' : 'yes',
+              block.holdsWording ? 'yes' : 'no',
+              block.suggestions.join(' | '),
+            ])
+          )
+        ),
+      ]);
+    }
 
-    blocks.push([
-      '# Evaluation',
-      row([
-        'target_key',
-        'target_context',
-        'target',
-        'target_type',
-        'dimension',
-        'judge',
-        'severity',
-        'status',
-        'proposed_change',
-        'rationale',
-        'source_quote',
-      ]),
-      ...findingRows,
-    ]);
+    if (include.evaluationRewordings) {
+      // Alternatives are their own block: one row per proposed phrasing. Folding them into the
+      // findings rows would either duplicate every judge row or leave most of them blank.
+      blocks.push([
+        '# Suggested rewordings',
+        row([
+          'target_key',
+          'current_wording',
+          'suggested_wording',
+          'addresses',
+          'note',
+          'unresolved',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          target.alternatives.map((alt) =>
+            row([
+              target.key,
+              target.label,
+              alt.prompt,
+              alt.addresses.join('; '),
+              alt.note,
+              target.unresolvedBy.join('; '),
+            ])
+          )
+        ),
+      ]);
+    }
+
+    if (include.evaluationJudgeDetail) {
+      blocks.push([
+        '# Evaluation',
+        row([
+          'target_key',
+          'target_context',
+          'target',
+          'target_type',
+          'target_type_label',
+          'routing_reach',
+          'topic',
+          'dimension',
+          'judge',
+          'severity',
+          'severity_label',
+          'status',
+          'status_label',
+          'proposed_change',
+          'rationale',
+          'proposed_edit',
+          'destination',
+          'reviewer_instruction',
+          'source_quote',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          target.judges.map((judge) =>
+            row([
+              target.key,
+              target.context ?? '',
+              target.label,
+              target.questionType ?? '',
+              target.questionType ? questionTypeLabel(target.questionType) : '',
+              target.routingReach ?? '',
+              target.topicLabel ?? '',
+              judge.dimension,
+              judge.label,
+              judge.severity,
+              severityLabelCell(judge.severity),
+              judge.status,
+              statusLabelCell(judge.status),
+              judge.proposedChange,
+              judge.rationale,
+              judge.proposedEditSummary ?? '',
+              judge.destination ?? '',
+              judge.applyInstruction ?? '',
+              // Kept in the CSV whatever the evidence flag says. Its reason for defaulting off is
+              // that a quote reprints the prompt beside it in a document read top to bottom; a
+              // spreadsheet column costs the reader nothing until they widen it.
+              judge.sourceQuote ?? '',
+            ])
+          )
+        ),
+      ]);
+    }
   }
 
   if (model.conditionalTopics) {
@@ -218,37 +291,56 @@ export function buildPackCsv(model: PackModel): string {
       '# Conditional topics',
       row(['field', 'value']),
       row(['Enabled', model.conditionalTopics.enabled ? 'yes' : 'no']),
-      row([
-        'Max conditional topics per interview',
-        String(model.conditionalTopics.maxConditionalTopics),
-      ]),
-      row([
-        'Also samples one area the respondent did not raise',
-        model.conditionalTopics.includeCheckTopic ? 'yes' : 'no',
-      ]),
-      row([
-        'Session time budget',
-        model.conditionalTopics.sessionBudgetSeconds > 0
-          ? `${model.conditionalTopics.sessionBudgetSeconds}s`
-          : 'no limit set',
-      ]),
+      // Derived from the routing settings registry, not hand-listed: this block named three of the
+      // fifteen settings before, and the ones it missed included whether the respondent is told
+      // what was chosen.
+      ...model.conditionalTopics.settings.map((item) => row([item.label, item.value])),
     ]);
+
+    const allTopics = [
+      ...model.conditionalTopics.alwaysAsked,
+      ...model.conditionalTopics.conditional,
+    ];
 
     blocks.push([
       '# Conditional topics topics',
-      row(['key', 'label', 'description', 'always_asked', 'criteria', 'sampled_only']),
-      ...[...model.conditionalTopics.alwaysAsked, ...model.conditionalTopics.conditional].map(
-        (topic) =>
-          row([
-            topic.key,
-            topic.label,
-            topic.description ?? '',
-            topic.alwaysAsked ? 'yes' : 'no',
-            topic.criteria ?? '',
-            topic.sampledOnly ? 'yes' : 'no',
-          ])
+      row([
+        'key',
+        'label',
+        'description',
+        'always_asked',
+        'criteria',
+        'sampled_only',
+        'document_trigger',
+      ]),
+      ...allTopics.map((topic) =>
+        row([
+          topic.key,
+          topic.label,
+          topic.description ?? '',
+          topic.alwaysAsked ? 'yes' : 'no',
+          topic.criteria ?? '',
+          topic.sampledOnly ? 'yes' : 'no',
+          // What the source document asked to be watched for mid-conversation, when it did.
+          // Recorded, not acted on — the topic still runs off its criteria.
+          topic.trigger?.condition ?? '',
+        ])
       ),
     ]);
+
+    // Membership is its own block, one row per (topic, question): folded into the topics block it
+    // would either duplicate every topic row or collapse a list into one unsortable cell. Emitted
+    // only when the sub-option is on, in which case `questions` is populated.
+    const membershipRows = allTopics.flatMap((topic) =>
+      topic.questions.map((q) => row([topic.key, topic.label, q.key, q.prompt]))
+    );
+    if (membershipRows.length > 0) {
+      blocks.push([
+        '# Conditional topics membership',
+        row(['topic_key', 'topic', 'question_key', 'question']),
+        ...membershipRows,
+      ]);
+    }
 
     blocks.push([
       '# Conditional topics rules',
@@ -256,60 +348,69 @@ export function buildPackCsv(model: PackModel): string {
       ...model.conditionalTopics.rules.map((rule) => row([rule.sentence])),
     ]);
 
+    // Both routing-review blocks are skipped wholesale when the admin excluded the review. A
+    // header-only block reads as "reviewed, nothing found"; an absent one reads as "not in this
+    // pack", which is what actually happened.
     const evaluation = model.conditionalTopics.evaluation;
-    blocks.push([
-      '# Scope evaluation judge scores',
-      row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
-      ...evaluation.scores.map((judge) =>
-        row([
-          judge.dimension,
-          judge.label,
-          judge.score !== null ? String(judge.score) : '',
-          judge.diagnostic ?? '',
-          String(judge.findingCount),
-        ])
-      ),
-    ]);
+    if (evaluation) {
+      blocks.push([
+        '# Routing review judge scores',
+        row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
+        ...evaluation.scores.map((judge) =>
+          row([
+            judge.dimension,
+            judge.label,
+            judge.score !== null ? String(judge.score) : '',
+            judge.diagnostic ?? '',
+            String(judge.findingCount),
+          ])
+        ),
+      ]);
 
-    // One row per (target, judge) pair, target columns first — same "the target's text repeats"
-    // rule the design-evaluation findings block follows, for the same reason (a CSV row must
-    // stand alone under a sort/filter/pivot).
-    const scopeFindingRows = evaluation.targets.flatMap((target) =>
-      target.judges.map((judge) =>
+      // One row per (target, judge) pair, target columns first — same "the target's text repeats"
+      // rule the design-evaluation findings block follows, for the same reason (a CSV row must
+      // stand alone under a sort/filter/pivot).
+      const scopeFindingRows = evaluation.targets.flatMap((target) =>
+        target.judges.map((judge) =>
+          row([
+            target.key,
+            target.kind,
+            target.label,
+            target.removed ? 'yes' : 'no',
+            judge.dimension,
+            judge.label,
+            judge.severity,
+            severityLabelCell(judge.severity),
+            judge.status,
+            statusLabelCell(judge.status),
+            judge.proposedChange,
+            judge.rationale,
+            judge.proposedEditSummary ?? '',
+            judge.sourceQuote ?? '',
+          ])
+        )
+      );
+      blocks.push([
+        '# Routing review findings',
         row([
-          target.key,
-          target.kind,
-          target.label,
-          target.removed ? 'yes' : 'no',
-          judge.dimension,
-          judge.label,
-          judge.severity,
-          judge.status,
-          judge.proposedChange,
-          judge.rationale,
-          judge.proposedEditSummary ?? '',
-          judge.sourceQuote ?? '',
-        ])
-      )
-    );
-    blocks.push([
-      '# Scope evaluation findings',
-      row([
-        'target_key',
-        'target_kind',
-        'target',
-        'target_removed',
-        'dimension',
-        'judge',
-        'severity',
-        'status',
-        'proposed_change',
-        'rationale',
-        'proposed_edit',
-        'source_quote',
-      ]),
-      ...scopeFindingRows,
-    ]);
+          'target_key',
+          'target_kind',
+          'target',
+          'target_removed',
+          'dimension',
+          'judge',
+          'severity',
+          'severity_label',
+          'status',
+          'status_label',
+          'proposed_change',
+          'rationale',
+          'proposed_edit',
+          'source_quote',
+        ]),
+        ...scopeFindingRows,
+      ]);
+    }
   }
 
   // ── Interviewer policy (F18.8) ───────────────────────────────────────────
@@ -359,7 +460,9 @@ export function buildPackCsv(model: PackModel): string {
           'subject',
           'reviewer',
           'severity',
+          'severity_label',
           'status',
+          'status_label',
           'proposed_change',
           'rationale',
           'proposed_edit',
@@ -370,7 +473,9 @@ export function buildPackCsv(model: PackModel): string {
               target.label,
               j.label,
               j.severity,
+              severityLabelCell(j.severity),
               j.status,
+              statusLabelCell(j.status),
               j.proposedChange,
               j.rationale,
               j.proposedEditSummary ?? '',

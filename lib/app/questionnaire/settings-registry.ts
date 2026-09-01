@@ -34,6 +34,7 @@ import {
   INTERVIEWER_APPROACH_LABELS,
   QUESTION_FIDELITY_LABELS,
   questionFidelityLevel,
+  questionTypeLabel,
   INVITEE_FIELD_LABELS,
   TONE_DIMENSION_KEYS,
   toDisplayLevel,
@@ -62,6 +63,7 @@ import {
 } from '@/lib/app/questionnaire/layout/catalog';
 import { CHAT_TEXT_SIZE_LABELS } from '@/lib/app/questionnaire/chat/text-scale';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
+import type { ConditionalTopicsSettings } from '@/lib/app/questionnaire/scope/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
 /* ── Tiers & groups ───────────────────────────────────────────────────────── */
@@ -1076,6 +1078,215 @@ export function buildSettingRows(config: ConfigView, includeTechnical: boolean):
         if ((row.tier ?? descriptor.tier) === 'technical' && !includeTechnical) continue;
         items.push({ group, label: row.label, value: row.value });
       }
+    }
+  }
+  return items;
+}
+
+/* ── Conditional Topics settings ──────────────────────────────────────────── */
+
+/**
+ * One descriptor per {@link ConditionalTopicsSettings} field — the routing-side sibling of
+ * {@link SETTING_DESCRIPTORS}, and it exists for the same reason that one does.
+ *
+ * The Questionnaire Pack's Conditional topics section hand-listed four of the fifteen settings on
+ * this object. That is precisely the failure the registry above was built to prevent, and it was
+ * missed here because Conditional Topics settings live on their own model rather than on
+ * `QuestionnaireConfigShape`, so the compile-time guard did not reach them. Two of the eleven
+ * omissions described what the RESPONDENT experiences — whether they are told which topics were
+ * chosen, and whether they may ask for one that was not — in a section whose entire subject is how
+ * the questionnaire adapts to them.
+ *
+ * Declared `satisfies Record<keyof ConditionalTopicsSettings, ...>`, so a new routing setting is a
+ * compile error until it is classified.
+ *
+ * `rules` is the one field that emits no row: the hard rules get their own block, rendered as
+ * sentences, and a count in the settings line would be a worse version of the list below it.
+ */
+export interface RoutingSettingDescriptor {
+  tier: SettingTier;
+  rows: (settings: ConditionalTopicsSettings, topicLabel: (key: string) => string) => SettingRow[];
+}
+
+const ROUTING_SETTING_DESCRIPTORS = {
+  // The master switch is stated by the section itself ("not enabled for this version"), so it emits
+  // no row of its own — a table line reading "Enabled: Yes" under a heading that already said so.
+  enabled: { tier: 'standard', rows: () => [] },
+
+  maxConditionalTopics: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Topics that depend on the respondent',
+        value: `Up to ${s.maxConditionalTopics} per interview`,
+      },
+    ],
+  },
+
+  includeCheckTopic: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Samples an area they did not raise',
+        // The reason this defaults on, in the value: an interview that only asks about the problem
+        // the respondent already named can only confirm what they already believed.
+        value: s.includeCheckTopic
+          ? 'Yes, one area is sampled briefly'
+          : 'No, only the selected areas are asked',
+      },
+    ],
+  },
+
+  checkTopicPreference: {
+    tier: 'technical',
+    rows: (s, topicLabel) =>
+      s.checkTopicPreference.length === 0
+        ? []
+        : [
+            {
+              label: 'Preferred area to sample',
+              value: s.checkTopicPreference.map(topicLabel).join(', '),
+            },
+          ],
+  },
+
+  sessionBudgetSeconds: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Interview length',
+        value: s.sessionBudgetSeconds > 0 ? formatSeconds(s.sessionBudgetSeconds) : 'No limit set',
+      },
+    ],
+  },
+
+  announce: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Respondent is told what was chosen',
+        // Not courtesy. Naming the selection back proves the interview listened, justifies the time
+        // it is about to ask for, and is the one chance the respondent gets to object.
+        value: s.announce
+          ? 'Yes, before those questions start'
+          : 'No, the interview moves straight on',
+      },
+    ],
+  },
+
+  allowRespondentAmendment: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Respondent can ask for another area',
+        value: s.allowRespondentAmendment ? 'Yes, and it is added' : 'No',
+      },
+    ],
+  },
+
+  fallbackTopicKeys: {
+    tier: 'standard',
+    rows: (s, topicLabel) => [
+      {
+        label: 'If the choice cannot be made',
+        value:
+          s.fallbackTopicKeys.length === 0
+            ? 'Only the always-asked areas are covered'
+            : `Falls back to ${s.fallbackTopicKeys.map(topicLabel).join(', ')}`,
+      },
+    ],
+  },
+
+  minConfidence: {
+    tier: 'technical',
+    rows: (s) => [{ label: 'Confidence floor for the choice', value: asPercent(s.minConfidence) }],
+  },
+
+  plannerInstructions: {
+    tier: 'technical',
+    // Presence, not content — the prompt-shaped rule the registry above already follows. A
+    // client-facing PDF is not the place to print a system prompt.
+    rows: (s) => [
+      { label: 'Extra guidance for the choice', value: setOrNot(s.plannerInstructions) },
+    ],
+  },
+
+  limitOpeningProbes: {
+    tier: 'technical',
+    rows: (s) => [
+      {
+        label: 'Follow-ups in the opening',
+        // Phrased exactly as the `conditionalTopics` descriptor in SETTING_DESCRIPTORS phrases it.
+        // Both can appear in one document, and two different sentences for one setting — "None —
+        // never probe" against "Capped at 0 for the whole opening" — reads as two settings.
+        value: s.limitOpeningProbes
+          ? s.maxOpeningProbes === 0
+            ? 'None — never probe'
+            : `Up to ${s.maxOpeningProbes} across the opening`
+          : 'Not limited',
+      },
+    ],
+  },
+
+  // Reported by `limitOpeningProbes` above, where the number means something. On its own it would
+  // print an allowance that is not in force.
+  maxOpeningProbes: { tier: 'technical', rows: () => [] },
+
+  secondsPerQuestionType: {
+    tier: 'technical',
+    rows: (s) => {
+      const overrides = Object.entries(s.secondsPerQuestionType);
+      return overrides.length === 0
+        ? []
+        : [
+            {
+              label: 'Time allowed per question type',
+              value: overrides
+                .map(([type, secs]) => `${questionTypeLabel(type)} ${secs}s`)
+                .join(', '),
+            },
+          ];
+    },
+  },
+
+  secondsPerDataSlot: {
+    tier: 'technical',
+    rows: (s) => [{ label: 'Time allowed per data slot', value: `${s.secondsPerDataSlot}s` }],
+  },
+
+  // The hard rules render as their own block of sentences. A count here would be a worse version
+  // of the list immediately below it.
+  rules: { tier: 'standard', rows: () => [] },
+} satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>;
+
+/** Every registered routing key, in declaration (reading) order. */
+export const ROUTING_SETTING_KEYS = Object.keys(
+  ROUTING_SETTING_DESCRIPTORS
+) as (keyof ConditionalTopicsSettings)[];
+
+/** One presented routing setting — a flat label/value pair; this section has no group headings. */
+export interface RoutingSettingItem {
+  label: string;
+  value: string;
+}
+
+/**
+ * Render the routing settings as presentation-ready rows, in registry declaration order.
+ *
+ * `topicLabel` resolves a topic key to its authored label, falling back to the raw key so a setting
+ * naming a since-deleted topic stays visible as something to clean up rather than vanishing.
+ */
+export function buildRoutingSettingRows(
+  settings: ConditionalTopicsSettings,
+  topicLabel: (key: string) => string,
+  includeTechnical: boolean
+): RoutingSettingItem[] {
+  const items: RoutingSettingItem[] = [];
+  for (const key of ROUTING_SETTING_KEYS) {
+    const descriptor: RoutingSettingDescriptor = ROUTING_SETTING_DESCRIPTORS[key];
+    for (const row of descriptor.rows(settings, topicLabel)) {
+      if ((row.tier ?? descriptor.tier) === 'technical' && !includeTechnical) continue;
+      items.push({ label: row.label, value: row.value });
     }
   }
   return items;

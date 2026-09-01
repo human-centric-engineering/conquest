@@ -22,7 +22,12 @@ import { renderPackPdf } from '@/app/api/v1/app/questionnaires/[id]/versions/[vi
 import {
   buildPackModel,
   DEFAULT_PACK_INCLUDE,
+  type PackEvaluations,
+  type PackEvaluationTarget,
   type PackInclude,
+  type PackInterviewerPolicy,
+  type PackModel,
+  type PackPolicyEvaluation,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import type {
@@ -381,7 +386,14 @@ describe('renderPackPdf', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
@@ -540,7 +552,44 @@ describe('renderPackPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the "no scope evaluation run yet" state when conditionalTopics is included but no run exists', async () => {
+  it('actually puts the interviewer section in the PDF when it is included', async () => {
+    // Not a smoke test. The PDF serialiser carried NO interviewer section at all while the model
+    // built one and the other two serialisers rendered it, so an admin who ticked the box got it in
+    // Markdown and CSV and silence in the format the pack is mostly downloaded as. A
+    // "starts with %PDF" assertion passed throughout.
+    //
+    // Byte length is the assertion available here (react-pdf hands back a buffer, not a tree), and
+    // it is enough: the same model with the section excluded must produce a smaller document. A
+    // section that renders nothing produces two identical sizes, which is exactly the bug.
+    const modelWith = (interviewerPolicy: boolean) =>
+      buildPackModel(
+        'Interviewer Pack',
+        graphOf([]),
+        [],
+        null,
+        null,
+        null,
+        null,
+        { ...DEFAULT_PACK_INCLUDE, interviewerPolicy },
+        '2026-08-10T00:00:00.000Z'
+      );
+
+    const withSection = modelWith(true);
+    const withoutSection = modelWith(false);
+
+    expect(withSection.interviewerPolicy).not.toBeNull();
+    expect(withoutSection.interviewerPolicy).toBeNull();
+
+    const [included, excluded] = await Promise.all([
+      renderPackPdf(withSection),
+      renderPackPdf(withoutSection),
+    ]);
+
+    expect(startsWithPdfMagic(included)).toBe(true);
+    expect(included.byteLength).toBeGreaterThan(excluded.byteLength);
+  }, 30000);
+
+  it('renders the "no routing review yet" state when conditionalTopics is included but no run exists', async () => {
     const model = buildPackModel(
       'Unscored Pack',
       graphOf([]),
@@ -562,6 +611,366 @@ describe('renderPackPdf', () => {
     });
 
     const pdf = await renderPackPdf(model);
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Populated appendices                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The tests above all reach the document through `buildPackModel`, which means every optional
+ * branch inside a populated appendix — a house rule with a trigger, an arc band, a judge with a
+ * structured edit, a verdict with dissent — renders only if a graph config happens to produce one.
+ * In practice none did: the interviewer and evaluation blocks rendered empty in every case, so the
+ * "does it throw" guarantee covered the headings and almost nothing under them.
+ *
+ * These build the {@link PackModel} directly, the way the Markdown and CSV suites do, so each
+ * branch is exercised deliberately. Still structural assertions (react-pdf returns a binary
+ * buffer); content-level behaviour is asserted at the `buildPackModel` and serialiser layers.
+ */
+describe('renderPackPdf — populated appendices', () => {
+  /** A model with everything null but the sections under test. */
+  function packModel(over: Partial<PackModel>): PackModel {
+    return {
+      title: 'Populated Pack',
+      versionNumber: 1,
+      generatedAt: '2026-08-10T00:00:00.000Z',
+      include: DEFAULT_PACK_INCLUDE,
+      meta: null,
+      sections: null,
+      sectionCount: 0,
+      questionCount: 0,
+      dataSlots: null,
+      glossary: null,
+      setup: null,
+      evaluations: null,
+      conditionalTopics: null,
+      interviewerPolicy: null,
+      ...over,
+    };
+  }
+
+  const POLICY_EVALUATION: PackPolicyEvaluation = {
+    hasRun: true,
+    runAt: '2026-08-11T00:00:00.000Z',
+    totalFindings: 2,
+    scores: [
+      {
+        dimension: 'rule_coherence',
+        label: 'Rule-Coherence Judge',
+        score: 0.82,
+        diagnostic: null,
+        findingCount: 1,
+      },
+      // A judge that failed, so the "unavailable: <diagnostic>" branch renders too.
+      {
+        dimension: 'arc_fit',
+        label: 'Arc-Fit Judge',
+        score: null,
+        diagnostic: 'provider timed out',
+        findingCount: 0,
+      },
+    ],
+    targets: [
+      {
+        key: 'rule-1',
+        kind: 'house_rule',
+        label: 'Never use humour.',
+        removed: false,
+        counts: { major: 1, minor: 0, info: 0, total: 1 },
+        judges: [
+          {
+            dimension: 'rule_coherence',
+            label: 'Rule-Coherence Judge',
+            severity: 'major',
+            status: 'pending',
+            proposedChange: 'Narrow this rule.',
+            rationale: 'It contradicts the always-rule above it.',
+            sourceQuote: null,
+            proposedEditSummary: 'Set the rule text to "Avoid jokes about the company."',
+          },
+        ],
+      },
+      {
+        // A subject the author has since deleted — the "no longer part of the interviewer setup"
+        // branch, and a judge with no structured edit beside it.
+        key: 'rule-2',
+        kind: 'house_rule',
+        label: 'A rule that no longer exists',
+        removed: true,
+        counts: { major: 0, minor: 1, info: 0, total: 1 },
+        judges: [
+          {
+            dimension: 'arc_fit',
+            label: 'Arc-Fit Judge',
+            severity: 'minor',
+            status: 'declined',
+            proposedChange: 'Drop it.',
+            rationale: 'Already gone.',
+            sourceQuote: null,
+            proposedEditSummary: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  function policy(over: Partial<PackInterviewerPolicy> = {}): PackInterviewerPolicy {
+    return {
+      conversational: true,
+      houseRulesEnabled: true,
+      houseRules: [
+        { kind: 'Never', text: 'Never use humour.', trigger: null },
+        // The if-asked branch, which is the only one that renders a trigger line.
+        { kind: 'If asked', text: 'Say who reads the answers.', trigger: 'privacy' },
+      ],
+      approachLabel: 'Funnel',
+      paceLabel: 'Brisk',
+      openingSource: 'Guided by the examples you wrote',
+      tacticLabels: ['Probes shallow answers', 'Reflects answers back'],
+      arcBands: [{ label: 'Opening third', detail: 'Broad, one follow-up per answer.' }],
+      fidelityEnabled: true,
+      fidelityDistribution: [
+        { level: 'must_ask', label: 'Word for word', count: 2 },
+        // A zero-count level, which the renderer filters out rather than printing as "0".
+        { level: 'creative', label: 'Fill creatively', count: 0 },
+      ],
+      mustAskQuestions: [{ key: 'q1', prompt: 'Do you consent to this interview being recorded?' }],
+      evaluation: POLICY_EVALUATION,
+      ...over,
+    };
+  }
+
+  it('renders a fully populated interviewer section', async () => {
+    const pdf = await renderPackPdf(packModel({ interviewerPolicy: policy() }));
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the form-only interviewer state, where none of the settings apply', async () => {
+    // `conversational: false` short-circuits every settings block but still renders the review.
+    const pdf = await renderPackPdf(
+      packModel({ interviewerPolicy: policy({ conversational: false }) })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the interviewer section with nothing in force and nothing reviewed', async () => {
+    // The other side of every branch above: no house rules, no arc, fidelity off, no run.
+    const pdf = await renderPackPdf(
+      packModel({
+        interviewerPolicy: policy({
+          houseRulesEnabled: false,
+          houseRules: [],
+          paceLabel: null,
+          tacticLabels: [],
+          arcBands: [],
+          fidelityEnabled: false,
+          fidelityDistribution: [],
+          mustAskQuestions: [],
+          evaluation: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
+        }),
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a reviewed interviewer setup that raised no findings', async () => {
+    const pdf = await renderPackPdf(
+      packModel({
+        interviewerPolicy: policy({
+          evaluation: { ...POLICY_EVALUATION, totalFindings: 0, targets: [] },
+        }),
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a topic that carries a document trigger and its member questions', async () => {
+    // Both are new to the topic block and neither is reachable from a graph fixture: a trigger is
+    // authored by the Routing Analyst, and membership only renders behind its own sub-option.
+    const pdf = await renderPackPdf(
+      packModel({
+        include: {
+          ...DEFAULT_PACK_INCLUDE,
+          conditionalTopics: true,
+          conditionalTopicsMembers: true,
+        },
+        conditionalTopics: {
+          enabled: true,
+          alwaysAsked: [],
+          conditional: [
+            {
+              key: 'safeguarding',
+              label: 'Safeguarding',
+              description: null,
+              alwaysAsked: false,
+              criteria: 'The opening suggests vulnerability.',
+              sampledOnly: true,
+              questions: [{ key: 'q9', prompt: 'Is there anything you would like us to know?' }],
+              trigger: {
+                condition: 'The applicant discloses that they are fleeing abuse',
+                cues: ['abuse', 'fleeing'],
+              },
+            },
+          ],
+          rules: [
+            { sentence: 'Always include "Safeguarding" when "housing status" is "at risk".' },
+          ],
+          settings: [{ label: 'Interview length', value: '10m' }],
+          evaluation: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  /* -- The evaluation appendix's own branches -------------------------------- */
+
+  const CONTESTED_TARGET: PackEvaluationTarget = {
+    key: 'q1',
+    context: 'Q1 · Onboarding',
+    label: 'How satisfied are you with our onboarding?',
+    questionType: 'single_choice',
+    routingReach: 'Asked when it fits',
+    topicLabel: 'Onboarding experience',
+    verdict: {
+      contested: true,
+      blocks: [
+        {
+          heading: 'A reword',
+          backing: '2 of 3 judges',
+          judges: 'Clarity, Audience-Match',
+          holdsWording: true,
+          suggestions: ['Reword to avoid the leading adjective.'],
+        },
+        {
+          heading: 'A deletion',
+          backing: '1 of 3 judges',
+          judges: 'Duplicates',
+          holdsWording: false,
+          suggestions: ['Remove it, Q2 already covers this ground.'],
+        },
+      ],
+    },
+    gap: false,
+    removed: false,
+    counts: { major: 1, minor: 2, info: 0, total: 3 },
+    judgeCount: 3,
+    alternatives: [
+      {
+        prompt: 'How did you find your first two weeks?',
+        addresses: ['Clarity Judge'],
+        note: 'Names the period concretely.',
+      },
+    ],
+    unresolvedBy: ['Duplicates Judge'],
+    judges: [
+      {
+        dimension: 'clarity',
+        label: 'Clarity Judge',
+        severity: 'minor',
+        status: 'pending',
+        proposedChange: 'Reword to avoid the leading adjective.',
+        rationale: '"Satisfied" presupposes a positive frame.',
+        sourceQuote: 'How satisfied are you',
+        proposedEditSummary: "Replaces this question's wording with the suggested version.",
+        destination: null,
+        applyInstruction: 'Keep it under fifteen words.',
+      },
+      {
+        // A drafted question: the only judge line that carries a destination sentence.
+        dimension: 'coverage',
+        label: 'Coverage Judge',
+        severity: 'info',
+        status: 'accepted',
+        proposedChange: 'Add a question on manager support.',
+        rationale: 'The goal names it and nothing asks about it.',
+        sourceQuote: null,
+        proposedEditSummary: 'Adds this as a new Free text question at the end of "Wrap-up".',
+        destination: 'No section was suggested, so it would go at the end of "Wrap-up".',
+        applyInstruction: null,
+      },
+    ],
+  };
+
+  function evaluations(targets: PackEvaluationTarget[]): PackEvaluations {
+    return {
+      hasRun: true,
+      runAt: '2026-08-30T09:12:44.118Z',
+      totalFindings: 3,
+      scores: [
+        {
+          dimension: 'clarity',
+          label: 'Clarity Judge',
+          score: 0.62,
+          diagnostic: null,
+          findingCount: 1,
+        },
+      ],
+      targets,
+    };
+  }
+
+  it('renders a contested target with its verdict, wordings and every judge', async () => {
+    const pdf = await renderPackPdf(
+      packModel({
+        include: {
+          ...DEFAULT_PACK_INCLUDE,
+          evaluations: true,
+          evaluationJudgeDetail: true,
+          evaluationEvidence: true,
+        },
+        evaluations: evaluations([CONTESTED_TARGET]),
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the same target with the verdict off, so the wordings stand alone', async () => {
+    // The fallback path: no verdict block to host them, so they render after the judges instead.
+    const pdf = await renderPackPdf(
+      packModel({
+        include: { ...DEFAULT_PACK_INCLUDE, evaluations: true, evaluationVerdicts: false },
+        evaluations: evaluations([CONTESTED_TARGET]),
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a bare target — no context, no type, no routing, nothing reconciled', async () => {
+    // Every optional field on the other side of its branch, plus `removed`, which is the only
+    // thing that makes the "no longer in the questionnaire" note render.
+    const pdf = await renderPackPdf(
+      packModel({
+        include: { ...DEFAULT_PACK_INCLUDE, evaluations: true, evaluationJudgeDetail: true },
+        evaluations: evaluations([
+          {
+            ...CONTESTED_TARGET,
+            context: null,
+            questionType: null,
+            routingReach: null,
+            topicLabel: null,
+            verdict: null,
+            removed: true,
+            counts: { major: 0, minor: 1, info: 0, total: 1 },
+            judgeCount: 1,
+            alternatives: [],
+            unresolvedBy: [],
+            judges: [
+              {
+                ...CONTESTED_TARGET.judges[0],
+                sourceQuote: null,
+                proposedEditSummary: null,
+                destination: null,
+                applyInstruction: null,
+              },
+            ],
+          },
+        ]),
+      })
+    );
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 });

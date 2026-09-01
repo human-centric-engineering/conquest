@@ -2,21 +2,35 @@
  * Questionnaire Pack download.
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md
- *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=
+ *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=
+ *     &evaluations=&evaluationVerdicts=&evaluationJudgeDetail=&evaluationRewordings=&evaluationEvidence=
+ *     &conditionalTopics=&conditionalTopicsMembers=&conditionalTopicsEvaluation=&conditionalTopicsTechnical=
+ *     &interviewerPolicy=
  *   Admin-only. Downloads a branded, shareable "pack" covering how the questionnaire is set up —
  *   title/version/goals, the question structure, the data slots (with linked questions), the
- *   definitions/glossary, the experience-setup summary, (opt-in) the latest F5.1–F5.3
- *   design-evaluation run's judge findings, and (opt-in) the Conditional Topics routing logic (topics,
- *   criteria, hard rules) in plain language — carrying the latest F17.21 scope-evaluation judge
- *   panel's verdict on that routing design nested inside it — as a PDF, CSV, or Markdown file. Each
- *   of the seven top-level sections can be toggled off via its query flag; all default `true` except
- *   `evaluations` and `conditionalTopics`, which default `false` (unreviewed AI critique, and routing
- *   design a stakeholder pack doesn't always need — the admin opts in per download). `setupTechnical`
- *   (also `false` by default) widens the setup summary from the standard tier to every setting,
- *   including numeric tuning and cost/abuse thresholds — see
- *   `lib/app/questionnaire/settings-registry.ts`. Distinct from the brand-free `…/instrument` export
- *   (F14.9), which is the design-time reviewer copy of just the questions — this is the
- *   external/showcase artifact.
+ *   definitions/glossary, the experience-setup summary, and three opt-in appendices: the latest
+ *   F5.1–F5.3 design-evaluation run's judge findings, the Conditional Topics routing logic (topics,
+ *   criteria, hard rules) in plain language carrying the F17.21 scope panel's verdict on it, and the
+ *   interviewer policy carrying the F18.8 panel's verdict on that — as a PDF, CSV, or Markdown file.
+ *
+ *   **Eight top-level sections**, each toggled by its own flag; all default `true` except
+ *   `evaluations`, `conditionalTopics` and `interviewerPolicy`, which default `false` (unreviewed AI
+ *   critique, and routing design a stakeholder pack doesn't always need — the admin opts in per
+ *   download).
+ *
+ *   **Sub-option flags refine a section rather than adding one**, and are ignored when their parent
+ *   section is off:
+ *     - `setupTechnical` (false) — widens the setup summary to numeric tuning and cost thresholds.
+ *     - `evaluationVerdicts` (true) — the panel's verdict per flagged question.
+ *     - `evaluationRewordings` (true) — the cross-judge reconciled phrasings.
+ *     - `evaluationJudgeDetail` (false) — every judge's own reasoning; the bulk of the appendix.
+ *     - `evaluationEvidence` (false) — the spans judges quoted.
+ *     - `conditionalTopicsEvaluation` (true) — the review of the routing design.
+ *     - `conditionalTopicsMembers` (false) — which questions each topic covers.
+ *     - `conditionalTopicsTechnical` (false) — the routing settings' technical tier.
+ *
+ *   Distinct from the brand-free `…/instrument` export (F14.9), which is the design-time reviewer
+ *   copy of just the questions — this is the external/showcase artifact.
  *
  * Node runtime — `@react-pdf/renderer` needs Node. Bulk read: the same `exportLimiter` sub-cap the
  * instrument/definition routes use. Version-scoped.
@@ -70,8 +84,20 @@ const querySchema = z.object({
   setupTechnical: includeParam('false'),
   // Unreviewed AI critique — opt-in, unlike every other section (see the route JSDoc).
   evaluations: includeParam('false'),
+  // Sub-options of `evaluations`, ignored when it is off. The two that default `true` are the
+  // conclusions (what the panel wants done, and the wording it proposes); the two that default
+  // `false` are the bulk (every judge's reasoning, and the spans they quoted).
+  evaluationVerdicts: includeParam('true'),
+  evaluationJudgeDetail: includeParam('false'),
+  evaluationRewordings: includeParam('true'),
+  evaluationEvidence: includeParam('false'),
   // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
   conditionalTopics: includeParam('false'),
+  // Sub-options of `conditionalTopics`, ignored when it is off. Membership is the long one (every
+  // question of every topic); the technical tier is the routing equivalent of `setupTechnical`.
+  conditionalTopicsMembers: includeParam('false'),
+  conditionalTopicsEvaluation: includeParam('true'),
+  conditionalTopicsTechnical: includeParam('false'),
   interviewerPolicy: includeParam('false'),
 });
 
@@ -93,7 +119,14 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
+      evaluationVerdicts,
+      evaluationJudgeDetail,
+      evaluationRewordings,
+      evaluationEvidence,
       conditionalTopics,
+      conditionalTopicsMembers,
+      conditionalTopicsEvaluation,
+      conditionalTopicsTechnical,
       interviewerPolicy,
     } = validateQueryParams(searchParams, querySchema);
     const include = {
@@ -104,7 +137,14 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
+      evaluationVerdicts,
+      evaluationJudgeDetail,
+      evaluationRewordings,
+      evaluationEvidence,
       conditionalTopics,
+      conditionalTopicsMembers,
+      conditionalTopicsEvaluation,
+      conditionalTopicsTechnical,
       interviewerPolicy,
     };
 

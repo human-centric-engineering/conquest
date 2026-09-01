@@ -21,6 +21,7 @@ import {
   type PackInclude,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import { SETTING_GROUPS } from '@/lib/app/questionnaire/settings-registry';
 import type {
   VersionGraphView,
@@ -418,7 +419,14 @@ describe('buildPackModel', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     };
     const model = buildPackModel(
@@ -814,6 +822,10 @@ describe('buildPackModel', () => {
         proposedChange: 'Split into two questions',
         rationale: 'This question asks two things at once',
         sourceQuote: 'both engaged and satisfied',
+        // Prose-only, so nothing to describe and no place to name — the pack invents neither.
+        proposedEditSummary: null,
+        destination: null,
+        applyInstruction: null,
       });
     });
 
@@ -941,6 +953,216 @@ describe('buildPackModel', () => {
       );
       expect(model.evaluations?.runAt).toBe('2026-08-10T00:00:00.000Z');
     });
+
+    /* ---------------------------------------------------------------------- */
+    /* The panel's verdict, routing reach, and the reviewer's own words        */
+    /* ---------------------------------------------------------------------- */
+
+    /** The run's evaluations section, built with the section included. */
+    function evaluationsOf(run: EvaluationRunDetail) {
+      return buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        run,
+        null,
+        null,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      ).evaluations;
+    }
+
+    /** `EVALUATION_RUN`'s two findings on q1, given structured ops. */
+    function runWithOps(
+      first: ProposedEdit | null,
+      second: ProposedEdit | null
+    ): EvaluationRunDetail {
+      return {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? { ...f, proposedEdit: first }
+            : f.id === 'f3'
+              ? { ...f, proposedEdit: second }
+              : f
+        ),
+      };
+    }
+
+    it('says what the panel wants done, not just who flagged it', () => {
+      // The appendix used to print severity tallies and a list of judges and leave the reader to
+      // work out, from several prose paragraphs, that all of them wanted the same thing. Built by
+      // the same `summariseGroupActions` the console leads with, so the two cannot disagree.
+      const evaluations = evaluationsOf(
+        runWithOps(
+          { op: 'replace_prompt', prompt: 'A clearer question?' },
+          { op: 'replace_prompt', prompt: 'A plainer question?' }
+        )
+      );
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.verdict?.contested).toBe(false);
+      expect(q1?.verdict?.blocks).toHaveLength(1);
+      expect(q1?.verdict?.blocks[0]).toMatchObject({
+        heading: 'A reword',
+        // Both judges that flagged it, so "all 2" rather than "2 of 2" — the denominator is the
+        // judges that flagged THIS question, never the seven on the panel.
+        backing: 'all 2 judges',
+        holdsWording: true,
+      });
+      expect(q1?.verdict?.blocks[0].judges).toBe('Clarity, Audience-Match');
+    });
+
+    it('keeps a disagreement as a second block rather than reporting the winner alone', () => {
+      // The rule the whole verdict is built around: judges disagreeing is information, and a pack
+      // that printed only the best-supported action would manufacture a consensus the panel never
+      // reached. The deletion leads on the consequence tiebreak, being the harder change to undo.
+      const evaluations = evaluationsOf(
+        runWithOps({ op: 'delete_question' }, { op: 'replace_prompt', prompt: 'A clearer one?' })
+      );
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.verdict?.contested).toBe(true);
+      expect(q1?.verdict?.blocks.map((b) => b.heading)).toEqual(['A deletion', 'A reword']);
+      // The wordings hang off the REWORD, not off the leading action. Under "A deletion" they
+      // would read as the panel wanting the question deleted and rewritten.
+      expect(q1?.verdict?.blocks.map((b) => b.holdsWording)).toEqual([false, true]);
+    });
+
+    it('says who is actually asked a flagged question, in the product’s words', () => {
+      // The one line connecting the pack's two opt-in appendices. Without it the document explains
+      // a routing design in one section and critiques questions in another, and a reader weighing
+      // "delete this" cannot see that only some respondents are ever asked it.
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.target
+            ? {
+                ...f,
+                target: {
+                  ...f.target,
+                  routingReach: 'conditional' as const,
+                  topicLabel: 'Onboarding',
+                },
+              }
+            : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.routingReach).toBe('Asked when it fits');
+      expect(q1?.topicLabel).toBe('Onboarding');
+    });
+
+    it('names the two other reaches, including the one a reader most needs', () => {
+      // "Never asked" is the case with no topic to name: a question in no topic is one nobody will
+      // ever see, and a judge's opinion of its wording is beside the point until that is fixed.
+      // Both branches were unexercised, so either could have been mislabelled silently.
+      const reachOf = (reach: 'always' | 'never', topicLabel: string | null) => {
+        const run: EvaluationRunDetail = {
+          ...EVALUATION_RUN,
+          findings: EVALUATION_RUN.findings.map((f) =>
+            f.target ? { ...f, target: { ...f.target, routingReach: reach, topicLabel } } : f
+          ),
+        };
+        return evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+      };
+
+      expect(reachOf('always', 'Background')).toMatchObject({
+        routingReach: 'Always asked',
+        topicLabel: 'Background',
+      });
+      // No topic to name, and the label stays null rather than inventing one.
+      expect(reachOf('never', null)).toMatchObject({
+        routingReach: 'Never asked — in no topic',
+        topicLabel: null,
+      });
+    });
+
+    it('says nothing about routing when the version does not route', () => {
+      // `routingReach` is null on every finding when Conditional Topics is off, and a questionnaire
+      // that does not route must not have a routing line invented for it.
+      const q1 = evaluationsOf(EVALUATION_RUN)?.targets.find((t) => t.key === 'q1');
+      expect(q1?.routingReach).toBeNull();
+      expect(q1?.topicLabel).toBeNull();
+    });
+
+    it('describes a structured edit in the same words the console prints under the button', () => {
+      const evaluations = evaluationsOf(runWithOps({ op: 'delete_question' }, null));
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].proposedEditSummary).toBe(
+        'Removes this question from the questionnaire.'
+      );
+      // A prose-only finding has no op, so there is nothing to describe and nothing is invented.
+      expect(q1?.judges[1].proposedEditSummary).toBeNull();
+    });
+
+    it('describes the edit that will actually run, not the one the judge drafted', () => {
+      // An admin-edited override wins at apply, so a pack describing the judge's original would
+      // describe a change that is not going to happen.
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? {
+                ...f,
+                proposedEdit: { op: 'delete_question' as const },
+                editedOverride: { op: 'replace_prompt' as const, prompt: 'Kept, reworded.' },
+              }
+            : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].proposedEditSummary).toBe(
+        "Replaces this question's wording with the suggested version."
+      );
+    });
+
+    it("carries the reviewer's own instruction, the one line on a finding written by a person", () => {
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1' ? { ...f, applyInstruction: 'Keep it under fifteen words.' } : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].applyInstruction).toBe('Keep it under fifteen words.');
+    });
+
+    it('says where a drafted question would land, and that nobody chose it', () => {
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? {
+                ...f,
+                proposedEdit: {
+                  op: 'add_question' as const,
+                  key: 'q9',
+                  prompt: 'A gap?',
+                  type: 'free_text' as const,
+                },
+                destination: {
+                  sectionTitle: 'Wrap-up',
+                  sectionPosition: 3,
+                  origin: 'default' as const,
+                },
+              }
+            : f
+        ),
+      };
+      // Drafted questions split into their own gap group — they are not a judgement about the
+      // target they were addressed to.
+      const gap = evaluationsOf(run)?.targets.find((t) => t.gap);
+
+      expect(gap?.judges[0].destination).toBe(
+        'No section was suggested, so it would go at the end of “Wrap-up” (section 3).'
+      );
+    });
   });
 
   describe('conditional topics appendix', () => {
@@ -974,24 +1196,117 @@ describe('buildPackModel', () => {
       expect(model.conditionalTopics).toBeNull();
     });
 
-    it('carries enabled/maxConditionalTopics/includeCheckTopic/sessionBudgetSeconds straight off the settings', () => {
-      const model = buildPackModel(
+    /** The Conditional topics section, built with the given include overrides. */
+    function topicsSectionWith(over: Partial<PackInclude> = {}, topics = SCOPE_TOPICS) {
+      return buildPackModel(
         'T',
         graphOf(SECTIONS),
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        { topics, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
-        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
+        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true, ...over },
         'now'
+      ).conditionalTopics;
+    }
+
+    it('derives the routing settings from the registry rather than naming a chosen few', () => {
+      // The section used to hand-list four of the fifteen fields on `ConditionalTopicsSettings`.
+      // The two named here are the ones whose absence mattered most: they describe what the
+      // RESPONDENT experiences, in a section whose whole subject is how the interview adapts.
+      const section = topicsSectionWith();
+      const labels = section?.settings.map((row) => row.label) ?? [];
+
+      expect(section?.enabled).toBe(true);
+      expect(labels).toContain('Respondent is told what was chosen');
+      expect(labels).toContain('Respondent can ask for another area');
+      expect(labels).toContain('Topics that depend on the respondent');
+      expect(labels).toContain('If the choice cannot be made');
+    });
+
+    it('keeps the numeric tuning behind the technical sub-option', () => {
+      const standard = topicsSectionWith()?.settings.map((r) => r.label) ?? [];
+      const technical = topicsSectionWith({ conditionalTopicsTechnical: true })?.settings.map(
+        (r) => r.label
       );
-      expect(model.conditionalTopics).toMatchObject({
-        enabled: true,
-        maxConditionalTopics: 3,
-        includeCheckTopic: true,
-        sessionBudgetSeconds: 600,
+
+      expect(standard).not.toContain('Confidence floor for the choice');
+      expect(technical).toContain('Confidence floor for the choice');
+      // The standard rows are still all there — the tier widens the list, it does not replace it.
+      for (const label of standard) expect(technical).toContain(label);
+    });
+
+    it('says which questions a topic covers only when asked for them', () => {
+      // Without it the pack lists topics in one section and questions in another with nothing
+      // tying them, and a reader cannot answer "if this area is not selected, what am I not asked?"
+      expect(topicsSectionWith()?.alwaysAsked[0]?.questions).toEqual([]);
+
+      const withMembers = topicsSectionWith({ conditionalTopicsMembers: true });
+      expect(withMembers?.alwaysAsked[0]?.questions).toEqual([
+        { key: 'q1', prompt: 'Prompt for q1' },
+      ]);
+    });
+
+    it('keeps a membership key that no longer resolves, rather than dropping it', () => {
+      // Same choice the hard rules make: a stale membership stays visible as something to clean
+      // up. Dropping it would quietly shrink the list of what a topic covers.
+      const topics = SCOPE_TOPICS.map((t) =>
+        t.key === 'background'
+          ? { ...t, members: { ...t.members, questionKeys: ['q1', 'deleted-question'] } }
+          : t
+      );
+      const section = topicsSectionWith({ conditionalTopicsMembers: true }, topics);
+
+      expect(section?.alwaysAsked[0]?.questions).toEqual([
+        { key: 'q1', prompt: 'Prompt for q1' },
+        { key: 'deleted-question', prompt: 'deleted-question' },
+      ]);
+    });
+
+    it('records what the source document asked to be watched for mid-conversation', () => {
+      // Recorded, not acted on: the topic still runs off its criteria. Printed anyway, because the
+      // alternative is a document showing the approximation as though it were the intent.
+      const topics = SCOPE_TOPICS.map((t) =>
+        t.key === 'talent'
+          ? {
+              ...t,
+              trigger: {
+                condition: 'The respondent discloses a redundancy round.',
+                cues: ['redundancy', 'restructure'],
+              },
+            }
+          : t
+      );
+      const section = topicsSectionWith({}, topics);
+      const talent = section?.conditional.find((t) => t.key === 'talent');
+
+      // The trailing full stop is trimmed: the serialisers continue the sentence ("... Today it is
+      // decided from the opening instead"), and an authored condition ending in one would render
+      // as "a redundancy round.. Today".
+      expect(talent?.trigger).toEqual({
+        condition: 'The respondent discloses a redundancy round',
+        cues: ['redundancy', 'restructure'],
       });
+      // Every other topic carries none, which is the normal case.
+      expect(section?.alwaysAsked[0]?.trigger).toBeNull();
+    });
+
+    it('omits the routing review entirely when the sub-option is off, never calling it unreviewed', () => {
+      // The distinction this asserts is a correctness one, not a shape preference. The serialisers
+      // render `hasRun: false` as the sentence "This routing has not been reviewed" — so emitting
+      // the EXCLUDED case that way would have a client-facing document state, in words, that a
+      // routing which HAD been reviewed was never looked at. `null` is how every other excluded
+      // part of the model is expressed, and every serialiser skips it.
+      const section = topicsSectionWith({ conditionalTopicsEvaluation: false });
+      expect(section?.evaluation).toBeNull();
+    });
+
+    it('still reports a never-reviewed routing as never reviewed when the sub-option is on', () => {
+      // The other side of the same distinction: with the review included and no run to show, the
+      // reader is told so. `topicsSectionWith` passes `scopeEvaluationRun: null`.
+      const section = topicsSectionWith({ conditionalTopicsEvaluation: true });
+      expect(section?.evaluation).toMatchObject({ hasRun: false, targets: [] });
     });
 
     it('reports enabled: false when the version never turned it on, without dropping the topic lists', () => {
@@ -1198,14 +1513,14 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      expect(model.conditionalTopics?.evaluation.scores.map((d) => d.dimension)).toEqual([
+      expect(model.conditionalTopics?.evaluation?.scores.map((d) => d.dimension)).toEqual([
         'criteria_quality',
         'rule_integrity',
         'budget_realism',
         'coverage_and_burden',
       ]);
       const byDimension = new Map(
-        model.conditionalTopics?.evaluation.scores.map((d) => [d.dimension, d])
+        model.conditionalTopics?.evaluation?.scores.map((d) => [d.dimension, d])
       );
       expect(byDimension.get('criteria_quality')).toMatchObject({
         label: 'Criteria-Quality Judge',
@@ -1237,7 +1552,7 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
       );
-      const targets = model.conditionalTopics?.evaluation.targets ?? [];
+      const targets = model.conditionalTopics?.evaluation?.targets ?? [];
       expect(targets).toHaveLength(1);
       expect(targets[0]).toMatchObject({
         key: 'talent',

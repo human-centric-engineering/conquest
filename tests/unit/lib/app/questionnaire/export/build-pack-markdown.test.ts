@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
+import { DEFAULT_PACK_INCLUDE } from '@/lib/app/questionnaire/export/build-pack-model';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
   PackInterviewerPolicy,
@@ -76,7 +77,14 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
+      conditionalTopicsMembers: true,
+      conditionalTopicsEvaluation: true,
+      conditionalTopicsTechnical: true,
       interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -316,6 +324,138 @@ describe('buildPackMarkdown', () => {
       expect(md).not.toContain('## Evaluation');
     });
 
+    /* ---------------------------------------------------------------------- */
+    /* The verdict, and the sub-options that decide how much of it prints      */
+    /* ---------------------------------------------------------------------- */
+
+    /** A contested question: two judges want a reword, one wants it gone. */
+    const CONTESTED_TARGET = {
+      key: 'q1',
+      context: 'Q1 · Background',
+      label: 'Are you engaged and satisfied?',
+      questionType: 'free_text',
+      routingReach: 'Asked when it fits',
+      topicLabel: 'Onboarding',
+      verdict: {
+        contested: true,
+        blocks: [
+          {
+            heading: 'A reword',
+            backing: '2 of 3 judges',
+            judges: 'Clarity, Audience-Match',
+            holdsWording: true,
+            suggestions: ['Reword to avoid the leading adjective.'],
+          },
+          {
+            heading: 'A deletion',
+            backing: '1 of 3 judges',
+            judges: 'Duplicates',
+            holdsWording: false,
+            suggestions: ['Remove it, Q2 already covers this ground.'],
+          },
+        ],
+      },
+      gap: false,
+      removed: false,
+      counts: { major: 1, minor: 2, info: 0, total: 3 },
+      judgeCount: 3,
+      alternatives: [
+        {
+          prompt: 'How engaged do you feel at work?',
+          addresses: ['Clarity Judge'],
+          note: 'One ask.',
+        },
+      ],
+      unresolvedBy: ['Type-Fit Judge'],
+      judges: [
+        {
+          dimension: 'clarity' as const,
+          label: 'Clarity Judge',
+          severity: 'major' as const,
+          status: 'pending' as const,
+          proposedChange: 'Split into two questions',
+          rationale: 'Asks two things at once',
+          sourceQuote: 'engaged and satisfied',
+          proposedEditSummary: "Replaces this question's wording with the suggested version.",
+          destination: null,
+          applyInstruction: 'Keep it under fifteen words.',
+        },
+      ],
+    };
+
+    function contested(over: Partial<PackModel['include']> = {}) {
+      return buildPackMarkdown(
+        model({
+          include: { ...DEFAULT_PACK_INCLUDE, evaluations: true, ...over },
+          evaluations: {
+            hasRun: true,
+            runAt: '2026-08-11T09:00:00.000Z',
+            totalFindings: 3,
+            scores: [],
+            targets: [CONTESTED_TARGET],
+          },
+        })
+      );
+    }
+
+    it('leads with what the panel wants done, and keeps the dissent', () => {
+      const md = contested();
+      expect(md).toContain('**A reword**, as proposed by 2 of 3 judges — Clarity, Audience-Match');
+      // The dissent is the next heading down, not a footnote. A pack printing only the winner
+      // would report a consensus the panel never reached.
+      expect(md).toContain('**A deletion**, as proposed by 1 of 3 judges — Duplicates');
+    });
+
+    it('says who is actually asked the flagged question', () => {
+      // The line joining the pack's two opt-in appendices: a reader weighing a deletion can see
+      // that only some respondents ever reach this question.
+      expect(contested()).toContain('Asked when it fits: Onboarding');
+    });
+
+    it('puts the wordings inside the block they answer, not under the leading action', () => {
+      const md = contested();
+      const rewordIdx = md.indexOf('**A reword**');
+      const deletionIdx = md.indexOf('**A deletion**');
+      const wordingIdx = md.indexOf('How engaged do you feel at work?');
+      // Between the reword heading (which holds them) and the deletion heading below it. Under
+      // "A deletion" they would read as the panel wanting the question deleted and rewritten.
+      expect(wordingIdx).toBeGreaterThan(rewordIdx);
+      expect(wordingIdx).toBeLessThan(deletionIdx);
+    });
+
+    it('prints the conclusions and not the arguments by default', () => {
+      // The default download shape. The judge's own reasoning is the bulk of the appendix, and a
+      // reader handed the pack usually wants what to do rather than four arguments for it.
+      const md = contested();
+      expect(md).toContain('**A reword**');
+      expect(md).not.toContain('Asks two things at once');
+      expect(md).not.toContain('> engaged and satisfied');
+    });
+
+    it('adds every judge’s reasoning, their edit, and the reviewer’s own words when asked', () => {
+      const md = contested({ evaluationJudgeDetail: true });
+      expect(md).toContain('**Clarity Judge** [Major] — Split into two questions');
+      expect(md).toContain('Asks two things at once');
+      expect(md).toContain("Replaces this question's wording with the suggested version.");
+      expect(md).toContain("_Reviewer's instruction: Keep it under fifteen words._");
+      // Evidence stays behind its own flag: judges routinely quote the prompt the finding already
+      // sits under, so it is mostly the same sentence twice.
+      expect(md).not.toContain('> engaged and satisfied');
+    });
+
+    it('adds the evidence quotes only when asked', () => {
+      const md = contested({ evaluationJudgeDetail: true, evaluationEvidence: true });
+      expect(md).toContain('> engaged and satisfied');
+    });
+
+    it('drops the verdict and the wordings when both are unticked', () => {
+      const md = contested({ evaluationVerdicts: false, evaluationRewordings: false });
+      expect(md).not.toContain('**A reword**');
+      expect(md).not.toContain('How engaged do you feel at work?');
+      // The subject and its tallies survive: the section still says what was flagged.
+      expect(md).toContain('Are you engaged and satisfied?');
+    });
+
     it('renders after Definitions, right before the closing "About ConQuest" blurb', () => {
       const md = buildPackMarkdown(
         model({
@@ -391,6 +531,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 2,
                 alternatives: [],
                 unresolvedBy: [],
@@ -403,6 +546,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: 'engaged and satisfied',
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                   {
                     dimension: 'audience_match',
@@ -412,6 +558,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Drop the jargon',
                     rationale: 'Too technical for this audience',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -425,17 +574,44 @@ describe('buildPackMarkdown', () => {
       const occurrences = md.split('Are you engaged and satisfied?').length - 1;
       expect(occurrences).toBe(1);
       expect(md).toContain('### Q1 · Background — Are you engaged and satisfied?');
-      expect(md).toContain('_Type: free_text · 2 judge(s) · 1 major_');
+      // The answer type in the reader's words, not the stored slug — the pack used to print
+      // "Type: free_text" in a document written for a client.
+      expect(md).toContain('_Type: Free text · 2 judge(s) · 1 major_');
 
       // Each judge is a bullet under that one heading, named (the missing fact under a
       // question heading is *which judge said this*).
-      expect(md).toContain('- **Clarity Judge** [major · pending] — Split into two questions');
+      // Severity is labelled, and `pending` is dropped: it is the state of nearly every finding
+      // in an untriaged run, so printing it on each line is a word to skip and nothing more. A
+      // decision someone actually recorded still shows.
+      expect(md).toContain('- **Clarity Judge** [Major] — Split into two questions');
       expect(md).toContain('  Asks two things at once');
       expect(md).toContain('  > engaged and satisfied');
-      expect(md).toContain('- **Audience-Match Judge** [minor · declined] — Drop the jargon');
+      expect(md).toContain('- **Audience-Match Judge** [Minor · Declined] — Drop the jargon');
+      expect(md).not.toContain('pending');
     });
 
-    it('prints the reconciled rewording after the verdicts it reconciles', () => {
+    it('prints the rewordings after the judges when the verdict is unticked', () => {
+      // The production route to the standalone-rewordings branch, which the fixture-level
+      // `verdict: null` test below reaches artificially: `buildPackModel` cannot emit a target
+      // that has judges and no verdict (a group always has at least one finding, so
+      // `summariseGroupActions` always yields a primary). Only the include flag gets you here.
+      const md = contested({ evaluationVerdicts: false, evaluationJudgeDetail: true });
+
+      expect(md).not.toContain('**A reword**');
+      expect(md).toContain('**Suggested rewording** (addressing the judges above):');
+      expect(md).toContain('How engaged do you feel at work?');
+      // And still after the judges, which is where they sat before verdicts existed and for the
+      // reason that has not changed: a resolution only reads as one once you have seen the
+      // disagreement it resolves.
+      expect(md.indexOf('Asks two things at once')).toBeLessThan(
+        md.indexOf('How engaged do you feel at work?')
+      );
+    });
+
+    // test-review:accept mock-realism — `verdict: null` with populated judges is a state
+    // `buildPackModel` cannot emit; these fixtures drive the serialiser's defensive fallback
+    // directly. The realistic route (evaluationVerdicts: false) is covered by the test above.
+    it('prints the reconciled rewording on its own when no verdict is there to host it', () => {
       const md = buildPackMarkdown(
         model({
           evaluations: {
@@ -452,6 +628,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [
                   {
@@ -470,6 +649,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -478,6 +660,8 @@ describe('buildPackMarkdown', () => {
         })
       );
 
+      // No verdict block to sit inside, so the wordings stand alone rather than being dropped —
+      // a run from before the verdict step, or a download with verdicts unticked.
       expect(md).toContain('**Suggested rewording** (addressing the judges above):');
       expect(md).toContain('- How engaged do you feel at work?');
       expect(md).toContain(
@@ -487,7 +671,8 @@ describe('buildPackMarkdown', () => {
       // consensus the panel never reached.
       expect(md).toContain('Not resolved by rewording: Type-Fit Judge');
 
-      // Order matters: the reconciliation only makes sense after the disagreement it resolves.
+      // Order matters, and still does in this path: the reconciliation only makes sense after the
+      // disagreement it resolves, so with no verdict to host it, it goes after the judges.
       expect(md.indexOf('Split into two questions')).toBeLessThan(
         md.indexOf('How engaged do you feel at work?')
       );
@@ -510,6 +695,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
@@ -522,6 +710,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Tighten it',
                     rationale: 'Wordy',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -549,6 +740,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: true,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
@@ -561,6 +755,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Merge with q1',
                     rationale: 'Covers the same ground',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -592,13 +789,13 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: true,
                 criteria: null,
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: true,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -624,6 +821,8 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: true,
                 criteria: null,
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
             ],
             conditional: [
@@ -634,6 +833,8 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: false,
                 criteria: 'Mentions hiring difficulty.',
                 sampledOnly: false,
+                questions: [],
+                trigger: null,
               },
               {
                 key: 'compliance-check',
@@ -642,12 +843,19 @@ describe('buildPackMarkdown', () => {
                 alwaysAsked: false,
                 criteria: 'Sampled when nothing else pointed at compliance.',
                 sampledOnly: true,
+                questions: [],
+                trigger: null,
               },
             ],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: true,
-            sessionBudgetSeconds: 600,
+            settings: [
+              { label: 'Topics that depend on the respondent', value: 'Up to 3 per interview' },
+              { label: 'Interview length', value: '10 min' },
+              {
+                label: 'Respondent can ask for another area',
+                value: 'Yes, and it is added',
+              },
+            ],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -661,10 +869,91 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain(
         '**Compliance blind-spot check** _(sampled lightly, not asked in full)_'
       );
-      // Up to N / minutes summary line and the check-topic fact.
-      expect(md).toContain('Up to 3 conditional topic(s) per interview');
-      expect(md).toContain('one area the respondent did not raise is sampled briefly');
-      expect(md).toContain('interviews are budgeted to about 10 minute(s)');
+      // The settings render as a table from the routing registry, so this section can no longer
+      // silently cover four of the fifteen routing settings.
+      expect(md).toContain('| Topics that depend on the respondent | Up to 3 per interview |');
+      expect(md).toContain('| Interview length | 10 min |');
+      // What the respondent actually experiences — absent from the section entirely before.
+      expect(md).toContain('| Respondent can ask for another area | Yes, and it is added |');
+      // "Conditional topic" as a noun is not reintroduced right after teaching the reader
+      // "asked when it fits".
+      expect(md).not.toContain('conditional topic(s)');
+    });
+
+    it('lists the questions a topic covers, so a reader can see what is not asked', () => {
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [
+              {
+                key: 'talent',
+                label: 'Talent & culture',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'Mentions hiring difficulty.',
+                sampledOnly: false,
+                questions: [
+                  { key: 'q7', prompt: 'How easy is it to hire for your team?' },
+                  { key: 'q8', prompt: 'What makes people stay?' },
+                ],
+                trigger: null,
+              },
+            ],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      // The link the document could not previously make: topics in one section, questions in
+      // another, and nothing saying which belongs to which.
+      expect(md).toContain('  - How easy is it to hire for your team?');
+      expect(md).toContain('  - What makes people stay?');
+    });
+
+    it('says when the source document wanted a topic triggered mid-conversation', () => {
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [
+              {
+                key: 'safeguarding',
+                label: 'Safeguarding',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'The opening suggests vulnerability.',
+                sampledOnly: false,
+                questions: [],
+                trigger: {
+                  condition: 'The applicant discloses that they are fleeing abuse',
+                  cues: ['abuse', 'fleeing'],
+                },
+              },
+            ],
+            rules: [],
+            settings: [],
+            evaluation: EMPTY_SCOPE_EVALUATION,
+          },
+        })
+      );
+
+      // Recorded, not acted on — and the document says which. Printing the criteria alone would
+      // show the approximation as though it were what the document asked for.
+      expect(md).toContain(
+        'The source document asks for this when: The applicant discloses that they are fleeing abuse.'
+      );
+      // One full stop, not two — the builder trims the authored condition's own.
+      expect(md).not.toContain('fleeing abuse..');
+      expect(md).toContain('Today it is decided from the opening instead.');
+      // The criteria that actually runs is still shown, above it.
+      expect(md.indexOf('_Included when: The opening suggests vulnerability._')).toBeLessThan(
+        md.indexOf('The source document asks for this when')
+      );
     });
 
     it('renders hard rules under their own heading, and omits it when there are none', () => {
@@ -675,9 +964,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -692,9 +979,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -710,9 +995,7 @@ describe('buildPackMarkdown', () => {
             alwaysAsked: [],
             conditional: [],
             rules: [],
-            maxConditionalTopics: 3,
-            includeCheckTopic: false,
-            sessionBudgetSeconds: 0,
+            settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
@@ -724,23 +1007,46 @@ describe('buildPackMarkdown', () => {
     });
   });
 
-  describe('scope evaluation subsection', () => {
+  describe('routing review subsection', () => {
+    it('says nothing at all about the review when the admin excluded it', () => {
+      // The bug this guards: rendering the excluded case as `hasRun: false` made the document
+      // state "This routing has not been reviewed" about a version whose routing HAD been
+      // reviewed. Silence is the only honest output for a section the admin left out.
+      const md = buildPackMarkdown(
+        model({
+          conditionalTopics: {
+            enabled: true,
+            alwaysAsked: [],
+            conditional: [],
+            rules: [],
+            settings: [],
+            evaluation: null,
+          },
+        })
+      );
+
+      expect(md).toContain('## Conditional topics');
+      expect(md).not.toContain('Review of this routing');
+      expect(md).not.toContain('has not been reviewed');
+    });
+
     const baseScope = {
       enabled: true,
       alwaysAsked: [],
       conditional: [],
       rules: [],
-      maxConditionalTopics: 3,
-      includeCheckTopic: false,
-      sessionBudgetSeconds: 0,
+      settings: [],
     };
 
     it('renders the "no run yet" fallback under its own heading when hasRun is false', () => {
       const md = buildPackMarkdown(
         model({ conditionalTopics: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
       );
-      expect(md).toContain('### Scope evaluation');
-      expect(md).toContain('_No scope evaluation has been run for this version yet._');
+      // "Scope" is the pre-F17.29 name for this whole area; a stakeholder heading is the last
+      // place it should survive.
+      expect(md).toContain('### Review of this routing');
+      expect(md).toContain('_This routing has not been reviewed._');
+      expect(md).not.toContain('Scope evaluation');
     });
 
     it('renders the judge scoreboard and one finding grouped under its target', () => {
@@ -787,7 +1093,7 @@ describe('buildPackMarkdown', () => {
         ],
       };
       const md = buildPackMarkdown(model({ conditionalTopics: { ...baseScope, evaluation } }));
-      expect(md).toContain('### Scope evaluation');
+      expect(md).toContain('### Review of this routing');
       expect(md).toContain('Criteria-Quality Judge');
       expect(md).toContain('70%');
       expect(md).toContain('Budget-Realism Judge');
@@ -870,6 +1176,18 @@ describe('buildPackMarkdown — the interviewer', () => {
 
   it('renders nothing at all when the section is excluded', () => {
     expect(buildPackMarkdown(model())).not.toContain('## The interviewer');
+  });
+
+  it('renders above the closing "About ConQuest" blurb, not after it', () => {
+    // It used to be appended after the sign-off, which put a whole appendix below the line where
+    // the document says it has ended. Asserting the ORDER rather than mere presence is the point:
+    // the previous tests all passed while the section was unreachable to a reader.
+    const md = buildPackMarkdown(model({ interviewerPolicy: policy() }));
+
+    expect(md.indexOf('## The interviewer')).toBeGreaterThan(-1);
+    expect(md.indexOf('## The interviewer')).toBeLessThan(md.indexOf('## About ConQuest'));
+    // And the sign-off is genuinely last, so nothing else has slipped below it either.
+    expect(md.trimEnd().endsWith('](https://conquestinsights.com)')).toBe(true);
   });
 
   it('renders the approach, pace, opening and tactics as a fact list', () => {
@@ -1007,14 +1325,16 @@ describe('buildPackMarkdown — the interviewer', () => {
         }),
       })
     );
-    expect(md).toContain('Reviewed 2026-08-11T00:00:00.000Z · 2 finding(s).');
+    // UTC, named — otherwise the same run prints as a different DAY depending on which region's
+    // server rendered the pack, on a document somebody may be reading as a record.
+    expect(md).toContain('Reviewed 11 Aug 2026, 00:00 UTC · 2 finding(s).');
     expect(md).toContain('| Rule-Coherence Judge | 82% | 1 |');
     // A judge that could not score says why; one that has no reason to give says so plainly.
     expect(md).toContain('| Arc-Fit Judge | provider timed out | 0 |');
     expect(md).toContain('| Fidelity-Calibration Judge | unavailable | 0 |');
   });
 
-  it('falls back to "recently" when a completed run carries no timestamp', () => {
+  it('says the date is unknown when a completed run carries no timestamp', () => {
     const md = buildPackMarkdown(
       model({
         interviewerPolicy: policy({
@@ -1028,7 +1348,7 @@ describe('buildPackMarkdown — the interviewer', () => {
         }),
       })
     );
-    expect(md).toContain('Reviewed recently · 0 finding(s).');
+    expect(md).toContain('Reviewed date unknown · 0 finding(s).');
   });
 
   it('groups findings under their subject, marking one the author has since deleted', () => {
@@ -1088,7 +1408,7 @@ describe('buildPackMarkdown — the interviewer', () => {
     // The reader must be able to tell a live subject from one the author has since deleted,
     // or they will go looking for a rule that is not there.
     expect(md).toContain('**A rule that no longer exists** _(since removed)_');
-    expect(md).toContain('- _Rule-Coherence Judge_ (major): Narrow this rule.');
+    expect(md).toContain('- **Rule-Coherence Judge** [Major] — Narrow this rule.');
     expect(md).toContain('  - It contradicts the always rule above it.');
     expect(md).toContain('  - Proposed: Set the rule text to "Avoid jokes about the company."');
     // A prose-only finding has no structured edit, and must not render an empty "Proposed:" line.
