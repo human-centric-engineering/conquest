@@ -176,47 +176,95 @@ export function buildPackMarkdown(model: PackModel): string {
         lines.push('_No findings raised._');
         lines.push('');
       } else {
+        const include = model.include;
+
+        /** The reconciled wordings, as their own lines. Used under a verdict block, or alone. */
+        const pushRewordings = (target: (typeof model.evaluations.targets)[number]) => {
+          for (const alt of target.alternatives) {
+            lines.push(`- ${cell(alt.prompt)}`);
+            lines.push(`  _Addresses: ${alt.addresses.join(', ')}._ ${alt.note}`);
+          }
+          if (target.unresolvedBy.length > 0) {
+            lines.push(
+              `- _Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change._`
+            );
+          }
+        };
+
         for (const target of model.evaluations.targets) {
-          // The subject, named once: context chip, the prompt itself, then the judges beneath it.
+          // The subject, named once: context chip, the prompt itself, then the verdict beneath it.
           const heading = target.context
             ? `${target.context} — ${cell(target.label)}`
             : cell(target.label);
           lines.push(`### ${heading}`);
           const facts = [
             target.questionType ? `Type: ${questionTypeLabel(target.questionType)}` : null,
+            // Who is actually asked it. A reader weighs "delete this" very differently once they
+            // know only some respondents ever see it, and completely differently again when the
+            // answer is nobody.
+            target.routingReach
+              ? target.topicLabel
+                ? `${target.routingReach}: ${cell(target.topicLabel)}`
+                : target.routingReach
+              : null,
             `${target.judgeCount} judge(s)`,
             target.counts.major > 0 ? `${target.counts.major} major` : null,
             target.removed ? 'no longer in the questionnaire' : null,
           ].filter((f): f is string => f !== null);
           lines.push(`_${facts.join(' · ')}_`);
           lines.push('');
-          for (const judge of target.judges) {
-            lines.push(
-              `- ${judgeLine(judge.label, judge.severity, judge.status)} — ${judge.proposedChange}`
-            );
-            lines.push(`  ${judge.rationale}`);
-            if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
+
+          // What the panel wants done, before any of the arguments for it. The appendix used to
+          // open with four near-identical judge paragraphs and leave the reader to work out that
+          // all four were asking for the same thing.
+          const verdict = include.evaluationVerdicts ? target.verdict : null;
+          if (verdict) {
+            for (const block of verdict.blocks) {
+              lines.push(`**${block.heading}**, as proposed by ${block.backing} — ${block.judges}`);
+              // The wordings sit inside the block they answer. Hung off whichever action leads,
+              // they would print proposed phrasing under "A deletion" — as if the panel wanted the
+              // question deleted and rewritten.
+              if (block.holdsWording && include.evaluationRewordings) {
+                pushRewordings(target);
+              }
+              lines.push('');
+            }
           }
-          // The reconciled wording goes LAST, after the verdicts that produced it — it only makes
-          // sense once a reader has seen what it is reconciling.
-          if (target.alternatives.length > 0) {
+
+          if (include.evaluationJudgeDetail) {
+            for (const judge of target.judges) {
+              lines.push(
+                `- ${judgeLine(judge.label, judge.severity, judge.status)} — ${judge.proposedChange}`
+              );
+              lines.push(`  ${judge.rationale}`);
+              // What a click would actually do, in the same words the console prints under the
+              // button that does it.
+              if (judge.proposedEditSummary) lines.push(`  ${judge.proposedEditSummary}`);
+              if (judge.destination) lines.push(`  ${judge.destination}`);
+              // The reviewer's own words — the one line on a finding written by a person.
+              if (judge.applyInstruction) {
+                lines.push(`  _Reviewer's instruction: ${cell(judge.applyInstruction)}_`);
+              }
+              if (include.evaluationEvidence && judge.sourceQuote) {
+                lines.push(`  > ${cell(judge.sourceQuote)}`);
+              }
+            }
             lines.push('');
+          }
+
+          // No verdict to host them, so the wordings stand alone rather than being dropped — a run
+          // from before the verdict step, or a download with verdicts unticked. LAST, after the
+          // judges, which is where they sat before verdicts existed and for the reason that has not
+          // changed: a resolution only reads as one once you have seen the disagreement.
+          if (!verdict && include.evaluationRewordings && target.alternatives.length > 0) {
             lines.push(
               target.alternatives.length === 1
                 ? '**Suggested rewording** (addressing the judges above):'
                 : '**Suggested rewordings** (addressing the judges above):'
             );
-            for (const alt of target.alternatives) {
-              lines.push(`- ${cell(alt.prompt)}`);
-              lines.push(`  _Addresses: ${alt.addresses.join(', ')}._ ${alt.note}`);
-            }
-            if (target.unresolvedBy.length > 0) {
-              lines.push(
-                `- _Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change._`
-              );
-            }
+            pushRewordings(target);
+            lines.push('');
           }
-          lines.push('');
         }
       }
     }

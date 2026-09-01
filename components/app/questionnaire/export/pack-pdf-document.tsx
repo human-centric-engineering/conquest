@@ -27,6 +27,8 @@ import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/rendere
 import { formatPackDate, PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
   PackConditionalTopicsTopic,
+  PackEvaluationTarget,
+  PackInclude,
   PackInterviewerPolicy,
   PackModel,
   PackSetupItem,
@@ -233,6 +235,23 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: 'Helvetica-Bold',
     marginTop: 10,
+  },
+  // One proposed course of action. Ruled rather than filled: the block already states itself in
+  // words, and a page of tinted panels competes with the reconciled-wording panel below them.
+  evaluationVerdictBlock: {
+    marginTop: 5,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.accent,
+  },
+  evaluationVerdictHeading: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+  },
+  evaluationVerdictJudges: {
+    fontSize: 8,
+    color: COLORS.faint,
+    marginTop: 1,
   },
   // The reconciled wording — tinted and ruled so it reads as the resolution of the verdicts
   // above it rather than one more opinion among them.
@@ -466,6 +485,143 @@ function ScopeTopicBlock({ topic }: { topic: PackConditionalTopicsTopic }) {
       {topic.description && <Text style={styles.scopeTopicDescription}>{topic.description}</Text>}
       {topic.criteria && (
         <Text style={styles.scopeTopicCriteria}>{`Included when: ${topic.criteria}`}</Text>
+      )}
+    </View>
+  );
+}
+
+/**
+ * The reconciled wordings — the phrasings proposed to satisfy several judges at once.
+ *
+ * Tinted and ruled so it reads as the resolution of the verdicts around it rather than one more
+ * opinion among them. `unresolvedBy` is printed, never swallowed: a rewrite that silently drops a
+ * judge's point reads as consensus.
+ */
+function Rewordings({
+  alternatives,
+  unresolvedBy,
+}: {
+  alternatives: PackEvaluationTarget['alternatives'];
+  unresolvedBy: string[];
+}) {
+  return (
+    <View style={styles.evaluationAlternatives}>
+      <Text style={styles.evaluationAlternativesLabel}>
+        {alternatives.length === 1 ? 'SUGGESTED REWORDING' : 'SUGGESTED REWORDINGS'}
+      </Text>
+      {alternatives.map((alt, i) => (
+        <View key={i} wrap={false}>
+          <Text style={styles.evaluationAlternativePrompt}>{alt.prompt}</Text>
+          <Text style={styles.evaluationAlternativeNote}>
+            {`Addresses: ${alt.addresses.join(', ')}. ${alt.note}`}
+          </Text>
+        </View>
+      ))}
+      {unresolvedBy.length > 0 && (
+        <Text style={styles.evaluationAlternativeNote}>
+          {`Not resolved by rewording: ${unresolvedBy.join(', ')} — these need a structural change.`}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/**
+ * One flagged subject: the question named once, what the panel wants done about it, and (opt-in)
+ * every judge's own argument beneath.
+ *
+ * The verdict leading is the whole shape of the block, and it is the console's shape. The appendix
+ * used to open each subject with four near-identical judge paragraphs and leave the reader to work
+ * out that all four were asking for the same thing — a conclusion the model already computes, via
+ * the same `summariseGroupActions` the review queue uses.
+ *
+ * Every part below the subject line is behind its own include flag, because this is the section
+ * that makes a pack long: judge reasoning is roughly a page per contested question, and a reader
+ * handed the document usually wants the conclusion rather than the arguments for it.
+ */
+function EvaluationTargetBlock({
+  target,
+  include,
+}: {
+  target: PackEvaluationTarget;
+  include: PackInclude;
+}) {
+  const verdict = include.evaluationVerdicts ? target.verdict : null;
+  const rewordings = include.evaluationRewordings ? target.alternatives : [];
+
+  return (
+    <View style={styles.evaluationTarget}>
+      {target.context && (
+        <Text style={styles.evaluationTargetContext}>{target.context.toUpperCase()}</Text>
+      )}
+      <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+      <Text style={styles.evaluationTargetMeta}>
+        {[
+          target.questionType ? `Type: ${questionTypeLabel(target.questionType)}` : null,
+          // Who is actually asked it. A reader weighs "delete this" very differently once they know
+          // only some respondents ever see it, and differently again when the answer is nobody.
+          target.routingReach
+            ? target.topicLabel
+              ? `${target.routingReach}: ${target.topicLabel}`
+              : target.routingReach
+            : null,
+          `${target.judgeCount} judge(s)`,
+          target.counts.major > 0 ? `${target.counts.major} major` : null,
+          target.removed ? 'no longer in the questionnaire' : null,
+        ]
+          .filter(Boolean)
+          .join('  ·  ')}
+      </Text>
+
+      {verdict?.blocks.map((block, i) => (
+        <View key={i} style={styles.evaluationVerdictBlock}>
+          <Text style={styles.evaluationVerdictHeading}>
+            {`${block.heading}, as proposed by ${block.backing}`}
+          </Text>
+          <Text style={styles.evaluationVerdictJudges}>{block.judges}</Text>
+          {/* The wordings sit inside the block they answer. Hung off whichever action leads, they
+              would print proposed phrasing under "A deletion" — as if the panel wanted the question
+              deleted and rewritten. */}
+          {block.holdsWording && rewordings.length > 0 && (
+            <Rewordings alternatives={rewordings} unresolvedBy={target.unresolvedBy} />
+          )}
+        </View>
+      ))}
+
+      {include.evaluationJudgeDetail &&
+        target.judges.map((judge, i) => (
+          <View key={i} style={styles.evaluationFinding} wrap={false}>
+            <Text style={styles.evaluationFindingHeader}>
+              {judgeHeader(judge.label, judge.severity, judge.status)}
+            </Text>
+            <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
+            <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
+            {/* What a click would actually do, in the same words the console prints under the
+                button that does it. */}
+            {judge.proposedEditSummary && (
+              <Text style={styles.scopeEvaluationEdit}>{judge.proposedEditSummary}</Text>
+            )}
+            {judge.destination && (
+              <Text style={styles.scopeEvaluationEdit}>{judge.destination}</Text>
+            )}
+            {/* The reviewer's own words — the one line on a finding written by a person. */}
+            {judge.applyInstruction && (
+              <Text style={styles.scopeEvaluationEdit}>
+                {`Reviewer's instruction: ${judge.applyInstruction}`}
+              </Text>
+            )}
+            {include.evaluationEvidence && judge.sourceQuote && (
+              <Text style={styles.evaluationAlternativeNote}>{`“${judge.sourceQuote}”`}</Text>
+            )}
+          </View>
+        ))}
+
+      {/* No verdict to host them, so the wordings stand alone rather than being dropped — a run
+          from before the verdict step, or a download with verdicts unticked. Last, after the
+          judges, which is where they sat before verdicts existed and for the reason that has not
+          changed: a resolution only reads as one once you have seen the disagreement. */}
+      {!verdict && rewordings.length > 0 && (
+        <Rewordings alternatives={rewordings} unresolvedBy={target.unresolvedBy} />
       )}
     </View>
   );
@@ -757,59 +913,11 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   <Text style={styles.empty}>No findings raised.</Text>
                 ) : (
                   model.evaluations.targets.map((target) => (
-                    <View key={target.key} style={styles.evaluationTarget}>
-                      {target.context && (
-                        <Text style={styles.evaluationTargetContext}>
-                          {target.context.toUpperCase()}
-                        </Text>
-                      )}
-                      <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
-                      <Text style={styles.evaluationTargetMeta}>
-                        {[
-                          target.questionType
-                            ? `Type: ${questionTypeLabel(target.questionType)}`
-                            : null,
-                          `${target.judgeCount} judge(s)`,
-                          target.counts.major > 0 ? `${target.counts.major} major` : null,
-                          target.removed ? 'no longer in the questionnaire' : null,
-                        ]
-                          .filter(Boolean)
-                          .join('  ·  ')}
-                      </Text>
-                      {target.judges.map((judge, i) => (
-                        <View key={i} style={styles.evaluationFinding} wrap={false}>
-                          <Text style={styles.evaluationFindingHeader}>
-                            {judgeHeader(judge.label, judge.severity, judge.status)}
-                          </Text>
-                          <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
-                          <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
-                        </View>
-                      ))}
-                      {/* Last, after the verdicts it reconciles — it reads as an answer only once
-                          the reader has seen the disagreement. */}
-                      {target.alternatives.length > 0 && (
-                        <View style={styles.evaluationAlternatives}>
-                          <Text style={styles.evaluationAlternativesLabel}>
-                            {target.alternatives.length === 1
-                              ? 'SUGGESTED REWORDING'
-                              : 'SUGGESTED REWORDINGS'}
-                          </Text>
-                          {target.alternatives.map((alt, i) => (
-                            <View key={i} wrap={false}>
-                              <Text style={styles.evaluationAlternativePrompt}>{alt.prompt}</Text>
-                              <Text style={styles.evaluationAlternativeNote}>
-                                {`Addresses: ${alt.addresses.join(', ')}. ${alt.note}`}
-                              </Text>
-                            </View>
-                          ))}
-                          {target.unresolvedBy.length > 0 && (
-                            <Text style={styles.evaluationAlternativeNote}>
-                              {`Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change.`}
-                            </Text>
-                          )}
-                        </View>
-                      )}
-                    </View>
+                    <EvaluationTargetBlock
+                      key={target.key}
+                      target={target}
+                      include={model.include}
+                    />
                   ))
                 )}
               </>

@@ -27,6 +27,7 @@
  */
 
 import type { EvaluationDimension, ProposedEdit } from '@/lib/app/questionnaire/evaluation/types';
+import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import type { EvaluationFindingView } from '@/lib/app/questionnaire/views';
 import { effectiveOp, type FindingGroup } from '@/lib/app/questionnaire/evaluation/group-findings';
 
@@ -201,4 +202,54 @@ export function summariseGroupActions(group: FindingGroup): GroupActionSummary {
     contested: ranked.length > 1,
     judgeCount: group.dimensions.length,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Naming the verdict                                                         */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * The three helpers below were written inside the admin verdict component and lived there as
+ * `'use client'` module functions — which meant the Questionnaire Pack, rendering the same verdict
+ * into a document, could not reach them and would have had to write its own. Two implementations of
+ * "how much of the panel is behind this" is exactly the drift `groupFindingsByTarget` is shared to
+ * avoid: the pack and the console must not disagree about what the panel said.
+ *
+ * They are pure — actions in, strings out — so they belong here beside the summary they describe.
+ */
+
+/** Judge names read better without the noun — "Clarity, Audience-Match", not "Clarity Judge, …". */
+export function judgeName(dimension: EvaluationDimension): string {
+  return EVALUATION_DIMENSION_SPECS[dimension].label.replace(/ Judge$/, '');
+}
+
+/** Several judges, joined for display. */
+export function judgeNames(dimensions: readonly EvaluationDimension[]): string {
+  return dimensions.map(judgeName).join(', ');
+}
+
+/**
+ * How much of the panel is behind an action, in words.
+ *
+ * The denominator is the judges that flagged THIS target, not the seven on the panel. "2 of 7"
+ * would be measuring the wrong thing: the other five had nothing to say about this question, so
+ * counting them as absent votes reads as weaker support than the panel actually gave.
+ */
+export function backing(action: GroupAction, flaggers: number): string {
+  const n = action.judges.length;
+  if (n === flaggers) return n === 1 ? '1 judge' : `all ${n} judges`;
+  return `${n} of ${flaggers} judges`;
+}
+
+/**
+ * Which action the reconciled wordings belong under.
+ *
+ * The reconciler produces alternative *prompts*, which are an answer to "reword it" and to nothing
+ * else. Hanging them off whichever action happens to lead would, on a question where the deletion
+ * won, print proposed wording under a heading reading "A deletion, as proposed by 2 judges" — as if
+ * the panel wanted the question deleted and rewritten. So they attach to the reword action when
+ * there is one, and only fall back to the leading action when there is not.
+ */
+export function wordingHost(actions: readonly GroupAction[]): GroupAction | undefined {
+  return actions.find((a) => a.kind === 'reword') ?? actions[0];
 }

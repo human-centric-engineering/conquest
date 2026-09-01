@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
+import { DEFAULT_PACK_INCLUDE } from '@/lib/app/questionnaire/export/build-pack-model';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type {
   PackInterviewerPolicy,
@@ -76,6 +77,10 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
       interviewerPolicy: false,
     },
@@ -316,6 +321,136 @@ describe('buildPackMarkdown', () => {
       expect(md).not.toContain('## Evaluation');
     });
 
+    /* ---------------------------------------------------------------------- */
+    /* The verdict, and the sub-options that decide how much of it prints      */
+    /* ---------------------------------------------------------------------- */
+
+    /** A contested question: two judges want a reword, one wants it gone. */
+    const CONTESTED_TARGET = {
+      key: 'q1',
+      context: 'Q1 · Background',
+      label: 'Are you engaged and satisfied?',
+      questionType: 'free_text',
+      routingReach: 'Asked when it fits',
+      topicLabel: 'Onboarding',
+      verdict: {
+        contested: true,
+        blocks: [
+          {
+            heading: 'A reword',
+            backing: '2 of 3 judges',
+            judges: 'Clarity, Audience-Match',
+            holdsWording: true,
+          },
+          {
+            heading: 'A deletion',
+            backing: '1 of 3 judges',
+            judges: 'Duplicates',
+            holdsWording: false,
+          },
+        ],
+      },
+      gap: false,
+      removed: false,
+      counts: { major: 1, minor: 2, info: 0, total: 3 },
+      judgeCount: 3,
+      alternatives: [
+        {
+          prompt: 'How engaged do you feel at work?',
+          addresses: ['Clarity Judge'],
+          note: 'One ask.',
+        },
+      ],
+      unresolvedBy: ['Type-Fit Judge'],
+      judges: [
+        {
+          dimension: 'clarity' as const,
+          label: 'Clarity Judge',
+          severity: 'major' as const,
+          status: 'pending' as const,
+          proposedChange: 'Split into two questions',
+          rationale: 'Asks two things at once',
+          sourceQuote: 'engaged and satisfied',
+          proposedEditSummary: "Replaces this question's wording with the suggested version.",
+          destination: null,
+          applyInstruction: 'Keep it under fifteen words.',
+        },
+      ],
+    };
+
+    function contested(over: Partial<PackModel['include']> = {}) {
+      return buildPackMarkdown(
+        model({
+          include: { ...DEFAULT_PACK_INCLUDE, evaluations: true, ...over },
+          evaluations: {
+            hasRun: true,
+            runAt: '2026-08-11T09:00:00.000Z',
+            totalFindings: 3,
+            scores: [],
+            targets: [CONTESTED_TARGET],
+          },
+        })
+      );
+    }
+
+    it('leads with what the panel wants done, and keeps the dissent', () => {
+      const md = contested();
+      expect(md).toContain('**A reword**, as proposed by 2 of 3 judges — Clarity, Audience-Match');
+      // The dissent is the next heading down, not a footnote. A pack printing only the winner
+      // would report a consensus the panel never reached.
+      expect(md).toContain('**A deletion**, as proposed by 1 of 3 judges — Duplicates');
+    });
+
+    it('says who is actually asked the flagged question', () => {
+      // The line joining the pack's two opt-in appendices: a reader weighing a deletion can see
+      // that only some respondents ever reach this question.
+      expect(contested()).toContain('Asked when it fits: Onboarding');
+    });
+
+    it('puts the wordings inside the block they answer, not under the leading action', () => {
+      const md = contested();
+      const rewordIdx = md.indexOf('**A reword**');
+      const deletionIdx = md.indexOf('**A deletion**');
+      const wordingIdx = md.indexOf('How engaged do you feel at work?');
+      // Between the reword heading (which holds them) and the deletion heading below it. Under
+      // "A deletion" they would read as the panel wanting the question deleted and rewritten.
+      expect(wordingIdx).toBeGreaterThan(rewordIdx);
+      expect(wordingIdx).toBeLessThan(deletionIdx);
+    });
+
+    it('prints the conclusions and not the arguments by default', () => {
+      // The default download shape. The judge's own reasoning is the bulk of the appendix, and a
+      // reader handed the pack usually wants what to do rather than four arguments for it.
+      const md = contested();
+      expect(md).toContain('**A reword**');
+      expect(md).not.toContain('Asks two things at once');
+      expect(md).not.toContain('> engaged and satisfied');
+    });
+
+    it('adds every judge’s reasoning, their edit, and the reviewer’s own words when asked', () => {
+      const md = contested({ evaluationJudgeDetail: true });
+      expect(md).toContain('**Clarity Judge** [Major] — Split into two questions');
+      expect(md).toContain('Asks two things at once');
+      expect(md).toContain("Replaces this question's wording with the suggested version.");
+      expect(md).toContain("_Reviewer's instruction: Keep it under fifteen words._");
+      // Evidence stays behind its own flag: judges routinely quote the prompt the finding already
+      // sits under, so it is mostly the same sentence twice.
+      expect(md).not.toContain('> engaged and satisfied');
+    });
+
+    it('adds the evidence quotes only when asked', () => {
+      const md = contested({ evaluationJudgeDetail: true, evaluationEvidence: true });
+      expect(md).toContain('> engaged and satisfied');
+    });
+
+    it('drops the verdict and the wordings when both are unticked', () => {
+      const md = contested({ evaluationVerdicts: false, evaluationRewordings: false });
+      expect(md).not.toContain('**A reword**');
+      expect(md).not.toContain('How engaged do you feel at work?');
+      // The subject and its tallies survive: the section still says what was flagged.
+      expect(md).toContain('Are you engaged and satisfied?');
+    });
+
     it('renders after Definitions, right before the closing "About ConQuest" blurb', () => {
       const md = buildPackMarkdown(
         model({
@@ -391,6 +526,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 2,
                 alternatives: [],
                 unresolvedBy: [],
@@ -403,6 +541,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: 'engaged and satisfied',
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                   {
                     dimension: 'audience_match',
@@ -412,6 +553,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Drop the jargon',
                     rationale: 'Too technical for this audience',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -441,7 +585,7 @@ describe('buildPackMarkdown', () => {
       expect(md).not.toContain('pending');
     });
 
-    it('prints the reconciled rewording after the verdicts it reconciles', () => {
+    it('prints the reconciled rewording on its own when no verdict is there to host it', () => {
       const md = buildPackMarkdown(
         model({
           evaluations: {
@@ -458,6 +602,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [
                   {
@@ -476,6 +623,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -484,6 +634,8 @@ describe('buildPackMarkdown', () => {
         })
       );
 
+      // No verdict block to sit inside, so the wordings stand alone rather than being dropped —
+      // a run from before the verdict step, or a download with verdicts unticked.
       expect(md).toContain('**Suggested rewording** (addressing the judges above):');
       expect(md).toContain('- How engaged do you feel at work?');
       expect(md).toContain(
@@ -493,7 +645,8 @@ describe('buildPackMarkdown', () => {
       // consensus the panel never reached.
       expect(md).toContain('Not resolved by rewording: Type-Fit Judge');
 
-      // Order matters: the reconciliation only makes sense after the disagreement it resolves.
+      // Order matters, and still does in this path: the reconciliation only makes sense after the
+      // disagreement it resolves, so with no verdict to host it, it goes after the judges.
       expect(md.indexOf('Split into two questions')).toBeLessThan(
         md.indexOf('How engaged do you feel at work?')
       );
@@ -516,6 +669,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
@@ -528,6 +684,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Tighten it',
                     rationale: 'Wordy',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -555,6 +714,9 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: true,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
@@ -567,6 +729,9 @@ describe('buildPackMarkdown', () => {
                     proposedChange: 'Merge with q1',
                     rationale: 'Covers the same ground',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },

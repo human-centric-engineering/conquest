@@ -70,6 +70,13 @@ const querySchema = z.object({
   setupTechnical: includeParam('false'),
   // Unreviewed AI critique — opt-in, unlike every other section (see the route JSDoc).
   evaluations: includeParam('false'),
+  // Sub-options of `evaluations`, ignored when it is off. The two that default `true` are the
+  // conclusions (what the panel wants done, and the wording it proposes); the two that default
+  // `false` are the bulk (every judge's reasoning, and the spans they quoted).
+  evaluationVerdicts: includeParam('true'),
+  evaluationJudgeDetail: includeParam('false'),
+  evaluationRewordings: includeParam('true'),
+  evaluationEvidence: includeParam('false'),
   // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
   conditionalTopics: includeParam('false'),
   interviewerPolicy: includeParam('false'),
@@ -93,6 +100,10 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
+      evaluationVerdicts,
+      evaluationJudgeDetail,
+      evaluationRewordings,
+      evaluationEvidence,
       conditionalTopics,
       interviewerPolicy,
     } = validateQueryParams(searchParams, querySchema);
@@ -104,6 +115,10 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
+      evaluationVerdicts,
+      evaluationJudgeDetail,
+      evaluationRewordings,
+      evaluationEvidence,
       conditionalTopics,
       interviewerPolicy,
     };

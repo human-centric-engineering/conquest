@@ -76,7 +76,12 @@ const FORMAT_LABELS: Record<PackFormat, string> = {
  * The flags that refine a section rather than being one. Listed here so {@link SectionKey} is the
  * exact complement — every other `PackInclude` flag is a top-level section and must have a row.
  */
-type SubOptionKey = 'setupTechnical';
+type SubOptionKey =
+  | 'setupTechnical'
+  | 'evaluationVerdicts'
+  | 'evaluationJudgeDetail'
+  | 'evaluationRewordings'
+  | 'evaluationEvidence';
 
 type SectionKey = Exclude<keyof PackInclude, SubOptionKey>;
 
@@ -133,6 +138,32 @@ const SECTIONS = [
     label: 'Evaluation findings',
     description:
       "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
+    subOptions: [
+      {
+        key: 'evaluationVerdicts',
+        label: "The panel's verdict per question",
+        description:
+          'What the judges want done about each flagged question, how many of them agree, and where they disagreed.',
+      },
+      {
+        key: 'evaluationRewordings',
+        label: 'Suggested rewordings',
+        description:
+          'The alternative phrasings proposed to satisfy several judges at once, and any judge no rewording satisfies.',
+      },
+      {
+        key: 'evaluationJudgeDetail',
+        label: "Every judge's reasoning",
+        description:
+          'Each judge\u2019s own suggestion and the argument for it, beneath the question it is about. The longest part of the appendix \u2014 a contested question runs to about a page. Off by default.',
+      },
+      {
+        key: 'evaluationEvidence',
+        label: 'Evidence quotes',
+        description:
+          'The span of the questionnaire each judge quoted. Often the same wording the question above it already shows. Off by default.',
+      },
+    ],
   },
   {
     key: 'conditionalTopics',
@@ -246,6 +277,10 @@ export function PackExportDialog({
                 <div key={sub.key} className="ml-6 flex items-start gap-2">
                   <Checkbox
                     id={`pack-section-${sub.key}`}
+                    // Marks this as a refinement rather than a section, for anything reading the
+                    // DOM. Without it the only signal is an indent, so a caller counting sections
+                    // has to hard-code which ids to skip and gets it wrong the next time one lands.
+                    data-suboption="true"
                     checked={included[sub.key]}
                     disabled={!included[section.key]}
                     onCheckedChange={(checked) =>

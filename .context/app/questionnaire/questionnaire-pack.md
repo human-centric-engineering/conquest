@@ -42,6 +42,32 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   is rendered as a "no evaluation has been run yet" line rather than an omitted section, so the
   toggle's meaning stays predictable regardless of whether a run exists.
 
+  **The appendix leads with what the panel WANTS DONE.** Each flagged subject opens with the
+  verdict: "A reword, as proposed by 2 of 3 judges — Clarity, Audience-Match", with every dissenting
+  action kept as the next block down ("A deletion, as proposed by 1 of 3 judges"). It is built by
+  `summariseGroupActions` — the console's own function, not a second implementation — so the
+  document and the screen cannot reach different verdicts. The appendix previously printed severity
+  tallies and a list of judges and left the reader to work out, from four prose paragraphs, that all
+  four were asking for the same thing.
+
+  The reconciled wordings sit **inside the block they answer**, chosen by the shared `wordingHost`:
+  hung off whichever action leads, a contested question where the deletion won would print proposed
+  wording under "A deletion", as if the panel wanted the question deleted and rewritten.
+
+  **Each flagged question says who is actually asked it** — "Asked when it fits: Onboarding",
+  "Never asked — in no topic" — from the finding's resolved `routingReach`. This is the one line
+  connecting the pack's two opt-in appendices: without it the document explains a routing design in
+  one section and critiques questions in another, and a reader weighing a deletion cannot see that
+  only some respondents ever reach the question. `null` whenever Conditional Topics is off, so a
+  questionnaire that does not route says nothing about routing.
+
+  **Each judge's line carries the edit, the destination and the reviewer's own instruction.**
+  `proposedEditSummary` comes from the shared `describeProposedEdit` (`evaluation/describe-edit.ts`)
+  — the same sentence the console prints under the button that performs it, resolved off the
+  EFFECTIVE op so an admin-edited override wins as it does at apply. `destination` says where a
+  drafted question would land and whether anyone chose that. `applyInstruction` is the reviewer's own
+  words, the one line on a finding written by a person rather than a model.
+
   **The appendix is grouped by question, not by judge**, and the model splits accordingly: `scores` is
   the seven-judge scoreboard (score/diagnostic/finding count, no findings) and `targets` is the work —
   one entry per flagged subject, in questionnaire order, with every judge's verdict beneath it. A
@@ -101,6 +127,30 @@ Each section is independently toggleable; an excluded section is `null` on the s
 so every serialiser skips it the same way. **Every section renders above the closing "About
 ConQuest" blurb** — the interviewer block was for a while emitted after it in Markdown, which put a
 whole appendix below the line where the document says it has ended.
+
+#### Sub-options: the conclusions by default, the arguments on request
+
+Four refinements sit under "Evaluation findings", and their defaults are what makes the section
+readable rather than exhaustive:
+
+| Sub-flag                | Checkbox                         | Default | What it adds                                             |
+| ----------------------- | -------------------------------- | ------- | -------------------------------------------------------- |
+| `evaluationVerdicts`    | The panel's verdict per question | `true`  | What the judges want done, the backing, and the dissent  |
+| `evaluationRewordings`  | Suggested rewordings             | `true`  | The reconciled phrasings, and what no phrasing satisfies |
+| `evaluationJudgeDetail` | Every judge's reasoning          | `false` | Each judge's own suggestion, argument, edit and steer    |
+| `evaluationEvidence`    | Evidence quotes                  | `false` | The span each judge quoted                               |
+
+**Judge reasoning defaulting off is a deliberate change to what this section used to produce.** It
+is the bulk of the appendix — a contested question runs to about a page — and with the verdict
+printed above it, a reader handed the pack usually wants the conclusion rather than four
+near-identical arguments for it. Evidence is off for a second reason: judges routinely quote the
+prompt the finding already sits under, so it is mostly the same sentence printed twice (the console
+suppresses a quote that merely restates its target; the pack, having no card to compare against,
+makes it an opt-in instead).
+
+**When verdicts are off, the wordings move back below the judges.** They were there before verdicts
+existed, for a reason that has not changed: a resolution only reads as one once you have seen the
+disagreement. With a verdict to host them they sit inside it, which is nearer still.
 
 **Why `evaluations`, `conditionalTopics` and `interviewerPolicy` default off, unlike the other five:** the Pack is the
 external/showcase artifact — built to hand to a client or stakeholder. Judge findings are unreviewed
@@ -208,7 +258,7 @@ spreadsheet.
 
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&conditionalTopics=&interviewerPolicy=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&evaluationVerdicts=&evaluationJudgeDetail=&evaluationRewordings=&evaluationEvidence=&conditionalTopics=&interviewerPolicy=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
 use. Each include flag is `true`/`false`; all default `true` except `evaluations`,
@@ -229,23 +279,25 @@ Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 
 ## Code map
 
-| Concern                    | File                                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                           |
-| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                     |
-| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                           |
-| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                       |
-| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                  |
-| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                            |
-| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                           |
-| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                      |
-| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                               |
-| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                              |
-| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                        |
-| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)              |
-| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`)   |
-| Latest scope run load      | `app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes.ts` (`loadLatestScopeEvaluationRun`)   |
-| Latest policy run load     | `app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes.ts` (`loadLatestPolicyEvaluationRun`) |
+| Concern                    | File                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                                            |
+| Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                                      |
+| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                                            |
+| CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                                        |
+| Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                                   |
+| PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                                             |
+| PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`                            |
+| Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                                       |
+| Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                                |
+| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                               |
+| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")                         |
+| Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`)               |
+| Topics + settings load     | `app/api/v1/app/questionnaires/_lib/topic-routes.ts` (`loadTopics`, `loadConditionalTopicsSettings`)    |
+| Latest scope run load      | `app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes.ts` (`loadLatestScopeEvaluationRun`)    |
+| Latest policy run load     | `app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes.ts` (`loadLatestPolicyEvaluationRun`)  |
+| Verdict + judge naming     | `lib/app/questionnaire/evaluation/group-actions.ts` (`summariseGroupActions`, `backing`, `wordingHost`) |
+| Edit descriptions (shared) | `lib/app/questionnaire/evaluation/describe-edit.ts` (`describeProposedEdit`, `destinationSentence`)     |
 
 ## UI surface
 

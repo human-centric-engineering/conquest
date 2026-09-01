@@ -21,6 +21,7 @@ import {
   type PackInclude,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import { SETTING_GROUPS } from '@/lib/app/questionnaire/settings-registry';
 import type {
   VersionGraphView,
@@ -418,6 +419,10 @@ describe('buildPackModel', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
       interviewerPolicy: false,
     };
@@ -814,6 +819,10 @@ describe('buildPackModel', () => {
         proposedChange: 'Split into two questions',
         rationale: 'This question asks two things at once',
         sourceQuote: 'both engaged and satisfied',
+        // Prose-only, so nothing to describe and no place to name — the pack invents neither.
+        proposedEditSummary: null,
+        destination: null,
+        applyInstruction: null,
       });
     });
 
@@ -940,6 +949,191 @@ describe('buildPackModel', () => {
         'now'
       );
       expect(model.evaluations?.runAt).toBe('2026-08-10T00:00:00.000Z');
+    });
+
+    /* ---------------------------------------------------------------------- */
+    /* The panel's verdict, routing reach, and the reviewer's own words        */
+    /* ---------------------------------------------------------------------- */
+
+    /** The run's evaluations section, built with the section included. */
+    function evaluationsOf(run: EvaluationRunDetail) {
+      return buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        run,
+        null,
+        null,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      ).evaluations;
+    }
+
+    /** `EVALUATION_RUN`'s two findings on q1, given structured ops. */
+    function runWithOps(
+      first: ProposedEdit | null,
+      second: ProposedEdit | null
+    ): EvaluationRunDetail {
+      return {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? { ...f, proposedEdit: first }
+            : f.id === 'f3'
+              ? { ...f, proposedEdit: second }
+              : f
+        ),
+      };
+    }
+
+    it('says what the panel wants done, not just who flagged it', () => {
+      // The appendix used to print severity tallies and a list of judges and leave the reader to
+      // work out, from several prose paragraphs, that all of them wanted the same thing. Built by
+      // the same `summariseGroupActions` the console leads with, so the two cannot disagree.
+      const evaluations = evaluationsOf(
+        runWithOps(
+          { op: 'replace_prompt', prompt: 'A clearer question?' },
+          { op: 'replace_prompt', prompt: 'A plainer question?' }
+        )
+      );
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.verdict?.contested).toBe(false);
+      expect(q1?.verdict?.blocks).toHaveLength(1);
+      expect(q1?.verdict?.blocks[0]).toMatchObject({
+        heading: 'A reword',
+        // Both judges that flagged it, so "all 2" rather than "2 of 2" — the denominator is the
+        // judges that flagged THIS question, never the seven on the panel.
+        backing: 'all 2 judges',
+        holdsWording: true,
+      });
+      expect(q1?.verdict?.blocks[0].judges).toBe('Clarity, Audience-Match');
+    });
+
+    it('keeps a disagreement as a second block rather than reporting the winner alone', () => {
+      // The rule the whole verdict is built around: judges disagreeing is information, and a pack
+      // that printed only the best-supported action would manufacture a consensus the panel never
+      // reached. The deletion leads on the consequence tiebreak, being the harder change to undo.
+      const evaluations = evaluationsOf(
+        runWithOps({ op: 'delete_question' }, { op: 'replace_prompt', prompt: 'A clearer one?' })
+      );
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.verdict?.contested).toBe(true);
+      expect(q1?.verdict?.blocks.map((b) => b.heading)).toEqual(['A deletion', 'A reword']);
+      // The wordings hang off the REWORD, not off the leading action. Under "A deletion" they
+      // would read as the panel wanting the question deleted and rewritten.
+      expect(q1?.verdict?.blocks.map((b) => b.holdsWording)).toEqual([false, true]);
+    });
+
+    it('says who is actually asked a flagged question, in the product’s words', () => {
+      // The one line connecting the pack's two opt-in appendices. Without it the document explains
+      // a routing design in one section and critiques questions in another, and a reader weighing
+      // "delete this" cannot see that only some respondents are ever asked it.
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.target
+            ? {
+                ...f,
+                target: {
+                  ...f.target,
+                  routingReach: 'conditional' as const,
+                  topicLabel: 'Onboarding',
+                },
+              }
+            : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.routingReach).toBe('Asked when it fits');
+      expect(q1?.topicLabel).toBe('Onboarding');
+    });
+
+    it('says nothing about routing when the version does not route', () => {
+      // `routingReach` is null on every finding when Conditional Topics is off, and a questionnaire
+      // that does not route must not have a routing line invented for it.
+      const q1 = evaluationsOf(EVALUATION_RUN)?.targets.find((t) => t.key === 'q1');
+      expect(q1?.routingReach).toBeNull();
+      expect(q1?.topicLabel).toBeNull();
+    });
+
+    it('describes a structured edit in the same words the console prints under the button', () => {
+      const evaluations = evaluationsOf(runWithOps({ op: 'delete_question' }, null));
+      const q1 = evaluations?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].proposedEditSummary).toBe(
+        'Removes this question from the questionnaire.'
+      );
+      // A prose-only finding has no op, so there is nothing to describe and nothing is invented.
+      expect(q1?.judges[1].proposedEditSummary).toBeNull();
+    });
+
+    it('describes the edit that will actually run, not the one the judge drafted', () => {
+      // An admin-edited override wins at apply, so a pack describing the judge's original would
+      // describe a change that is not going to happen.
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? {
+                ...f,
+                proposedEdit: { op: 'delete_question' as const },
+                editedOverride: { op: 'replace_prompt' as const, prompt: 'Kept, reworded.' },
+              }
+            : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].proposedEditSummary).toBe(
+        "Replaces this question's wording with the suggested version."
+      );
+    });
+
+    it("carries the reviewer's own instruction, the one line on a finding written by a person", () => {
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1' ? { ...f, applyInstruction: 'Keep it under fifteen words.' } : f
+        ),
+      };
+      const q1 = evaluationsOf(run)?.targets.find((t) => t.key === 'q1');
+
+      expect(q1?.judges[0].applyInstruction).toBe('Keep it under fifteen words.');
+    });
+
+    it('says where a drafted question would land, and that nobody chose it', () => {
+      const run: EvaluationRunDetail = {
+        ...EVALUATION_RUN,
+        findings: EVALUATION_RUN.findings.map((f) =>
+          f.id === 'f1'
+            ? {
+                ...f,
+                proposedEdit: {
+                  op: 'add_question' as const,
+                  key: 'q9',
+                  prompt: 'A gap?',
+                  type: 'free_text' as const,
+                },
+                destination: {
+                  sectionTitle: 'Wrap-up',
+                  sectionPosition: 3,
+                  origin: 'default' as const,
+                },
+              }
+            : f
+        ),
+      };
+      // Drafted questions split into their own gap group — they are not a judgement about the
+      // target they were addressed to.
+      const gap = evaluationsOf(run)?.targets.find((t) => t.gap);
+
+      expect(gap?.judges[0].destination).toBe(
+        'No section was suggested, so it would go at the end of “Wrap-up” (section 3).'
+      );
     });
   });
 

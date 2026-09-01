@@ -59,17 +59,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
-import { QUESTION_TYPE_LABELS, questionTypeLabel } from '@/lib/app/questionnaire/types';
+import { questionTypeLabel } from '@/lib/app/questionnaire/types';
 import {
   EVALUATION_DIMENSION_SPECS,
   MAX_APPLY_INSTRUCTION,
 } from '@/lib/app/questionnaire/evaluation';
-import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
-import type {
-  EvaluationFindingView,
-  FindingDestinationView,
-  FindingTargetKind,
-} from '@/lib/app/questionnaire/views';
+import {
+  describeProposedEdit,
+  destinationSentence,
+} from '@/lib/app/questionnaire/evaluation/describe-edit';
+import type { EvaluationFindingView, FindingTargetKind } from '@/lib/app/questionnaire/views';
 import {
   findingReviewStatusBadge,
   findingSeverityBadge,
@@ -122,80 +121,6 @@ interface Props {
   sectionTitles?: string[];
   /** Called with the server's updated view; `meta` is present after a successful apply. */
   onUpdate: (next: EvaluationFindingView, meta?: ApplyMeta) => void;
-}
-
-/**
- * Where a drafted question will land, as a sentence a reviewer can act on.
- *
- * Said in words rather than left to a chip, because the fact worth conveying is not the section's
- * name but whether anyone *chose* it. A judge that named a section made a judgement the reviewer
- * can weigh; a default is the apply engine appending to whatever section happens to be last, which
- * the reviewer should probably override and could not previously even see.
- */
-function destinationSentence(dest: FindingDestinationView, terminal: boolean): string | null {
-  if (dest.origin === 'none') {
-    return terminal
-      ? null
-      : 'This questionnaire has no sections, so there is nowhere to put it yet. Add a section first.';
-  }
-  const where =
-    dest.sectionPosition === null
-      ? `“${dest.sectionTitle}”`
-      : `“${dest.sectionTitle}” (section ${dest.sectionPosition})`;
-  if (dest.origin === 'chosen') {
-    // Past tense once the finding is terminal. `chosen` comes from the op's own `sectionKey`,
-    // which is the title apply resolved against, so this stays true after the fact.
-    return terminal ? `Went into ${where}.` : `Goes into ${where}.`;
-  }
-  // A default is re-derived against the structure as it is NOW, so on a terminal finding it would
-  // name whichever section is last today rather than where the question actually went, in a tense
-  // that promises a future that already happened. Nothing recorded the real answer, so say nothing.
-  return terminal ? null : `No section was suggested, so it would go at the end of ${where}.`;
-}
-
-/**
- * What applying this op will do to the questionnaire, as a sentence about the questionnaire.
- *
- * These used to be imperative fragments — "Rewrite the question prompt", "Delete this question" —
- * printed under an eyebrow reading "Edit". In that position an imperative reads as an instruction
- * *to the reader*: the admin sees "Rewrite the question prompt" above two buttons and reasonably
- * asks whether they are being told to go and rewrite something themselves, or whether a click will
- * do it. Every one is now declarative and names its subject, so it can only be read as a
- * description of the consequence: "Replaces this question's wording with the suggested version."
- */
-function effectOf(op: ProposedEdit, destination: FindingDestinationView | null): string {
-  switch (op.op) {
-    case 'replace_prompt':
-      return "Replaces this question's wording with the suggested version.";
-    case 'split_question':
-      return 'Replaces this question with the first prompt above, and adds the second one straight after it.';
-    case 'edit_guidelines':
-      return op.guidelines === null
-        ? 'Clears the author guidelines on this question.'
-        : 'Sets the author guidelines on this question.';
-    case 'change_type':
-      return `Changes the answer type to ${QUESTION_TYPE_LABELS[op.type]}, and resets that question's type-specific settings.`;
-    case 'delete_question':
-      return 'Removes this question from the questionnaire.';
-    case 'reorder':
-      return op.targetSectionKey
-        ? `Moves this question into “${op.targetSectionKey}”, at position ${op.ordinal + 1}.`
-        : `Moves this question to position ${op.ordinal + 1}.`;
-    case 'edit_goal':
-      return "Replaces the questionnaire's goal statement.";
-    case 'edit_audience':
-      return `Updates the audience description (${Object.keys(op.audience).join(', ')}).`;
-    case 'add_question': {
-      // The section is named here as well as on the draft block above, and deliberately: this is
-      // the sentence directly under the button, and it is the last thing read before a click that
-      // writes a question into a section the reviewer never picked.
-      const base = `Adds this as a new ${QUESTION_TYPE_LABELS[op.type]} question`;
-      if (!destination || destination.origin === 'none') return `${base}.`;
-      return destination.origin === 'chosen'
-        ? `${base} in “${destination.sectionTitle}”.`
-        : `${base} at the end of “${destination.sectionTitle}”.`;
-    }
-  }
 }
 
 /**
@@ -394,7 +319,7 @@ export function FindingReviewCard({
    */
   const effect = op
     ? finding.applicable === 'apply' || addOp
-      ? effectOf(op, finding.destination)
+      ? describeProposedEdit(op, finding.destination)
       : null
     : null;
 

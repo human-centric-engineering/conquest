@@ -381,6 +381,10 @@ describe('renderPackPdf', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
       interviewerPolicy: false,
     };

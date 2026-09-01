@@ -41,14 +41,17 @@ function renderDialog(onOpenChange = vi.fn()) {
   return onOpenChange;
 }
 
-/** Ids of every nested sub-option, so {@link sectionBoxes} can be "the top-level ones". */
-const SUB_OPTION_IDS = new Set(['pack-section-setupTechnical']);
-
-/** The top-level section checkboxes, in document order — excludes every nested sub-option. */
+/**
+ * The top-level section checkboxes, in document order — excludes every nested sub-option.
+ *
+ * Read off `data-suboption`, which the dialog stamps on every refinement, rather than a hard-coded
+ * id list: the list form was already wrong once, silently counting four new sub-options as sections
+ * and only failing on a total.
+ */
 function sectionBoxes(): HTMLElement[] {
   return screen
     .getAllByRole('checkbox')
-    .filter((box) => !SUB_OPTION_IDS.has(box.getAttribute('id') ?? ''));
+    .filter((box) => box.getAttribute('data-suboption') === null);
 }
 
 /** The sections ticked on open — what "unchecking everything" actually has to click. */
@@ -104,6 +107,50 @@ describe('PackExportDialog', () => {
       // and could not be asked for. A name assertion is the cheap guard against that recurring.
       renderDialog();
       expect(screen.getByRole('checkbox', { name: /the interviewer/i })).toBeInTheDocument();
+    });
+
+    it('offers the evaluation sub-options with the conclusions on and the bulk off', async () => {
+      // The shape that makes a slim pack readable: what the panel wants done and the wording it
+      // proposes, without the four near-identical arguments for it.
+      renderDialog();
+      expect(screen.getByRole('checkbox', { name: /panel's verdict/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /suggested rewordings/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /every judge's reasoning/i })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /evidence quotes/i })).not.toBeChecked();
+    });
+
+    it('disables the evaluation sub-options while "Evaluation findings" is off', () => {
+      // Which is the default state, so this is what an admin sees on opening the dialog: the
+      // refinements are visible (they say what ticking the parent would give) but inert.
+      renderDialog();
+      expect(screen.getByRole('checkbox', { name: /panel's verdict/i })).toBeDisabled();
+      expect(screen.getByRole('checkbox', { name: /every judge's reasoning/i })).toBeDisabled();
+    });
+
+    it('enables them once the parent section is ticked', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.click(screen.getByRole('checkbox', { name: /evaluation findings/i }));
+
+      expect(screen.getByRole('checkbox', { name: /panel's verdict/i })).not.toBeDisabled();
+    });
+
+    it('keeps a sub-option’s value when its parent is unticked and re-ticked', async () => {
+      // Unticking a section is not a decision to reset how it should be rendered. An admin who
+      // turns judge reasoning on, changes their mind about the section, then changes it back must
+      // not silently lose the refinement they set.
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.click(screen.getByRole('checkbox', { name: /evaluation findings/i }));
+      await user.click(screen.getByRole('checkbox', { name: /every judge's reasoning/i }));
+      expect(screen.getByRole('checkbox', { name: /every judge's reasoning/i })).toBeChecked();
+
+      await user.click(screen.getByRole('checkbox', { name: /evaluation findings/i }));
+      await user.click(screen.getByRole('checkbox', { name: /evaluation findings/i }));
+
+      expect(screen.getByRole('checkbox', { name: /every judge's reasoning/i })).toBeChecked();
     });
 
     it('starts the nested technical sub-option unchecked, enabled under a checked parent', () => {

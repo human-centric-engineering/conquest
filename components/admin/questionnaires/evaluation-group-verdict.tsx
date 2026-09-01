@@ -33,11 +33,13 @@
  */
 
 import { cn } from '@/lib/utils';
-import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationDimension } from '@/lib/app/questionnaire/evaluation';
 import {
   ACTION_NOUNS,
-  type GroupAction,
+  backing,
+  judgeName,
+  judgeNames,
+  wordingHost,
   type GroupActionKind,
   type GroupActionSummary,
 } from '@/lib/app/questionnaire/evaluation/group-actions';
@@ -50,14 +52,13 @@ import {
   QUESTION_MEASURE,
 } from '@/components/admin/questionnaires/evaluation-field';
 
-/** Judge names read better without the noun — "Clarity, Audience-Match", not "Clarity Judge, …". */
-export function judgeName(dimension: EvaluationDimension): string {
-  return EVALUATION_DIMENSION_SPECS[dimension].label.replace(/ Judge$/, '');
-}
-
-function judgeNames(dimensions: EvaluationDimension[]): string {
-  return dimensions.map(judgeName).join(', ');
-}
+/**
+ * Re-exported rather than declared here. `judgeName` moved into `group-actions.ts` when the
+ * Questionnaire Pack needed the same names in a document it renders on the server, and a
+ * `'use client'` module is not somewhere `lib/` can import from. Callers in this folder keep their
+ * existing import site.
+ */
+export { judgeName };
 
 /**
  * Accent per verb, as a rule down the left edge of its block rather than a fill.
@@ -78,32 +79,6 @@ const ACTION_TONE: Record<GroupActionKind, string> = {
   audience: 'border-primary/40',
   review: 'border-border',
 };
-
-/**
- * How much of the panel is behind an action, in words.
- *
- * The denominator is the judges that flagged THIS question, not the seven on the panel. "2 of 7"
- * would be measuring the wrong thing: the other five had nothing to say about this question, so
- * counting them as absent votes reads as weaker support than the panel actually gave.
- */
-function backing(action: GroupAction, flaggers: number): string {
-  const n = action.judges.length;
-  if (n === flaggers) return n === 1 ? '1 judge' : `all ${n} judges`;
-  return `${n} of ${flaggers} judges`;
-}
-
-/**
- * Which block the reconciled wordings belong under.
- *
- * The reconciler produces alternative *prompts*, which are an answer to "reword it" and to nothing
- * else. Hanging them off whichever action happens to lead would, on a question where the deletion
- * won, print proposed wording under a heading reading "A deletion, as proposed by 2 judges" — as if
- * the panel wanted the question deleted and rewritten. So they attach to the reword block when
- * there is one, and only fall back to the leading action when there is not.
- */
-function wordingHost(actions: GroupAction[]): GroupAction | undefined {
-  return actions.find((a) => a.kind === 'reword') ?? actions[0];
-}
 
 interface Props {
   summary: GroupActionSummary;

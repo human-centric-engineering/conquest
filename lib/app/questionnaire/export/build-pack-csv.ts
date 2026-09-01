@@ -149,7 +149,12 @@ export function buildPackCsv(model: PackModel): string {
   }
 
   if (model.evaluations) {
-    // Two blocks, mirroring the model's split: the judge scoreboard, then the findings.
+    const include = model.include;
+
+    // Blocks mirror the model's split: the judge scoreboard, the panel's verdict per subject, the
+    // proposed wordings, then the individual findings. Each is separately included, and each stands
+    // alone under a sort or a pivot — which is why the target's text repeats down every one of them
+    // rather than being named once as the prose formats do.
     blocks.push([
       '# Judge scores',
       row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
@@ -164,82 +169,119 @@ export function buildPackCsv(model: PackModel): string {
       ),
     ]);
 
-    // One row per (target, judge) pair, in questionnaire order, target columns first — so the
-    // block sorts and pivots by the thing under review rather than by which judge spoke.
-    //
-    // The target's text DOES repeat down the rows of a contested question, unlike the PDF and
-    // Markdown packs. That is deliberate: a CSV row has to stand alone to survive a sort, a
-    // filter, or a pivot, and blanking the continuation rows would break all three. The
-    // "name the question once" rule is about the documents a person reads top to bottom.
-    // `!hasRun` yields zero targets, so the block degrades to header-only — the same "nothing
-    // here" shape empty dataSlots/sections use.
-    const findingRows = model.evaluations.targets.flatMap((target) =>
-      target.judges.map((judge) =>
+    if (include.evaluationVerdicts) {
+      // One row per proposed action, so a contested question is several rows and a spreadsheet can
+      // count them. `is_dissent` is the fact a reader loses when they sort: the leading action is
+      // the first row of its target only until someone sorts by judge name.
+      blocks.push([
+        '# Panel verdict',
         row([
-          target.key,
-          target.context ?? '',
-          target.label,
-          target.questionType ?? '',
-          target.questionType ? questionTypeLabel(target.questionType) : '',
-          judge.dimension,
-          judge.label,
-          judge.severity,
-          severityLabelCell(judge.severity),
-          judge.status,
-          statusLabelCell(judge.status),
-          judge.proposedChange,
-          judge.rationale,
-          judge.sourceQuote ?? '',
-        ])
-      )
-    );
-    // Alternatives are their own block: one row per proposed phrasing. Folding them into the
-    // findings rows would either duplicate every judge row or leave most of them blank.
-    const alternativeRows = model.evaluations.targets.flatMap((target) =>
-      target.alternatives.map((alt) =>
-        row([
-          target.key,
-          target.label,
-          alt.prompt,
-          alt.addresses.join('; '),
-          alt.note,
-          target.unresolvedBy.join('; '),
-        ])
-      )
-    );
-    blocks.push([
-      '# Suggested rewordings',
-      row([
-        'target_key',
-        'current_wording',
-        'suggested_wording',
-        'addresses',
-        'note',
-        'unresolved',
-      ]),
-      ...alternativeRows,
-    ]);
+          'target_key',
+          'target',
+          'action',
+          'backing',
+          'judges',
+          'is_dissent',
+          'holds_rewording',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          (target.verdict?.blocks ?? []).map((block, i) =>
+            row([
+              target.key,
+              target.label,
+              block.heading,
+              block.backing,
+              block.judges,
+              i === 0 ? 'no' : 'yes',
+              block.holdsWording ? 'yes' : 'no',
+            ])
+          )
+        ),
+      ]);
+    }
 
-    blocks.push([
-      '# Evaluation',
-      row([
-        'target_key',
-        'target_context',
-        'target',
-        'target_type',
-        'target_type_label',
-        'dimension',
-        'judge',
-        'severity',
-        'severity_label',
-        'status',
-        'status_label',
-        'proposed_change',
-        'rationale',
-        'source_quote',
-      ]),
-      ...findingRows,
-    ]);
+    if (include.evaluationRewordings) {
+      // Alternatives are their own block: one row per proposed phrasing. Folding them into the
+      // findings rows would either duplicate every judge row or leave most of them blank.
+      blocks.push([
+        '# Suggested rewordings',
+        row([
+          'target_key',
+          'current_wording',
+          'suggested_wording',
+          'addresses',
+          'note',
+          'unresolved',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          target.alternatives.map((alt) =>
+            row([
+              target.key,
+              target.label,
+              alt.prompt,
+              alt.addresses.join('; '),
+              alt.note,
+              target.unresolvedBy.join('; '),
+            ])
+          )
+        ),
+      ]);
+    }
+
+    if (include.evaluationJudgeDetail) {
+      blocks.push([
+        '# Evaluation',
+        row([
+          'target_key',
+          'target_context',
+          'target',
+          'target_type',
+          'target_type_label',
+          'routing_reach',
+          'topic',
+          'dimension',
+          'judge',
+          'severity',
+          'severity_label',
+          'status',
+          'status_label',
+          'proposed_change',
+          'rationale',
+          'proposed_edit',
+          'destination',
+          'reviewer_instruction',
+          'source_quote',
+        ]),
+        ...model.evaluations.targets.flatMap((target) =>
+          target.judges.map((judge) =>
+            row([
+              target.key,
+              target.context ?? '',
+              target.label,
+              target.questionType ?? '',
+              target.questionType ? questionTypeLabel(target.questionType) : '',
+              target.routingReach ?? '',
+              target.topicLabel ?? '',
+              judge.dimension,
+              judge.label,
+              judge.severity,
+              severityLabelCell(judge.severity),
+              judge.status,
+              statusLabelCell(judge.status),
+              judge.proposedChange,
+              judge.rationale,
+              judge.proposedEditSummary ?? '',
+              judge.destination ?? '',
+              judge.applyInstruction ?? '',
+              // Kept in the CSV whatever the evidence flag says. Its reason for defaulting off is
+              // that a quote reprints the prompt beside it in a document read top to bottom; a
+              // spreadsheet column costs the reader nothing until they widen it.
+              judge.sourceQuote ?? '',
+            ])
+          )
+        ),
+      ]);
+    }
   }
 
   if (model.conditionalTopics) {

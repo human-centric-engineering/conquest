@@ -76,6 +76,10 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
+      evaluationVerdicts: true,
+      evaluationJudgeDetail: true,
+      evaluationRewordings: true,
+      evaluationEvidence: true,
       conditionalTopics: false,
       interviewerPolicy: false,
     },
@@ -228,8 +232,10 @@ describe('buildPackCsv', () => {
       expect(definitionsIdx).toBeLessThan(scoresIdx);
       expect(scoresIdx).toBeLessThan(evaluationIdx);
       expect(csv).toContain('dimension,judge,score,diagnostic,finding_count');
+      // Routing reach and the reviewer's own instruction ride the same row as the finding: a
+      // spreadsheet filtering "questions nobody is ever asked" should not need a second sheet.
       expect(csv).toContain(
-        'target_key,target_context,target,target_type,target_type_label,dimension,judge,severity,severity_label,status,status_label,proposed_change,rationale,source_quote'
+        'target_key,target_context,target,target_type,target_type_label,routing_reach,topic,dimension,judge,severity,severity_label,status,status_label,proposed_change,rationale,proposed_edit,destination,reviewer_instruction,source_quote'
       );
     });
 
@@ -282,6 +288,9 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 2,
                 alternatives: [],
                 unresolvedBy: [],
@@ -294,6 +303,9 @@ describe('buildPackCsv', () => {
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: 'both engaged and satisfied',
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                   {
                     dimension: 'audience_match',
@@ -303,6 +315,9 @@ describe('buildPackCsv', () => {
                     proposedChange: 'Drop the jargon',
                     rationale: 'Too technical',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -311,12 +326,12 @@ describe('buildPackCsv', () => {
         })
       );
       expect(csv).toContain(
-        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,clarity,Clarity Judge,major,Major,pending,Pending,Split into two questions,Asks two things at once,both engaged and satisfied'
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,,,clarity,Clarity Judge,major,Major,pending,Pending,Split into two questions,Asks two things at once,,,,both engaged and satisfied'
       );
       // Unlike the PDF/Markdown packs, the target text DOES repeat per row — a CSV row has to
       // survive a sort or a pivot on its own, so blanking continuation rows would break it.
       expect(csv).toContain(
-        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,audience_match,Audience-Match Judge,minor,Minor,declined,Declined,Drop the jargon,Too technical,'
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,Free text,,,audience_match,Audience-Match Judge,minor,Minor,declined,Declined,Drop the jargon,Too technical,,,,'
       );
     });
 
@@ -337,6 +352,9 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 0, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [
                   {
@@ -355,6 +373,9 @@ describe('buildPackCsv', () => {
                     proposedChange: 'Split it',
                     rationale: 'Two asks',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
@@ -391,6 +412,9 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                routingReach: null,
+                topicLabel: null,
+                verdict: null,
                 judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
@@ -403,6 +427,9 @@ describe('buildPackCsv', () => {
                     proposedChange: '=HYPERLINK("evil")',
                     rationale: 'r',
                     sourceQuote: null,
+                    proposedEditSummary: null,
+                    destination: null,
+                    applyInstruction: null,
                   },
                 ],
               },
