@@ -175,6 +175,8 @@ function loadedContext(
     respondentUserId?: string | null;
     state?: SectionState;
     navigation?: 'sequential' | 'free';
+    /** `conditionalTopics.enabled` — the only thing that can add a section mid-interview. */
+    conditionalTopics?: boolean;
   } = {}
 ) {
   const {
@@ -182,12 +184,14 @@ function loadedContext(
     respondentUserId = USER,
     state = sectionState(),
     navigation = 'sequential',
+    conditionalTopics = false,
   } = over;
   return {
     session: { id: 'sess-1', status, respondentUserId },
     base: {
       config: {
         sections: { ...DEFAULT_SECTIONED_INTERVIEW_SETTINGS, navigation },
+        conditionalTopics: { enabled: conditionalTopics },
       },
       selectionRound: 5,
     },
@@ -250,6 +254,7 @@ describe('GET /sections', () => {
       blockedOnRequired: false,
       allClosed: false,
       showLocked: true,
+      canGrow: false,
     });
   });
 
@@ -269,6 +274,7 @@ describe('GET /sections', () => {
         status: 'closed',
         isActive: false,
         isAvailable: true,
+        finishesActive: false,
         reopenCount: 0,
       },
       {
@@ -278,16 +284,20 @@ describe('GET /sections', () => {
         status: 'in_progress',
         isActive: true,
         isAvailable: true,
+        finishesActive: false,
         reopenCount: 0,
       },
-      // Sequential navigation + s2 still open ⇒ s3 is locked (not the active/closed/next-open section).
+      // s2 is active AND closeable, so s3 is where "Move on to Wrap-up" lands: reachable, but only
+      // through s2, which is what `finishesActive` says. Drawing it locked here is what put a
+      // padlock beside a control offering to go there.
       {
         key: 's3',
         label: 'Wrap-up',
         position: 3,
         status: 'not_started',
         isActive: false,
-        isAvailable: false,
+        isAvailable: true,
+        finishesActive: true,
         reopenCount: 0,
       },
     ]);
@@ -299,6 +309,7 @@ describe('GET /sections', () => {
       base: {
         config: {
           sections: { ...DEFAULT_SECTIONED_INTERVIEW_SETTINGS, showLockedSections: false },
+          conditionalTopics: { enabled: false },
         },
         selectionRound: 5,
       },
@@ -306,6 +317,17 @@ describe('GET /sections', () => {
     const res = await GET(req(), ctx);
     const body = await res.json();
     expect(body.data.showLocked).toBe(false);
+  });
+
+  it('reports canGrow only when Conditional Topics is on', async () => {
+    // What the respondent surface uses to decide whether to say "more sections can appear". It has
+    // to come from the server for the same reason `showLocked` does: the client should not hold a
+    // second copy of the settings to know what it may claim.
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ conditionalTopics: true }));
+    expect((await (await GET(req(), ctx)).json()).data.canGrow).toBe(true);
+
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ conditionalTopics: false }));
+    expect((await (await GET(req(), ctx)).json()).data.canGrow).toBe(false);
   });
 
   it('500s via handleAPIError when the loader throws unexpectedly', async () => {
@@ -408,6 +430,59 @@ describe('POST /sections — open', () => {
     ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ navigation: 'free' }));
     const res = await POST(req({}, { action: 'open', key: 's3' }), ctx);
     expect(res.status).toBe(200);
+  });
+
+  it('lets the respondent return to a section they have already been in', async () => {
+    // The dead end this rule exists to prevent: s1 was finished, s2 opened, then they stepped back
+    // into s1 to add a line. s1 is the first-not-closed again, so on the old rule s2 — where they
+    // had just been working — was refused, and there was no way forward at all.
+    const steppedBack = run({
+      activeKey: 's1',
+      sections: [
+        {
+          key: 's1',
+          status: 'in_progress',
+          openedAtTurn: 0,
+          closedAtTurn: null,
+          closeReason: null,
+          reopenCount: 1,
+          turnsSpent: 2,
+        },
+        {
+          key: 's2',
+          status: 'in_progress',
+          openedAtTurn: 1,
+          closedAtTurn: null,
+          closeReason: null,
+          reopenCount: 0,
+          turnsSpent: 1,
+        },
+        {
+          key: 's3',
+          status: 'not_started',
+          openedAtTurn: 0,
+          closedAtTurn: null,
+          closeReason: null,
+          reopenCount: 0,
+          turnsSpent: 0,
+        },
+      ],
+    });
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ state: sectionState({ run: steppedBack }) })
+    );
+
+    const res = await POST(req({}, { action: 'open', key: 's2' }), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.activeKey).toBe('s2');
+
+    // s3 is still refused: never opened, and not the next open one either.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ state: sectionState({ run: steppedBack }) })
+    );
+    const jump = await POST(req({}, { action: 'open', key: 's3' }), ctx);
+    expect(jump.status).toBe(409);
   });
 });
 

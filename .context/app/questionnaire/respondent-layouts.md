@@ -319,6 +319,26 @@ layout never showed it.
 The conversation with the live answer panel beside it from `lg` up, the panel's bottom-sheet twin
 below that. What every questionnaire has always looked like, extracted unchanged.
 
+Three placements are Classic-specific, and they all follow from that panel. The **conversation card
+carries its own two bands** (`ConversationFrame`'s `header` and `footer`): `sectionTabs` and
+`completionOffer` above the transcript, `sectionClose` below the composer, all three inside the card
+rather than on rows around it. Each comes and goes mid-session — the section control when the
+interview is sectioned, the offer when the session is nearly done, the close control when a section
+becomes finishable or gets stuck — and outside the card each one moved an edge the panel beside it
+is aligned to, so the two columns fell out of line exactly when something appeared. Two consequences
+worth knowing:
+
+- A band, its padding and its rule **vanish together** when its slots draw nothing, via
+  `empty:hidden`. That selector is unforgiving: an always-present wrapper inside a band would leave
+  an empty rule on every unsectioned conversation, so nothing may sit between a band and the slots
+  themselves. A test asserts both stay childless, using nodes that render nothing rather than `null`
+  slots — the production shape, since `SectionTabStrip` and `SectionCloseControl` are always in the
+  tree and return null internally.
+- `completionOffer` is declared `compact` here, and the container reads that the way it reads the
+  composer's `prominent`: the offer and its early-finish twin render as a condensed row rather than
+  the tinted banner, since a bordered card drawn inside another card is two rectangles making the
+  same claim. Every other layout gives the offer a row of its own and keeps the banner.
+
 ### Focus
 
 One column at every width, with a deliberately tighter reading measure (`--cq-chat-measure: 38rem`,

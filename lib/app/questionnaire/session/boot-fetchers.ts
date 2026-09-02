@@ -50,6 +50,14 @@ function authHeaders(accessToken: string): Record<string, string> {
   return { 'X-Session-Token': accessToken };
 }
 
+/**
+ * The statuses that mean "this credential does not open a session any more".
+ *
+ * `404` the row is gone; `401`/`403` the token no longer authorises it. Anything else — a 500, a
+ * timeout — is a reason to keep the session, not to abandon it.
+ */
+const SESSION_GONE_STATUSES: readonly number[] = [401, 403, 404];
+
 /* -------------------------------------------------------------------------- */
 /* Transcript                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -64,6 +72,11 @@ function authHeaders(accessToken: string): Record<string, string> {
 const transcriptTurnSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+  // Sectioned interviews (P21): the section this exchange was said in. Enumerated here because Zod
+  // strips what it does not know — without it a resumed transcript came back with every turn
+  // untagged, and the respondent surface, which divides the conversation by section, showed the
+  // whole interview under whichever section they were in.
+  sectionKey: z.string().nullable().optional(),
   warnings: z
     .array(z.object({ code: z.string(), message: z.string(), detail: z.string().optional() }))
     .optional(),
@@ -98,12 +111,27 @@ const transcriptResponseSchema = z.object({
 /**
  * Fetch the session's replayed transcript. Fails soft to an empty transcript — the worst case is a
  * fresh greeting and a re-asked opening question, exactly the pre-replay behaviour.
+ *
+ * `sessionGone` is the ONE thing this read reports that the others do not: the server says this
+ * credential no longer opens a session (`404` — the row is not there; `401`/`403` — the token no
+ * longer authorises it). Failing soft is right for a plainer surface, but not for a session that
+ * does not exist: the boot would seed a welcome, the first turn would come back "Session not
+ * found", and Try again would ask the same dead session forever. The caller uses it to drop the
+ * stored credential and start a real one.
+ *
+ * Deliberately narrow. A network failure, a 500, or a malformed body all leave it `false`: those
+ * are reasons to carry on with what we have, and abandoning a live session over a blip would lose
+ * a respondent's thread to fix a problem they did not have.
  */
 export async function fetchTranscript(
   sessionId: string,
   accessToken: string
-): Promise<{ turns: QuestionnaireTurn[]; inspectorTurns: TurnInspectorData[] }> {
-  const empty = { turns: [], inspectorTurns: [] };
+): Promise<{
+  turns: QuestionnaireTurn[];
+  inspectorTurns: TurnInspectorData[];
+  sessionGone: boolean;
+}> {
+  const empty = { turns: [], inspectorTurns: [], sessionGone: false };
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.transcript(sessionId), {
       headers: authHeaders(accessToken),
@@ -111,12 +139,15 @@ export async function fetchTranscript(
       // one would carry the session access token to whatever it pointed at.
       redirect: 'error',
     });
-    if (!res.ok) return empty;
+    if (!res.ok) {
+      return { ...empty, sessionGone: SESSION_GONE_STATUSES.includes(res.status) };
+    }
     const parsed = transcriptResponseSchema.safeParse(await res.json());
     if (!parsed.success) return empty;
     return {
       turns: parsed.data.data?.turns ?? [],
       inspectorTurns: parsed.data.data?.inspectorTurns ?? [],
+      sessionGone: false,
     };
   } catch {
     return empty;

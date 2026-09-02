@@ -30,6 +30,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
         status: 'in_progress',
         isActive: true,
         isAvailable: true,
+        finishesActive: false,
         reopenCount: 0,
       },
       {
@@ -39,6 +40,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
         status: 'not_started',
         isActive: false,
         isAvailable: false,
+        finishesActive: false,
         reopenCount: 0,
       },
     ],
@@ -47,6 +49,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
     blockedOnRequired: false,
     allClosed: false,
     showLocked: true,
+    canGrow: false,
     ...overrides,
   };
 }

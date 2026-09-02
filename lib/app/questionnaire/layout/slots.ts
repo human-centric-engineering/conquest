@@ -129,13 +129,13 @@ export const RESPONDENT_SLOTS = [
    */
   'composer',
   /**
-   * Sectioned interviews (P21): the strip of sections the respondent moves between.
+   * Sectioned interviews (P21): the control naming the section the respondent is in, with the way
+   * to the others one press away.
    *
-   * Renders nothing on an unsectioned interview, which is most of them. A slot rather than
-   * something the transcript draws for itself, because the four layouts genuinely disagree about
-   * it: Classic and Broadsheet have room for a strip, Focus strips chrome by design, and Horizon
-   * exists to fold accumulated context away — a permanent list of seven areas is precisely what it
-   * puts behind a gesture.
+   * Renders nothing on an unsectioned interview, which is most of them. It was a tab strip, and the
+   * four layouts disagreed about how to draw it; it is one quiet control now (see `SectionMenu`)
+   * and they disagree only about WHERE it goes, which is the decision this contract is for. The key
+   * keeps its name so that every layout's placement map does not churn for a rename.
    */
   'sectionTabs',
   /**
@@ -227,6 +227,21 @@ export type SlotPlacement =
        * surface and the prose height without the box becoming its whole column.
        */
       prominent?: boolean;
+      /**
+       * This region is a CHROME BAND rather than a row of the page, so the slot should render its
+       * condensed form.
+       *
+       * Read today by `completionOffer`, and by the same reasoning as `prominent` above: the layout
+       * places a node it did not build and cannot reach inside it to tell the banner to stop being
+       * a card. Classic sets it, because it puts the offer inside the conversation card's own
+       * header band — a bordered, tinted card drawn inside another card is two rectangles making
+       * the same claim, and the band has only a row of height to give.
+       *
+       * Every other layout leaves it unset and keeps the banner: they give the offer a row of its
+       * own above the conversation (Focus, Horizon) or in the margin beside it (Broadsheet), and
+       * there it is the only thing in that row and should look like it.
+       */
+      compact?: boolean;
     }
   | { kind: 'overlay'; via: 'sheet' | 'drawer' | 'modal' | 'gesture' }
   | { kind: 'omitted'; because: string };
@@ -261,8 +276,9 @@ export const ESSENTIAL_SLOTS = [
   // P21. Both are here on the strength of "can the respondent finish, correctly, without it", and
   // in a sectioned interview the answer is no for each: without `sectionClose` a sequential run
   // cannot get past section one, and without `sectionTabs` a free-navigation run has no route to
-  // another section. `overlay` remains legal for both — Horizon folds the tabs behind a gesture —
-  // so this forbids deleting the only way through, not folding it away.
+  // another section. `overlay` remains legal for both, so this forbids deleting the only way
+  // through, not folding it away — though no layout takes that option today: the control is already
+  // as quiet as a line of text, and there is nothing left to fold.
   'sectionTabs',
   'sectionClose',
   'history',

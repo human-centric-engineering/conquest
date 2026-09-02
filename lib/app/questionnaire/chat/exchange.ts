@@ -54,3 +54,40 @@ export function hasConversationHistory(
 ): boolean {
   return currentExchangeStart(turns) > 0 || stitchedSegmentCount > 0;
 }
+
+/**
+ * Sectioned interviews (P21): does this turn belong on screen while `sectionKey` is the section
+ * the conversation is in?
+ *
+ * The one predicate both halves of the transcript apply, for the same reason `currentExchangeStart`
+ * is one function: the history and the live exchange are separate nodes that a layout may place
+ * with nothing in common between them, and a turn shown by one and hidden by the other would read
+ * as the conversation duplicating itself across a section move.
+ *
+ * An unsectioned interview (`sectionKey` null or undefined) shows everything — there is nothing to
+ * divide the conversation by, and the transcript renders as it always has.
+ *
+ * ## The turn that carries no section of its own
+ *
+ * Two kinds: the greeting the surface builds on the client (`buildWelcomeTurns` — never persisted,
+ * so never tagged), and a turn recorded before P21 or before this session was sectioned.
+ *
+ * `untaggedSectionKey` decides where they go, and a sectioned surface passes the FIRST section:
+ * the conversation began there, so that is where its opening belongs. Left to "show everywhere",
+ * the welcome and its "answer honestly, there are no right or wrong answers" reappeared at the top
+ * of every section the respondent moved to, which reads as the interview starting over rather than
+ * carrying on — and it was the only thing on screen in a section whose own opening had not landed.
+ *
+ * Omitted (or null), they are kept in every section, which is the honest default for a reader that
+ * does not know where the run began: hiding a turn from every section would make the transcript lie
+ * about what was said.
+ */
+export function turnInSection(
+  turn: Pick<QuestionnaireTurn, 'sectionKey'>,
+  sectionKey: string | null | undefined,
+  untaggedSectionKey?: string | null
+): boolean {
+  if (!sectionKey) return true;
+  if (!turn.sectionKey) return !untaggedSectionKey || untaggedSectionKey === sectionKey;
+  return turn.sectionKey === sectionKey;
+}

@@ -292,8 +292,12 @@ export function AnonymousSessionBoot({
   // only `autoStart` is resume-gated. Capture is always fetched (server returns null fast for
   // anonymous versions); `satisfied` skips its gate on resume.
   const enterSession = useCallback(
-    async (sessionId: string, accessToken: string) => {
-      const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
+    async (sessionId: string, accessToken: string): Promise<'ok' | 'gone'> => {
+      const { turns, inspectorTurns, sessionGone } = await fetchTranscript(sessionId, accessToken);
+      // The credential no longer opens a session. Reported rather than handled here, because what
+      // to do about it depends on where the credential came from: a stored one is replaced, a
+      // just-minted one is a real failure to surface.
+      if (sessionGone) return 'gone';
       const resumed = turns.length > 0;
       const [intro, personas, capture] = await Promise.all([
         fetchIntro(sessionId, accessToken),
@@ -313,6 +317,7 @@ export function AnonymousSessionBoot({
         initialInspectorTurns: inspectorTurns,
         autoStart: !resumed,
       });
+      return 'ok';
     },
     [welcomeCopy, voiceInputEnabled, anonymous]
   );
@@ -364,14 +369,56 @@ export function AnonymousSessionBoot({
     }
   }, [versionId, preview, inviteToken, credsKey, usesDurableResume]);
 
+  /**
+   * Enter a freshly-minted session, surfacing the one outcome that has nowhere else to go.
+   *
+   * A session the server has just created and immediately does not recognise is a real failure,
+   * not something to recover from — minting another would be the same request again.
+   */
+  const enterFreshSession = useCallback(
+    async (fresh: StoredAnonSession) => {
+      if ((await enterSession(fresh.sessionId, fresh.accessToken)) === 'gone') {
+        setState({
+          phase: 'error',
+          message: 'We could not start the questionnaire. Please try again.',
+        });
+      }
+    },
+    [enterSession]
+  );
+
+  /**
+   * Enter a STORED session, and start a real one if the server no longer has it.
+   *
+   * The dead end this closes: a credential in storage outlives the session it names (the row was
+   * removed, or a token stopped authorising it). The boot entered it anyway, every read failed
+   * soft to nothing, the surface seeded a welcome — and the first turn came back "Session not
+   * found", with a Try again that asked the same dead session every time. Nothing cleared the
+   * credential, so a reload landed in exactly the same place.
+   *
+   * Recovery happens once and never loops: the fresh session is entered through
+   * {@link enterFreshSession}, which surfaces a failure rather than recovering again.
+   */
+  const enterStoredSession = useCallback(
+    async (stored: StoredAnonSession) => {
+      if ((await enterSession(stored.sessionId, stored.accessToken)) === 'ok') return;
+      clearAnonSession(credsKey);
+      clearTabMarker(versionId);
+      setState({ phase: 'creating' });
+      const fresh = await createFreshSession();
+      if (fresh) await enterFreshSession(fresh);
+    },
+    [enterSession, enterFreshSession, createFreshSession, credsKey, versionId]
+  );
+
   // Welcome-back → Continue: mark the tab entered so a later refresh resumes silently, then enter.
   const handleContinue = useCallback(
     async (stored: StoredAnonSession) => {
       setGateBusy(true);
       setTabMarker(versionId);
-      await enterSession(stored.sessionId, stored.accessToken);
+      await enterStoredSession(stored);
     },
-    [versionId, enterSession]
+    [versionId, enterStoredSession]
   );
 
   // Welcome-back → Start new: best-effort abandon the old session (so it's not left dangling in
@@ -392,10 +439,10 @@ export function AnonymousSessionBoot({
       clearTabMarker(versionId);
       setState({ phase: 'creating' });
       const fresh = await createFreshSession();
-      if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
+      if (fresh) await enterFreshSession(fresh);
       setGateBusy(false);
     },
-    [versionId, credsKey, createFreshSession, enterSession]
+    [versionId, credsKey, createFreshSession, enterFreshSession]
   );
 
   useEffect(() => {
@@ -409,7 +456,7 @@ export function AnonymousSessionBoot({
           // A same-tab refresh (marker present) resumes silently — the returning-respondent gate is
           // only for a genuine return (new tab / after close), where the marker is absent.
           if (hasTabMarker(versionId)) {
-            await enterSession(existing.sessionId, existing.accessToken);
+            await enterStoredSession(existing);
             return;
           }
           // Genuine return: confirm the session is still resumable (active/paused with real
@@ -432,7 +479,7 @@ export function AnonymousSessionBoot({
           clearAnonSession(credsKey);
         }
         const fresh = await createFreshSession();
-        if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
+        if (fresh) await enterFreshSession(fresh);
         return;
       }
 
@@ -440,13 +487,20 @@ export function AnonymousSessionBoot({
       // stored token (refresh within the 24h TTL), else mint fresh — the pre-resume behaviour.
       const existing = readAnonSession(credsKey, false);
       if (existing) {
-        await enterSession(existing.sessionId, existing.accessToken);
+        await enterStoredSession(existing);
         return;
       }
       const fresh = await createFreshSession();
-      if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
+      if (fresh) await enterFreshSession(fresh);
     })();
-  }, [versionId, credsKey, usesDurableResume, enterSession, createFreshSession]);
+  }, [
+    versionId,
+    credsKey,
+    usesDurableResume,
+    enterStoredSession,
+    enterFreshSession,
+    createFreshSession,
+  ]);
 
   if (state.phase === 'creating') {
     return (

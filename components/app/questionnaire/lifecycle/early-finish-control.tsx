@@ -39,12 +39,26 @@ export interface EarlyFinishControlProps {
   onFinish: () => void;
   /** A submit/finish is in flight. */
   busy: boolean;
+  /**
+   * `bar` condenses it for a layout that places it in the conversation card's chrome band, and
+   * matches {@link CompletionOffer}'s twin variant — the two share a slot, so a layout that
+   * condenses one and not the other would change shape at the moment the session gets closer to
+   * finishing, which is the worst moment to move the controls.
+   */
+  variant?: 'banner' | 'bar';
   className?: string;
 }
 
-export function EarlyFinishControl({ onFinish, busy, className }: EarlyFinishControlProps) {
+export function EarlyFinishControl({
+  onFinish,
+  busy,
+  variant = 'banner',
+  className,
+}: EarlyFinishControlProps) {
   const [collapsed, setCollapsed] = useState(false);
 
+  // The collapsed form is already a slim trailing link, so it needs no variant of its own: it is
+  // the shape the `bar` variant is reaching for, and it reads the same in a band as above one.
   if (collapsed) {
     return (
       <div className={cn('flex justify-end', className)}>
@@ -59,6 +73,56 @@ export function EarlyFinishControl({ onFinish, busy, className }: EarlyFinishCon
           <Flag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
           {busy ? 'Finishing…' : 'Finish up now'}
         </Button>
+      </div>
+    );
+  }
+
+  if (variant === 'bar') {
+    return (
+      <div
+        role="region"
+        aria-label="Continue or finish up"
+        className={cn(
+          '@container flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2.5 py-1.5',
+          className
+        )}
+        style={{
+          backgroundColor:
+            'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 9%, transparent)',
+        }}
+      >
+        <Flag
+          className="h-3.5 w-3.5 shrink-0"
+          style={{ color: 'var(--app-accent-color, var(--color-primary))' }}
+          aria-hidden="true"
+        />
+        <p className="text-foreground min-w-0 flex-1 text-xs leading-snug text-pretty">
+          Keep chatting, or finish up now and we&rsquo;ll prepare your report.
+        </p>
+        {/* The pair moves as one: "Continue" wrapping away from the action it declines would read
+            as an instruction rather than a choice. */}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed(true)}
+            disabled={busy}
+            className="h-7 px-2 text-xs"
+          >
+            Continue
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onFinish}
+            disabled={busy}
+            className="h-7 px-2.5 text-xs text-[var(--app-on-cta,#fff)]"
+            style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
+          >
+            {busy ? 'Finishing…' : 'Finish up & get my report'}
+          </Button>
+        </div>
       </div>
     );
   }

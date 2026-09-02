@@ -94,10 +94,69 @@ describe('the conversation card', () => {
     expect(card.contains(screen.getByTestId('slot-composer'))).toBe(false);
   });
 
+  it('classic puts the section control and the submit offer in the card’s own header band', () => {
+    // The alignment claim in Classic's placement declarations. The conversation card's top edge is
+    // level with the answers panel beside it, and both of these come and go mid-session — the
+    // section control when the interview is sectioned, the offer when the session is nearly done.
+    // Above the card they pushed its top edge below the panel's; inside it the two edges stay level.
+    // Asserted by containment, so the band may be restyled freely.
+    render(<LAYOUT_REGISTRY.classic.Component slots={sentinelSlots()} state={stubState()} />);
+
+    const card = boxAround(screen.getByTestId('slot-currentExchange'));
+    const sections = screen.getByTestId('slot-sectionTabs');
+    const offer = screen.getByTestId('slot-completionOffer');
+    expect(card.contains(sections), 'the section control left the card').toBe(true);
+    expect(card.contains(offer), 'the offer left the card').toBe(true);
+    // Above the conversation, not below it: they are chrome that bounds the transcript.
+    expect(precedes(sections, screen.getByTestId('slot-currentExchange'))).toBe(true);
+    expect(precedes(offer, screen.getByTestId('slot-currentExchange'))).toBe(true);
+  });
+
+  it('classic puts the section’s finish control in the card’s closing band', () => {
+    // The foot of the same alignment argument as the header band: the card's bottom edge is level
+    // with the foot of the answers panel, and this control appears the moment a section becomes
+    // finishable. On a row under the card, that moment moved the card's bottom edge up.
+    render(<LAYOUT_REGISTRY.classic.Component slots={sentinelSlots()} state={stubState()} />);
+
+    const card = boxAround(screen.getByTestId('slot-currentExchange'));
+    const close = screen.getByTestId('slot-sectionClose');
+    expect(card.contains(close), 'the finish control left the card').toBe(true);
+    // Beneath the answer box, not competing with it for the same row.
+    expect(precedes(screen.getByTestId('slot-composer'), close)).toBe(true);
+  });
+
+  it('classic’s bands hold nothing when their slots draw nothing', () => {
+    // The band is hidden by `:empty`, which is unforgiving: a single always-present wrapper inside
+    // it — a flex row, a spacer — and the selector never matches again, leaving an empty band and
+    // its rule above every unsectioned conversation for the rest of the product's life. Nothing
+    // else in the suite would notice, because the band would still be "correct" in every structural
+    // sense. So this asserts the childlessness the CSS depends on, not the CSS.
+    // Nodes that render nothing, NOT `null` slots — that is the production shape. `SectionTabStrip`
+    // and `SectionCloseControl` are always in the tree and return null internally on an unsectioned
+    // interview, so the bands really are rendered and really do have to collapse themselves.
+    const Silent = () => null;
+    render(
+      <LAYOUT_REGISTRY.classic.Component
+        slots={sentinelSlots({
+          sectionTabs: <Silent />,
+          completionOffer: <Silent />,
+          sectionClose: <Silent />,
+        })}
+        state={stubState()}
+      />
+    );
+
+    for (const id of ['conversation-header', 'conversation-footer']) {
+      const band = screen.getByTestId(id);
+      expect(band.childNodes.length, `something is drawing inside the empty ${id}`).toBe(0);
+    }
+  });
+
   it('broadsheet puts the completion offer with the composer, not above the document', () => {
     // Declared as "the margin, above the composer" — finishing and answering are the two things the
-    // respondent does, and the document is the thing they read. Classic puts it above the
-    // conversation instead, so this is a real difference and not a restatement of the registry.
+    // respondent does, and the document is the thing they read. Classic puts it in the conversation
+    // card's header band instead, so this is a real difference and not a restatement of the
+    // registry.
     render(<LAYOUT_REGISTRY.broadsheet.Component slots={sentinelSlots()} state={stubState()} />);
 
     const offer = screen.getByTestId('slot-completionOffer');
@@ -109,7 +168,7 @@ describe('the conversation card', () => {
     expect(rail?.contains(composer)).toBe(true);
     // ...and the offer comes first: the respondent reads the document, then acts in the margin.
     expect(offer.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Not above the document — that is Classic's placement, and the difference is the point.
+    // Not with the document — that is Classic's placement, and the difference is the point.
     expect(boxAround(screen.getByTestId('slot-currentExchange')).contains(offer)).toBe(false);
   });
 

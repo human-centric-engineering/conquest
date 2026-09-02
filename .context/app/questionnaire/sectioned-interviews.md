@@ -33,8 +33,8 @@ sections resolve.**
 
 Every caller reads `[]` as "not sectioned". Returning `[]` rather than
 `[theOnlySection]` for case 3 is why no caller has to remember a length check: a
-one-section interview is the whole questionnaire with a tab strip above it and a
-"move on" control that goes nowhere.
+one-section interview is the whole questionnaire with a section control above it
+naming its only section, and a "move on" control that goes nowhere.
 
 Downstream, `buildSectionState` returns `INERT_SECTION_STATE` and every filter
 that reads it becomes a no-op.
@@ -275,8 +275,38 @@ is active, and whether it can be moved to.
 questions of a section they have not reached into the browser, which is the same
 reasoning `answered_only` panel scope already applies to pending prompts.
 
-`isAvailable` under `sequential` is: the active section, any closed one (the
-reopen right), and the next still-open one. Under `free`, everything.
+`isAvailable` under `sequential` is: the active section, any **visited** one —
+closed (the reopen right) or left in progress — the next still-open one, and —
+once the active section can be finished — the section finishing it hands the run
+to. Under `free`, everything.
+
+**The visited clause is not a loosening of sequential navigation.** A section only
+reaches `in_progress` by having been opened, which required it to be permitted at
+the time, so returning to it skips nothing. Without it, going back to an earlier
+section to add a line re-locked everything: section one reopens, becomes the
+first-not-closed again, and the section the respondent had just been working in is
+a padlock with no way forward. Sequential navigation is there to stop someone
+racing ahead of the interview, not to trap them behind ground they have already
+covered. `canOpenSection` enforces the same clause server-side, because a list
+offering a move the server refuses is the same defect in the other direction.
+
+**That last clause is `finishesActive`, and it is set on exactly one tab.** Under
+`sequential` there is no plain move onto the section ahead: `open` on it is
+refused server-side, because the way forward is through the current section
+rather than around it. So while the close gate is met, the surface draws that one
+section reachable and performs the CLOSE move when it is picked — the same move
+"Move on to _{section}_" makes. Without it the respondent met an incoherent pair:
+a control offering to move on to Growth Strategy, and Growth Strategy drawn with
+a padlock in the list beside it. Both were telling the truth about their own rule.
+It is never set under `free` navigation, where moving on without finishing is a
+move the respondent is entitled to and the close control is the affordance for the
+other one.
+
+`onwardSectionKey(view.sections)` is where that move lands: the first section that
+is neither active nor closed, which is the rule `closeSection` applies on the
+server. The close control names its destination with it rather than with
+`position + 1`, which is wrong the moment a section has been finished out of
+order — it would name a section the close skips straight past.
 
 `showLocked` rides on the view rather than being read from config by the surface,
 so a client rendering the strip never holds a second copy of the settings.
@@ -287,25 +317,83 @@ so a client rendering the strip never holds a second copy of the settings.
 
 Two slots in `RESPONDENT_SLOTS`, both in `ESSENTIAL_SLOTS`:
 
-- **`sectionTabs`**, the strip, in a `strip` or a compact `menu` variant.
-- **`sectionClose`**, "finish this section and move on".
+- **`sectionTabs`**, the section control (`SectionMenu`): the current section's
+  name, its place in the run, and a chevron opening the rest. The popover is
+  CONTROLLED and picking a section shuts it — Radix closes on an outside press or
+  Escape, and a row is neither, so the list sat open over the section it had just
+  moved to, covering the reply arriving underneath. The list wears the
+  client's brand (`BrandThemeProvider` vars, the same tokens the answers panel
+  and the intro splash use) down to the focus ring, which the browser would
+  otherwise draw in its own blue on the first row the moment the menu opens.
+  Tinting alone was not enough: the list is portalled to `document.body`, so it
+  also spreads `useRespondentSurfaceAttrs()` onto its root — the seam the answers
+  drawer established — or every `--app-*` reference resolves to a platform
+  fallback and the neutral palette reverts to the surrounding ConQuest consumer
+  brand. The surface's variables are spread FIRST and the tints second, since the
+  tints are `color-mix` expressions reading those variables off that same
+  element. It
+  sizes to its labels between a 16rem floor and a 26rem ceiling, wrapping rather
+  than truncating, because section labels are sentences.
+- **The way back.** Beside the trigger, and only when the two differ, sits
+  "Back to _{section}_". Picking a section MOVES the conversation into it, so a
+  respondent who returns to an earlier section to add a line has quietly taken
+  the interview with them; without a named way on, their only route is a menu
+  they have to reason about, and the section they left is not marked in it. The
+  destination is `resumeSectionKey(view)` — the first section that is not
+  finished — exported from `view.ts` rather than re-derived on the surface,
+  because it is the same rule the builder uses for `nextOpenKey` and the two must
+  not drift on what "where we were" means. Absent on a straight run, before the
+  first section opens (there is nothing to have moved away from), and once every
+  section is closed (there is nothing to continue to).
+- **`view.canGrow`** decides whether the list closes with "more sections can
+  appear as the conversation develops". It is `conditionalTopics.enabled`,
+  carried on the view rather than derived on the client for the same reason
+  `showLocked` is. On a fixed instrument the note is absent, because there it
+  would be a promise the questionnaire cannot keep and the respondent would wait
+  for a section that is never coming.
+- **`sectionClose`**, "finish this section and move on". Its label names
+  `onwardSectionKey(view.sections)`, so it and the list agree on where the move
+  goes.
 
 Both are essential on the same test: can the respondent finish, correctly,
 without it? Under `sequential` navigation `sectionClose` is the **only** way past
 section one.
 
-| Layout     | `sectionTabs`                                           | `sectionClose`                               |
-| ---------- | ------------------------------------------------------- | -------------------------------------------- |
-| Classic    | region, above the conversation card                     | region, foot of the card beside the composer |
-| Focus      | region, lifecycle strip trailing cluster (compact menu) | region, beneath the composer                 |
-| Broadsheet | region, the margin above the completion offer           | region, the margin with the composer         |
-| Horizon    | **overlay**, behind a gesture                           | region, above the stage                      |
+| Layout     | `sectionTabs`                                 | `sectionClose`                       |
+| ---------- | --------------------------------------------- | ------------------------------------ |
+| Classic    | region, the conversation card's header band   | region, the card's footer band       |
+| Focus      | region, above the card, beside the finish     | region, beneath the composer         |
+| Broadsheet | region, the margin above the completion offer | region, the margin with the composer |
+| Horizon    | region, above the stage, with the finish      | region, above the stage              |
 
-Horizon puts the tabs behind a gesture for the reason it folds the history away:
-a permanent list of seven areas is precisely the accumulated wall it exists to
-remove. `overlay` is availability, not omission. `sectionClose` stays on screen
-even there, because it is an action on the current question rather than a record
-of past ones, and folding it away would fold away the way forward.
+### Why there is no tab strip
+
+It was one, and the strip is gone rather than hidden. Three things were wrong with
+it and only the third is about small screens:
+
+1. A row of pills is the loudest thing in a conversation meant to be read. It
+   announced the instrument's filing structure above every reply.
+2. Section labels are sentences ("Opening — Situation, Goals, Challenges,
+   Impact"), not tab words, so the strip was wide at any width, and truncating it
+   took away the one thing a tab is for.
+3. Below about 30rem it degraded into a horizontal scroller cropped to its first
+   tab, with every other section behind a gesture nothing advertised.
+
+Naming the current section and putting the others one press away answers all
+three. It is also what the strip had already started falling back to on a narrow
+column, so this is that fallback becoming the whole design.
+
+Two consequences in the contract. There are **no variants** — the container used
+to read the layout's placement to choose `strip` or `menu`, which meant Focus
+declared its control into the lifecycle strip's trailing cluster to get the
+compact one, a declaration doing a job other than the one it named; every region
+string now says where the control actually is. And **Horizon's placement became
+`region`**: it was `overlay: gesture` when it was refusing to draw a strip, and
+calling the same control an overlay there and a region everywhere else would be
+two names for one thing. `overlay` stays legal for both slots, but nothing takes
+it — the control is already as quiet as a line of text, so there is nothing left
+to fold away. `sectionClose` stays on screen everywhere for its own reason: it is
+an action on the current question, not a record of past ones.
 
 `useSectionStrip` (`lib/hooks/use-section-strip.ts`) reads and writes the
 endpoint. Modelled on `useAnswerPanel`: one hook for both access modes, refetched
@@ -315,14 +403,70 @@ whose frames stay `start | content | warning | done | error`, F7.2 already
 established that a panel reads its own endpoint rather than widening that
 contract.
 
-Both fetch failures **fail quiet**. An unreachable strip leaves the last good one
-on screen; collapsing the tabs mid-conversation reads as the interview losing its
-shape. A refused move leaves the strip as it was, because the server is the
+Both fetch failures **fail quiet**. An unreachable view leaves the last good one
+on screen; blanking the control mid-conversation reads as the interview losing its
+shape. A refused move leaves the control as it was, because the server is the
 authority and the controls it refused were drawn from that same view.
 
 ---
 
 ## What else reads a section
+
+- **The conversation itself** shows only the section it is in. `turnInSection`
+  (`lib/app/questionnaire/chat/exchange.ts`) is the one predicate, and BOTH halves
+  of the split transcript apply it: `ChatHistory` for what is settled, and
+  `CurrentExchange` for the live end. Both, because the exchange boundary is
+  anchored on the respondent's last message and a section move moves no message —
+  so the section they left keeps its final question and answer past that boundary,
+  where a history-only filter never sees them. It cannot strand the reveal queue: a
+  turn is only filtered out by a move, and a move is only offered on `canSend`,
+  which is false until the queue has emptied.
+
+  For that to work live, the turns have to be tagged as they are appended.
+  `useQuestionnaireSessionStream` takes a `sectionKey` and stamps it on the
+  optimistic respondent bubble and on the committed reply — the same key the
+  `/messages` route stamps on the persisted row, because both are
+  `run.activeKey ?? nextOpenSectionKey(...)` over the same stored run. The stamp is
+  fixed when the turn STARTS, not when it commits. Without it the filter had
+  nothing to match on until a reload brought the tagged rows back from
+  `/transcript`, and a section move looked like it had changed nothing.
+
+  **The turn that opens a new section names its own.** `kickoff({ sectionKey })`
+  overrides the hook's, because that one turn fires from the move's own callback:
+  the strip's new view is set and the kickoff runs before React re-renders, so the
+  hook still holds the section the respondent LEFT. The server tags the row from
+  the run it has just written, so the two disagreed — the new section's opening
+  question rendered in the old section, below a later turn, and the section just
+  opened showed nothing but the greeting.
+
+  The tag also has to survive a RELOAD. `transcriptTurnSchema` in
+  `lib/app/questionnaire/session/boot-fetchers.ts` enumerates every field it
+  parses and Zod strips the rest, so `sectionKey` is listed there explicitly —
+  without it a resumed no-login session came back with every turn untagged and
+  showed the whole interview under whichever section the respondent was in. The
+  authenticated page reads `loadTranscript` server-side and never had the gap.
+
+  **What is said once, at the head of the conversation, is placed the same way.**
+  `openingSectionKey(view)` is the run's first section and `isInOpeningSection(view)`
+  is whether the conversation is still there (both true/null on an unsectioned
+  interview, and a null `activeKey` counts as the opening — there is no section to
+  be somewhere else in). The workspace gates the **pre-release recording notice** on
+  it: that notice is not a turn, so the section filter never touched it, and it
+  reappeared above every section the respondent moved to — telling them a third time
+  that their chat is recorded, and taking the top of a section whose own opening
+  question was the thing to read.
+
+  A turn carrying no key belongs to `untaggedSectionKey`, and the surface passes the
+  run's FIRST section: the conversation began there. Two kinds of turn have no key —
+  the greeting the surface builds on the client (`buildWelcomeTurns`, never
+  persisted so never tagged) and anything recorded before this session was
+  sectioned. Filing them anywhere else means showing them everywhere, and then the
+  welcome and its "answer honestly, there are no right or wrong answers" reappeared
+  at the top of every section the respondent moved to, reading as the interview
+  starting over rather than carrying on. `turnInSection` still keeps an untagged
+  turn in every section when no home is given, which is the honest default for a
+  reader that does not know where the run began, and what makes an unsectioned
+  interview render exactly as it always has.
 
 - **The answers panel** follows the conversation: when sectioned it shows the
   answers for the **active** section, not the whole instrument. Once **every**

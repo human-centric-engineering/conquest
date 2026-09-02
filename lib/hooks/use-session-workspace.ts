@@ -35,6 +35,7 @@ import { useSectionStrip } from '@/lib/hooks/use-section-strip';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
 import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { useLocalStorage } from '@/lib/hooks/use-local-storage';
+import { useMediaQuery } from '@/lib/hooks/use-media-query';
 import { useStitchedHistory } from '@/lib/hooks/use-stitched-history';
 import {
   diffNewlyFilled,
@@ -48,6 +49,7 @@ import {
   DEFAULT_CHAT_TEXT_SCALE_INDEX,
   normalizeScaleIndex,
   scaleForIndex,
+  stepScaleIndex,
 } from '@/lib/app/questionnaire/chat/text-scale';
 import { API } from '@/lib/api/endpoints';
 import type {
@@ -66,6 +68,13 @@ import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
 import type { RunPollState } from '@/lib/app/questionnaire/experiences/run/types';
+
+/**
+ * Below Tailwind's `lg`, the breakpoint at which the answers panel appears beside the conversation.
+ * Written as a max-width so the two are complements rather than two thresholds that could drift:
+ * `1023.98px` is the last width `lg:` does not cover.
+ */
+const NARROW_CHAT_VIEWPORT_QUERY = '(max-width: 1023.98px)';
 
 /**
  * Which surface the carousel is showing. `intro`, `capture`, and `persona` are pre-chat "gates" that
@@ -384,10 +393,31 @@ export function useSessionWorkspace({
   // Storage is untrusted (stale ladder, another tab, hand-edited); normalise before it can reach a
   // `calc()`, where a NaN would silently drop the transcript's font-size entirely.
   const textScaleIndex = normalizeScaleIndex(storedTextScaleIndex);
+  // One notch larger below `lg` — the width at which the answers panel retires and the conversation
+  // has the surface to itself. Reading a questionnaire on a phone through a column sized for a
+  // laptop beside a panel is the case the stepper was most often being used to correct, and a
+  // respondent should not have to correct it by hand.
+  //
+  // Three things this deliberately is NOT:
+  //
+  //  - Not a change to what the respondent set. `storedTextScaleIndex` is untouched, so the stepper
+  //    still shows and edits their own rung and nothing follows them back to a laptop. Rotating a
+  //    tablet moves the text and moves it back.
+  //  - Not a multiplier. It is a step along the SAME ladder the stepper walks, which is what makes
+  //    "one notch" mean the notch they would have pressed. `stepScaleIndex` clamps rather than
+  //    wraps, so Largest stays Largest: someone who has already asked for the biggest text is not
+  //    given something bigger still.
+  //  - Not `--cq-chat-viewport-scale`'s business. That factor answers the same question at the
+  //    other end (a 27" display, 1536px and up) and the two ranges cannot overlap, so a size is
+  //    only ever adjusted for the display once.
+  const narrowChatViewport = useMediaQuery(NARROW_CHAT_VIEWPORT_QUERY);
+  const appliedTextScaleIndex = narrowChatViewport
+    ? stepScaleIndex(textScaleIndex, 'up')
+    : textScaleIndex;
   // CSS custom properties aren't part of `CSSProperties`, so the var is declared on its own typed
   // const rather than asserted inline.
   const chatScaleStyle: CSSProperties & Record<'--cq-chat-scale', string> = {
-    '--cq-chat-scale': String(scaleForIndex(textScaleIndex)),
+    '--cq-chat-scale': String(scaleForIndex(appliedTextScaleIndex)),
   };
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
@@ -455,6 +485,11 @@ export function useSessionWorkspace({
     initialInspectorTurns,
     initialStatus,
     onTurnSettled,
+    // P21: tag the turns this session appends with the section they are spoken in, the same key the
+    // server stamps on the persisted row. Declared after `sections` for exactly this — the strip is
+    // where the active key lives, and without the stamp a live transcript cannot be divided by
+    // section until the page is reloaded.
+    sectionKey: sections.view.active ? sections.view.activeKey : null,
   });
 
   // A held submit records the probe as a turn server-side; drop it into the live transcript now so the
@@ -896,7 +931,10 @@ export function useSessionWorkspace({
     sectionKickoffRef.current = (key: string) => {
       setSectionFocusKey(key);
       const tab = sections.view.sections.find((t) => t.key === key);
-      if (tab?.status === 'not_started') void streamKickoff();
+      // The key is passed explicitly rather than left to the stream's own: this fires from the
+      // move's own callback, before the render that would refresh it, so the hook still believes
+      // the conversation is in the section they just left.
+      if (tab?.status === 'not_started') void streamKickoff({ sectionKey: key });
     };
   }, [sections.view.sections, streamKickoff]);
 
@@ -907,6 +945,15 @@ export function useSessionWorkspace({
       // A tap on the section already active is a no-op rather than a re-open: re-opening would
       // stamp a reopen on a section nobody left.
       if (key === sections.view.activeKey) return;
+      // The onward section under sequential navigation is reachable only THROUGH the current one,
+      // so picking it from the list is the same move the "Move on to X" control makes: finish here,
+      // and the server hands the run forward. A plain `open` on it would be refused, which is the
+      // shape the respondent met as a section drawn locked beside a control offering to go there.
+      const tab = sections.view.sections.find((t) => t.key === key);
+      if (tab?.finishesActive && sections.view.activeKey) {
+        sections.close(sections.view.activeKey);
+        return;
+      }
       sections.open(key);
     },
     [sections]

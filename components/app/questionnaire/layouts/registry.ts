@@ -74,19 +74,30 @@ export const LAYOUT_REGISTRY = {
       answersDrawer: { kind: 'overlay', via: 'sheet' },
 
       /* Sectioned interviews (P21) */
-      // Room and a two-column split: the tabs are chrome and belong with the chrome, directly above
-      // the conversation they bound.
+      // Chrome, and it belongs with the chrome — in the conversation card's own header band,
+      // directly above the transcript it names. Inside the card rather than above it because the
+      // card's top edge is aligned with the answers panel beside it, and a band that comes and goes
+      // above the card takes that alignment with it.
       sectionTabs: {
         kind: 'region',
-        region: 'above the conversation card, below the lifecycle strip',
+        region: 'the conversation card header, above the transcript',
       },
+      // The card's closing band, beneath the composer — inside the card for the same alignment
+      // reason as the header band above it.
       sectionClose: {
         kind: 'region',
-        region: 'foot of the conversation card, beside the composer',
+        region: 'the conversation card footer, beneath the composer',
       },
 
       /* Finishing */
-      completionOffer: { kind: 'region', region: 'above the conversation and the form' },
+      // Chat: the same header band as the tabs, and `compact` so it arrives as a row rather than a
+      // card inside a card. Form: its own row above the form, where that surface's submit expects
+      // it — one placement, because the two surfaces are never on screen together.
+      completionOffer: {
+        kind: 'region',
+        region: 'the conversation card header, else above the form',
+        compact: true,
+      },
       finalCheck: { kind: 'overlay', via: 'modal' },
       complete: { kind: 'region', region: 'takeover' },
       handoff: { kind: 'region', region: 'takeover' },
@@ -139,9 +150,13 @@ export const LAYOUT_REGISTRY = {
       // This layout strips chrome on purpose, so a permanent seven-tab strip would reintroduce
       // exactly what it exists to remove. The tabs collapse into the trailing cluster beside the
       // review trigger — already this layout's pattern for anything it will not keep on screen.
+      // Above the card, on the same line as the finish control. It used to be declared into the
+      // lifecycle strip's trailing cluster, which was where the container read "give this layout the
+      // compact variant" from — a declaration doing a job other than the one it names. There is one
+      // shape now, so it says where the control actually is.
       sectionTabs: {
         kind: 'region',
-        region: 'lifecycle strip, trailing cluster (a compact part-of menu)',
+        region: 'above the conversation card, beside the finish control',
       },
       sectionClose: {
         kind: 'region',
@@ -223,6 +238,7 @@ export const LAYOUT_REGISTRY = {
       // which area to work in is a third, so it joins them there rather than floating above the
       // document, which is the thing they read.
       sectionTabs: { kind: 'region', region: 'the margin, above the completion offer' },
+      // (Unchanged by the strip's retirement: the margin is still where choosing an area belongs.)
       sectionClose: {
         kind: 'region',
         region: 'the margin, with the composer and the completion offer',
@@ -307,7 +323,11 @@ export const LAYOUT_REGISTRY = {
       // Behind the same kind of gesture as the history, and for the same reason: a permanent list
       // of seven areas is precisely the accumulated wall this layout exists to fold away. Legal
       // because `overlay` is availability, not omission — one gesture away is a design decision.
-      sectionTabs: { kind: 'overlay', via: 'gesture' },
+      // `region`, not `overlay`. It was declared as a gesture when it was a tab strip this layout
+      // refused to draw, and the compact menu it got instead is exactly what every layout now
+      // shows: a line of context on screen, with the list one press away. Calling that an overlay
+      // here and a region everywhere else would be two names for one control.
+      sectionTabs: { kind: 'region', region: 'above the stage, with the finish control' },
       // The exception that stays on screen. It is an action on the CURRENT question, not a record
       // of past ones, so folding it away would be folding away the way forward.
       sectionClose: { kind: 'region', region: 'above the stage, with the completion offer' },

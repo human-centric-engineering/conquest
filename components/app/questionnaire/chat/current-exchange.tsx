@@ -49,6 +49,7 @@ import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questi
 import type { CorrectionTarget } from '@/lib/app/questionnaire/panel/correction-targets';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import { turnInSection } from '@/lib/app/questionnaire/chat/exchange';
 
 export interface CurrentExchangeProps {
   /** The session id powering the question card's submit and the inspector drawer. */
@@ -78,6 +79,26 @@ export interface CurrentExchangeProps {
   /** Refetch the panel/lifecycle after a successful inline correction. */
   onCorrected?: (view: AnswerPanelView) => void;
   /**
+   * Sectioned interviews (P21): show only the exchange belonging to this section.
+   *
+   * The same key and the same predicate `ChatHistory` takes, and it is needed HERE too because the
+   * exchange boundary is anchored on the last respondent message. Moving to another section moves
+   * no message, so the section they left keeps its final question and answer sitting past that
+   * boundary — visible under the new section's name until the respondent speaks again. Filtering
+   * one half and not the other is what made a section move look like it had changed nothing.
+   *
+   * It cannot strand the reveal queue. A turn can only be filtered out here by a section move, and
+   * a move is only offered on `canSend`, which is false until the queue has emptied — so the turn
+   * at the cursor is never the one that disappears.
+   */
+  sectionKey?: string | null;
+  /**
+   * Sectioned interviews (P21): where a turn carrying NO section of its own belongs — the run's
+   * first section. See {@link turnInSection}; the surface passes it so the client-built greeting
+   * does not reappear at the top of every section.
+   */
+  untaggedSectionKey?: string | null;
+  /**
    * Read-only replay: the admin session viewer reading a respondent's conversation. Suppresses
    * every answer affordance — there is no composer beside it either, but these are hidden
    * independently of that.
@@ -96,6 +117,8 @@ export function CurrentExchange({
   reasoningPerItemMs = AUTO_REVEAL_PER_ITEM_MS,
   correctionTargets = [],
   onCorrected,
+  sectionKey,
+  untaggedSectionKey,
   readOnly = false,
   className,
 }: CurrentExchangeProps) {
@@ -124,8 +147,12 @@ export function CurrentExchange({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // The answer control belonging to the CURRENT turn, if any. Reading only the last turn is what
-  // keeps exactly one card on screen: a new turn retires the previous card automatically.
-  const activeCard = turns[turns.length - 1]?.card;
+  // keeps exactly one card on screen: a new turn retires the previous card automatically. A last
+  // turn belonging to another section retires it too — the card asks a question of the section the
+  // respondent has just left, and its Submit would write an answer they are no longer looking at.
+  const lastTurn = turns[turns.length - 1];
+  const activeCard =
+    lastTurn && turnInSection(lastTurn, sectionKey, untaggedSectionKey) ? lastTurn.card : undefined;
   // Dismissal is keyed on the TURN, not the question. Keying it on the question key would suppress
   // the control permanently: a must-ask question the respondent dismissed stays unsatisfied, so the
   // interviewer re-asks it on a later turn — and a prose answer can't clear the 0.85 must-ask floor
@@ -167,6 +194,9 @@ export function CurrentExchange({
       {turns.map((turn, i) => {
         // Behind the boundary: `ChatHistory` is rendering this one, wherever the layout put it.
         if (i < historyEnd) return null;
+        // P21: said in another section. Skipped by index rather than filtered out of the array, so
+        // the reveal cursor keeps indexing the same turns it always did.
+        if (!turnInSection(turn, sectionKey, untaggedSectionKey)) return null;
         if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
 
         // Reveal queue. Turns past the cursor stay hidden until the queue reaches them, so a

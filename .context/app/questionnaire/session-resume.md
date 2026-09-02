@@ -42,6 +42,19 @@ Admin toggle lives on the **Settings** tab of the config editor ("Resume in-prog
   session (`POST …/lifecycle { action: 'abandon' }`, token-authed), clears creds, and mints fresh.
 - Durable creds are cleared when the session reaches a terminal status (so a shared device doesn't
   offer a finished session).
+- **A stored credential the server no longer honours is replaced, not entered.** Every path that
+  enters a STORED session goes through `enterStoredSession`, which reads the transcript first:
+  `fetchTranscript` reports `sessionGone` on a `404` (the row is not there) or a `401`/`403` (the
+  token no longer authorises it), and the boot then clears the credential + tab marker and mints a
+  real session. Without it the boot entered the dead session anyway — every boot read fails soft to
+  nothing, so the surface seeded a welcome and the FIRST turn came back "Session not found", with a
+  Try again that asked the same dead session every time and a credential nothing cleared, so a
+  reload landed in the same place. It applies to the ephemeral paths too (admin preview,
+  frictionless invite), which reuse a stored token with no status check of their own.
+  Deliberately narrow: a 500, a timeout, or a malformed body leave the session alone, because
+  abandoning a live one over a blip would lose a respondent's thread to fix a problem they did not
+  have. Recovery happens once — the replacement is entered through `enterFreshSession`, which
+  surfaces a failure rather than recovering again.
 
 ## B. Cross-device by ref
 

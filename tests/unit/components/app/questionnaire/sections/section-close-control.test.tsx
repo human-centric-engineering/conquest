@@ -25,6 +25,7 @@ function makeTab(overrides: Partial<SectionTabView> = {}): SectionTabView {
     status: 'not_started',
     isActive: false,
     isAvailable: true,
+    finishesActive: false,
     reopenCount: 0,
     ...overrides,
   };
@@ -42,6 +43,7 @@ function makeView(overrides: Partial<SectionStripView> = {}): SectionStripView {
     blockedOnRequired: false,
     allClosed: false,
     showLocked: true,
+    canGrow: false,
     ...overrides,
   };
 }
@@ -96,6 +98,22 @@ describe('SectionCloseControl', () => {
   it('renders "Move on to {next label}" when a next section exists', () => {
     render(<SectionCloseControl view={makeView({ canClose: true })} onClose={vi.fn()} canClose />);
     expect(screen.getByRole('button', { name: /Move on to Goals/ })).toBeInTheDocument();
+  });
+
+  it('names the section the move actually lands in, skipping one already finished', () => {
+    // Position + 1 would have named "Goals", which is closed and which the server's own close rule
+    // skips straight past. The label has to name where the respondent will land.
+    const view = makeView({
+      canClose: true,
+      sections: [
+        makeTab({ key: 'intro', label: 'Introduction', position: 1, isActive: true }),
+        makeTab({ key: 'goals', label: 'Goals', position: 2, status: 'closed' }),
+        makeTab({ key: 'wrap', label: 'Wrap up', position: 3 }),
+      ],
+    });
+    render(<SectionCloseControl view={view} onClose={vi.fn()} canClose />);
+    expect(screen.getByRole('button', { name: /Move on to Wrap up/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Move on to Goals/ })).not.toBeInTheDocument();
   });
 
   it('renders "Finish this section" when there is no next section', () => {

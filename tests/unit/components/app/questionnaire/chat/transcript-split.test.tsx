@@ -72,16 +72,28 @@ function streamStub(
 function renderSplit(
   turns: QuestionnaireTurn[],
   animateOpening = false,
-  history: Partial<React.ComponentProps<typeof ChatHistory>> = {}
+  history: Partial<React.ComponentProps<typeof ChatHistory>> = {},
+  sectionKey?: string | null,
+  untaggedSectionKey?: string | null
 ) {
   const stream = streamStub(turns);
   return render(
     <ConversationProvider stream={stream} animateOpening={animateOpening}>
       <div data-testid="folded">
-        <ChatHistory stream={stream} {...history} />
+        <ChatHistory
+          stream={stream}
+          sectionKey={sectionKey}
+          untaggedSectionKey={untaggedSectionKey}
+          {...history}
+        />
       </div>
       <div data-testid="stage">
-        <CurrentExchange sessionId="s1" stream={stream} />
+        <CurrentExchange
+          sessionId="s1"
+          stream={stream}
+          sectionKey={sectionKey}
+          untaggedSectionKey={untaggedSectionKey}
+        />
       </div>
     </ConversationProvider>
   );
@@ -198,6 +210,83 @@ describe('history and current exchange placed apart', () => {
     renderSplit([ask('Welcome.')]);
 
     expect(screen.getByTestId('folded')).toBeEmptyDOMElement();
+  });
+});
+
+describe('sectioned interviews: the conversation belongs to the section it was said in', () => {
+  /**
+   * The state a section move leaves behind. The respondent worked in `s1`, and their last message
+   * and the reply to it are the CURRENT exchange — past the history boundary, which is anchored on
+   * the last respondent message and does not move because a section did. Then they move to `s2`,
+   * which opens with a question of its own.
+   */
+  const moved: QuestionnaireTurn[] = [
+    { role: 'assistant', content: 'How is the team set up?', sectionKey: 's1' },
+    { role: 'user', content: 'Twenty people, mostly juniors.', sectionKey: 's1' },
+    { role: 'assistant', content: 'What is getting in the way?', sectionKey: 's1' },
+    { role: 'assistant', content: 'Where do you want to grow?', sectionKey: 's2' },
+  ];
+
+  it('shows only the new section, across BOTH halves', () => {
+    renderSplit(moved, false, {}, 's2');
+
+    expect(screen.queryByText('How is the team set up?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Twenty people, mostly juniors.')).not.toBeInTheDocument();
+    // The one that made the move look like it had done nothing: past the boundary, so the history
+    // filter never saw it.
+    expect(screen.queryByText('What is getting in the way?')).not.toBeInTheDocument();
+    expect(screen.getByText('Where do you want to grow?')).toBeInTheDocument();
+  });
+
+  it('brings the earlier section back, whole, when the respondent returns to it', () => {
+    renderSplit(moved, false, {}, 's1');
+
+    expect(screen.getByText('How is the team set up?')).toBeInTheDocument();
+    expect(screen.getByText('Twenty people, mostly juniors.')).toBeInTheDocument();
+    expect(screen.getByText('What is getting in the way?')).toBeInTheDocument();
+    expect(screen.queryByText('Where do you want to grow?')).not.toBeInTheDocument();
+  });
+
+  it('renders everything when the interview is not sectioned', () => {
+    renderSplit(moved, false, {}, null);
+    for (const turn of moved) expect(screen.getByText(turn.content)).toBeInTheDocument();
+  });
+
+  it('leaves the greeting in the section the conversation began in', () => {
+    // The client-built welcome is never persisted, so it carries no section. Shown everywhere, it
+    // reappeared at the top of each section the respondent moved to — and in a section whose own
+    // opening had not landed yet it was the ONLY thing on screen, which reads as a restart.
+    const opened: QuestionnaireTurn[] = [
+      ask('Welcome. Answer honestly — there are no right or wrong answers.'),
+      { role: 'assistant', content: 'Where do you want to grow?', sectionKey: 's2' },
+    ];
+
+    const { unmount } = renderSplit(opened, false, {}, 's2', 's1');
+    expect(
+      screen.queryByText('Welcome. Answer honestly — there are no right or wrong answers.')
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Where do you want to grow?')).toBeInTheDocument();
+    unmount();
+
+    renderSplit(opened, false, {}, 's1', 's1');
+    expect(
+      screen.getByText('Welcome. Answer honestly — there are no right or wrong answers.')
+    ).toBeInTheDocument();
+  });
+
+  it('keeps a turn carrying no section key, whichever section is being shown', () => {
+    // Recorded before P21, or before this session was sectioned. Hiding it would make the
+    // transcript lie about what was said.
+    const mixed: QuestionnaireTurn[] = [
+      ask('Said before any of this was sectioned.'),
+      say('And my answer to it.'),
+      { role: 'assistant', content: 'A section question.', sectionKey: 's2' },
+    ];
+    renderSplit(mixed, false, {}, 's2');
+
+    expect(screen.getByText('Said before any of this was sectioned.')).toBeInTheDocument();
+    expect(screen.getByText('And my answer to it.')).toBeInTheDocument();
+    expect(screen.getByText('A section question.')).toBeInTheDocument();
   });
 });
 

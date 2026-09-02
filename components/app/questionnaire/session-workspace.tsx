@@ -60,10 +60,11 @@ import { HandoffCard } from '@/components/app/questionnaire/experiences/handoff-
 import { StitchedContinuation } from '@/components/app/questionnaire/experiences/stitched-continuation';
 import { VIEW_META } from '@/components/app/questionnaire/layouts/view-meta';
 import { resolveLayout } from '@/components/app/questionnaire/layouts/registry';
-import { SectionTabStrip } from '@/components/app/questionnaire/sections/section-tab-strip';
+import { SectionMenu } from '@/components/app/questionnaire/sections/section-menu';
 import { SectionCloseControl } from '@/components/app/questionnaire/sections/section-close-control';
 import type { RespondentSlots } from '@/components/app/questionnaire/layouts/types';
 import { hasConversationHistory } from '@/lib/app/questionnaire/chat/exchange';
+import { isInOpeningSection, openingSectionKey } from '@/lib/app/questionnaire/sections/view';
 import { stepScaleIndex } from '@/lib/app/questionnaire/chat/text-scale';
 import { useSessionWorkspace, type WorkspaceView } from '@/lib/hooks/use-session-workspace';
 import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
@@ -473,20 +474,15 @@ export function SessionWorkspace({
   // — it cannot reach inside the composer and tell the textarea to grow.
   const composerFills = placements.composer.kind === 'region' && placements.composer.fills === true;
 
-  /* ── Sectioned interviews (P21): two placement reads ───────────────────────────────────────
-     1. The tab VARIANT. A layout that folds the tabs behind a gesture (Horizon) or tucks them into
-        the lifecycle strip's trailing cluster (Focus) wants the compact menu; Classic and
-        Broadsheet have room for the full strip.
-     2. What "bring the section's answers into focus" MEANS here. With the panel on screen it is a
-        scroll to the top of the freshly-filtered list. On the three layouts that keep review in the
-        sheet there is nothing on screen to scroll, and force-opening the sheet on every tab click
-        would fight the explicit reason each of them folds review away — so the review trigger is
-        marked as having something new instead, and the respondent opens it when they choose. */
-  const sectionTabsVariant =
-    placements.sectionTabs.kind === 'overlay' ||
-    (placements.sectionTabs.kind === 'region' && placements.sectionTabs.region.includes('trailing'))
-      ? 'menu'
-      : 'strip';
+  /* ── Sectioned interviews (P21) ─────────────────────────────────────────────────────────────
+     What "bring the section's answers into focus" MEANS here. With the panel on screen it is a
+     scroll to the top of the freshly-filtered list. On the three layouts that keep review in the
+     sheet there is nothing on screen to scroll, and force-opening the sheet whenever a section is
+     picked would fight the explicit reason each of them folds review away — so the review trigger
+     is marked as having something new instead, and the respondent opens it when they choose.
+
+     There is no longer a second read here for the section control's own shape: it has one shape
+     everywhere (see `SectionMenu`), and a layout decides only where it goes. */
   // And does that region want the composer PRESENT in the room it was given, or tucked into a
   // corner of it? Broadsheet's bare margin and Horizon's one-question stage both say present, and
   // get the bordered box at prose height with its controls inside; Classic and Focus say tucked,
@@ -609,11 +605,29 @@ export function SessionWorkspace({
   // Completion affordance, by precedence: the agent's full submit offer wins (the session is
   // genuinely "done enough"); otherwise the respondent-controlled early-finish escape hatch shows
   // once unlocked. Shared verbatim by the chat and form surfaces.
+  //
+  // The SHAPE is a placement read, like `composerProminent` below it: a layout that hands this its
+  // own row above the conversation gets the tinted banner, and one that puts it in the conversation
+  // card's chrome band (Classic) gets the condensed bar. Both twins take it, so the controls cannot
+  // change shape at the moment the early-finish offer gives way to the full submit offer.
+  const offerVariant =
+    placements.completionOffer.kind === 'region' && placements.completionOffer.compact === true
+      ? 'bar'
+      : 'banner';
   const completionOffer = lifecycle.canSubmit ? (
-    <CompletionOffer onSubmit={doSubmit} busy={lifecycle.busy} />
+    <CompletionOffer onSubmit={doSubmit} busy={lifecycle.busy} variant={offerVariant} />
   ) : lifecycle.canFinishEarly ? (
-    <EarlyFinishControl onFinish={doFinishEarly} busy={lifecycle.busy} />
+    <EarlyFinishControl onFinish={doFinishEarly} busy={lifecycle.busy} variant={offerVariant} />
   ) : null;
+
+  // Sectioned interviews (P21): where a turn carrying no section of its own belongs — the run's
+  // FIRST section, because that is where the conversation began. It covers the greeting the surface
+  // builds on the client (never persisted, so never tagged) and anything recorded before this
+  // session was sectioned. Null when unsectioned, which leaves every turn on its flat path.
+  const untaggedSectionKey = openingSectionKey(sections.view);
+  // ...and whether the conversation is still THERE. What is said once, at the head of the
+  // conversation, is placed by this — see `isInOpeningSection`.
+  const inOpeningSection = isInOpeningSection(sections.view);
 
   const slots: RespondentSlots = {
     // Rendered by the page's `BrandThemeProvider`, above this component — a slot key because a
@@ -724,7 +738,13 @@ export function SessionWorkspace({
     // A slot of its own since Horizon, which folds the history away: a recording notice folded away
     // with it would not be a notice. `null` in the read-only admin replay — the admin is not the
     // recorded party — and the component itself renders nothing once the product is `stable`.
-    releaseNotice: readOnly ? null : <ReleaseStageNotice />,
+    //
+    // On a sectioned interview it belongs to the OPENING section only, the same place the greeting
+    // it sits beside belongs. It is a disclosure made once, at the head of the conversation; it is
+    // not a turn, so the section filter never touched it, and it reappeared above every section the
+    // respondent moved to — telling them a third time that their chat is being recorded, and taking
+    // the top of a section whose own opening question was the thing to read.
+    releaseNotice: readOnly || !inOpeningSection ? null : <ReleaseStageNotice />,
 
     // `null` when there is nothing behind the current exchange — a fresh session's opening burst is
     // all current exchange, and a stitched run's earlier legs count as history even before this leg
@@ -738,6 +758,7 @@ export function SessionWorkspace({
         stitchedHistory={stitchedHistory}
         stitchedSeamLabel={stitchedSeamLabel}
         sectionKey={sections.view.active ? sections.view.activeKey : null}
+        untaggedSectionKey={untaggedSectionKey}
       />
     ) : null,
 
@@ -752,6 +773,8 @@ export function SessionWorkspace({
         reasoningPerItemMs={reasoningPerItemMs}
         correctionTargets={correctionTargets}
         onCorrected={onTurnSettled}
+        sectionKey={sections.view.active ? sections.view.activeKey : null}
+        untaggedSectionKey={untaggedSectionKey}
       />
     ),
 
@@ -771,21 +794,14 @@ export function SessionWorkspace({
     ),
 
     /* ── Sectioned interviews (P21) ─────────────────────────────────────────────────────────
-       Both render `null` on an unsectioned questionnaire (the strip's `active` is false), so every
-       layout places them unconditionally and most questionnaires draw neither.
-
-       The VARIANT is read from this layout's own placement rather than from the viewport: an
-       `overlay` placement means this layout folds accumulated context away (Horizon), and a
-       trailing-cluster region means it strips chrome (Focus). Both want the compact menu; the two
-       layouts with room for a strip get the strip. Same idiom as `composerFills` /
-       `composerProminent` above — the container reads the declaration and the node cooperates. */
+       Both render `null` on an unsectioned questionnaire (the view's `active` is false), so every
+       layout places them unconditionally and most questionnaires draw neither. */
     sectionTabs: (
-      <SectionTabStrip
+      <SectionMenu
         view={sections.view}
         onSelect={onSelectSection}
         // Moving mid-stream would strand the reply that is still arriving.
         canSelect={stream.canSend && !sections.moving}
-        variant={sectionTabsVariant}
       />
     ),
 

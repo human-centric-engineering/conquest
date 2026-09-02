@@ -218,6 +218,20 @@ describe('canOpenSection', () => {
     expect(canOpenSection(run, SECTIONS, 'a', 'sequential')).toBe(true);
   });
 
+  it('allows returning to a section already visited, even one left in progress', () => {
+    // The reported dead end: a closed, b opened, then back into a to add a line. a reopens and is
+    // the first-not-closed again, so the old rule made b — where they had just been working — a
+    // padlock. Being opened at all meant b was permitted, so returning to it skips nothing.
+    let run = closeSection(openSection(fresh(), 'a', 0), 'a', 1, 'respondent', SECTIONS);
+    run = openSection(run, 'b', 2);
+    run = openSection(run, 'a', 3);
+
+    expect(run.activeKey).toBe('a');
+    expect(canOpenSection(run, SECTIONS, 'b', 'sequential')).toBe(true);
+    // Still refused: c has never been opened, and it is not the next open one either.
+    expect(canOpenSection(run, SECTIONS, 'c', 'sequential')).toBe(false);
+  });
+
   it('refuses a section the run does not track', () => {
     expect(canOpenSection(fresh(), SECTIONS, 'ghost', 'free')).toBe(false);
   });

@@ -276,6 +276,71 @@ describe('AnonymousSessionBoot', () => {
       expect(createCalls()).toHaveLength(0);
     });
 
+    it('replaces a stored session the server no longer has, instead of entering a dead one', async () => {
+      // The dead end this closes: a credential outlives the session it names (the row was removed,
+      // or the token stopped authorising it). The boot used to enter it anyway — every read failed
+      // soft to nothing, the surface seeded a welcome, and the first turn came back "Session not
+      // found" with a Try again that asked the same dead session forever. Nothing cleared the
+      // credential, so a reload landed in exactly the same place.
+      fakeStorage.setItem(STORAGE_KEY, storedSession('gone-sess', 'gone-tok', futureExpiry()));
+      // Re-stubbed the way `beforeEach` builds it, rather than `mockImplementation`: the mock is
+      // typed from that call site, and a replacement implementation has to match its signature.
+      fakeFetch = vi.fn((url: unknown, init?: RequestInit) => {
+        if (typeof url === 'string' && url.includes('/transcript')) {
+          // The dead credential's read 404s; the replacement session's read is healthy.
+          return Promise.resolve(
+            url.includes('gone-sess')
+              ? ({ ok: false, status: 404, json: async () => ({ success: false }) } as Response)
+              : jsonResponse(transcriptResponse([]))
+          );
+        }
+        if (init?.method === 'POST') {
+          return Promise.resolve(jsonResponse(successBody('fresh-sess', 'fresh-tok')));
+        }
+        return Promise.resolve(jsonResponse({ success: true, data: {} }));
+      });
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+          'data-session-id',
+          'fresh-sess'
+        );
+      });
+      expect(createCalls()).toHaveLength(1);
+      // And the dead credential is replaced, so a reload does not walk back into it.
+      expect(fakeStorage.getItem(STORAGE_KEY)).toContain('fresh-sess');
+    });
+
+    it('keeps a stored session when the transcript read fails for any other reason', async () => {
+      // A 500 or an outage is a reason to carry on with the session, not to abandon it: minting a
+      // replacement would lose the respondent's thread to fix a problem they did not have.
+      fakeStorage.setItem(STORAGE_KEY, storedSession('live-sess', 'live-tok', futureExpiry()));
+      fakeFetch = vi.fn((url: unknown) => {
+        if (typeof url === 'string' && url.includes('/transcript')) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: async () => ({ success: false }),
+          } as Response);
+        }
+        return Promise.resolve(jsonResponse({ success: true, data: {} }));
+      });
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+          'data-session-id',
+          'live-sess'
+        );
+      });
+      expect(createCalls()).toHaveLength(0);
+    });
+
     it('replays a prior transcript and suppresses the auto-open when the session has turns', async () => {
       // Arrange: a stored token (so the only fetch is the transcript read) whose response carries
       // prior turns.

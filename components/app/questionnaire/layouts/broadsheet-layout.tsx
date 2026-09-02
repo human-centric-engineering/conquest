@@ -98,7 +98,7 @@ export function BroadsheetLayout({ slots, state }: RespondentLayoutProps) {
           would be two rectangles saying the same thing. */}
       <div className="flex min-h-0 flex-col gap-3">
         {/* P21: the margin already holds the two things the respondent DOES — answer, and finish.
-            Choosing which area to work in is a third, so it joins them here rather than floating
+            Choosing which area to work in is a third, so it joins them here rather than sitting
             above the document, which is the thing they read. */}
         {slots.sectionTabs}
         {slots.completionOffer}

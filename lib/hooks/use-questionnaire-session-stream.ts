@@ -71,6 +71,22 @@ export interface UseQuestionnaireSessionStreamOptions {
    * does not churn `sendMessage`'s identity.
    */
   onTurnSettled?: () => void;
+  /**
+   * Sectioned interviews (P21): the section the conversation is currently in.
+   *
+   * Stamped onto every turn this hook appends, because the server stamps the persisted row with
+   * the same key — `activeSection` on the turn it just ran — and a live transcript whose turns
+   * carry no section is one the surface cannot divide. Without it a section move looked like it
+   * changed nothing until the page was reloaded, which is the point at which the tagged rows came
+   * back from `/transcript`.
+   *
+   * The two keys cannot disagree: both are `run.activeKey ?? nextOpenSectionKey(...)` over the
+   * same stored run, and a move is only offered while no turn is in flight.
+   *
+   * Undefined on every unsectioned interview, which leaves the turns untagged and every reader on
+   * its flat path.
+   */
+  sectionKey?: string | null;
 }
 
 export interface UseQuestionnaireSessionStreamReturn {
@@ -103,7 +119,7 @@ export interface UseQuestionnaireSessionStreamReturn {
    * Proactive opening: stream the first question without a respondent message (no user bubble).
    * Fired once on a fresh session by {@link SessionWorkspace}'s `autoStart`. No-ops when blocked.
    */
-  kickoff: () => Promise<void>;
+  kickoff: (opts?: { sectionKey?: string | null }) => Promise<void>;
   /** Run a follow-up turn after an in-chat answer control was submitted (no respondent bubble). */
   continueAfterCard: (questionKey: string) => Promise<void>;
   /** Clear a transient error banner. */
@@ -245,6 +261,7 @@ export function useQuestionnaireSessionStream(
     initialInspectorTurns,
     initialStatus,
     onTurnSettled,
+    sectionKey,
   } = options;
   const anonymous = Boolean(accessToken);
 
@@ -252,6 +269,15 @@ export function useQuestionnaireSessionStream(
   // the caller passes a new closure each render.
   const onTurnSettledRef = useRef(onTurnSettled);
   onTurnSettledRef.current = onTurnSettled;
+
+  // Held in a ref for the same reason, and read at the START of a turn rather than when it commits:
+  // the section is what it was when the respondent spoke, and the strip refetches on settle.
+  const sectionKeyRef = useRef(sectionKey);
+  sectionKeyRef.current = sectionKey;
+
+  /** The section stamp for a turn appended now. Empty (not `{ sectionKey: null }`) when unsectioned. */
+  const sectionStamp = (key = sectionKeyRef.current): { sectionKey?: string } =>
+    key ? { sectionKey: key } : {};
 
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
@@ -311,7 +337,12 @@ export function useQuestionnaireSessionStream(
   const appendAgentTurn = useCallback((content: string, warnings?: SessionWarning[]) => {
     setTurns((prev) => [
       ...prev,
-      { role: 'assistant', content, ...(warnings && warnings.length > 0 ? { warnings } : {}) },
+      {
+        role: 'assistant',
+        content,
+        ...(warnings && warnings.length > 0 ? { warnings } : {}),
+        ...sectionStamp(),
+      },
     ]);
   }, []);
 
@@ -320,7 +351,22 @@ export function useQuestionnaireSessionStream(
   // carries no respondent message); `body` is the POST payload (`{ message, attachments }` or
   // `{ kickoff: true }`).
   const streamTurn = useCallback(
-    async (opts: { body: Record<string, unknown>; userTurn?: string; isRetry?: boolean }) => {
+    async (opts: {
+      body: Record<string, unknown>;
+      userTurn?: string;
+      isRetry?: boolean;
+      /**
+       * Override the section this turn is stamped with (P21).
+       *
+       * For the one turn that opens a section the respondent has just moved to. The move posts,
+       * the strip's new view is set, and the kickoff fires from that same callback — before React
+       * has re-rendered, so `sectionKeyRef` still holds the section they LEFT. The server tags the
+       * persisted row from the run it just wrote, so the two disagreed: the new section's opening
+       * question rendered in the old section, below a later turn, and the section just opened
+       * showed nothing but the greeting.
+       */
+      sectionKey?: string | null;
+    }) => {
       // `BLOCKING_STATUSES` (streaming + the terminal cost-cap / not-active / expired states)
       // is the single source of truth for "no further input is meaningful" — the same set
       // `canSend` is derived from, so the guard and the composer can never disagree.
@@ -331,13 +377,21 @@ export function useQuestionnaireSessionStream(
       // a transient failure can resend the same body + key.
       const prior = lastAttemptRef.current;
       const key = opts.isRetry && prior ? prior.key : crypto.randomUUID();
+      // The section this turn is being spoken in, fixed now rather than read again when the reply
+      // commits: it is the key the server will stamp on the persisted row, and a move that landed
+      // in between must not retag a turn that was said somewhere else. An explicit key wins, for
+      // the turn that opens a section the ref has not caught up with yet.
+      const turnSection = opts.sectionKey !== undefined ? opts.sectionKey : sectionKeyRef.current;
       const hasUserTurn = opts.isRetry && prior ? prior.hasUserTurn : opts.userTurn !== undefined;
       lastAttemptRef.current = { body: opts.body, key, hasUserTurn };
 
       // Optimistic: show the respondent's turn immediately (fresh send only — a retry's bubble is
       // already on screen from the failed attempt) and clear side-band state.
       if (!opts.isRetry && opts.userTurn !== undefined) {
-        setTurns((prev) => [...prev, { role: 'user', content: opts.userTurn as string }]);
+        setTurns((prev) => [
+          ...prev,
+          { role: 'user', content: opts.userTurn as string, ...sectionStamp(turnSection) },
+        ]);
       }
       setError(null);
       setStatus('streaming');
@@ -452,6 +506,7 @@ export function useQuestionnaireSessionStream(
               ...(streamWarnings.length > 0 ? { warnings: streamWarnings } : {}),
               ...(streamReasoning.length > 0 ? { reasoning: streamReasoning } : {}),
               ...(streamCard !== null ? { card: streamCard } : {}),
+              ...sectionStamp(turnSection),
             },
           ]);
         }
@@ -515,9 +570,18 @@ export function useQuestionnaireSessionStream(
 
   // Proactive opening: stream the first question with no respondent bubble. The empty-message
   // turn is skipped by the server's `recentMessages` and ignored by the opening phraser.
-  const kickoff = useCallback(async () => {
-    await streamTurn({ body: { kickoff: true } });
-  }, [streamTurn]);
+  //
+  // `sectionKey` is passed by the one caller that knows better than this hook does: the section
+  // move, which fires the opening for a section the strip has only just switched to.
+  const kickoff = useCallback(
+    async (opts: { sectionKey?: string | null } = {}) => {
+      await streamTurn({
+        body: { kickoff: true },
+        ...(opts.sectionKey !== undefined ? { sectionKey: opts.sectionKey } : {}),
+      });
+    },
+    [streamTurn]
+  );
 
   /**
    * Question fidelity (P18): run a turn after the respondent answered a question through its in-chat

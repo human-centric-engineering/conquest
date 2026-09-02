@@ -84,6 +84,7 @@ async function handleGet(
       buildSectionStripView(resolved.loaded.sectionState, {
         showLocked: settings.showLockedSections,
         navigation: settings.navigation,
+        canGrow: resolved.loaded.base.config.conditionalTopics.enabled,
       })
     );
   } catch (error) {
@@ -197,7 +198,11 @@ async function handlePost(
           // it with the next turn, which is also when it becomes true.
           close: null,
         },
-        { showLocked: settings.showLockedSections, navigation: settings.navigation }
+        {
+          showLocked: settings.showLockedSections,
+          navigation: settings.navigation,
+          canGrow: resolved.loaded.base.config.conditionalTopics.enabled,
+        }
       )
     );
   } catch (error) {
