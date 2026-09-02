@@ -85,6 +85,7 @@ const EXCLUDED_SOURCE_LABELS: Record<ScopeDecisionSource, string> = {
   fallback: 'Not in the fallback set',
   check: 'Not the blind-spot check',
   respondent: 'Not requested',
+  early: 'Not chosen during the opening',
 };
 
 /** Shown instead of the stored source when the agent proposed a topic a later layer removed. */
@@ -98,6 +99,9 @@ const SOURCE_TONE: Record<ScopeDecisionSource, string> = {
   check: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
   budget: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
   respondent: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  // Related to `llm` and distinct from it, because it is the same judgement made earlier on less:
+  // a teal family member rather than a colour of its own.
+  early: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
 };
 
 export function PlanPreviewCard({

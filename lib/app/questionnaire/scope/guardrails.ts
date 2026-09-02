@@ -23,6 +23,7 @@
 import {
   ALWAYS_PHASES,
   type ConditionalTopicsSettings,
+  type EarlySeat,
   type ExcludedTopic,
   type InterviewPlan,
   type PlannedTopic,
@@ -99,6 +100,16 @@ export interface ApplyGuardrailsInput {
   topics: readonly Topic[];
   /** What the planner proposed, best first. Empty when it errored or chose nothing. */
   proposed: readonly ProposedTopic[];
+  /**
+   * Topics already seated during the opening (F17.36), seated FIRST and never truncated by the cap.
+   *
+   * Something the interview has already asked about cannot be dropped by a later enthusiasm: the
+   * respondent has spent turns on it, and a plan that excluded it would produce a report claiming
+   * an area was not assessed when it was. So these consume the cap rather than competing for it.
+   *
+   * Empty on every session that never seated one early, which is nearly all of them.
+   */
+  preSeated?: readonly EarlySeat[];
   settings: ConditionalTopicsSettings;
   /** The planner's confidence, already clamped to 0–1. */
   confidence: number;
@@ -227,6 +238,12 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     });
   };
 
+  // 0. Early seats (F17.36). Before the cap, for the reason on `preSeated`: this is not the
+  // planner choosing, it is the planner being told what the interview already committed to.
+  for (const early of input.preSeated ?? []) {
+    seat(early.key, 'early', early.rationale, undefined, early.respondentReason);
+  }
+
   // 1. The model's picks, in its own order, up to the limit.
   for (const proposal of input.proposed) {
     if (planned.length >= settings.maxConditionalTopics) break;
@@ -241,6 +258,11 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
 
   // 2. The fallback — only when nothing at all was seated. An interview of just the always-run
   // topics is coherent, if thin, so an empty fallback list is a legitimate configuration.
+  //
+  // An early seat (F17.36) therefore SUPPRESSES the fallback, and deliberately. The fallback's
+  // precondition is "there was no signal to judge on at all"; a topic seated during the opening is
+  // a judgement made on real evidence at a HIGHER confidence bar than this plan needed. Adding safe
+  // defaults beside it would pad an interview that already knows what it is about.
   let source = input.source;
   if (planned.length === 0 && settings.fallbackTopicKeys.length > 0) {
     source = 'fallback';

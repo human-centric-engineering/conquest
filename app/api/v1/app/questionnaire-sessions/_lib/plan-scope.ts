@@ -18,6 +18,13 @@
  * read as complete before it had been asked, which put the decision on turn one with nothing
  * captured, and a judgement over an empty transcript is not a judgement.
  *
+ * ## Early seats (F17.36)
+ *
+ * A session may already have seated topics during the opening. They are handed to the planner as
+ * pre-seated keys: excluded from the candidates it is shown, and seated before the cap. So the seal
+ * ratifies what the interview already committed to rather than re-deciding it — and the sealed plan
+ * stays what it has always been, a single coherent statement of what this interview covered.
+ *
  * ## The backstop (F17.36)
  *
  * That gate has no escape, and an instrument can be authored so it never passes: an opening topic
@@ -66,6 +73,7 @@ import { planScope, type ScopeAnswer } from '@/lib/app/questionnaire/scope/plann
 import { openingReadiness } from '@/lib/app/questionnaire/scope/readiness';
 import {
   narrowConditionalTopicsSettings,
+  narrowEarlySeating,
   narrowInterviewPlan,
   type ForcedClose,
   type InterviewPlan,
@@ -102,6 +110,9 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       select: {
         versionId: true,
         interviewPlan: true,
+        // F17.36. Whatever was seated during the opening, so the seal absorbs it rather than
+        // deciding over the top of it.
+        earlySeatedTopics: true,
         version: {
           select: {
             goal: true,
@@ -247,6 +258,11 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       }))
       .sort((a, b) => Number(openingKeys.has(b.key)) - Number(openingKeys.has(a.key)));
 
+    // F17.36. Handed to the planner as pre-seated keys, which `applyGuardrails` seats BEFORE the
+    // cap: something the interview has already asked about cannot be truncated by a later
+    // enthusiasm, and a plan that excluded it would claim an area was not assessed when it was.
+    const preSeated = narrowEarlySeating(session.earlySeatedTopics)?.seated ?? [];
+
     const budget = await loadPlanBudget(session.versionId, settings, topics);
 
     // What each candidate topic's questions ASK, so the planner can name a subset of one (C6).
@@ -275,6 +291,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       goal: session.version.goal,
       settings,
       decidedAtTurn: turnCount,
+      ...(preSeated.length > 0 ? { preSeated } : {}),
       ...(budget ? { budget } : {}),
       ...(itemPrompts ? { itemPrompts } : {}),
     });
@@ -324,6 +341,9 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
         // audit row records that a topic was dropped but not the arithmetic that dropped it.
         budgetSeconds: result.plan.budgetSeconds ?? null,
         estimatedSeconds: result.plan.estimatedSeconds ?? null,
+        // F17.36: which of the seated topics the interview had already committed to before this
+        // decision. Without it the audit row cannot tell a planner choice from a ratified one.
+        preSeatedKeys: preSeated.map((s) => s.key),
         // Null on an ordinary plan. Recorded on the audit row as well as the plan so that "why is
         // this report thin" is answerable from the AI run alone, without joining back to a session
         // whose plan may since have been amended.

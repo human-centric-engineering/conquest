@@ -609,6 +609,110 @@ for.
 `maxOpeningTurns` is a backstop, not a pace setting. Set it well above how long the opening actually
 takes; an author who wants a shorter opening should ask fewer opening questions.
 
+### Choosing during the opening, not only at the end of it (F17.36)
+
+The opening exists to find out what is relevant. Until early seating, it could only report that
+finding **once**, at the very end of itself: a respondent could spend six turns making an area
+obvious and the interview would not act on it until the last opening question was answered.
+
+> **Planning is two stages over one plan: provisional seating during the opening, then the existing
+> planner at the end, which seals the record.**
+
+The final planner still runs, always, over the complete opening. Early seating front-runs it; it
+never replaces it. That is what preserves the balanced judgement the design rests on while removing
+the all-or-nothing wait.
+
+#### The invariants
+
+Load-bearing. These are the line between a tuning knob and a re-planning engine.
+
+1. **Only ever adds.** An early seat brings a topic into scope. Nothing removes one, including the
+   final planner. Same invariant as respondent amendment, and for the same reason: an interview that
+   silently narrowed produces a report meaning something different from every other in its cohort.
+2. **The final plan is still a single coherent statement.** It absorbs every early seat with its own
+   source and turn, so a finished report is still reproducible from the record.
+3. **Breadth is one budget.** Early seats consume `maxConditionalTopics`. Two sub-caps bound how much
+   of it partial information may spend, and how much any single turn may spend.
+
+Any request to remove, re-rank or re-plan is a different feature.
+
+#### Two numbers, never one
+
+The **floor** is coverage: how much of the opening is in. The **bar** is confidence: how sure the
+judgement about this one topic is. They answer different questions, they are separately explicable
+on the admin surface, and a single blended score is a number nobody can reason about.
+
+The floor reads `openingReadiness` with `countParked: false`. The gate that seals the plan counts
+parks; this does not. A park is a best-effort inference the interviewer gave up on, and letting three
+of those carry a session over the floor would seat topics on evidence nobody actually gave.
+
+The bar defaults **above** `minConfidence` (0.85 against 0.6), and `validate.ts` says so when an
+author sets it lower: deciding on less evidence must mean deciding less readily, never more.
+
+#### Where it lives
+
+`earlySeatedTopics` is its own nullable column, **not** part of `interviewPlan`. The planner's
+once-only write guard keys on `interviewPlan` being null, so a partial plan written there would make
+the session look sealed and the final planner would never run. `resolveScope` unions the two; at seal
+time the same keys are handed to `applyGuardrails` as `preSeated` and seated **before** the cap,
+because something the interview has already asked about cannot be truncated by a later enthusiasm.
+
+An early seat also **suppresses the fallback**, deliberately. The fallback's precondition is "there
+was no signal to judge on at all", and a topic seated during the opening is a judgement made on real
+evidence at a higher bar than the plan itself needed.
+
+#### The gate, cheapest first
+
+`maybeSeatEarlyTopics` runs **first** of the four post-turn triggers, and stands down the moment a
+plan exists.
+
+| Tier | Cost              | What it does                                                               |
+| ---- | ----------------- | -------------------------------------------------------------------------- |
+| 0    | one field read    | Deferred picks outstanding? Seat up to the per-turn cap. **No model call** |
+| 1    | arithmetic only   | On? Above the floor? Allowance unspent? **Did the evidence change?**       |
+| 2    | one narrowed read | Load topics; anything still eligible?                                      |
+| 3    | one planner call  | Judge the eligible candidates over the opening so far                      |
+
+**The evidence-change check is the important one.** A turn that added no new fill and no new answer
+cannot change the judgement, so it must not pay for one. That single condition removes most turns.
+
+**Tier 0 exists because of the per-turn cap.** A turn warranting three seats under a cap of one would
+otherwise strand the other two: the evidence would not change on the next turn, so tier 1 would block
+and they would never be seated. Instead the pass records what it judged and could not seat, and later
+turns drain that list at the cap rate for free. The cap paces rather than truncates, and `overCap` is
+recorded — a cap that quietly discards decisions reads afterwards as "the planner only found one
+area" when it found four.
+
+A judgement **below the bar** is discarded outright rather than deferred. It was not a decision, it
+was a guess, and parking it would let it become a seat for free on a later turn.
+
+#### The cap hierarchy
+
+```
+maxRoutingDecisionsPerTurn  ≤  maxEarlySeatedTopics  ≤  maxConditionalTopics
+   (one answer)                  (whole opening)         (whole interview)
+```
+
+`validate.ts` raises `cap_hierarchy_inverted` when they do not nest, because the configuration is
+then expressing an intent the runtime cannot honour.
+
+#### What a respondent notices today: nothing
+
+**Seating a topic changes what is _in scope_. It does not change what is _asked next_.** The
+data-slot orchestrator picks theme-then-ordinal and stays topic-local, and the opening's themes sort
+first, so a newly seated topic waits its turn behind every remaining opening slot.
+
+That is a known and accepted limit of this phase. Making the interviewer bridge to a seated topic
+while opening slots remain is a change to the orchestrator's _pick_, not to scope, and it can make an
+interview feel like it abandoned a line of questioning — so it is its own phase with its own
+sign-off. The respondent-facing announcement is deferred to the same place: an early seat that
+changes nothing about the next question has nothing to announce yet.
+
+Analytics count `early` **separately** and never fold it into `llm`. An early seat the final planner
+would also have chosen is a planner success; one it would not have chosen is not, and counting them
+together would make the planner look better the harder the floor was tuned. The same rule
+`respondent` already follows.
+
 The announcement rides the existing **briefing** seam into the phraser, on the one turn following the
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still

@@ -683,6 +683,15 @@ export const SETTING_DESCRIPTORS = {
               : 'No limit',
         },
         {
+          // F17.36. One row for the switch and the two numbers that only mean anything with it on,
+          // for the same reason the follow-up allowance is one row: three separate rows beside a
+          // switch nobody set read as three limits that are in force.
+          label: 'Choose areas during the opening',
+          value: c.conditionalTopics.earlyTopicSeating
+            ? `After ${Math.round(c.conditionalTopics.earlySeatingFloor * 100)}% of the opening, at ${Math.round(c.conditionalTopics.earlySeatingMinConfidence * 100)}% confidence · up to ${c.conditionalTopics.maxEarlySeatedTopics} early, ${c.conditionalTopics.maxRoutingDecisionsPerTurn} from one answer`
+            : 'No — every area is chosen once the opening finishes',
+        },
+        {
           label: 'Unraised-area check topic',
           value: yesNo(c.conditionalTopics.includeCheckTopic),
         },
@@ -1286,6 +1295,35 @@ const ROUTING_SETTING_DESCRIPTORS = {
   // Reported by `limitOpeningProbes` above, where the number means something. On its own it would
   // print an allowance that is not in force.
   maxOpeningProbes: { tier: 'technical', rows: () => [] },
+
+  earlyTopicSeating: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Choose areas during the opening',
+        value: s.earlyTopicSeating
+          ? `After ${Math.round(s.earlySeatingFloor * 100)}% of the opening, at ${Math.round(s.earlySeatingMinConfidence * 100)}% confidence`
+          : 'No — every area is chosen once the opening finishes',
+      },
+      // The two caps, printed only when the switch that gives them meaning is on. Together on one
+      // row because they are one idea read at two scales.
+      ...(s.earlyTopicSeating
+        ? [
+            {
+              label: 'Most areas chosen early',
+              value: `${s.maxEarlySeatedTopics} across the opening, ${s.maxRoutingDecisionsPerTurn} from any one answer`,
+            },
+          ]
+        : []),
+    ],
+  },
+
+  // All four reported by `earlyTopicSeating` above, where the switch gives them meaning. On their
+  // own each would print a threshold that is not in force.
+  earlySeatingFloor: { tier: 'technical', rows: () => [] },
+  earlySeatingMinConfidence: { tier: 'technical', rows: () => [] },
+  maxEarlySeatedTopics: { tier: 'technical', rows: () => [] },
+  maxRoutingDecisionsPerTurn: { tier: 'technical', rows: () => [] },
 
   maxOpeningTurns: {
     tier: 'technical',

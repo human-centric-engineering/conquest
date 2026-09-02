@@ -652,3 +652,96 @@ describe('applyGuardrails — respondent-facing reasons', () => {
     }
   });
 });
+
+describe('pre-seated topics (F17.36)', () => {
+  const seat = (key: string) => ({
+    key,
+    depth: 'full' as const,
+    confidence: 0.93,
+    rationale: `seated early because ${key}`,
+    respondentReason: `you mentioned ${key}`,
+    atTurn: 3,
+  });
+
+  it('seats an early topic BEFORE the cap, so a later enthusiasm cannot truncate it', () => {
+    // The respondent has already spent turns on `pipeline`. A plan excluding it would produce a
+    // report claiming an area was not assessed when it was.
+    const plan = applyGuardrails(
+      input({
+        settings: settings({ maxConditionalTopics: 1 }),
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'forecast', rationale: 'the model preferred this' }],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+    expect(plan.topics[0]?.source).toBe('early');
+  });
+
+  it('consumes the cap rather than sitting outside it', () => {
+    // Breadth is ONE budget. An early seat that did not spend the cap would let a session cover
+    // `maxConditionalTopics + maxEarlySeatedTopics` areas, which is not what either number says.
+    const plan = applyGuardrails(
+      input({
+        settings: settings({ maxConditionalTopics: 2 }),
+        preSeated: [seat('pipeline')],
+        proposed: [
+          { key: 'forecast', rationale: 'a' },
+          { key: 'talent', rationale: 'b' },
+        ],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast']);
+  });
+
+  it("carries the early seat's own reasons through to the plan", () => {
+    const plan = applyGuardrails(input({ preSeated: [seat('pipeline')] }));
+
+    expect(plan.topics[0]?.rationale).toBe('seated early because pipeline');
+    expect(plan.topics[0]?.respondentReason).toBe('you mentioned pipeline');
+  });
+
+  it('does not double-seat a topic the model also proposed', () => {
+    const plan = applyGuardrails(
+      input({
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'pipeline', rationale: 'the model agreed' }],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+    // The early source wins, because it is the one that describes what actually happened: the
+    // interview committed to this before the plan was made.
+    expect(plan.topics[0]?.source).toBe('early');
+  });
+
+  it('keeps a pre-seated topic out of the excluded list', () => {
+    const plan = applyGuardrails(input({ preSeated: [seat('pipeline')] }));
+    expect(plan.excluded.map((t) => t.key)).not.toContain('pipeline');
+  });
+
+  it('drops a pre-seated key that no longer resolves to a conditional topic', () => {
+    // Same treatment every other layer gives an unknown key: never route into nothing. A topic an
+    // author deleted mid-interview cannot be asked, however firmly it was seated.
+    const plan = applyGuardrails(input({ preSeated: [seat('deleted'), seat('open')] }));
+    expect(plan.topics).toEqual([]);
+  });
+
+  it('survives a failed planner, and suppresses the fallback while doing so', () => {
+    // Two claims in one, and the second is the deliberate one: the fallback's precondition is "no
+    // signal to judge on at all", and a topic seated during the opening is a judgement made on real
+    // evidence at a HIGHER bar than this plan needed. Padding it with safe defaults would widen an
+    // interview that already knows what it is about.
+    const plan = applyGuardrails(
+      input({
+        source: 'fallback',
+        proposed: [],
+        settings: settings({ fallbackTopicKeys: ['talent'] }),
+        preSeated: [seat('pipeline')],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+  });
+});

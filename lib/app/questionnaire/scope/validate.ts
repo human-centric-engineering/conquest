@@ -398,6 +398,40 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
       });
     }
 
+    // ── Early topic seating (F17.36) ───────────────────────────────────────────────────────
+    if (settings.earlyTopicSeating) {
+      if (conditionalCount === 0) {
+        issues.push({
+          severity: 'warning',
+          code: 'early_seating_without_conditional_topics',
+          message:
+            'Choosing areas early is on, but no topic is conditional — there is nothing it could ever choose, so it will never do anything.',
+        });
+      }
+      // Deciding on LESS evidence must mean deciding LESS readily. A bar below the final planner's
+      // makes early seating the loose gate and the considered decision the strict one, which is
+      // backwards and produces exactly the thin-evidence seats the floor exists to prevent.
+      if (settings.earlySeatingMinConfidence < settings.minConfidence) {
+        issues.push({
+          severity: 'warning',
+          code: 'early_confidence_below_floor',
+          message: `Areas can be chosen early at ${pct(settings.earlySeatingMinConfidence)} confidence but the full decision needs ${pct(settings.minConfidence)}. That makes the early choice, which sees less of the opening, the easier one to pass.`,
+        });
+      }
+      // The three caps must nest, or the configuration expresses an intent the runtime cannot
+      // honour: an inner cap above an outer one is simply never reached.
+      if (
+        settings.maxRoutingDecisionsPerTurn > settings.maxEarlySeatedTopics ||
+        settings.maxEarlySeatedTopics > settings.maxConditionalTopics
+      ) {
+        issues.push({
+          severity: 'warning',
+          code: 'cap_hierarchy_inverted',
+          message: `These limits do not nest: up to ${settings.maxRoutingDecisionsPerTurn} from one answer, ${settings.maxEarlySeatedTopics} early in total, ${settings.maxConditionalTopics} for the whole interview. Each should be no larger than the one after it, or the smaller limit is the only one that ever applies.`,
+        });
+      }
+    }
+
     // ── Opening members no respondent can ever cover (F17.36) ──────────────────────────────
     //
     // The opening gate is all-or-nothing, so ONE member nobody can cover means the plan is never
@@ -511,6 +545,11 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
 }
 
 /** True when nothing would behave wrongly. Convenience for the launch checklist. */
+/** A confidence as a percentage, for a message an admin reads. */
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Uncoverable-member heuristics (F17.36)                                     */
 /* -------------------------------------------------------------------------- */

@@ -841,3 +841,73 @@ describe('opening_member_uncoverable (F17.36)', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('early topic seating (F17.36)', () => {
+  function run(over: Partial<ConditionalTopicsSettings> = {}, conditionals = 3) {
+    return validateConditionalTopics({
+      topics: [
+        topic('open', 'opening'),
+        ...Array.from({ length: conditionals }, (_, i) => topic(`cond_${i}`, 'conditional')),
+      ],
+      settings: settings({ earlyTopicSeating: true, ...over }),
+      allQuestionKeys: ['open_q', ...Array.from({ length: conditionals }, (_, i) => `cond_${i}_q`)],
+      allDataSlotKeys: [],
+    }).map((i) => i.code);
+  }
+
+  it('says nothing while the switch is off, however the numbers are set', () => {
+    const codes = run({ earlyTopicSeating: false, earlySeatingMinConfidence: 0.1 });
+    expect(codes).not.toContain('early_confidence_below_floor');
+    expect(codes).not.toContain('cap_hierarchy_inverted');
+  });
+
+  it('flags an early bar looser than the full decision needs', () => {
+    // Backwards: deciding on LESS of the conversation would then be the EASIER gate to pass, which
+    // produces exactly the thin-evidence seats the floor exists to prevent.
+    expect(run({ minConfidence: 0.8, earlySeatingMinConfidence: 0.6 })).toContain(
+      'early_confidence_below_floor'
+    );
+    expect(run({ minConfidence: 0.6, earlySeatingMinConfidence: 0.85 })).not.toContain(
+      'early_confidence_below_floor'
+    );
+  });
+
+  it('flags caps that do not nest', () => {
+    // Per turn ≤ per opening ≤ per interview. An inner cap above an outer one expresses an intent
+    // the runtime cannot honour: it is simply never reached.
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 3, maxEarlySeatedTopics: 1, maxConditionalTopics: 5 })
+    ).toContain('cap_hierarchy_inverted');
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 1, maxEarlySeatedTopics: 4, maxConditionalTopics: 2 })
+    ).toContain('cap_hierarchy_inverted');
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 1, maxEarlySeatedTopics: 2, maxConditionalTopics: 3 })
+    ).not.toContain('cap_hierarchy_inverted');
+  });
+
+  it('flags the switch turned on with nothing it could ever choose', () => {
+    expect(run({}, 0)).toContain('early_seating_without_conditional_topics');
+    expect(run({}, 3)).not.toContain('early_seating_without_conditional_topics');
+  });
+
+  it('reports every finding as advisory, never as a launch blocker', () => {
+    // These are configuration opinions. An interview configured this way still runs coherently, so
+    // refusing a launch over one would block a client on a judgement call.
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('cond_a', 'conditional')],
+      settings: settings({
+        earlyTopicSeating: true,
+        minConfidence: 0.9,
+        earlySeatingMinConfidence: 0.2,
+        maxRoutingDecisionsPerTurn: 9,
+        maxEarlySeatedTopics: 1,
+      }),
+      allQuestionKeys: ['open_q', 'cond_a_q'],
+      allDataSlotKeys: [],
+    }).filter((i) => i.code.startsWith('early_') || i.code === 'cap_hierarchy_inverted');
+
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === 'warning')).toBe(true);
+  });
+});

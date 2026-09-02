@@ -17,6 +17,13 @@
  * state, where the always-run phases are in scope and the conditional ones are not yet decided.
  * That is what makes the opening happen before the plan is made rather than alongside it.
  *
+ * ## Early seats (F17.36)
+ *
+ * `earlySeated` is the one thing that puts a conditional topic in scope BEFORE a plan exists. It is
+ * unioned with the plan's topics rather than replacing them: an early seat survives sealing, and
+ * after sealing the same topic appears in both, which is why the union is by key and the plan's
+ * entry wins. The plan is the sealed statement; the early record is how it got there.
+ *
  * ## Why unknown keys are silently skipped
  *
  * A topic's `members` are question/data-slot KEYS, and an author can delete a question a topic
@@ -35,7 +42,9 @@ import {
   ALWAYS_PHASES,
   LIGHT_DEPTH_MEMBER_COUNT,
   type ConditionalTopicsSettings,
+  type EarlySeating,
   type InterviewPlan,
+  type PlannedTopic,
   type Topic,
   type TopicDepth,
 } from '@/lib/app/questionnaire/scope/types';
@@ -46,6 +55,14 @@ export interface ScopeInput {
   topics: readonly Topic[];
   /** The session's plan, or null before one is made (and forever, on a non-adaptive version). */
   plan: InterviewPlan | null;
+  /**
+   * Topics seated during the opening, before the plan was sealed (F17.36).
+   *
+   * Omitted by nearly every caller and null on nearly every session. Present, its `seated` keys are
+   * in scope exactly as a planned topic is — which is the whole point: an early seat that did not
+   * reach scope would be a decision with no effect.
+   */
+  earlySeated?: EarlySeating | null;
   /** The version's resolved settings. */
   settings: ConditionalTopicsSettings;
   /**
@@ -181,7 +198,20 @@ export function resolveScope(input: ScopeInput): ResolvedScope {
   if (!input.settings.enabled || input.topics.length === 0) return fullScope(input);
 
   const plan = input.plan;
-  const plannedByKey = new Map(plan?.topics.map((t) => [t.key, t]) ?? []);
+  // Early seats first, then the plan over the top. The plan's entry wins on a key both carry,
+  // because sealing is where the depth and any member subset are finally decided — and after
+  // sealing every early seat appears in both by construction (`preSeated`).
+  const plannedByKey = new Map<string, PlannedTopic>();
+  for (const seat of input.earlySeated?.seated ?? []) {
+    plannedByKey.set(seat.key, {
+      key: seat.key,
+      depth: seat.depth,
+      source: 'early',
+      rationale: seat.rationale,
+      ...(seat.respondentReason ? { respondentReason: seat.respondentReason } : {}),
+    });
+  }
+  for (const t of plan?.topics ?? []) plannedByKey.set(t.key, t);
 
   const topicKeys = new Set<string>();
   const questionKeys = new Set<string>();

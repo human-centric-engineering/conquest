@@ -116,6 +116,7 @@ export const SCOPE_DECISION_SOURCES = [
   'check',
   'respondent',
   'budget',
+  'early',
 ] as const;
 export type ScopeDecisionSource = (typeof SCOPE_DECISION_SOURCES)[number];
 
@@ -129,6 +130,11 @@ export const SCOPE_DECISION_SOURCE_LABELS: Record<ScopeDecisionSource, string> =
   // Only ever appears on an EXCLUDED topic. The agent chose this one and the time budget took it
   // back, which is a different answer to "why was I not asked about that" than "it was not chosen".
   budget: 'Dropped — over the time budget',
+  // F17.36. Counted SEPARATELY from `llm` in routing analytics, never folded into it: an early seat
+  // the final planner would also have chosen is a planner success, one it would not have chosen is
+  // not, and counting them together would make the planner look better the harder the floor was
+  // tuned. Same rule `respondent` already follows, for the same reason.
+  early: 'Chosen early, during the opening',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -243,6 +249,40 @@ export const MAX_OPENING_PROBES_CEILING = 5;
  */
 export const MIN_OPENING_TURNS = 0;
 export const MAX_OPENING_TURNS_CEILING = 40;
+
+/* -------------------------------------------------------------------------- */
+/* Early topic seating (F17.36)                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bounds on the early-seating floor — how much of the opening must be answered before a topic may
+ * be seated on partial information.
+ *
+ * The floor is never 0. A floor of zero would let the very first turn seat a topic, which is a
+ * decision over an empty transcript wearing the language of a considered one — the exact failure
+ * the opening gate exists to prevent, reintroduced through the back door.
+ */
+export const MIN_EARLY_SEATING_FLOOR = 0.2;
+export const MAX_EARLY_SEATING_FLOOR = 1;
+
+/** Bounds on the two early-seating caps. Both default to 1; see the cap hierarchy in `validate.ts`. */
+export const MIN_EARLY_SEATED_TOPICS = 1;
+export const MAX_EARLY_SEATED_TOPICS_CEILING = 20;
+export const MIN_ROUTING_DECISIONS_PER_TURN = 1;
+export const MAX_ROUTING_DECISIONS_PER_TURN_CEILING = 20;
+
+/**
+ * How often the early-seating pass may run, in turns, once the floor is passed.
+ *
+ * A module constant rather than a setting, deliberately (F17.36 §16.5). The evidence-change gate
+ * does most of what a cadence dial was for — a turn that added no fill and no answer cannot change
+ * the judgement, so it never pays for one — and a seventh number on the Conditional topics tab
+ * costs more in comprehension than it buys in control.
+ */
+export const EARLY_SEATING_CADENCE_TURNS = 1;
+
+/** How many deferred picks one session may carry. A cap on the row, not a judgement. */
+export const MAX_DEFERRED_EARLY_PICKS = 12;
 
 /** Bounds on a per-question-type time estimate, in seconds. */
 export const MIN_SECONDS_PER_ITEM = 1;
@@ -593,6 +633,68 @@ export interface ConditionalTopicsSettings {
    * admin comparing a forced plan against a considered one is comparing like with like.
    */
   maxOpeningTurns: number;
+
+  /* ---- Early topic seating (F17.36) ---- */
+
+  /**
+   * Let the interview seat a topic **while the opening is still running**, rather than only when it
+   * finishes. **False by default**, and while false none of the code below is reachable and no
+   * query is made.
+   *
+   * The opening exists to find out what is relevant. Today it can only report that finding once, at
+   * the very end of itself: a respondent can spend six turns making it obvious which area matters
+   * and the interview will not act on it until the last opening question is answered. This lets a
+   * sufficiently-evidenced, sufficiently-confident decision land sooner.
+   *
+   * The final planner still runs, always, over the complete opening. Early seating front-runs it;
+   * it never replaces it — which is what preserves the balanced judgement the design rests on.
+   */
+  earlyTopicSeating: boolean;
+
+  /**
+   * How much of the opening must be covered before anything may be seated early, 0–1.
+   *
+   * **Parked slots do not count toward this.** A park is a best-effort inference the interviewer
+   * gave up on, and letting three of those carry a session over the floor would seat topics on
+   * evidence nobody actually gave. The gate that seals the plan still counts them; this does not.
+   * See `scope/readiness.ts`.
+   */
+  earlySeatingFloor: number;
+
+  /**
+   * How sure the planner must be about ONE topic to seat it early, 0–1.
+   *
+   * Separate from {@link earlySeatingFloor} and never blended with it. The floor is coverage — how
+   * much of the opening is in; this is confidence — how sure the judgement about this particular
+   * topic is. They answer different questions, they are separately explicable on the admin surface,
+   * and a single blended score is a number nobody can reason about.
+   *
+   * Must be at or above {@link minConfidence}: early seating decides on LESS evidence than the
+   * final planner, so it must not be allowed to decide more readily. `validate.ts` says so when it
+   * is not.
+   */
+  earlySeatingMinConfidence: number;
+
+  /**
+   * How many topics one whole opening may seat early.
+   *
+   * Counts **against** {@link maxConditionalTopics}, never in addition to it. Breadth is one
+   * budget; this bounds how much of it partial information may spend.
+   */
+  maxEarlySeatedTopics: number;
+
+  /**
+   * How many topics a SINGLE turn may seat early.
+   *
+   * A respondent can say one thing that plainly warrants three areas. Without this, one turn could
+   * spend the whole session allowance on a single answer. With it, the pass records what it judged
+   * and could not seat, and later turns drain that list at this rate with no further model calls —
+   * so the cap paces rather than truncates. See `EarlySeating.deferred`.
+   *
+   * Governs early seating only. The final planner seats everything it decides in one write, because
+   * that is the sealed decision rather than a reaction to a turn.
+   */
+  maxRoutingDecisionsPerTurn: number;
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
@@ -615,6 +717,14 @@ export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   maxOpeningProbes: 1,
   // 0 = no limit. The opening gate keeps its own counsel unless an author says otherwise.
   maxOpeningTurns: 0,
+  // Off. Every version decides exactly when it decided before: at the end of the opening.
+  earlyTopicSeating: false,
+  earlySeatingFloor: 0.6,
+  // Above `minConfidence` (0.6) on purpose: deciding on less evidence must mean deciding less
+  // readily, never more.
+  earlySeatingMinConfidence: 0.85,
+  maxEarlySeatedTopics: 1,
+  maxRoutingDecisionsPerTurn: 1,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -773,6 +883,66 @@ export interface ForcedClose {
   limitTurns: number;
   /** What was still outstanding. Bounded on write; a stall is usually one or two stuck members. */
   uncovered: { dataSlotKeys: string[]; questionKeys: string[] };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Early topic seating — the stored record (F17.36)                           */
+/* -------------------------------------------------------------------------- */
+
+/** One topic seated during the opening, or judged warranted and waiting on the per-turn cap. */
+export interface EarlySeat {
+  key: string;
+  depth: TopicDepth;
+  /** The planner's confidence in THIS topic, which is what cleared the bar. */
+  confidence: number;
+  /** Why, for an admin. Same register as {@link PlannedTopic.rationale}. */
+  rationale: string;
+  /** Why, in words the respondent may read. Same register as {@link PlannedTopic.respondentReason}. */
+  respondentReason: string;
+  /** Turn the topic was seated at, or judged at while it waits in `deferred`. */
+  atTurn: number;
+}
+
+/**
+ * What a session has seated early, and what it still owes.
+ *
+ * Written to its own `earlySeatedTopics` column rather than into `interviewPlan`, because the
+ * planner's once-only write guard keys on `interviewPlan` being null: a partial plan written there
+ * would make the session look sealed and the final planner would never run.
+ *
+ * `resolveScope` unions `seated` with the plan's topics, so an early seat is in scope from the turn
+ * it lands. At seal time the same keys are handed to the planner as pre-seated and survive the cap
+ * — something already asked cannot be truncated by a later enthusiasm.
+ */
+export interface EarlySeating {
+  v: 1;
+  /** In scope now. Only ever appended to: nothing removes a seat, including the final planner. */
+  seated: EarlySeat[];
+  /**
+   * Judged warranted by a pass that had already spent its per-turn cap.
+   *
+   * Drained by later turns at the cap rate with no further model call, which is what makes
+   * {@link ConditionalTopicsSettings.maxRoutingDecisionsPerTurn} a pacing control rather than a
+   * silent truncation. Cleared whenever a fresh pass runs, so a stale judgement can never outlive
+   * the evidence that produced it.
+   */
+  deferred: EarlySeat[];
+  /** Turn the last pass ran at, for the cadence check. */
+  lastPassAtTurn: number;
+  /**
+   * A cheap fingerprint of the evidence the last pass ran on.
+   *
+   * The gate that removes most turns regardless of cadence: a turn that added no new fill and no
+   * new answer cannot change the judgement, so it must not pay for one.
+   */
+  evidenceKey: string;
+  /**
+   * True once a pass judged more topics as warranted than any cap allowed.
+   *
+   * Recorded rather than discarded. A cap that quietly throws decisions away reads on the admin
+   * surface as "the planner only found one area" when it found four.
+   */
+  overCap: boolean;
 }
 
 /**
@@ -1029,6 +1199,35 @@ export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopi
     maxOpeningTurns: Math.round(
       asNumber(obj.maxOpeningTurns, MIN_OPENING_TURNS, MAX_OPENING_TURNS_CEILING, d.maxOpeningTurns)
     ),
+    earlyTopicSeating: asBool(obj.earlyTopicSeating, d.earlyTopicSeating),
+    earlySeatingFloor: asNumber(
+      obj.earlySeatingFloor,
+      MIN_EARLY_SEATING_FLOOR,
+      MAX_EARLY_SEATING_FLOOR,
+      d.earlySeatingFloor
+    ),
+    earlySeatingMinConfidence: asNumber(
+      obj.earlySeatingMinConfidence,
+      MIN_SCOPE_CONFIDENCE_FLOOR,
+      MIN_SCOPE_CONFIDENCE_CEILING,
+      d.earlySeatingMinConfidence
+    ),
+    maxEarlySeatedTopics: Math.round(
+      asNumber(
+        obj.maxEarlySeatedTopics,
+        MIN_EARLY_SEATED_TOPICS,
+        MAX_EARLY_SEATED_TOPICS_CEILING,
+        d.maxEarlySeatedTopics
+      )
+    ),
+    maxRoutingDecisionsPerTurn: Math.round(
+      asNumber(
+        obj.maxRoutingDecisionsPerTurn,
+        MIN_ROUTING_DECISIONS_PER_TURN,
+        MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
+        d.maxRoutingDecisionsPerTurn
+      )
+    ),
   };
 }
 
@@ -1158,6 +1357,57 @@ function narrowForcedClose(value: unknown): ForcedClose | null {
       dataSlotKeys: asKeyList(isRecord(value.uncovered) ? value.uncovered.dataSlotKeys : []),
       questionKeys: asKeyList(isRecord(value.uncovered) ? value.uncovered.questionKeys : []),
     },
+  };
+}
+
+/**
+ * Narrow a stored {@link EarlySeating} blob, or null.
+ *
+ * Null for anything unreadable, and null means "nothing was seated early" — which resolves to the
+ * plan alone, i.e. exactly the pre-F17.36 behaviour. That is the safe direction here and it is the
+ * OPPOSITE of the one `narrowInterviewPlan` takes: a corrupt plan widens scope because withholding
+ * questions the instrument meant to ask is a wrong result, while a corrupt early-seating record
+ * simply means the interview decides at the end, the way it always did.
+ */
+export function narrowEarlySeating(value: unknown): EarlySeating | null {
+  if (!isRecord(value)) return null;
+  if (value.v !== 1) return null;
+
+  const seats = (raw: unknown, max: number): EarlySeat[] => {
+    if (!Array.isArray(raw)) return [];
+    const out: EarlySeat[] = [];
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      if (!isRecord(entry)) continue;
+      const key = asText(entry.key, TOPIC_KEY_MAX_LENGTH, '');
+      if (key.length === 0 || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        key,
+        depth: narrowToEnum(
+          typeof entry.depth === 'string' ? entry.depth : '',
+          TOPIC_DEPTHS,
+          'full'
+        ),
+        confidence: asNumber(entry.confidence, 0, 1, 0),
+        rationale: asText(entry.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+        respondentReason: asText(entry.respondentReason, SCOPE_RATIONALE_MAX_LENGTH, ''),
+        atTurn: Math.round(asNumber(entry.atTurn, 0, 100_000, 0)),
+      });
+      if (out.length >= max) break;
+    }
+    return out;
+  };
+
+  return {
+    v: 1,
+    // Bounded by the ceiling rather than by the version's own cap: this is a READ, and a settings
+    // change must never retroactively un-seat a topic the interview already asked about.
+    seated: seats(value.seated, MAX_EARLY_SEATED_TOPICS_CEILING),
+    deferred: seats(value.deferred, MAX_DEFERRED_EARLY_PICKS),
+    lastPassAtTurn: Math.round(asNumber(value.lastPassAtTurn, 0, 100_000, 0)),
+    evidenceKey: asText(value.evidenceKey, 128, ''),
+    overCap: asBool(value.overCap, false),
   };
 }
 

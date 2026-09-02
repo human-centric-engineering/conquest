@@ -291,6 +291,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Null on every ordinary session, and before the planner has run on an adaptive one —
       // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
       interviewPlan: true,
+      earlySeatedTopics: true,
       // P21: the section run state, read every turn from the row already loaded.
       sectionRun: true,
       version: {
@@ -538,6 +539,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     versionId: session.versionId,
     settings: config.conditionalTopics,
     interviewPlan: session.interviewPlan,
+    earlySeatedTopics: session.earlySeatedTopics,
     weightByQuestionKey: new Map(questions.map((q) => [q.key, q.weight])),
     weightByDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight])),
   });

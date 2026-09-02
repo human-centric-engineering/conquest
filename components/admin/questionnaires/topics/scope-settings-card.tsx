@@ -32,11 +32,17 @@ import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_EARLY_SEATED_TOPICS_CEILING,
+  MAX_EARLY_SEATING_FLOOR,
   MAX_OPENING_TURNS_CEILING,
+  MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_EARLY_SEATED_TOPICS,
+  MIN_EARLY_SEATING_FLOOR,
   MIN_OPENING_TURNS,
+  MIN_ROUTING_DECISIONS_PER_TURN,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type ConditionalTopicsSettings,
   type Topic,
@@ -448,8 +454,192 @@ export function ScopeSettingsCard({
           </div>
         </div>
 
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={3}>Choosing before the opening finishes</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-early-seating" className="text-sm font-medium">
+                Start choosing areas before the opening finishes{' '}
+                <FieldHelp title="Choosing areas during the opening">
+                  <p>
+                    Normally the agent waits for the whole opening, then chooses. That is the right
+                    wait: a decision made over half an opening is a worse decision.
+                  </p>
+                  <p>
+                    But sometimes a respondent makes an area obvious on their second answer, and
+                    then spends four more turns finishing an opening whose conclusion is already
+                    settled. Turn this on and the agent may act on something that has become
+                    unmistakable, while the opening is still running.
+                  </p>
+                  <p>
+                    <strong>It only ever adds.</strong> Nothing chosen this way can be taken back,
+                    and the full decision still happens at the end of the opening exactly as it does
+                    now — it simply starts from what has already been settled.
+                  </p>
+                  <p>
+                    Off by default. Leave it off unless your openings are long enough that waiting
+                    costs the respondent something.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Off means every area is chosen once, when the opening finishes.
+              </p>
+            </div>
+            <Switch
+              id="scope-early-seating"
+              checked={draft.earlyTopicSeating}
+              onCheckedChange={(v) => set({ earlyTopicSeating: v })}
+              disabled={busy}
+            />
+          </div>
+
+          {draft.earlyTopicSeating && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  How much of the opening must be answered first{' '}
+                  <FieldHelp title="How much of the opening must be answered first">
+                    <p>
+                      Nothing is considered until this much of the opening has been answered. It is
+                      the guard against acting on a first impression.
+                    </p>
+                    <p>
+                      Questions the agent gave up on do <strong>not</strong> count toward this. A
+                      question it stopped asking is one nobody answered, and letting three of those
+                      carry a respondent over the line would mean choosing areas on evidence they
+                      never gave.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    min={Math.round(MIN_EARLY_SEATING_FLOOR * 100)}
+                    max={Math.round(MAX_EARLY_SEATING_FLOOR * 100)}
+                    value={Math.round(draft.earlySeatingFloor * 100)}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      set({
+                        earlySeatingFloor: Number.isFinite(parsed)
+                          ? Math.min(
+                              MAX_EARLY_SEATING_FLOOR,
+                              Math.max(MIN_EARLY_SEATING_FLOOR, parsed / 100)
+                            )
+                          : draft.earlySeatingFloor,
+                      });
+                    }}
+                    disabled={busy}
+                  />
+                  <span className="text-muted-foreground shrink-0 text-xs">% of the opening</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  How sure it must be to choose early{' '}
+                  <FieldHelp title="How sure it must be to choose early">
+                    <p>
+                      How confident the agent must be about one area before it may act on it this
+                      early. Anything less sure is discarded and left to the full decision.
+                    </p>
+                    <p>
+                      Keep this at or above the confidence you set above for the full decision.
+                      Choosing on less of the conversation should mean choosing less readily, not
+                      more.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    min={0}
+                    max={100}
+                    value={Math.round(draft.earlySeatingMinConfidence * 100)}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      set({
+                        earlySeatingMinConfidence: Number.isFinite(parsed)
+                          ? Math.min(1, Math.max(0, parsed / 100))
+                          : draft.earlySeatingMinConfidence,
+                      });
+                    }}
+                    disabled={busy}
+                  />
+                  <span className="text-muted-foreground shrink-0 text-xs">% confident</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  Most areas that may be chosen early{' '}
+                  <FieldHelp title="Most areas that may be chosen early">
+                    Counts toward the overall limit above, never on top of it. It bounds how much of
+                    the interview may be decided before the opening has finished, leaving the rest
+                    for the full decision.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  className="max-w-28"
+                  min={MIN_EARLY_SEATED_TOPICS}
+                  max={MAX_EARLY_SEATED_TOPICS_CEILING}
+                  value={draft.maxEarlySeatedTopics}
+                  onChange={(e) =>
+                    set({
+                      maxEarlySeatedTopics: boundedInt(
+                        e.target.value,
+                        MIN_EARLY_SEATED_TOPICS,
+                        MAX_EARLY_SEATED_TOPICS_CEILING,
+                        draft.maxEarlySeatedTopics
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  Most areas from a single answer{' '}
+                  <FieldHelp title="Most areas from a single answer">
+                    <p>
+                      A respondent can say one thing that plainly warrants three areas. This paces
+                      that, so one answer cannot spend the whole allowance at once.
+                    </p>
+                    <p>
+                      Nothing is thrown away: anything it judged and could not take is picked up on
+                      later answers, without asking again.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  className="max-w-28"
+                  min={MIN_ROUTING_DECISIONS_PER_TURN}
+                  max={MAX_ROUTING_DECISIONS_PER_TURN_CEILING}
+                  value={draft.maxRoutingDecisionsPerTurn}
+                  onChange={(e) =>
+                    set({
+                      maxRoutingDecisionsPerTurn: boundedInt(
+                        e.target.value,
+                        MIN_ROUTING_DECISIONS_PER_TURN,
+                        MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
+                        draft.maxRoutingDecisionsPerTurn
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-2 border-t pt-4">
-          <SectionLabel step={3}>Guard against a narrow result</SectionLabel>
+          <SectionLabel step={4}>Guard against a narrow result</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-check-topic" className="text-sm font-medium">
@@ -496,7 +686,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-1.5 border-t pt-4">
-          <SectionLabel step={4}>When the agent cannot decide</SectionLabel>
+          <SectionLabel step={5}>When the agent cannot decide</SectionLabel>
           <Label className="text-sm font-medium">
             Ask these instead{' '}
             <FieldHelp title="Ask these instead">
@@ -517,7 +707,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={5}>What the respondent is told</SectionLabel>
+          <SectionLabel step={6}>What the respondent is told</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-announce" className="text-sm font-medium">

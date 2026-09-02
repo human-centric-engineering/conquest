@@ -184,6 +184,7 @@ async function loadInScopeRefs(sessionIds: string[]): Promise<Map<string, Readon
       id: true,
       versionId: true,
       interviewPlan: true,
+      earlySeatedTopics: true,
       version: { select: { config: { select: { conditionalTopics: true } } } },
     },
   });
@@ -240,6 +241,7 @@ async function loadInScopeRefs(sessionIds: string[]): Promise<Map<string, Readon
       versionId: session.versionId,
       settings,
       interviewPlan: session.interviewPlan,
+      earlySeatedTopics: session.earlySeatedTopics,
       topics: cached.topics,
       weightByQuestionKey: cached.weightByQuestionKey,
       weightByDataSlotKey: cached.weightByDataSlotKey,

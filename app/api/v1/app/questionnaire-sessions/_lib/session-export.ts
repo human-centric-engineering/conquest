@@ -146,6 +146,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       updatedAt: true,
       versionId: true,
       interviewPlan: true,
+      earlySeatedTopics: true,
       version: {
         select: {
           versionNumber: true,
@@ -259,6 +260,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     versionId: row.versionId,
     settings: narrowConditionalTopicsSettings(row.version.config?.conditionalTopics),
     interviewPlan: row.interviewPlan,
+    earlySeatedTopics: row.earlySeatedTopics,
     weightByQuestionKey: new Map(
       row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
     ),

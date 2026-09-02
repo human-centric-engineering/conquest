@@ -2,7 +2,7 @@
 feature: F17.36
 title: Early topic seating — deciding during the opening, not only at the end of it
 phase: P17 — Conditional Topics
-status: phases 1 and 2 SHIPPED (2026-09-02). Phases 3–6 proposed; §16 settled below
+status: phases 1, 2 and 3 SHIPPED (2026-09-02). Phases 4–6 proposed; §16 settled below
 owner: TBD
 opened: 2026-09-02
 revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added; §16 settled and phases 1+2 built)
@@ -439,11 +439,46 @@ All six were taken as recommended.
   Topics route supplies. Advisory warning; two conservative heuristics, both documented at the
   call site.
 
-**Not shipped, and deliberately:** §5's "say it is inactive" surfaces are moot — hard rules were
-deleted rather than suspended, so there is no inactive tier to announce and no
-`hard_rules_suspended` check. §12's three early-seating validation checks
-(`early_confidence_below_floor`, `cap_hierarchy_inverted`,
-`early_seating_without_conditional_topics`) belong to phase 3, with the settings they check.
+**Not shipped in phases 1–2, and deliberately:** §5's "say it is inactive" surfaces are moot — hard
+rules were deleted rather than suspended, so there is no inactive tier to announce and no
+`hard_rules_suspended` check.
+
+### What phase 3 shipped
+
+- **Schema.** `AppQuestionnaireSession.earlySeatedTopics Json?`, migration
+  `20260902211549_app_early_seated_topics`. Generated `--create-only`, the five phantom pgvector
+  `DROP INDEX` statements and the `searchVector` `DROP DEFAULT` stripped by hand, applied via
+  `migrate deploy`, all five vector indexes verified present afterwards.
+- **Five settings** (not six — see §16.5): `earlyTopicSeating`, `earlySeatingFloor`,
+  `earlySeatingMinConfidence`, `maxEarlySeatedTopics`, `maxRoutingDecisionsPerTurn`. Every default
+  reproduces today's behaviour. Carried through the Zod patch schema, `SETTING_DESCRIPTORS`, the
+  Questionnaire Pack, and a new step 3 on the Conditional topics card with a `<FieldHelp>` on each.
+- **`scope/early-seating.ts`** — pure: the tiered gate, the evidence fingerprint, candidate
+  eligibility, `applyEarlyJudgements` and `drainDeferred`.
+- **`scope/early-planner.ts`** — the one model call, mirroring `planner.ts`'s failure discipline
+  exactly. Its prompt is the part that differs: the opening is unfinished, silence is the correct
+  answer most of the time, and it cannot decline anything.
+- **`scope/planner-prompt.ts`** — `renderConveyed` / `renderCandidates` / `ScopeAnswer` extracted
+  from `planner.ts` so both passes read the conversation through one rendering.
+- **`_lib/seat-early-topics.ts`** — the trigger, first of the four in the post-turn block.
+- **`'early'`** added to `SCOPE_DECISION_SOURCES`, counted separately in `analytics/routing.ts` and
+  never folded into `llm`.
+- **`resolveScope`** unions `earlySeated.seated` with the plan; `applyGuardrails` gained `preSeated`
+  and seats it before the cap; `plan-scope.ts` hands the seats over at seal time and records
+  `preSeatedKeys` on the audit row.
+- **Three validation checks**: `early_confidence_below_floor`, `cap_hierarchy_inverted`,
+  `early_seating_without_conditional_topics`. All advisory.
+
+**One interaction decided during the build, not in this spec:** an early seat **suppresses the
+fallback**. The fallback's precondition is "no signal to judge on at all", and a topic seated during
+the opening is a judgement made on real evidence at a higher bar than the plan itself needed. Padding
+it with safe defaults would widen an interview that already knows what it is about. Recorded at the
+call site and asserted in `guardrails.test.ts`.
+
+**Deferred to phase 5 with the announcement it governs:** `announceEarlySeating`. Shipping the
+setting now would put a switch on the tab that does nothing, which is the exact failure this codebase
+has already shipped once. It is also coherent to defer: until phase 4 an early seat does not change
+what is asked next, so there is nothing to announce.
 
 ## 17. Risks
 

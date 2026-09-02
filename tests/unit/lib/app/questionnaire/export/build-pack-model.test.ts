@@ -288,6 +288,11 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
   maxOpeningTurns: 0,
+  earlyTopicSeating: false,
+  earlySeatingFloor: 0.6,
+  earlySeatingMinConfidence: 0.85,
+  maxEarlySeatedTopics: 1,
+  maxRoutingDecisionsPerTurn: 1,
 };
 
 const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {

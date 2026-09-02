@@ -192,6 +192,7 @@ export async function loadAnswerPanelState(
       turns: { select: { id: true, ordinal: true } },
       // Conditional Topics (P17): the frozen decision about which topics this interview covers.
       interviewPlan: true,
+      earlySeatedTopics: true,
       // Sectioned interviews (P21): which section the respondent is in, so the panel shows the
       // answers for THAT section rather than the whole interview at once.
       sectionRun: true,
@@ -218,6 +219,7 @@ export async function loadAnswerPanelState(
     versionId: row.versionId,
     settings: narrowConditionalTopicsSettings(row.version.config?.conditionalTopics),
     interviewPlan: row.interviewPlan,
+    earlySeatedTopics: row.earlySeatedTopics,
     weightByQuestionKey,
     weightByDataSlotKey,
   });

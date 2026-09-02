@@ -86,7 +86,7 @@ const BUDGET_PATTERN_SHARE = 0.5;
  * `undefined` that increments to `NaN` and quietly empties a column.
  */
 function emptySourceCounts(): Record<ScopeDecisionSource, number> {
-  return { phase: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0 };
+  return { phase: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0, early: 0 };
 }
 
 /**
@@ -158,6 +158,12 @@ export function assembleRoutingAnalytics(
       // `check` is the one source that means the OPPOSITE of selection — the topic is sampled
       // because nothing chose it. `fallback` is likewise not a judgement about this topic; it is
       // what happens when there was no signal to judge on at all.
+      //
+      // `early` (F17.36) is deliberately NOT counted as `chosen` either, and this is the same rule
+      // `respondent` follows above. An early seat the final planner would also have chosen is a
+      // planner success; one it would not have chosen is not, and counting them together would make
+      // the planner look better the more aggressively the early-seating floor was tuned. The
+      // separate count lives in `bySource.early`.
       if (topic.source === 'llm') target.chosen += 1;
       else if (topic.source === 'check') target.sampled += 1;
     }

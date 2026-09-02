@@ -7,10 +7,12 @@ import {
   MEMBER_KEY_MAX_LENGTH,
   MAX_OPENING_PROBES_CEILING,
   MAX_OPENING_TURNS_CEILING,
+  MIN_EARLY_SEATING_FLOOR,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_SESSION_BUDGET_SECONDS,
   narrowConditionalTopicsSettings,
+  narrowEarlySeating,
   narrowInterviewPlan,
   narrowProposedTopicSet,
   narrowTopicTrigger,
@@ -691,5 +693,104 @@ describe('narrowProposedTopicSet — a recorded trigger', () => {
     const set = narrowProposedTopicSet(storedWith({ cues: ['abuse'] }));
     expect(set?.topics).toHaveLength(1);
     expect(set?.topics[0]?.trigger).toBeUndefined();
+  });
+});
+
+describe('narrowConditionalTopicsSettings — early topic seating (F17.36)', () => {
+  it('is off by default, with defaults that would be safe if it were on', () => {
+    const s = narrowConditionalTopicsSettings({});
+    expect(s.earlyTopicSeating).toBe(false);
+    expect(s.earlySeatingFloor).toBe(0.6);
+    // Above `minConfidence` (0.6): deciding on less evidence must mean deciding less readily.
+    expect(s.earlySeatingMinConfidence).toBe(0.85);
+    expect(s.earlySeatingMinConfidence).toBeGreaterThanOrEqual(s.minConfidence);
+    expect(s.maxEarlySeatedTopics).toBe(1);
+    expect(s.maxRoutingDecisionsPerTurn).toBe(1);
+  });
+
+  it('never lets the floor reach zero', () => {
+    // A floor of zero would let the very first turn seat a topic — a decision over an empty
+    // transcript wearing the language of a considered one.
+    expect(narrowConditionalTopicsSettings({ earlySeatingFloor: 0 }).earlySeatingFloor).toBe(
+      MIN_EARLY_SEATING_FLOOR
+    );
+    expect(narrowConditionalTopicsSettings({ earlySeatingFloor: -1 }).earlySeatingFloor).toBe(
+      MIN_EARLY_SEATING_FLOOR
+    );
+  });
+
+  it('clamps the caps to at least one, never zero', () => {
+    // A cap of zero is a feature switched on that can never act — which is the failure this
+    // codebase has already shipped once. The switch is how it is turned off.
+    expect(narrowConditionalTopicsSettings({ maxEarlySeatedTopics: 0 }).maxEarlySeatedTopics).toBe(
+      1
+    );
+    expect(
+      narrowConditionalTopicsSettings({ maxRoutingDecisionsPerTurn: 0 }).maxRoutingDecisionsPerTurn
+    ).toBe(1);
+  });
+
+  it('falls back to the defaults for anything unusable', () => {
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: 'yes',
+      earlySeatingFloor: 'high',
+      maxEarlySeatedTopics: null,
+    });
+    expect(s.earlyTopicSeating).toBe(false);
+    expect(s.earlySeatingFloor).toBe(0.6);
+    expect(s.maxEarlySeatedTopics).toBe(1);
+  });
+});
+
+describe('narrowEarlySeating (F17.36)', () => {
+  const seat = {
+    key: 'pipeline',
+    depth: 'full',
+    confidence: 0.93,
+    rationale: 'they said deals stall',
+    respondentReason: 'you mentioned deals stalling',
+    atTurn: 3,
+  };
+
+  it('reads back a stored record', () => {
+    const early = narrowEarlySeating({
+      v: 1,
+      seated: [seat],
+      deferred: [],
+      lastPassAtTurn: 3,
+      evidenceKey: 'e1',
+      overCap: false,
+    });
+
+    expect(early?.seated).toEqual([seat]);
+    expect(early?.evidenceKey).toBe('e1');
+  });
+
+  it('returns null for anything unreadable, which means "nothing was seated early"', () => {
+    // The OPPOSITE direction to `narrowInterviewPlan`, deliberately: a corrupt plan widens scope
+    // because withholding questions is a wrong result, while a corrupt early record just means the
+    // interview decides at the end, the way it always did.
+    expect(narrowEarlySeating(null)).toBeNull();
+    expect(narrowEarlySeating({ v: 2, seated: [seat] })).toBeNull();
+    expect(narrowEarlySeating('nonsense')).toBeNull();
+  });
+
+  it('drops a seat with no key and de-duplicates by key', () => {
+    const early = narrowEarlySeating({
+      v: 1,
+      seated: [seat, { ...seat, rationale: 'a duplicate' }, { ...seat, key: '' }],
+    });
+    expect(early?.seated).toHaveLength(1);
+  });
+
+  it('survives a record missing everything but its version', () => {
+    expect(narrowEarlySeating({ v: 1 })).toEqual({
+      v: 1,
+      seated: [],
+      deferred: [],
+      lastPassAtTurn: 0,
+      evidenceKey: '',
+      overCap: false,
+    });
   });
 });

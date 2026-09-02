@@ -95,6 +95,7 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeSeatEarlyTopics } from '@/app/api/v1/app/questionnaire-sessions/_lib/seat-early-topics';
 import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
@@ -1300,6 +1301,21 @@ async function handleMessage(
           scope: 'persist',
           stage: 'persist_turn',
           error: err,
+        });
+      }
+
+      // Conditional Topics (F17.36): before the plan is sealed, seat any area the opening has
+      // already made unmistakable. FIRST of the four, because it is the only one that acts while
+      // `interviewPlan` is still null and it stands down the moment one exists — and because
+      // `maybePlanScope` below then absorbs whatever it seated as pre-seated keys, so the two never
+      // decide the same interview twice. Never throws; a failure means the interview decides at the
+      // end of the opening, exactly as it always did.
+      const seatedEarly = await maybeSeatEarlyTopics(sessionId);
+      if (seatedEarly.kind === 'seated') {
+        log.info('Conditional topics seated early', {
+          sessionId,
+          topicKeys: seatedEarly.seated.map((t) => t.key),
+          fromDeferred: seatedEarly.fromDeferred,
         });
       }
 

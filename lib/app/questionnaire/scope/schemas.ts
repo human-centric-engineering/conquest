@@ -15,13 +15,19 @@ import { z } from 'zod';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_EARLY_SEATED_TOPICS_CEILING,
+  MAX_EARLY_SEATING_FLOOR,
   MAX_OPENING_TURNS_CEILING,
+  MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MAX_TRIGGER_CUES,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_EARLY_SEATED_TOPICS,
+  MIN_EARLY_SEATING_FLOOR,
   MIN_OPENING_TURNS,
+  MIN_ROUTING_DECISIONS_PER_TURN,
   MIN_SECONDS_PER_ITEM,
   MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
@@ -153,6 +159,31 @@ export const conditionalTopicsSettingsSchema = z.object({
     .int()
     .min(MIN_OPENING_TURNS)
     .max(MAX_OPENING_TURNS_CEILING)
+    .optional(),
+  // F17.36 — early topic seating. The floor never reaches 0: a floor of zero would let the first
+  // turn seat a topic, which is a decision over an empty transcript wearing the language of a
+  // considered one.
+  earlyTopicSeating: z.boolean().optional(),
+  earlySeatingFloor: z
+    .number()
+    .min(MIN_EARLY_SEATING_FLOOR)
+    .max(MAX_EARLY_SEATING_FLOOR)
+    .optional(),
+  // Bounded 0–1 exactly as `minConfidence` is. The relationship BETWEEN the two — this must sit at
+  // or above it — is a coherence check rather than a schema rule: an admin mid-edit routinely has
+  // one wrong, and refusing the save is a surface they fight.
+  earlySeatingMinConfidence: z.number().min(0).max(1).optional(),
+  maxEarlySeatedTopics: z
+    .number()
+    .int()
+    .min(MIN_EARLY_SEATED_TOPICS)
+    .max(MAX_EARLY_SEATED_TOPICS_CEILING)
+    .optional(),
+  maxRoutingDecisionsPerTurn: z
+    .number()
+    .int()
+    .min(MIN_ROUTING_DECISIONS_PER_TURN)
+    .max(MAX_ROUTING_DECISIONS_PER_TURN_CEILING)
     .optional(),
 });
 

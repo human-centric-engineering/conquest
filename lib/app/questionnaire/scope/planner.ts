@@ -29,13 +29,6 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import {
-  MAX_ANSWERS_IN_PLANNER_PROMPT,
-  MAX_FILLS_IN_PLANNER_PROMPT,
-  MAX_PLANNER_ITEM_CHARS,
-  MAX_PLANNER_ITEMS_PER_TOPIC,
-  MAX_PLANNER_RENDERED_ITEMS,
-  PLANNER_ANSWER_CHARS,
-  PLANNER_FILL_CHARS,
   SCOPE_PLANNER_AGENT_SLUG,
   SCOPE_PLANNER_MAX_TOKENS,
   SCOPE_PLANNER_TIMEOUT_MS,
@@ -50,16 +43,23 @@ import {
   openingReadiness,
   type OpeningQuestionCoverage,
 } from '@/lib/app/questionnaire/scope/readiness';
+import {
+  renderCandidates,
+  renderConveyed,
+  type ScopeAnswer,
+} from '@/lib/app/questionnaire/scope/planner-prompt';
 import type {
   ConditionalTopicsSettings,
+  EarlySeat,
   InterviewPlan,
   ScopeFill,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
 
-// Re-exported because this module owned the type before `readiness.ts` existed, and the trigger
-// imports it from here. One definition, two import paths — not two definitions.
+// Both re-exported because this module owned them before the shared prompt module existed, and the
+// triggers import them from here. One definition, two import paths — not two definitions.
 export type { OpeningQuestionCoverage };
+export type { ScopeAnswer };
 
 const plannerSchema = z.object({
   selected: z.array(
@@ -90,17 +90,6 @@ const plannerSchema = z.object({
  * The `prompt` is not decoration: an answer without the question it answers is not evidence. "About
  * two years" means nothing until you know it answered "how long has this been a problem?".
  */
-export interface ScopeAnswer {
-  /** The question's key. */
-  key: string;
-  /** What the question asked. */
-  prompt: string;
-  /** The stored answer — a mapped form value (a choice slug, a scale point) for typed questions. */
-  value: unknown;
-  /** The living natural-language account of what they conveyed, when the answer has one. */
-  paraphrase: string | null;
-}
-
 export interface PlanScopeParams {
   sessionId: string;
   /** Every topic in the version. */
@@ -139,6 +128,15 @@ export interface PlanScopeParams {
    * was before budgets existed.
    */
   budget?: PlanBudget;
+  /**
+   * Topics already seated during the opening (F17.36).
+   *
+   * Handed straight to `applyGuardrails`, which seats them BEFORE the cap. They are also excluded
+   * from the candidate list the model is shown: asking it to judge a topic the interview is already
+   * covering spends prompt on a decision that has been taken, and invites it to "choose" something
+   * it cannot decline.
+   */
+  preSeated?: readonly EarlySeat[];
 }
 
 /** The plan plus what producing it cost, so the caller can bill and audit it. */
@@ -150,106 +148,6 @@ export interface PlanScopeResult {
   /** Raw prompt + output for the AppAiRun snapshot. Null when no model call was made. */
   promptSnapshot: string | null;
   outputSnapshot: unknown;
-}
-
-/** A readable rendering of a stored answer value, or null when there is nothing worth printing. */
-function answerText(answer: ScopeAnswer): string | null {
-  // Paraphrase first, always. It is the natural-language account of what they conveyed; `value`
-  // holds the MAPPED form value for a typed question — a choice slug like `gt3` — and feeding form
-  // codes to a model that is reading for meaning is noise at best.
-  if (answer.paraphrase && answer.paraphrase.trim() !== '') return answer.paraphrase.trim();
-  if (typeof answer.value === 'string' && answer.value.trim() !== '') return answer.value.trim();
-  if (typeof answer.value === 'number' || typeof answer.value === 'boolean') {
-    return String(answer.value);
-  }
-  if (Array.isArray(answer.value) && answer.value.length > 0) {
-    return answer.value.map((v) => String(v)).join(', ');
-  }
-  return null;
-}
-
-function renderAnswers(answers: readonly ScopeAnswer[]): string[] {
-  const lines: string[] = [];
-  for (const answer of answers) {
-    if (lines.length >= MAX_ANSWERS_IN_PLANNER_PROMPT) break;
-    const text = answerText(answer);
-    if (!text) continue;
-    lines.push(`- Asked: ${answer.prompt}\n  Answered: ${text.slice(0, PLANNER_ANSWER_CHARS)}`);
-  }
-  return lines;
-}
-
-/**
- * The evidence block: what they said, then what was captured from it.
- *
- * Their own words come first because that is what they are — the primary record. A fill is an
- * extraction from those words, so it can be thin, stale, or simply absent, and a planner that reads
- * only fills is reading a summary of a conversation it was never shown.
- */
-function renderConveyed(
-  fills: readonly ScopeFill[],
-  answers: readonly ScopeAnswer[],
-  briefing: string | null | undefined
-): string {
-  const answerLines = renderAnswers(answers);
-  const fillLines = fills.slice(0, MAX_FILLS_IN_PLANNER_PROMPT).map((f) => {
-    const text =
-      typeof f.value === 'string' && f.value.trim() !== ''
-        ? f.value
-        : (f.paraphrase ?? '(no answer captured)');
-    return `- [${f.key}] ${text.slice(0, PLANNER_FILL_CHARS)}`;
-  });
-
-  const parts: string[] = [];
-  if (answerLines.length > 0) parts.push(`In their own words:\n${answerLines.join('\n')}`);
-  if (fillLines.length > 0) parts.push(`Captured from what they said:\n${fillLines.join('\n')}`);
-  if (parts.length === 0) parts.push('(nothing was captured in the opening)');
-  if (briefing) parts.push(`Summary of the conversation so far:\n${briefing}`);
-  return parts.join('\n\n');
-}
-
-/**
- * Render the candidates, with each topic's questions when the caller supplied their wording.
- *
- * Bounded three ways, because this is the part of the prompt that grows with the instrument: a
- * per-question character cap, a per-topic item cap, and a whole-prompt item budget spent in
- * candidate order (best first, which is the order the planner reads them in anyway). A topic whose
- * items were not rendered simply cannot be partially selected — which is why the line saying so is
- * printed rather than the items being dropped in silence.
- */
-function renderCandidates(
-  candidates: readonly Topic[],
-  itemPrompts: ReadonlyMap<string, string> | undefined
-): string {
-  let budget = MAX_PLANNER_RENDERED_ITEMS;
-
-  return candidates
-    .map((t) => {
-      const lines = [`- key: ${t.key}`, `  name: ${t.label}`];
-      if (t.criteria) lines.push(`  choose when: ${t.criteria}`);
-
-      if (itemPrompts && t.members.questionKeys.length > 0) {
-        const known = t.members.questionKeys.filter((key) => itemPrompts.has(key));
-        const room = Math.min(known.length, MAX_PLANNER_ITEMS_PER_TOPIC, Math.max(0, budget));
-        if (room < known.length) {
-          lines.push('  questions: not listed — choose this topic whole or not at all');
-        } else if (room > 0) {
-          budget -= room;
-          lines.push('  questions:');
-          for (const key of known.slice(0, room)) {
-            const prompt = (itemPrompts.get(key) ?? '').replace(/\s+/g, ' ').trim();
-            const text =
-              prompt.length > MAX_PLANNER_ITEM_CHARS
-                ? `${prompt.slice(0, MAX_PLANNER_ITEM_CHARS)}…`
-                : prompt;
-            lines.push(`    - ${key}: ${text}`);
-          }
-        }
-      }
-
-      return lines.join('\n');
-    })
-    .join('\n\n');
 }
 
 /**
@@ -435,13 +333,21 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
   const decidedAt = new Date().toISOString();
 
-  const candidates = plannerCandidates(params.topics);
+  // F17.36: a topic already seated during the opening is not a candidate. It has been decided, the
+  // interview is already asking about it, and showing it to the model spends prompt inviting a
+  // choice that cannot be declined.
+  const preSeatedKeys = new Set((params.preSeated ?? []).map((s) => s.key));
+  const candidates = plannerCandidates(params.topics).filter((t) => !preSeatedKeys.has(t.key));
 
   const base = {
     topics: params.topics,
     settings: params.settings,
     decidedAtTurn: params.decidedAtTurn,
     decidedAt,
+    // F17.36. Carried on EVERY path for the same reason `budget` is: a fallback plan that dropped
+    // the topics the interview had already asked about would be a plan contradicting the transcript
+    // behind it.
+    ...(params.preSeated ? { preSeated: params.preSeated } : {}),
     // Carried on EVERY path, including the ones that never call a model: a fallback plan is still
     // an interview someone has to sit through. A budget that applied only to the model's picks
     // would be a budget with a hole in it.
