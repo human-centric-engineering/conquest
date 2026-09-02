@@ -688,7 +688,7 @@ export const SETTING_DESCRIPTORS = {
           // switch nobody set read as three limits that are in force.
           label: 'Choose areas during the opening',
           value: c.conditionalTopics.earlyTopicSeating
-            ? `After ${Math.round(c.conditionalTopics.earlySeatingFloor * 100)}% of the opening, at ${Math.round(c.conditionalTopics.earlySeatingMinConfidence * 100)}% confidence · up to ${c.conditionalTopics.maxEarlySeatedTopics} early, ${c.conditionalTopics.maxRoutingDecisionsPerTurn} from one answer`
+            ? `After ${Math.round(c.conditionalTopics.earlySeatingFloor * 100)}% of the opening, at ${Math.round(c.conditionalTopics.earlySeatingMinConfidence * 100)}% confidence · up to ${c.conditionalTopics.maxEarlySeatedTopics} early, ${c.conditionalTopics.maxRoutingDecisionsPerTurn} from one answer${c.conditionalTopics.bridgeToSeatedTopics ? ' · moves to it at the next change of subject' : ''}`
             : 'No — every area is chosen once the opening finishes',
         },
         {
@@ -1316,6 +1316,23 @@ const ROUTING_SETTING_DESCRIPTORS = {
           ]
         : []),
     ],
+  },
+
+  bridgeToSeatedTopics: {
+    tier: 'standard',
+    rows: (s) =>
+      // Inert while early seating is off, and a row saying "No" beside a feature nobody enabled
+      // reads as a limit that is in force. Printed only where it means something.
+      s.earlyTopicSeating
+        ? [
+            {
+              label: 'Move to an area chosen early',
+              value: s.bridgeToSeatedTopics
+                ? 'Yes — at the next natural change of subject'
+                : 'No — it is covered later, in the usual order',
+            },
+          ]
+        : [],
   },
 
   // All four reported by `earlyTopicSeating` above, where the switch gives them meaning. On their

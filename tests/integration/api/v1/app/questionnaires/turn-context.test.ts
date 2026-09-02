@@ -996,6 +996,111 @@ describe('buildTurnContext — Conditional Topics (P17)', () => {
     });
   });
 
+  describe('the early-seating bridge (F17.36 phase 4)', () => {
+    const EARLY = {
+      v: 1,
+      seated: [
+        {
+          key: 'later',
+          depth: 'full',
+          confidence: 0.93,
+          rationale: 'r',
+          respondentReason: 'rr',
+          atTurn: 3,
+        },
+      ],
+      deferred: [],
+      lastPassAtTurn: 3,
+      evidenceKey: 'e',
+      overCap: false,
+    };
+
+    /** A version with early seating ON — the bridge is unreachable without it. */
+    function earlyVersion(over: Record<string, unknown> = {}) {
+      return {
+        ...versionWithDataSlots(),
+        config: scopedConfig({ earlyTopicSeating: true, ...over }),
+      };
+    }
+
+    function graph(over: Record<string, unknown> = {}) {
+      return sessionGraph({
+        version: earlyVersion(),
+        interviewPlan: null,
+        earlySeatedTopics: EARLY,
+        ...over,
+      });
+    }
+
+    const TOPICS = [
+      topicRow('core', 'core', ['role'], 'full', ['role_fit']),
+      topicRow('later', 'conditional', ['team'], 'full', ['team_shape']),
+    ];
+
+    beforeEach(() => {
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue(TOPICS);
+    });
+
+    it("names the seated topic's data slots, so targeting can move to them", async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph());
+
+      const loaded = await buildTurnContext('sess-1');
+
+      // In scope (that is phase 3) AND flagged for the bridge (that is this phase). Without the
+      // second half the seated topic is invisible to the respondent: it sorts behind every opening
+      // slot and is never reached until the opening is done.
+      expect(loaded!.base.dataSlots?.map((d) => d.key)).toEqual(['role_fit', 'team_shape']);
+      expect(loaded!.base.bridgeDataSlotKeys).toEqual(['team_shape']);
+    });
+
+    it('names nothing once the plan is sealed', async () => {
+      // After the seal the opening is over and the plan governs. Preferring one topic over another
+      // then would be re-ordering a decision that has already been made.
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        graph({
+          interviewPlan: {
+            v: 1,
+            topics: [{ key: 'later', depth: 'full', source: 'early', rationale: 'r' }],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.9,
+            source: 'llm',
+            respondentMessage: '',
+            decidedAtTurn: 5,
+            decidedAt: '2026-09-02T00:00:00.000Z',
+          },
+        })
+      );
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.bridgeDataSlotKeys).toBeUndefined();
+    });
+
+    it('names nothing when the admin turned the bridge off', async () => {
+      // The escape hatch: the area is still in scope and still covered, just later and in the
+      // usual order.
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        graph({ version: earlyVersion({ bridgeToSeatedTopics: false }) })
+      );
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.dataSlots?.map((d) => d.key)).toContain('team_shape');
+      expect(loaded!.base.bridgeDataSlotKeys).toBeUndefined();
+    });
+
+    it('names nothing on a session that seated nothing early', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        graph({ earlySeatedTopics: null })
+      );
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.bridgeDataSlotKeys).toBeUndefined();
+    });
+  });
+
   describe('before the plan exists', () => {
     it('offers the always-run topics and withholds the conditional ones', async () => {
       (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(

@@ -554,6 +554,27 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
     : dataSlots;
 
+  // ── The early-seating bridge (F17.36 phase 4) ────────────────────────────────────────────────
+  // The data slots belonging to topics this interview seated DURING its opening, so the targeting
+  // can MOVE to the area the respondent made obvious rather than only counting it as in scope.
+  //
+  // Only while the plan is still null. After the seal the opening is over, the plan governs, and a
+  // preference for one topic over another would be re-ordering a decision that has been made.
+  // Empty (and therefore absent) on every session that never seated one early, which is nearly all
+  // of them — and absent leaves the pick exactly as it was.
+  const bridgeDataSlotKeys =
+    scope.settings.earlyTopicSeating &&
+    scope.settings.bridgeToSeatedTopics &&
+    scope.plan === null &&
+    scope.earlySeated !== null
+      ? (() => {
+          const seatedTopicKeys = new Set(scope.earlySeated.seated.map((t) => t.key));
+          return scopedDataSlots
+            .filter((d) => seatedTopicKeys.has(scope.scope.topicByDataSlotKey.get(d.key) ?? ''))
+            .map((d) => d.key);
+        })()
+      : [];
+
   // ── Sectioned interviews (P21) ────────────────────────────────────────────────────────────────
   // The second choke point, and deliberately AFTER scope rather than beside it: sections decide the
   // ORDER and the BOUNDARY, scope decides what applies at all, and a section can only ever narrow
@@ -720,6 +741,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Data Slots feature: present always (cheap); the route decides whether to run data-slot
       // mode (flag on + dataSlots non-empty). The pure orchestrators read these only in that mode.
       dataSlots: scopedDataSlots,
+      ...(bridgeDataSlotKeys.length > 0 ? { bridgeDataSlotKeys } : {}),
       dataSlotAnswered,
       activeDataSlotKey,
       dataSlotAttempts,

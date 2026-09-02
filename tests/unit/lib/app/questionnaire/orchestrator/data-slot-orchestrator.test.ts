@@ -58,6 +58,8 @@ function dsState(input: {
   sectionQuestions?: TurnState['sectionQuestions'];
   sectionDataSlots?: TurnState['sectionDataSlots'];
   sectionMeta?: TurnState['sectionMeta'];
+  /** F17.36 phase 4: data-slot keys of topics seated during the opening. */
+  bridgeDataSlotKeys?: string[];
 }): TurnState {
   return {
     ...state({
@@ -75,6 +77,9 @@ function dsState(input: {
     ...(input.sectionQuestions !== undefined ? { sectionQuestions: input.sectionQuestions } : {}),
     ...(input.sectionDataSlots !== undefined ? { sectionDataSlots: input.sectionDataSlots } : {}),
     ...(input.sectionMeta !== undefined ? { sectionMeta: input.sectionMeta } : {}),
+    ...(input.bridgeDataSlotKeys !== undefined
+      ? { bridgeDataSlotKeys: input.bridgeDataSlotKeys }
+      : {}),
   };
 }
 
@@ -1740,5 +1745,149 @@ describe('runDataSlotTurn — sectioned interviews (P21)', () => {
 
     expect(result.response.kind).toBe('question');
     expect(result.targetedQuestionId).toBe('q2');
+  });
+});
+
+describe('runDataSlotTurn — the early-seating bridge (F17.36 phase 4)', () => {
+  /**
+   * Opening themes A and B; `seated` is the topic chosen early during the opening.
+   *
+   * Ordinals put the opening first, which is the arrangement that makes the bridge necessary: the
+   * seated slot would otherwise never be reached until every opening slot was done.
+   */
+  const SLOTS = [
+    ds({ id: 'a1', key: 'a1', theme: 'A', ordinal: 0 }),
+    ds({ id: 'a2', key: 'a2', theme: 'A', ordinal: 1 }),
+    ds({ id: 'b1', key: 'b1', theme: 'B', ordinal: 2 }),
+    ds({ id: 's1', key: 's1', theme: 'seated', ordinal: 9 }),
+    ds({ id: 's2', key: 's2', theme: 'seated', ordinal: 10 }),
+  ];
+
+  async function pick(input: Parameters<typeof dsState>[0]) {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(dsState(input), invokers);
+    expect(result.response.kind).toBe('data_slot');
+    return result.response.kind === 'data_slot' ? result.response : null;
+  }
+
+  it('does NOT interrupt a theme mid-flow', async () => {
+    // The whole safety argument. `a1` was just answered and `a2` is still open in the same theme,
+    // so the interview stays where it is. Interrupting a line of questioning is exactly what would
+    // make an interview feel scattered.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [{ dataSlotId: 'a1', confidence: 0.9 }],
+      activeDataSlotKey: 'a1',
+      bridgeDataSlotKeys: ['s1', 's2'],
+    });
+
+    expect(next?.dataSlotId).toBe('a2');
+    expect(next?.isTransition).toBe(false);
+  });
+
+  it('moves to the seated area at a transition, instead of the next opening theme', async () => {
+    // Theme A is exhausted, so the pick was moving somewhere new regardless. Without the bridge it
+    // would go to `b1`; with it, it goes to the area the respondent made obvious.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [
+        { dataSlotId: 'a1', confidence: 0.9 },
+        { dataSlotId: 'a2', confidence: 0.9 },
+      ],
+      activeDataSlotKey: 'a2',
+      bridgeDataSlotKeys: ['s1', 's2'],
+    });
+
+    expect(next?.dataSlotId).toBe('s1');
+    // It reads as an ordinary change of subject, which is the point: the framing was already there.
+    expect(next?.isTransition).toBe(true);
+  });
+
+  it('goes to the next opening theme when there is nothing seated', async () => {
+    // The control. Absent `bridgeDataSlotKeys`, targeting is exactly what it always was.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [
+        { dataSlotId: 'a1', confidence: 0.9 },
+        { dataSlotId: 'a2', confidence: 0.9 },
+      ],
+      activeDataSlotKey: 'a2',
+    });
+
+    expect(next?.dataSlotId).toBe('b1');
+  });
+
+  it('returns to the opening once the visit is spent, rather than finishing the topic', async () => {
+    // The bound. Both seated slots are covered, so the budget is gone — and critically the ACTIVE
+    // theme is the seated one, where the topic-local rule would otherwise hold the interview until
+    // the whole area was done, delaying an opening that has not finished.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: [...SLOTS, ds({ id: 's3', key: 's3', theme: 'seated', ordinal: 11 })],
+      dataSlotAnswered: [
+        { dataSlotId: 'a1', confidence: 0.9 },
+        { dataSlotId: 's1', confidence: 0.9 },
+        { dataSlotId: 's2', confidence: 0.9 },
+      ],
+      activeDataSlotKey: 's2',
+      bridgeDataSlotKeys: ['s1', 's2', 's3'],
+    });
+
+    expect(next?.dataSlotId).toBe('a2');
+  });
+
+  it('prefers the seated area when a parked slot forces a move', async () => {
+    // Parking is the most explicit transition there is: the interviewer has given up and is moving
+    // on regardless. Where it moves TO is exactly this decision.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [],
+      activeDataSlotKey: 'a1',
+      // At the re-ask cap, so this turn parks `a1` and bridges away from theme A.
+      dataSlotAttempts: { a1: 9 },
+      bridgeDataSlotKeys: ['s1', 's2'],
+    });
+
+    expect(next?.dataSlotId).toBe('s1');
+  });
+
+  it('still asks a seated slot when it is all that is left', async () => {
+    // A spent budget must never stall the interview. Preferring the opening is a preference, not a
+    // prohibition — there is nothing else to ask here.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [
+        { dataSlotId: 'a1', confidence: 0.9 },
+        { dataSlotId: 'a2', confidence: 0.9 },
+        { dataSlotId: 'b1', confidence: 0.9 },
+        { dataSlotId: 's1', confidence: 0.9 },
+      ],
+      activeDataSlotKey: 'b1',
+      bridgeDataSlotKeys: ['s1', 's2'],
+    });
+
+    expect(next?.dataSlotId).toBe('s2');
+  });
+
+  it('ignores a bridge key that names no slot in the pool', async () => {
+    // A topic seated on a version whose slots were since edited. Same treatment every unresolvable
+    // key gets in this feature: skipped, never a stall.
+    const next = await pick({
+      questions: [q({ id: 'q1' })],
+      dataSlots: SLOTS,
+      dataSlotAnswered: [
+        { dataSlotId: 'a1', confidence: 0.9 },
+        { dataSlotId: 'a2', confidence: 0.9 },
+      ],
+      activeDataSlotKey: 'a2',
+      bridgeDataSlotKeys: ['deleted'],
+    });
+
+    expect(next?.dataSlotId).toBe('b1');
   });
 });

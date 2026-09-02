@@ -601,6 +601,47 @@ export function ScopeSettingsCard({
                 />
               </div>
 
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-0.5">
+                    <Label htmlFor="scope-bridge" className="text-sm font-medium">
+                      Move to an area as soon as it is chosen{' '}
+                      <FieldHelp title="Moving to an area chosen early">
+                        <p>
+                          Choosing an area early decides what the interview will{' '}
+                          <strong>cover</strong>. On its own it does not change what is{' '}
+                          <strong>asked next</strong> — the opening questions still come first, so
+                          the respondent would notice nothing until the opening finished.
+                        </p>
+                        <p>
+                          Turn this on and the interview moves to the chosen area at the next
+                          natural change of subject. It never interrupts a line of questioning
+                          mid-flow; it only changes which subject comes next when one was about to
+                          change anyway.
+                        </p>
+                        <p>
+                          It is a visit, not a move: after a question or two it returns to the
+                          opening, which still has to finish before the full decision is made.
+                        </p>
+                        <p>
+                          Turn it off if respondents tell you the conversation feels like it jumps
+                          around. The area is still covered, just later and in the usual order.
+                        </p>
+                      </FieldHelp>
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Off means a chosen area is covered later, in the usual order.
+                    </p>
+                  </div>
+                  <Switch
+                    id="scope-bridge"
+                    checked={draft.bridgeToSeatedTopics}
+                    onCheckedChange={(v) => set({ bridgeToSeatedTopics: v })}
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <Label className="text-muted-foreground text-xs">
                   Most areas from a single answer{' '}

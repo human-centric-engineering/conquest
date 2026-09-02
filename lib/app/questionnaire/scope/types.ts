@@ -284,6 +284,21 @@ export const EARLY_SEATING_CADENCE_TURNS = 1;
 /** How many deferred picks one session may carry. A cap on the row, not a judgement. */
 export const MAX_DEFERRED_EARLY_PICKS = 12;
 
+/**
+ * How many data slots the interview may ask from early-seated topics BEFORE the plan is sealed.
+ *
+ * The bound that makes the bridge a visit rather than an emigration. Without it, moving into a
+ * seated topic's theme would hand that theme the topic-local preference and the interview would
+ * finish the whole area before returning to an opening it has not completed — which delays the
+ * decision the opening exists to inform.
+ *
+ * A module constant rather than a setting, for the same reason `EARLY_SEATING_CADENCE_TURNS` is:
+ * it is the shape of the behaviour, not a dial anyone should be tuning per questionnaire. Two is
+ * enough for the move to register as deliberate and short enough that the opening is plainly still
+ * the subject.
+ */
+export const MAX_BRIDGED_SLOTS_BEFORE_PLAN = 2;
+
 /** Bounds on a per-question-type time estimate, in seconds. */
 export const MIN_SECONDS_PER_ITEM = 1;
 export const MAX_SECONDS_PER_ITEM = 600;
@@ -695,6 +710,33 @@ export interface ConditionalTopicsSettings {
    * that is the sealed decision rather than a reaction to a turn.
    */
   maxRoutingDecisionsPerTurn: number;
+
+  /**
+   * Once an area has been chosen early, let the interview actually MOVE to it — at the next natural
+   * transition, rather than waiting for the whole opening to finish first (F17.36 phase 4).
+   *
+   * **Inert unless {@link earlyTopicSeating} is on**, which is why it defaults to `true`: it is not
+   * a second switch for the feature, it is the escape hatch for the one risk the feature carries.
+   *
+   * ## What it does, precisely
+   *
+   * Nothing while the interviewer is mid-theme. The targeting is topic-local by design — it lingers
+   * in an area until that area is exhausted — and interrupting that is what would make an interview
+   * feel scattered. But at the moment it would move to a NEW area anyway, it moves to the seated
+   * topic instead of to the next opening theme. That transition was already happening and already
+   * carries "moving on to…" framing, so nothing reads as a non-sequitur.
+   *
+   * Bounded by `MAX_BRIDGED_SLOTS_BEFORE_PLAN`: the interview visits the chosen area, it does not
+   * emigrate to it. Once the bound is spent the preference inverts and the opening is preferred, so
+   * the plan still gets sealed over a complete opening.
+   *
+   * ## Why it exists as a switch at all
+   *
+   * Without it, early seating is invisible to the respondent: it changes what is in SCOPE, not what
+   * is ASKED NEXT, and the opening's themes sort first. An admin who wants the scope effect for the
+   * report without the conversational change turns this off.
+   */
+  bridgeToSeatedTopics: boolean;
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
@@ -725,6 +767,10 @@ export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   earlySeatingMinConfidence: 0.85,
   maxEarlySeatedTopics: 1,
   maxRoutingDecisionsPerTurn: 1,
+  // On, but reachable only when `earlyTopicSeating` is — which is off. So no existing version
+  // changes, and an author who turns early seating on gets an interview that acts on what it
+  // learned rather than one that files it away.
+  bridgeToSeatedTopics: true,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1228,6 +1274,7 @@ export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopi
         d.maxRoutingDecisionsPerTurn
       )
     ),
+    bridgeToSeatedTopics: asBool(obj.bridgeToSeatedTopics, d.bridgeToSeatedTopics),
   };
 }
 

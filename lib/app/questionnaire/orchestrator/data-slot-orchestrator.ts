@@ -58,6 +58,7 @@ import {
 } from '@/lib/app/questionnaire/selection/context';
 import { resolveQuestionFidelity } from '@/lib/app/questionnaire/types';
 import { governsSlot, probesRemaining } from '@/lib/app/questionnaire/scope/probe';
+import { MAX_BRIDGED_SLOTS_BEFORE_PLAN } from '@/lib/app/questionnaire/scope/types';
 import type { StageEmitter } from '@/lib/app/questionnaire/orchestrator/stage-progress';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
@@ -167,31 +168,102 @@ function unfilledDataSlots(
 }
 
 /**
+ * What the interview has decided early, and how much of that decision it may act on yet (F17.36).
+ *
+ * `keys` are the data slots belonging to topics seated DURING the opening. `remaining` is how many
+ * more of them may be asked before the plan is sealed — see `MAX_BRIDGED_SLOTS_BEFORE_PLAN`.
+ *
+ * The two directions matter equally. With budget left, a seated slot is PREFERRED at a transition.
+ * With the budget spent, a seated slot is AVOIDED — otherwise the topic-local preference would keep
+ * the interview in the area it just bridged to and it would finish that topic before returning to
+ * an opening it has not completed.
+ */
+interface BridgeIntent {
+  keys: ReadonlySet<string>;
+  remaining: number;
+}
+
+/**
  * Topic-local pick: prefer an unfilled slot in the CURRENT theme (the one the previous turn
  * targeted) so the interviewer lingers in an area; only when that area is exhausted move to the
  * next theme. Falls back to the first unfilled slot when there's no active theme. When `avoidTheme`
  * is set (we just PARKED a slot and want to bridge to a fresh topic), prefer a slot in a DIFFERENT
  * theme — explicit forward movement instead of lingering on the area we just gave up on.
+ *
+ * ## The early-seating bridge (F17.36 phase 4)
+ *
+ * `bridge` changes WHICH area comes next, never WHETHER to leave the current one. The topic-local
+ * rule above is untouched and is checked first: an interview mid-theme stays mid-theme, because
+ * interrupting a line of questioning is exactly what would make it feel scattered.
+ *
+ * The bridge acts only at a transition — the moment the current theme is exhausted and the pick was
+ * going to move somewhere new anyway. That transition already carries "moving on to…" framing, so
+ * moving to the area the respondent made obvious reads as the interview listening rather than as a
+ * non-sequitur.
  */
 function pickNextDataSlot(
   unfilled: DataSlotTarget[],
   activeDataSlotKey: string | null | undefined,
   dataSlots: DataSlotTarget[],
-  avoidTheme?: string
+  avoidTheme?: string,
+  bridge?: BridgeIntent
 ): DataSlotTarget {
+  // Which way the bridge is pulling, if at all. `wants` prefers a seated slot; `returns` prefers
+  // anything BUT one, which is how the interview comes back to the opening after its visit.
+  const wants = bridge !== undefined && bridge.remaining > 0 && bridge.keys.size > 0;
+  const returns = bridge !== undefined && bridge.remaining <= 0 && bridge.keys.size > 0;
+  const isSeated = (s: DataSlotTarget): boolean => bridge?.keys.has(s.key) ?? false;
+
   if (avoidTheme) {
-    const elsewhere = unfilled.find((s) => s.theme !== avoidTheme);
-    if (elsewhere) return elsewhere;
+    // Parking is a transition too, and the most explicit one there is. Prefer the seated area over
+    // any other fresh theme, since we are moving on regardless.
+    const elsewhere = unfilled.filter((s) => s.theme !== avoidTheme);
+    const preferred =
+      (wants ? elsewhere.find(isSeated) : undefined) ??
+      (returns ? elsewhere.find((s) => !isSeated(s)) : undefined) ??
+      elsewhere[0];
+    if (preferred) return preferred;
     // Only the just-parked theme remains — fall through (still better to keep asking than stall).
   }
+
   const activeTheme = activeDataSlotKey
     ? dataSlots.find((s) => s.key === activeDataSlotKey)?.theme
     : undefined;
   if (activeTheme) {
-    const sameTheme = unfilled.find((s) => s.theme === activeTheme);
-    if (sameTheme) return sameTheme;
+    const sameTheme = unfilled.filter((s) => s.theme === activeTheme);
+    // Mid-theme: stay. The one exception is a spent bridge sitting in a seated theme — there,
+    // lingering is what the bound exists to prevent, so a non-seated slot elsewhere wins.
+    const stay = returns ? sameTheme.find((s) => !isSeated(s)) : sameTheme[0];
+    if (stay) return stay;
   }
-  return unfilled[0];
+
+  // The transition. This is the only place the bridge chooses a NEW area.
+  const preferred =
+    (wants ? unfilled.find(isSeated) : undefined) ??
+    (returns ? unfilled.find((s) => !isSeated(s)) : undefined);
+  return preferred ?? unfilled[0];
+}
+
+/**
+ * Turn the seated-topic slot keys into a {@link BridgeIntent}, or `undefined` when there is nothing
+ * to bridge to.
+ *
+ * `remaining` is derived rather than stored: the bound minus however many of those slots the
+ * interview has already covered. That means the visit is self-limiting with no counter to keep in
+ * sync, and a respondent who answers a seated slot in passing (rather than being asked it) spends
+ * the budget just the same — which is right, because the point of the bound is how much of the
+ * interview has moved off the opening, not how many times the pick preferred it.
+ */
+function resolveBridge(
+  bridgeDataSlotKeys: readonly string[] | undefined,
+  dataSlots: DataSlotTarget[],
+  answered: DataSlotAnsweredView[]
+): BridgeIntent | undefined {
+  if (!bridgeDataSlotKeys || bridgeDataSlotKeys.length === 0) return undefined;
+  const keys = new Set(bridgeDataSlotKeys);
+  const coveredIds = new Set(answered.filter(isCovered).map((a) => a.dataSlotId));
+  const spent = dataSlots.filter((s) => keys.has(s.key) && coveredIds.has(s.id)).length;
+  return { keys, remaining: MAX_BRIDGED_SLOTS_BEFORE_PLAN - spent };
 }
 
 /** Build the offer composer's input from the filled data slots (the topics covered). */
@@ -663,6 +735,12 @@ export async function runDataSlotTurn(
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
+  // F17.36 phase 4: the early-seating bridge. Absent on every session that has not seated a topic
+  // during its opening, which is nearly all of them — and `undefined` leaves the pick exactly as it
+  // was. `remaining` counts DOWN from the bound as the seated slots get covered, so a session that
+  // has already spent its visit flips to preferring the opening again without any extra state.
+  const bridge = resolveBridge(state.bridgeDataSlotKeys, dataSlots, effectiveDataAnswered);
+
   // Deepen a volunteered tangent (be led by the respondent): when THIS turn captured a STRONG,
   // volunteered opinion on a NON-active topic — a `direct`, non-provisional fill on a slot other than
   // the one we were exploring — that slot is now covered and drops out of `unfilled`, so the
@@ -761,10 +839,12 @@ export async function runDataSlotTurn(
     if (adaptivePick) {
       const chosen = candidatePool.find((s) => s.key === adaptivePick.dataSlotKey);
       // Trust only an in-pool pick; an off-pool key falls back to the deterministic order.
-      next = chosen ?? pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
+      next =
+        chosen ??
+        pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme, bridge);
       costUsd += adaptivePick.costUsd;
     } else {
-      next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
+      next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme, bridge);
     }
     // A deepen pick is a covered slot the respondent just raised — frame it as a follow-up (re-ask),
     // not a fresh move into a new area, so the interviewer goes deeper on what they volunteered.

@@ -293,6 +293,7 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   earlySeatingMinConfidence: 0.85,
   maxEarlySeatedTopics: 1,
   maxRoutingDecisionsPerTurn: 1,
+  bridgeToSeatedTopics: true,
 };
 
 const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {

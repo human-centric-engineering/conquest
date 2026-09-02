@@ -696,17 +696,46 @@ maxRoutingDecisionsPerTurn  ≤  maxEarlySeatedTopics  ≤  maxConditionalTopics
 `validate.ts` raises `cap_hierarchy_inverted` when they do not nest, because the configuration is
 then expressing an intent the runtime cannot honour.
 
-#### What a respondent notices today: nothing
+#### Moving to the area, not just scoping it (phase 4)
 
-**Seating a topic changes what is _in scope_. It does not change what is _asked next_.** The
-data-slot orchestrator picks theme-then-ordinal and stays topic-local, and the opening's themes sort
-first, so a newly seated topic waits its turn behind every remaining opening slot.
+**Seating a topic changes what is _in scope_. On its own it does not change what is _asked next_.**
+The data-slot orchestrator picks theme-then-ordinal and stays topic-local, and the opening's themes
+sort first, so a newly seated topic would wait behind every remaining opening slot — and the
+respondent would notice nothing at all until the opening finished.
 
-That is a known and accepted limit of this phase. Making the interviewer bridge to a seated topic
-while opening slots remain is a change to the orchestrator's _pick_, not to scope, and it can make an
-interview feel like it abandoned a line of questioning — so it is its own phase with its own
-sign-off. The respondent-facing announcement is deferred to the same place: an early seat that
-changes nothing about the next question has nothing to announce yet.
+`bridgeToSeatedTopics` (default on, **inert unless `earlyTopicSeating` is on**) closes that gap. It
+is not a second switch for the feature; it is the escape hatch for the one risk the feature carries.
+
+**It changes _which_ area comes next, never _whether_ to leave the current one.** The rules, in the
+order `pickNextDataSlot` applies them:
+
+| Moment                     | What happens                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Mid-theme, slots remaining | **Nothing.** The interview stays put. Interrupting a line of questioning is what would make it feel scattered |
+| Current theme exhausted    | The pick was moving somewhere new anyway — it moves to the **seated area** instead of the next opening theme  |
+| A slot was just parked     | The most explicit transition there is. Prefers the seated area over any other fresh theme                     |
+| The visit is spent         | The preference **inverts**: a non-seated slot is preferred, so the interview returns to the opening           |
+
+Because it only ever acts at a transition, and a transition already carries "moving on to…" framing,
+nothing reads as a non-sequitur. The interview moves to the area the respondent made obvious at
+exactly the moment it was going to change subject regardless.
+
+**It is a visit, not an emigration.** `MAX_BRIDGED_SLOTS_BEFORE_PLAN` bounds it, and the inversion
+above is what enforces the bound: without it, moving into the seated theme would hand that theme the
+topic-local preference and the interview would finish the whole area before returning to an opening
+it has not completed — delaying the very decision the opening exists to inform. `remaining` is
+derived from how many seated slots are already covered rather than stored, so there is no counter to
+keep in sync, and a respondent who answers a seated slot in passing spends the budget just the same.
+
+The preference is never a prohibition: when a seated slot is all that is left, it is asked.
+
+**Question slots are not bridged**, only data slots. The orchestrator's pick is over data slots — the
+conversation targets a slot, and the questions behind it are filled by extraction. A seated topic's
+questions come into scope with it and are answered the way every other in-scope question is.
+
+The respondent-facing **announcement** is still deferred (phase 5). Until it ships, the move is felt
+but not narrated: the interview changes subject to the right thing, with ordinary transition framing
+and no explanation of why that area rather than another.
 
 Analytics count `early` **separately** and never fold it into `llm`. An early seat the final planner
 would also have chosen is a planner success; one it would not have chosen is not, and counting them

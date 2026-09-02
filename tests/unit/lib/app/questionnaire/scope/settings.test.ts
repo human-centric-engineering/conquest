@@ -706,6 +706,20 @@ describe('narrowConditionalTopicsSettings — early topic seating (F17.36)', () 
     expect(s.earlySeatingMinConfidence).toBeGreaterThanOrEqual(s.minConfidence);
     expect(s.maxEarlySeatedTopics).toBe(1);
     expect(s.maxRoutingDecisionsPerTurn).toBe(1);
+    // On, but reachable only through `earlyTopicSeating` — which is off. So no existing version
+    // changes, and turning early seating on gets an interview that acts on what it learned.
+    expect(s.bridgeToSeatedTopics).toBe(true);
+  });
+
+  it('lets an author turn the bridge off without turning early seating off', () => {
+    // The escape hatch for the one risk this feature carries: the area is still chosen and still
+    // covered, just later and in the usual order.
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: true,
+      bridgeToSeatedTopics: false,
+    });
+    expect(s.earlyTopicSeating).toBe(true);
+    expect(s.bridgeToSeatedTopics).toBe(false);
   });
 
   it('never lets the floor reach zero', () => {

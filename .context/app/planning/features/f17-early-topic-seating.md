@@ -2,7 +2,7 @@
 feature: F17.36
 title: Early topic seating — deciding during the opening, not only at the end of it
 phase: P17 — Conditional Topics
-status: phases 1, 2 and 3 SHIPPED (2026-09-02). Phases 4–6 proposed; §16 settled below
+status: phases 1–4 SHIPPED (2026-09-02). Phases 5–6 proposed; §16 settled below
 owner: TBD
 opened: 2026-09-02
 revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added; §16 settled and phases 1+2 built)
@@ -474,6 +474,30 @@ fallback**. The fallback's precondition is "no signal to judge on at all", and a
 the opening is a judgement made on real evidence at a higher bar than the plan itself needed. Padding
 it with safe defaults would widen an interview that already knows what it is about. Recorded at the
 call site and asserted in `guardrails.test.ts`.
+
+### What phase 4 shipped
+
+§9 lever 3, and the sign-off it required was about **how aggressive** the bridge is, not merely
+whether to build it. Three options were on the table; the middle one was taken:
+
+| Option                      | Verdict                                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Only when a slot is parked  | Safest, and literally what §9's sentence describes — but parking needs `maxDataSlotAttempts` exhausted, so on many instruments it would almost never fire |
+| **At any theme transition** | **Chosen.** Never interrupts a theme; changes only which area comes next when one was changing anyway                                                     |
+| Immediately after seating   | Most responsive, but interrupts mid-flow and reads as a non-sequitur until the phase 5 announcement                                                       |
+
+- `bridgeToSeatedTopics` (default `true`, inert unless `earlyTopicSeating` is on) — the sixth
+  setting, and the escape hatch for the risk the feature carries rather than a second switch for it.
+- `pickNextDataSlot` gained a `BridgeIntent`. The topic-local rule is checked **first and unchanged**;
+  the bridge acts only where the pick was already moving to a new theme, and at the parked-slot
+  transition. Once the visit is spent the preference **inverts**, which is what stops the topic-local
+  rule holding the interview in the bridged theme until the whole area is done.
+- `MAX_BRIDGED_SLOTS_BEFORE_PLAN = 2`, a module constant. `remaining` is derived from how many seated
+  slots are already covered, so there is no counter to keep in sync.
+- `TurnState.bridgeDataSlotKeys`, computed in `turn-context.ts` only while the plan is null.
+
+**Not bridged, and deliberately:** question slots. The orchestrator's pick is over data slots; a
+seated topic's questions come into scope with it and are answered like any other in-scope question.
 
 **Deferred to phase 5 with the announcement it governs:** `announceEarlySeating`. Shipping the
 setting now would put a switch on the tab that does nothing, which is the exact failure this codebase

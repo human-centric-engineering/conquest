@@ -238,6 +238,20 @@ export interface TurnState {
    * Absent (the default) means question mode — `runDataSlotTurn` is not used.
    */
   dataSlots?: DataSlotTarget[];
+  /**
+   * Conditional Topics (F17.36 phase 4): the data-slot keys belonging to topics seated DURING the
+   * opening, before the plan was sealed.
+   *
+   * Absent on every session that has not seated one early, which is nearly all of them — and absent
+   * leaves targeting exactly as it was. Present, the pick prefers one of these at the next theme
+   * TRANSITION (never mid-theme), so the interview moves to the area the respondent made obvious
+   * rather than to the next opening theme. Bounded by `MAX_BRIDGED_SLOTS_BEFORE_PLAN`, after which
+   * the preference inverts and the opening is preferred again.
+   *
+   * Keys rather than ids because that is what scope and topic membership speak in, and the
+   * orchestrator already resolves keys to slots.
+   */
+  bridgeDataSlotKeys?: string[];
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
   /**
