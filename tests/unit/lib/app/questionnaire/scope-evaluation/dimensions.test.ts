@@ -8,9 +8,9 @@ import {
 } from '@/lib/app/questionnaire/scope-evaluation';
 
 describe('scope-evaluation dimension registry parity', () => {
-  it('declares exactly four distinct dimensions', () => {
-    expect(SCOPE_EVALUATION_DIMENSIONS).toHaveLength(4);
-    expect(new Set(SCOPE_EVALUATION_DIMENSIONS).size).toBe(4);
+  it('declares exactly three distinct dimensions', () => {
+    expect(SCOPE_EVALUATION_DIMENSIONS).toHaveLength(3);
+    expect(new Set(SCOPE_EVALUATION_DIMENSIONS).size).toBe(3);
   });
 
   it('has a spec for every dimension with a unique, app-namespaced slug', () => {
@@ -23,7 +23,7 @@ describe('scope-evaluation dimension registry parity', () => {
       expect(spec.slug).toMatch(/^app-questionnaire-scope-judge-[a-z-]+$/);
       slugs.add(spec.slug);
     }
-    expect(slugs.size).toBe(4);
+    expect(slugs.size).toBe(3);
   });
 
   it('SCOPE_EVALUATION_JUDGE_SLUGS lists the spec slugs in dimension order', () => {

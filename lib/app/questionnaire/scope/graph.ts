@@ -1,7 +1,7 @@
 /**
  * Conditional Topics (P17) — the routing map's graph, built from the authoring payload.
  *
- * Turns a version's topics, hard rules and settings into a laid-out node/edge graph the admin canvas
+ * Turns a version's topics and settings into a laid-out node/edge graph the admin canvas
  * renders. Pure: no Prisma, no Next, and deliberately **no `@xyflow/react` import** — it emits its own
  * neutral shape and the component maps that onto React Flow's `Node`/`Edge`. That keeps `scope/**` the
  * pure leaf the rest of the feature relies on, and lets the whole layout be asserted without a DOM.
@@ -14,30 +14,19 @@
  * map shows:
  *
  * ```
- * start ──> opening topics ──> hard rules ──────────────────────────┐
- *       │                  └─> planner ──> guardrails ──> conditional topics
+ * start ──> opening topics ──> planner ──> guardrails ──> conditional topics
  *       └──────────────────────────────────> always asked (core + closing)
  * ```
  *
- * The geometry carries the one claim an author most often gets wrong: a rule edge **skips over** the
- * planner and the guardrails, because `applyGuardrails` seats rule includes before the cap and never
- * truncates them. A cap the model is imagined to be honouring, rather than one applied to its answer, is
+ * The geometry carries the one claim an author most often gets wrong: the cap is applied to the
+ * model's answer rather than honoured by the model. A cap the model is imagined to be obeying is
  * the misreading the settings card's numbering already fights; here it is a picture.
  *
  * ## Structural, never predictive
  *
- * No fills exist at authoring time, so no rule can be evaluated and no plan can be known. Every rule
- * therefore draws its edge and the guardrails draw a candidate edge to every conditional topic — this is
- * the map of what **can** happen, not a forecast of what will. `evaluateScopeRules` and
- * `plannerCandidates` are deliberately not called: both need a session's fills, and a map that pretended
- * to have them would be a preview that lies. The dry-run card (F17.14) is the surface that answers "what
- * would this actually do".
- *
- * The one thing the structure *can* settle is where a rule's evidence comes from, and it classifies that
- * exactly as `validateConditionalTopics` does — **opening, `core`, or neither**. A rule reading a slot the
- * opening does not gather never matches; for `not_exists` it is worse, and fires for everybody. Those
- * rules hang off an explicit "not gathered in the opening" node rather than off nothing, so the failure is
- * visible as a shape rather than only as a sentence in the findings list above the map.
+ * No fills exist at authoring time, so no plan can be known. The guardrails therefore draw a candidate
+ * edge to every conditional topic — this is the map of what **can** happen, not a forecast of what will.
+ * The dry-run card (F17.14) is the surface that answers "what would this actually do".
  */
 
 import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
@@ -45,12 +34,9 @@ import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import { questionTypeLabel } from '@/lib/app/questionnaire/types';
 import {
-  SCOPE_RULE_OPERATOR_LABELS,
   TOPIC_DEPTH_LABELS,
   TOPIC_PHASE_LABELS,
-  VALUELESS_SCOPE_OPERATORS,
   type ConditionalTopicsSettings,
-  type ScopeRuleOperator,
   type Topic,
   type TopicDepth,
   type TopicPhase,
@@ -69,22 +55,9 @@ import type {
  * What a node stands for. The kind drives both the tone it is painted in and what the detail panel
  * offers — a topic node gets "Edit this topic", a guardrail node cannot.
  *
- * A rule's action is part of its kind rather than a field beside it, because include and exclude are
- * the one pair on this map that must never be confused at a glance. Splitting them here means the
- * renderer picks a colour and an icon by exhaustive lookup, with no branch that could fall through to
- * the wrong direction.
  */
 export type ScopeNodeKind =
-  | 'start'
-  | 'opening'
-  | 'ungathered'
-  | 'ruleInclude'
-  | 'ruleExclude'
-  | 'planner'
-  | 'guardrails'
-  | 'conditional'
-  | 'always'
-  | 'alwaysBand';
+  'start' | 'opening' | 'planner' | 'guardrails' | 'conditional' | 'always' | 'alwaysBand';
 
 /** A chip on a node. `tone` is advisory — the renderer maps it to colour. */
 export interface ScopeNodeBadge {
@@ -109,7 +82,7 @@ export const SCOPE_BADGES = {
     label: 'No criteria',
     tone: 'warning',
     meaning:
-      'There is nothing here for the agent to judge this topic on. It reads each conditional topic’s criteria when it decides what to ask, so with none written, this topic can only be asked because a hard rule includes it, because it is a fallback, or because the blind-spot check picks it.',
+      'There is nothing here for the agent to judge this topic on. It reads each conditional topic’s criteria when it decides what to ask, so with none written, this topic can only be asked because it is a fallback, or because the blind-spot check picks it.',
   },
   fallback: {
     label: 'Fallback',
@@ -123,30 +96,6 @@ export const SCOPE_BADGES = {
     meaning:
       'First in line for the blind-spot check. When that check is on, one topic the agent did NOT choose is asked anyway, at Light depth — just its most important few questions. This topic is picked ahead of the others whenever it is available.',
   },
-  include: {
-    label: 'Include',
-    tone: 'positive',
-    meaning:
-      'This rule adds its topic outright, before the agent runs and before the limit on how many topics is applied — so a respondent can end up with more topics than that limit would normally allow.',
-  },
-  exclude: {
-    label: 'Exclude',
-    tone: 'negative',
-    meaning:
-      'This rule blocks its topic, before the agent runs. Blocking always wins: a topic blocked here stays out however many other rules or judgements ask for it.',
-  },
-  unknownTopic: {
-    label: 'Unknown topic',
-    tone: 'warning',
-    meaning:
-      'This rule points at a topic this version does not have, so it can never add or block anything. Either the topic was renamed and the rule was not, or the topic was deleted and the rule was left behind.',
-  },
-  noEffect: {
-    label: 'No effect',
-    tone: 'warning',
-    meaning:
-      'This rule points at a topic that is asked in every interview, so it can never add or block anything. Rules only act on topics set to “Ask when it fits” — change the topic to that, or delete the rule.',
-  },
   checkThis: {
     label: 'Check this',
     tone: 'warning',
@@ -157,7 +106,7 @@ export const SCOPE_BADGES = {
     label: 'AI',
     tone: 'neutral',
     meaning:
-      'The only step on this map that makes a judgement rather than following a rule. Everything it chooses still has to get past the guardrails.',
+      'The only step on this map that makes a judgement. Everything it chooses still has to get past the guardrails.',
   },
 } as const satisfies Record<string, ScopeNodeBadge & { meaning: string }>;
 
@@ -252,7 +201,7 @@ export interface ScopeNodeDetail {
   rows: ScopeDetailRow[];
   /**
    * The topic key, when this node IS a topic. Its presence is what enables the "Edit this topic"
-   * jump — a guardrail or a rule has no row in the topic list to land on.
+   * jump — a guardrail has no row in the topic list to land on.
    */
   topicKey?: string;
   /** The author's criteria, verbatim and untruncated. Only conditional topics carry one. */
@@ -286,14 +235,8 @@ export interface ScopeGraphNode {
  *
  * - `always` — solid. Happens for every respondent.
  * - `candidate` — dashed. The agent *may* choose it; nothing here is settled at authoring time.
- * - `ruleInclude` / `ruleExclude` — an author's certainty, drawn as one. Both bypass the planner and
- *   the guardrails, which is exactly where they sit in `applyGuardrails`.
- * - `evidence` — an opening topic gathers the slot a rule reads.
- * - `evidenceWeak` — a `core` topic gathers it, or nothing reachable does. Either way the rule cannot
- *   rely on the slot having been filled by the moment the rules are evaluated.
  */
-export type ScopeEdgeKind =
-  'always' | 'candidate' | 'ruleInclude' | 'ruleExclude' | 'evidence' | 'evidenceWeak';
+export type ScopeEdgeKind = 'always' | 'candidate';
 
 export interface ScopeGraphEdge {
   id: string;
@@ -312,7 +255,7 @@ export interface BuildScopeGraphInput {
   topics: readonly Topic[];
   settings: ConditionalTopicsSettings;
   costs: TopicsCostView;
-  /** The version's data slots — for resolving a rule's slot key to the name an author recognises. */
+  /** The version's data slots, priced for the timing figures on each topic node. */
   dataSlots: readonly TopicDataSlotRef[];
   /**
    * The version's questions, priced.
@@ -342,15 +285,13 @@ export interface BuildScopeGraphInput {
 export const START_NODE_ID = 'start';
 export const PLANNER_NODE_ID = 'planner';
 export const GUARDRAILS_NODE_ID = 'guardrails';
-export const UNGATHERED_NODE_ID = 'ungathered';
 
 /**
  * The always-asked band's head node — present whether or not the band is expanded.
  *
  * It stays on the canvas in both states on purpose. It is the band's only anchor: `start` points at it
- * rather than at fifteen individual topics, and a weak-evidence edge from a `core` topic falls back to
- * it while the band is collapsed. An edge whose endpoint is not on the canvas is silently dropped by
- * React Flow, so a head that came and went would take those edges with it.
+ * rather than at fifteen individual topics. An edge whose endpoint is not on the canvas is silently
+ * dropped by React Flow, so a head that came and went would take those edges with it.
  */
 export const ALWAYS_BAND_NODE_ID = 'always::band';
 
@@ -389,10 +330,9 @@ const ROW_GAP = 52;
 const COL = {
   start: 0,
   opening: 1,
-  rule: 2,
-  planner: 3,
-  guardrails: 4,
-  conditional: 5,
+  planner: 2,
+  guardrails: 3,
+  conditional: 4,
 } as const;
 
 type ColumnKey = keyof typeof COL;
@@ -401,22 +341,15 @@ type ColumnKey = keyof typeof COL;
  * The vertical lane each column is centred on. Every column on y = 0 is what made the first map
  * unreadable, and not because it looked flat.
  *
- * A left-to-right graph draws its edges as horizontal runs. Put six columns on one centre line and every
- * one of those runs lands in the same horizontal band — so the rule's edge to a conditional topic is
- * drawn straight through the planner and the guardrails, and a reader cannot tell an edge that stops at
+ * A left-to-right graph draws its edges as horizontal runs. Put every column on one centre line and
+ * each of those runs lands in the same horizontal band, so a reader cannot tell an edge that stops at
  * a node from one that merely passes behind it. Offsetting a column moves its outbound runs into a lane
  * of their own, and the diagonals that result are the cheapest signal that two nodes are not the same
  * kind of thing.
- *
- * The hard rules get the big offset, and it is the one that carries meaning rather than clearance: a
- * rule **bypasses** the planner and the guardrails — that is exactly where `applyGuardrails` seats it —
- * so it is drawn as the bypass lane it is, running underneath the stage it goes around. The ±56 on the
- * spine is the smaller job: it stops two adjacent columns sharing an edge run.
  */
 const LANE: Record<ColumnKey, number> = {
   start: 0,
   opening: 56,
-  rule: 240,
   planner: -56,
   guardrails: 0,
   conditional: 0,
@@ -448,17 +381,12 @@ const ALWAYS_BAND_GAP = 180;
  * It also keeps the whole band inside one `x`, so it only ever has to clear the two short columns it
  * hangs beneath and never the twelve-topic conditional column away to the right.
  *
- * **Why the band sits under the first two columns and not the second and third.** Every edge on this map
- * must run left to right: React Flow leaves each node's source handle on the right and its target handle
- * on the left, so an edge between two nodes sharing an `x` is drawn as a backwards loop around both of
- * them. The band used to start one column further right, which put its expanded topics in the *rule*
- * column — and the weak-evidence edge from a `core` topic to the rule that reads its slot then ran
- * inside a single column. That edge is the "timing not guaranteed" case, which is the single most
- * important thing this map has to make legible, and it was the one drawn worst.
- *
- * Moving the band one column left puts every edge it touches back on a left-to-right run: head → topic,
- * and topic → rule. The one edge that cannot be — `start` → head, now vertically below it — is why the
- * head is the only node on the map whose inbound handle is on top. See `routing-map-node.tsx`.
+ * **Why the band sits under the first two columns.** Every edge on this map must run left to right:
+ * React Flow leaves each node's source handle on the right and its target handle on the left, so an
+ * edge between two nodes sharing an `x` is drawn as a backwards loop around both of them. Keeping the
+ * band here puts every edge it touches on a left-to-right run. The one edge that cannot be —
+ * `start` → head, vertically below it — is why the head is the only node on the map whose inbound
+ * handle is on top. See `routing-map-node.tsx`.
  */
 const ALWAYS_BAND_HEAD_COLUMN = COL.start;
 const ALWAYS_BAND_COLUMN = COL.opening;
@@ -492,11 +420,9 @@ const SUBLABEL_CHAR = 5.3;
 /**
  * How many lines each style may take before the renderer truncates it.
  *
- * A node's **title is never truncated**. It used to clamp at two lines, which turned a rule node into
- * `Commercial outcome named was never…` — and an ellipsis in a title is worse than a tall node, because
- * a truncated rule sentence reads as a different rule. `was never…` could be `was never answered`, and
- * it is the operator that decides whether the rule fires for everybody. Letting it wrap costs a few
- * units of height that the stacking above already accounts for.
+ * A node's **title is never truncated**. An ellipsis in a title is worse than a tall node, because a
+ * truncated sentence reads as a different one. Letting it wrap costs a few units of height that the
+ * stacking above already accounts for.
  *
  * The sublabel still stops, at three lines: it is a summary whose full text is one click away in the
  * detail panel, and it is the one field an author can make arbitrarily long by naming a topic in a
@@ -537,8 +463,8 @@ export function estimateNodeHeight(
  *
  * Nodes are grouped by the `x` they were built at — the column IS the stage — and each column is
  * stacked in build order (which is ordinal order) and centred on its {@link LANE}, so the pipeline
- * still reads left to right without any two adjacent columns sharing an edge run. Order within a column is never touched: a reader tracing rule 1, rule 2, rule 3 down
- * the column is reading the order they fire in.
+ * still reads left to right without any two adjacent columns sharing an edge run. Order within a
+ * column is never touched.
  *
  * The returned figures are real bottom edges, not last nodes' centres, so a gap measured from one is
  * genuinely that much clear air whatever the column ends with. They are reported per column rather than
@@ -748,18 +674,6 @@ function topicDetailRows(topic: Topic): ScopeDetailRow[] {
   return rows;
 }
 
-/**
- * Render a rule the way the rules editor states it: subject, operator, operand.
- *
- * `exists` / `not_exists` take no operand (`VALUELESS_SCOPE_OPERATORS`), and printing an empty pair of
- * quotes after them would suggest the author left a field blank.
- */
-function ruleSentence(slotName: string, operator: ScopeRuleOperator, value: string | null): string {
-  const verb = SCOPE_RULE_OPERATOR_LABELS[operator];
-  if (VALUELESS_SCOPE_OPERATORS.includes(operator)) return `${slotName} ${verb}`;
-  return `${slotName} ${verb} “${value ?? ''}”`;
-}
-
 function byOrdinal(a: Topic, b: Topic): number {
   return a.ordinal - b.ordinal;
 }
@@ -788,8 +702,6 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
   const conditional = byPhase('conditional');
   const always = [...byPhase('core'), ...byPhase('closing')];
 
-  const topicByKey = new Map(topics.map((t) => [t.key, t]));
-  const slotNameByKey = new Map(dataSlots.map((s) => [s.key, s.name]));
   const fallbackKeys = new Set(settings.fallbackTopicKeys);
   const checkPreference = new Set(settings.checkTopicPreference);
 
@@ -828,7 +740,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
       detail: {
         title: topic.label,
         summary:
-          'Runs first, for everyone. What the respondent says here is what the hard rules test and what the agent reads. The decision waits until every question and data slot in the opening topics has been covered.',
+          'Runs first, for everyone. What the respondent says here is what the agent reads. The decision waits until every question and data slot in the opening topics has been covered.',
         rows: topicDetailRows(topic),
         topicKey: topic.key,
         ...timingDetail(topic, costs.byTopicKey[topic.key], inventory),
@@ -836,149 +748,6 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     });
     edges.push({ id: `e:start:${id}`, source: START_NODE_ID, target: id, kind: 'always' });
   }
-
-  /* --- where each rule's evidence comes from ------------------------------ */
-
-  // Classified exactly as `validateConditionalTopics` classifies it, and for the same reason: rules are
-  // evaluated at one moment — when the opening completes — so only the opening reliably has an answer by
-  // then. `core` runs alongside it in an order nothing guarantees; `conditional` and `closing` are by
-  // construction not in scope until the plan exists, which puts them in the same bucket as a slot no
-  // topic gathers at all. If this drifted from the validator the map would contradict the warning
-  // printed directly above it.
-  const openingSlotOwner = new Map<string, string>();
-  for (const topic of opening) {
-    for (const key of topic.members.dataSlotKeys) {
-      if (!openingSlotOwner.has(key)) openingSlotOwner.set(key, topic.key);
-    }
-  }
-  const coreSlotOwner = new Map<string, string>();
-  for (const topic of topics) {
-    if (topic.phase !== 'core') continue;
-    for (const key of topic.members.dataSlotKeys) {
-      if (!coreSlotOwner.has(key)) coreSlotOwner.set(key, topic.key);
-    }
-  }
-
-  const rules = [...settings.rules].sort((a, b) => a.ordinal - b.ordinal);
-  const needsUngathered = rules.some(
-    (r) => !openingSlotOwner.has(r.dataSlotKey) && !coreSlotOwner.has(r.dataSlotKey)
-  );
-
-  if (needsUngathered) {
-    nodes.push({
-      id: UNGATHERED_NODE_ID,
-      kind: 'ungathered',
-      // Seated at the foot of the opening column: it stands where the evidence would have come from.
-      x: COL.opening * X_STEP,
-      y: 0,
-
-      label: 'Not gathered in the opening',
-      sublabel: 'the rules beside this have nothing to read',
-      badges: [badge('checkThis')],
-      detail: {
-        title: 'Not gathered in the opening',
-        badgeNotes: badgeNotes(['checkThis']),
-        summary:
-          'Hard rules are checked at exactly one moment — when the opening finishes — so a rule can only read a data slot the opening collected. A rule reading anything else never matches. The exception is worse: “was never answered” matches when the answer is missing, so a slot nothing collects makes that rule fire for every respondent.',
-        rows: [
-          { label: 'Fix', value: 'Add the data slot to an opening topic, or drop the rule.' },
-          {
-            label: 'Note',
-            value:
-              'It does not help to collect the slot in a conditional or closing topic — neither of those is asked until after the decision has been made.',
-          },
-        ],
-      },
-    });
-  }
-
-  /* --- hard rules --------------------------------------------------------- */
-
-  for (const rule of rules) {
-    const id = `rule:${rule.id}`;
-    const slotName = slotNameByKey.get(rule.dataSlotKey) ?? `${rule.dataSlotKey} (missing)`;
-    const target = topicByKey.get(rule.topicKey);
-    const include = rule.action === 'include';
-
-    // A rule can only act on a CONDITIONAL topic: `applyGuardrails` seats and vetoes within the
-    // conditional set, and `resolveScope` puts every other phase in scope regardless. So a rule aimed
-    // at a `core`/`opening`/`closing` topic is dead — and without this badge it drew identically to a
-    // live one, which is the same failure `rule_veto_always_fires` exists to prevent: a rule that
-    // looks reasonable and does nothing to anybody.
-    const targetAlwaysRuns = target !== undefined && target.phase !== 'conditional';
-    const badgeKeys: ScopeBadgeKey[] = [include ? 'include' : 'exclude'];
-    if (!target) badgeKeys.push('unknownTopic');
-    else if (targetAlwaysRuns) badgeKeys.push('noEffect');
-    const badges = badgeKeys.map(badge);
-
-    nodes.push({
-      id,
-      kind: include ? 'ruleInclude' : 'ruleExclude',
-      x: COL.rule * X_STEP,
-      y: 0,
-
-      label: ruleSentence(slotName, rule.operator, rule.value),
-      sublabel: `${include ? 'always include' : 'never include'} ${target?.label ?? rule.topicKey}`,
-      badges,
-      detail: {
-        title: 'Hard rule',
-        badgeNotes: badgeNotes(badgeKeys),
-        summary: include
-          ? 'Checked before the agent runs, and applied before the limit on how many topics — your “always include” is never cut short by that limit, so a respondent can end up with more topics than it would normally allow.'
-          : 'Checked before the agent runs. Blocking always wins: a topic blocked here stays out however many other rules ask for it.',
-        rows: [
-          { label: 'Reads', value: slotName },
-          { label: 'When', value: ruleSentence(slotName, rule.operator, rule.value) },
-          { label: 'Then', value: include ? 'always include' : 'never include' },
-          {
-            label: 'Topic',
-            value: !target
-              ? `${rule.topicKey} — no such topic`
-              : targetAlwaysRuns
-                ? `${target.label} — always asked, so this rule changes nothing`
-                : target.label,
-          },
-        ],
-      },
-    });
-
-    // Where the evidence comes from — and, when it comes from nowhere, saying so.
-    const openingOwner = openingSlotOwner.get(rule.dataSlotKey);
-    if (openingOwner) {
-      const source = topicNodeId('opening', openingOwner);
-      edges.push({ id: `e:${source}:${id}`, source, target: id, kind: 'evidence' });
-    } else {
-      const coreOwner = coreSlotOwner.get(rule.dataSlotKey);
-      // While the band is collapsed the individual core topic is not on the canvas, so the edge falls
-      // back to the band's head. It still tells the truth — the slot is gathered by something that is
-      // not the opening — and expanding the band sharpens it to the exact topic.
-      const source = coreOwner
-        ? expandAlways
-          ? topicNodeId('always', coreOwner)
-          : ALWAYS_BAND_NODE_ID
-        : UNGATHERED_NODE_ID;
-      edges.push({
-        id: `e:${source}:${id}`,
-        source,
-        target: id,
-        kind: 'evidenceWeak',
-        label: coreOwner ? 'timing not guaranteed' : 'never gathered in time',
-      });
-    }
-
-    // A rule naming a topic that does not exist draws no target edge: an arrow into nothing reads as a
-    // rendering fault, where the badge on the node reads as the authoring fault it is.
-    if (target && target.phase === 'conditional') {
-      edges.push({
-        id: `e:${id}:${topicNodeId('conditional', target.key)}`,
-        source: id,
-        target: topicNodeId('conditional', target.key),
-        kind: include ? 'ruleInclude' : 'ruleExclude',
-      });
-    }
-  }
-
-  /* --- the planner -------------------------------------------------------- */
 
   nodes.push({
     id: PLANNER_NODE_ID,
@@ -1035,7 +804,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     detail: {
       title: 'Guardrails',
       summary:
-        'Applied to the agent’s answer, in this order: the limit on how many topics, the fallback if nothing was chosen at all, the time check, then the blind-spot check. These are checks in code, not instructions the AI is trusted to follow — which is why the rule lines above arrive already decided and pass straight through.',
+        'Applied to the agent’s answer, in this order: the limit on how many topics, the fallback if nothing was chosen at all, the time check, then the blind-spot check. These are checks in code, not instructions the AI is trusted to follow.',
       rows: [
         { label: 'Limit', value: plural(settings.maxConditionalTopics, 'conditional topic') },
         { label: 'Time budget', value: budgetValue },

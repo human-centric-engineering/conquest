@@ -451,7 +451,7 @@ describe('buildPackCsv', () => {
       expect(csv).not.toContain('# Conditional topics');
     });
 
-    it('renders the summary, topics, and rules blocks after Definitions', () => {
+    it('renders the summary and topics blocks after Definitions', () => {
       const csv = buildPackCsv(
         model({
           conditionalTopics: {
@@ -480,7 +480,6 @@ describe('buildPackCsv', () => {
                 trigger: null,
               },
             ],
-            rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -489,18 +488,15 @@ describe('buildPackCsv', () => {
       const definitionsIdx = csv.indexOf('# Definitions');
       const summaryIdx = csv.indexOf('# Conditional topics');
       const topicsIdx = csv.indexOf('# Conditional topics topics');
-      const rulesIdx = csv.indexOf('# Conditional topics rules');
       expect(definitionsIdx).toBeGreaterThan(-1);
       expect(definitionsIdx).toBeLessThan(summaryIdx);
       expect(summaryIdx).toBeLessThan(topicsIdx);
-      expect(topicsIdx).toBeLessThan(rulesIdx);
       expect(csv).toContain('Enabled,yes');
       expect(csv).toContain('key,label,description,always_asked,criteria,sampled_only');
       expect(csv).toContain('background,Background,,yes,,no');
       expect(csv).toContain(
         'talent,Talent & culture,Hiring and retention.,no,Mentions hiring difficulty.,no'
       );
-      expect(csv).toContain('"Always include ""Talent & culture"" when ""Engagement"" exists."');
     });
 
     it('reports "no" for enabled and writes every routing setting as its own row', () => {
@@ -512,7 +508,6 @@ describe('buildPackCsv', () => {
             enabled: false,
             alwaysAsked: [],
             conditional: [],
-            rules: [],
             settings: [
               { label: 'Interview length', value: 'No limit set' },
               {
@@ -557,7 +552,6 @@ describe('buildPackCsv', () => {
               },
             ],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -579,7 +573,6 @@ describe('buildPackCsv', () => {
             enabled: true,
             alwaysAsked: [],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -609,7 +602,6 @@ describe('buildPackCsv', () => {
                 },
               },
             ],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -701,7 +693,6 @@ describe('buildPackCsv', () => {
             enabled: true,
             alwaysAsked: [],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: null,
           },
@@ -717,7 +708,6 @@ describe('buildPackCsv', () => {
       enabled: true,
       alwaysAsked: [],
       conditional: [],
-      rules: [],
       settings: [],
     };
 

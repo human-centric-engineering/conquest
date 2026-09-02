@@ -27,17 +27,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
 
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
 import { API } from '@/lib/api/endpoints';
-import type { ProposedTopicSet, ProposedScopeRule } from '@/lib/app/questionnaire/scope/types';
-
-const RULE: ProposedScopeRule = {
-  dataSlotKey: 'headcount',
-  operator: 'gt',
-  value: '50',
-  action: 'include',
-  topicKey: 'pipeline',
-  rationale: 'Stated as a certainty on the guardrails tab.',
-  sourceQuote: 'Always include Pipeline when headcount is over 50.',
-};
+import type { ProposedTopicSet } from '@/lib/app/questionnaire/scope/types';
 
 const QN_ID = 'qn-1';
 const VID = 'ver-1';
@@ -60,7 +50,6 @@ function draft(overrides: Partial<ProposedTopicSet> = {}): ProposedTopicSet {
         sourceQuote: 'Only cover pipeline for sales-led businesses.',
       },
     ],
-    rules: [],
     gaps: [
       {
         sourceQuote: 'Use judgement for respondents outside these categories.',
@@ -557,51 +546,8 @@ describe('RoutingAnalystCard — reviewing a pending draft', () => {
           trigger: null,
         },
       ],
-      rules: [],
     });
     expect(body).not.toHaveProperty('gaps');
-  });
-
-  it('renders proposed hard rules and posts them on accept', async () => {
-    const user = userEvent.setup();
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === DRAFT_URL && init?.method === 'POST') {
-        return Promise.resolve(jsonResponse({ success: true, data: {}, meta: null }));
-      }
-      return Promise.reject(new Error(`unexpected fetch: ${url}`));
-    });
-
-    renderCard({ initialDraft: draft({ rules: [RULE] }) });
-
-    expect(screen.getByText('Hard rules')).toBeInTheDocument();
-    expect(screen.getByText('headcount', { selector: 'code' })).toBeInTheDocument();
-    expect(
-      screen.getByText('Always include Pipeline when headcount is over 50.')
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
-    const dialog = screen.getByRole('alertdialog');
-    await user.click(within(dialog).getByRole('button', { name: /^Accept$/ }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        DRAFT_URL,
-        expect.objectContaining({ method: 'POST', body: expect.any(String) })
-      )
-    );
-    const [, init] = fetchMock.mock.calls.find(
-      ([url, callInit]) => url === DRAFT_URL && (callInit as RequestInit)?.method === 'POST'
-    ) as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as { rules: unknown[] };
-    expect(body.rules).toEqual([
-      {
-        dataSlotKey: 'headcount',
-        operator: 'gt',
-        value: '50',
-        action: 'include',
-        topicKey: 'pipeline',
-      },
-    ]);
   });
 
   it('redirects to the forked draft when accepting forks a launched version', async () => {

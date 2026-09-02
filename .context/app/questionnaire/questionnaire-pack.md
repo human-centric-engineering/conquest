@@ -101,7 +101,7 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
 - **Conditional topics** (opt-in, off by default) — the [routing logic](./conditional-topics.md) explained
   in plain language for a stakeholder audience, not the authoring vocabulary: which topics are
   **always asked** (opening/core/closing), which are **asked when it fits** (conditional, with the
-  admin's own plain-English criteria), and the hard rules that force a topic in or out — each
+  admin's own plain-English criteria) — each
   rendered as a sentence ("Always include ... when ...") rather than an operator/action pair. When
   the version has never turned Conditional Topics on, the section still renders — it states that fact
   rather than being omitted, the same "state it, don't hide it" choice `PackEvaluations.hasRun: false`
@@ -134,7 +134,7 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   reader cannot answer the obvious question: if this area is not selected for me, what am I not
   asked? It is off by default because it is the longest part of the section — a second pass over an
   instrument the pack has usually already printed in full. A membership key that no longer resolves
-  keeps the raw key rather than being dropped, the same choice the hard rules make.
+  keeps the raw key rather than being dropped, so a stale reference stays visible.
 
   **A topic's `trigger` is printed, not flattened away.** When the source document asked for a topic
   to be added on something said mid-conversation rather than on how the opening went, the product

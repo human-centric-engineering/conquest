@@ -74,7 +74,6 @@ function draftSet(over: Partial<ProposedTopicSet> = {}): ProposedTopicSet {
   return {
     v: 1,
     topics: [],
-    rules: [],
     gaps: [],
     summary: 'Summary',
     fromDocument: true,
@@ -203,82 +202,6 @@ describe('acceptTopicDraft', () => {
     expect(prismaMock.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
   });
 
-  it('replaces rather than appends the hard rules onto the existing settings', async () => {
-    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      conditionalTopics: {
-        rules: [
-          {
-            id: 'old-rule',
-            dataSlotKey: 'd-old',
-            operator: 'exists',
-            value: null,
-            action: 'include',
-            topicKey: 't-old',
-            ordinal: 0,
-          },
-        ],
-      },
-    });
-
-    const bodyWithRules: AcceptTopicDraftBody = {
-      ...BODY,
-      rules: [
-        {
-          dataSlotKey: 'd-new',
-          operator: 'exists',
-          value: null,
-          action: 'include',
-          topicKey: 'intro',
-        },
-      ],
-    };
-    const result = await acceptTopicDraft('v-1', bodyWithRules);
-
-    // Only the new rule survives — the old one was not merged alongside it.
-    expect(result.settings.rules).toHaveLength(1);
-    expect(result.settings.rules[0]?.dataSlotKey).toBe('d-new');
-  });
-
-  it('keeps the existing rules untouched when the accepted body omits rules', async () => {
-    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      conditionalTopics: {
-        rules: [
-          {
-            id: 'kept',
-            dataSlotKey: 'd1',
-            operator: 'exists',
-            value: null,
-            action: 'include',
-            topicKey: 'intro',
-            ordinal: 0,
-          },
-        ],
-      },
-    });
-
-    const result = await acceptTopicDraft('v-1', BODY);
-
-    expect(result.settings.rules).toHaveLength(1);
-    expect(result.settings.rules[0]?.id).toBe('kept');
-  });
-
-  it('defaults a rule with no id to rule-<index>', async () => {
-    const bodyWithRules: AcceptTopicDraftBody = {
-      ...BODY,
-      rules: [
-        {
-          dataSlotKey: 'd1',
-          operator: 'exists',
-          value: null,
-          action: 'include',
-          topicKey: 'intro',
-        },
-      ],
-    };
-    const result = await acceptTopicDraft('v-1', bodyWithRules);
-    expect(result.settings.rules[0]?.id).toBe('rule-0');
-  });
-
   it('only touches maxConditionalTopics when the body supplies it', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
       conditionalTopics: { maxConditionalTopics: 7, rules: [] },
@@ -296,7 +219,6 @@ describe('acceptTopicDraft', () => {
       conditionalTopics: {
         fallbackTopicKeys: ['existing_fallback'],
         checkTopicPreference: ['existing_check'],
-        rules: [],
       },
     });
 

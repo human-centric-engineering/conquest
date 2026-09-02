@@ -18,7 +18,7 @@
  *
  * A model asked "what are the topics?" will confidently invent a clean taxonomy from the section
  * headings alone, and that answer is worse than useless: it looks authored, so an admin accepts it,
- * and the instrument now routes on the model's guess rather than the author's rule. So the rubric
+ * and the instrument now routes on the model's guess rather than the author's instruction. So the rubric
  * spends most of its length on the distinction between QUOTING a routing instruction and INFERRING
  * one, and the contract makes the analyst declare which it did (`fromDocument`, and a per-item
  * `sourceQuote` that must be absent when nothing in the document said it).
@@ -40,13 +40,11 @@ import type { SourceDocumentRole } from '@/lib/app/questionnaire/constants';
 
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
-  ROUTING_ANALYSIS_MAX_RULES,
   ROUTING_ANALYSIS_MAX_TOPICS,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
 import {
   LIGHT_DEPTH_MEMBER_COUNT,
   MAX_CONDITIONAL_TOPICS_CEILING,
-  SCOPE_RULE_OPERATORS,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 
@@ -57,7 +55,7 @@ export interface RoutingAnalysisQuestion {
   sectionTitle?: string;
 }
 
-/** One data slot, projected for the analyst — the vocabulary its hard rules may test. */
+/** One data slot, projected for the analyst — the vocabulary a topic's membership may name. */
 export interface RoutingAnalysisDataSlot {
   key: string;
   name: string;
@@ -240,18 +238,7 @@ anything about how that resolves — one takes priority, they are mutually exclu
 the respondent raised first — that resolution must appear in the criteria of BOTH topics. Each topic \
 is weighed against its own criteria alone, so a tie-break recorded on one side only, or in a note \
 beside them, is a tie-break that never applies. Where the document is silent on a genuine overlap, \
-do not invent a rule: say in each criteria what distinguishes that topic from its neighbour.
-
-## Hard rules
-
-Propose a hard rule ONLY where the document states a CERTAINTY — "never ask X of Y", "always \
-include Z when they said W". A rule is checked mechanically against one data slot, before any \
-judgement, so it must be something the author is sure about, not a preference. Everything softer \
-belongs in a topic's criteria.
-- Each rule tests ONE data slot key from the list you are given, with one operator: \
-${SCOPE_RULE_OPERATORS.join(', ')}.
-- "action" is "include" (always ask this topic) or "exclude" (never ask it). Exclude beats include.
-- Propose at most ${ROUTING_ANALYSIS_MAX_RULES} rules. Zero is the common and correct answer.
+do not invent a distinction: say in each criteria what distinguishes that topic from its neighbour.
 
 ## Guidance that is about no single topic
 
@@ -275,7 +262,7 @@ reader their attention.
 phrased — the platform has separate settings for that, and guidance about phrasing put here does \
 nothing.
 
-It also cannot overrule the topic limit, the hard rules or the fallback list: those are applied \
+It also cannot overrule the topic limit or the fallback list: those are applied \
 after the decision, whatever this says.
 
 If the document offers no such cross-cutting guidance, OMIT the field. Do not summarise, do not \
@@ -304,18 +291,16 @@ do not supply a default, for the same reason you omit "maxConditionalTopics".
 ## Gaps — what you recognized but could not formalize
 
 Sometimes the document plainly states a routing or eligibility instruction and you cannot express \
-it AT ALL — not as a conditional topic's criteria, and not as a hard rule. It depends on \
+it AT ALL — not as a conditional topic's criteria, and not as its membership. It depends on \
 information no question captures, it contradicts another instruction in the same document, it \
 happens mid-interview rather than at the opening, or it is simply too vague to act on ("use \
 judgement for edge cases"). Do not silently drop this. Do not force it into a topic's criteria or a \
-rule just to have somewhere to put it, and do not paraphrase around the problem.
+topic just to have somewhere to put it, and do not paraphrase around the problem.
 
 **A condition you DID express as a conditional topic's criteria is not a gap.** That is the \
 mechanism working, and reporting it as a gap as well says the opposite. In particular, having no \
-data slot to test a condition mechanically is NOT on its own a gap: criteria are judged against \
-what the respondent conveyed, which is the normal way a conditional topic is decided, and a hard \
-rule is the rare exception. When DATA SLOTS is empty EVERY condition is untestable by a rule, so a \
-gap for each one says nothing about this document and buries the gaps that do.
+data slot behind a condition is NOT on its own a gap: criteria are judged against what the \
+respondent conveyed, which is the normal and only way a conditional topic is decided.
 
 **Three exceptions to that, and they matter more than anything else on this page. In each, writing \
 the topic is NOT enough, because what you wrote does not mean what the document said.**
@@ -412,21 +397,10 @@ Output ONLY a single JSON object — no prose, no code fences:
       }
     }
   ],
-  "rules": [
-    {
-      "dataSlotKey": "<exact key from DATA SLOTS>",
-      "operator": "equals" | "contains" | "gt" | "lt" | "exists",
-      "value": "<operand, or null for exists>",
-      "action": "include" | "exclude",
-      "topicKey": "<key of one of your proposed topics>",
-      "rationale": "<one sentence>",
-      "sourceQuote": "<exact span — omit if inferred>"
-    }
-  ],
   "gaps": [
     {
       "sourceQuote": "<exact span that states an instruction you could not formalize>",
-      "explanation": "<what you recognized, and specifically why you could not turn it into a topic or rule>"
+      "explanation": "<what you recognized, and specifically why you could not turn it into a topic>"
     }
   ],
   "maxConditionalTopics": <number — omit unless the document states one>,
@@ -538,10 +512,10 @@ export function buildRoutingAnalysisPrompt(input: RoutingAnalysisInput): LlmMess
 
   if (input.dataSlots && input.dataSlots.length > 0) {
     parts.push(
-      `DATA SLOTS (the only keys a rule may test):\n${input.dataSlots.map(describeDataSlot).join('\n')}`
+      `DATA SLOTS (use these keys exactly):\n${input.dataSlots.map(describeDataSlot).join('\n')}`
     );
   } else {
-    parts.push('DATA SLOTS: none. Propose no hard rules — there is nothing for one to test.');
+    parts.push('DATA SLOTS: none. Propose topics whose membership is questions alone.');
   }
 
   if (input.existingTopics && input.existingTopics.length > 0) {
@@ -564,7 +538,7 @@ export function buildRoutingAnalysisRetryMessage(): string {
     'Your previous response did not match the required JSON schema. Respond again with ONLY the ' +
     'JSON object: a "topics" array where every entry has a lowercase_snake_case "key", a "label", ' +
     'a "phase", a "rationale", and — for every entry whose phase is "conditional" — a non-empty ' +
-    '"criteria". Topic keys must be unique. Also include "rules" (may be empty), "gaps" (may be ' +
+    '"criteria". Topic keys must be unique. Also include "gaps" (may be ' +
     'empty, but every entry needs a non-empty "sourceQuote" and "explanation"), a "summary", and ' +
     'the boolean "fromDocument". No prose, no code fences.'
   );

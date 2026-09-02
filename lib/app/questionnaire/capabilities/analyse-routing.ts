@@ -3,7 +3,7 @@
  *
  * A `BaseCapability` that runs ONE structured LLM call over an uploaded instrument and returns the
  * TOPIC SET it implies: which groups of questions always run, which are conditional, the author's
- * own criteria for each conditional one, and any hard rules the document states as certainties.
+ * own criteria for each conditional one.
  *
  * It is a PROPOSER, not an author: it writes nothing, changes no question, and everything it
  * returns lands in `AppQuestionnaireTopicDraft` for an admin to review — the same not-live contract
@@ -206,7 +206,6 @@ export class AppAnalyseRoutingCapability extends BaseCapability<
               topicCount: result.data.result.topics.length,
               conditionalCount: result.data.result.topics.filter((t) => t.phase === 'conditional')
                 .length,
-              ruleCount: result.data.result.rules.length,
               gapCount: result.data.result.gaps.length,
               fromDocument: result.data.result.fromDocument,
             },

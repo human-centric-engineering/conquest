@@ -44,7 +44,7 @@ export function InterviewPlanCard({ plan }: InterviewPlanCardProps) {
         <Badge variant="outline" className="text-[10px]">
           {SCOPE_DECISION_SOURCE_LABELS[plan.source]}
         </Badge>
-        {/* Confidence is only meaningful for a judged plan. A hard rule or the fallback carries a
+        {/* Confidence is only meaningful for a judged plan. The fallback carries a
             confidence of 1 or 0 by construction, and showing it would imply a measurement. */}
         {plan.source === 'llm' && (
           <span className="text-muted-foreground text-xs">

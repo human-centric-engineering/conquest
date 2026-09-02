@@ -362,7 +362,6 @@ describe('DataSlotsTab', () => {
         draft: {
           v: 1,
           topics: [],
-          rules: [],
           gaps: [],
           summary: 's',
           fromDocument: true,

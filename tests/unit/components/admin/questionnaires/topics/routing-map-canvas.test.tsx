@@ -75,14 +75,7 @@ import type {
 /* Fixtures                                                                   */
 /* -------------------------------------------------------------------------- */
 
-const ALL_EDGE_KINDS: ScopeEdgeKind[] = [
-  'always',
-  'candidate',
-  'ruleInclude',
-  'ruleExclude',
-  'evidence',
-  'evidenceWeak',
-];
+const ALL_EDGE_KINDS: ScopeEdgeKind[] = ['always', 'candidate'];
 
 function node(id: string, x = 0, y = 0): ScopeGraphNode {
   return {
@@ -177,7 +170,7 @@ describe('RoutingMapCanvas — edges', () => {
     expect(new Set(strokes).size).toBeGreaterThanOrEqual(ALL_EDGE_KINDS.length - 1);
   });
 
-  it('dashes exactly the two kinds nothing has settled yet', () => {
+  it('dashes exactly the kind nothing has settled yet', () => {
     render(
       <RoutingMapCanvas
         graph={graph({ edges: ALL_EDGE_KINDS.map((kind) => edge(kind, kind)) })}
@@ -189,23 +182,7 @@ describe('RoutingMapCanvas — edges', () => {
       .filter((e) => (e.style as { strokeDasharray?: string }).strokeDasharray !== undefined)
       .map((e) => e.id);
 
-    expect(dashed.sort()).toEqual(['candidate', 'evidenceWeak']);
-  });
-
-  it('draws the two hard-rule kinds thicker than the rest — an author’s own certainty', () => {
-    render(
-      <RoutingMapCanvas
-        graph={graph({ edges: ALL_EDGE_KINDS.map((kind) => edge(kind, kind)) })}
-        onSelectNode={vi.fn()}
-      />
-    );
-
-    const widthOf = (id: string) =>
-      (lastEdges().find((e) => e.id === id)?.style as { strokeWidth: number }).strokeWidth;
-
-    expect(widthOf('ruleInclude')).toBe(2);
-    expect(widthOf('ruleExclude')).toBe(2);
-    expect(widthOf('always')).toBe(1.5);
+    expect(dashed.sort()).toEqual(['candidate']);
   });
 
   it('colours the arrowhead to match its line, so an edge reads as one object', () => {
@@ -221,10 +198,7 @@ describe('RoutingMapCanvas — edges', () => {
     render(
       <RoutingMapCanvas
         graph={graph({
-          edges: [
-            edge('labelled', 'evidenceWeak', 'timing not guaranteed'),
-            edge('bare', 'always'),
-          ],
+          edges: [edge('labelled', 'candidate', 'timing not guaranteed'), edge('bare', 'always')],
         })}
         onSelectNode={vi.fn()}
       />
@@ -334,14 +308,7 @@ describe('RoutingMapCanvas — legend', () => {
   it('names every edge kind the canvas can draw, in plain English', () => {
     render(<RoutingMapCanvas graph={graph()} onSelectNode={vi.fn()} />);
 
-    for (const label of [
-      'Always happens',
-      'Evidence a rule reads',
-      'Evidence that may not be there yet',
-      'Rule: always include',
-      'Rule: never include',
-      'The agent may choose it',
-    ]) {
+    for (const label of ['Always happens', 'The agent may choose it']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
@@ -364,13 +331,13 @@ describe('RoutingMapCanvas — legend', () => {
     expect(strokes.every((s) => s !== null && /^#[0-9a-f]{6}$/i.test(s))).toBe(true);
   });
 
-  it('dashes the two legend swatches whose edges are dashed', () => {
+  it('dashes the legend swatch whose edge is dashed', () => {
     render(<RoutingMapCanvas graph={graph()} onSelectNode={vi.fn()} />);
 
     const dashed = [...screen.getByTestId('rf-panel').querySelectorAll('line')].filter((l) =>
       l.hasAttribute('stroke-dasharray')
     );
 
-    expect(dashed).toHaveLength(2);
+    expect(dashed).toHaveLength(1);
   });
 });

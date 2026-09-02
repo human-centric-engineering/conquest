@@ -76,7 +76,7 @@ describe('respondentReasons', () => {
     // constantly justifying itself.
     const reasons = respondentReasons({
       plan: plan([
-        { key: 'core', depth: 'full', source: 'rule', rationale: 'r', respondentReason: 'why' },
+        { key: 'core', depth: 'full', source: 'llm', rationale: 'r', respondentReason: 'why' },
       ]),
       topics: TOPICS,
     });

@@ -682,12 +682,6 @@ export const SETTING_DESCRIPTORS = {
           value: yesNo(c.conditionalTopics.allowRespondentAmendment),
         },
         {
-          label: 'Scope rules',
-          value: c.conditionalTopics.rules.length
-            ? `${c.conditionalTopics.rules.length} rule${c.conditionalTopics.rules.length === 1 ? '' : 's'}`
-            : 'None',
-        },
-        {
           label: 'Planner confidence floor',
           tier: 'technical',
           value: asPercent(c.conditionalTopics.minConfidence),
@@ -1153,9 +1147,6 @@ export function buildSettingRows(config: ConfigView, includeTechnical: boolean):
  *
  * Declared `satisfies Record<keyof ConditionalTopicsSettings, ...>`, so a new routing setting is a
  * compile error until it is classified.
- *
- * `rules` is the one field that emits no row: the hard rules get their own block, rendered as
- * sentences, and a count in the settings line would be a worse version of the list below it.
  */
 export interface RoutingSettingDescriptor {
   tier: SettingTier;
@@ -1307,10 +1298,6 @@ const ROUTING_SETTING_DESCRIPTORS = {
     tier: 'technical',
     rows: (s) => [{ label: 'Time allowed per data slot', value: `${s.secondsPerDataSlot}s` }],
   },
-
-  // The hard rules render as their own block of sentences. A count here would be a worse version
-  // of the list immediately below it.
-  rules: { tier: 'standard', rows: () => [] },
 } satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>;
 
 /** Every registered routing key, in declaration (reading) order. */

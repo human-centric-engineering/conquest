@@ -15,7 +15,6 @@
 import type {
   ScopeProposedEdit,
   ScopeStructureInput,
-  ScopeStructureRule,
   ScopeStructureSettings,
   ScopeStructureTopic,
 } from '@/lib/app/questionnaire/scope-evaluation';
@@ -23,7 +22,6 @@ import type {
 import type { FindingApplicability } from '@/lib/app/questionnaire/evaluation/types';
 
 const TOPIC_PREFIX = 'topic:';
-const RULE_PREFIX = 'rule:';
 const SETTINGS_KEY = 'settings';
 
 /** What the deriver needs about one finding (no DB row dependency). */
@@ -54,10 +52,6 @@ function findTopic(structure: ScopeStructureInput, key: string): ScopeStructureT
   return structure.topics.find((t) => t.key === key) ?? null;
 }
 
-function findRule(structure: ScopeStructureInput, id: string): ScopeStructureRule | null {
-  return structure.rules.find((r) => r.id === id) ?? null;
-}
-
 /** Is the topic-targeted finding stale? Compares only the field the op touches. */
 function isTopicFindingStale(
   op: ScopeProposedEdit | null,
@@ -75,34 +69,7 @@ function isTopicFindingStale(
   }
 }
 
-/**
- * Is the rule-targeted finding stale? `sentence` is compared alongside the raw fields because it
- * is the only place the rule's comparison operand ({@link ScopeStructureRule} doesn't carry the
- * raw `value` — only the rendered sentence embedding it) shows up in this DTO.
- */
-function isRuleFindingStale(
-  op: ScopeProposedEdit | null,
-  snap: ScopeStructureRule,
-  live: ScopeStructureRule | null
-): boolean {
-  if (!live) return true; // target removed since the run
-  switch (op?.op) {
-    case 'delete_rule':
-      return false; // present in both → still deletable, not stale
-    case 'edit_rule':
-      return (
-        snap.dataSlotKey !== live.dataSlotKey ||
-        snap.operator !== live.operator ||
-        snap.action !== live.action ||
-        snap.topicKey !== live.topicKey ||
-        snap.sentence !== live.sentence
-      );
-    default:
-      return snap.sentence !== live.sentence;
-  }
-}
-
-/** Is the settings-targeted finding stale? Additions (`add_rule`/`add_fallback_topic`) never are. */
+/** Is the settings-targeted finding stale? An addition (`add_fallback_topic`) never is. */
 function isSettingsFindingStale(
   op: ScopeProposedEdit | null,
   snap: ScopeStructureSettings,
@@ -119,7 +86,6 @@ function isSettingsFindingStale(
       );
     case 'edit_planner_instructions':
       return snap.plannerInstructions !== live.plannerInstructions;
-    case 'add_rule':
     case 'add_fallback_topic':
       return false; // nothing existing to have drifted
     default:
@@ -149,10 +115,6 @@ export function deriveScopeFindingState(
     const key = input.targetKey.slice(TOPIC_PREFIX.length);
     const snap = findTopic(snapshot, key);
     stale = snap ? isTopicFindingStale(op, snap, findTopic(current, key)) : false;
-  } else if (input.targetKey.startsWith(RULE_PREFIX)) {
-    const id = input.targetKey.slice(RULE_PREFIX.length);
-    const snap = findRule(snapshot, id);
-    stale = snap ? isRuleFindingStale(op, snap, findRule(current, id)) : false;
   } else {
     stale = false;
   }

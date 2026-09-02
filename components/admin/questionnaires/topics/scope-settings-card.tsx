@@ -4,13 +4,13 @@
  * The Conditional Topics knobs — the master switch and everything that governs how the plan is decided.
  *
  * These live beside the topics rather than on the Settings tab because most of them *address*
- * topics: the fallback set, the blind-spot preference and every hard rule name a topic key. Split
- * across two tabs, an admin would be picking from a list they cannot see.
+ * topics: the fallback set and the blind-spot preference both name a topic key. Split across two
+ * tabs, an admin would be picking from a list they cannot see.
  *
  * Everything on this card is one PATCH of the `conditionalTopics` blob. The order of the fields follows
- * the order of the decision itself, and the steps are numbered to say so: the hard rules that run
- * before the agent, then the cap the model cannot exceed, the blind-spot check, what happens when
- * the model cannot decide, and what the respondent is told.
+ * the order of the decision itself, and the steps are numbered to say so: what the opening may
+ * spend, then the cap the model cannot exceed, the blind-spot check, what happens when the model
+ * cannot decide, and what the respondent is told.
  *
  * Numbering them is not decoration. The failure this card exists to prevent is an admin reading the
  * cap as a request the model tries to honour; seeing it sit *after* the agent's turn in a sequence
@@ -29,7 +29,6 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { Switch } from '@/components/ui/switch';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
-import { ScopeRulesEditor } from '@/components/admin/questionnaires/topics/scope-rules-editor';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
@@ -38,7 +37,6 @@ import {
   MIN_OPENING_PROBES,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
@@ -48,7 +46,6 @@ import { cn } from '@/lib/utils';
 export interface ScopeSettingsCardProps {
   settings: ConditionalTopicsSettings;
   topics: readonly Topic[];
-  dataSlots: TopicsPayload['inventory']['dataSlots'];
   /**
    * The version's time arithmetic (C7), computed server-side: what the always-run questions cost
    * and what a budget therefore leaves for routed topics.
@@ -101,8 +98,8 @@ function BudgetReadout({
 /**
  * A numbered step heading inside the card.
  *
- * The numbers are the DECISION ORDER, not a wizard: hard rules really are evaluated before the
- * agent, and the agent's answer really is filtered by the limits that follow. Ordering the controls
+ * The numbers are the DECISION ORDER, not a wizard: the agent's answer really is filtered by the
+ * limits that follow. Ordering the controls
  * the way the runtime orders them is what stops an admin reading the cap as something the model
  * merely tries to respect. `step` is omitted for the aside that has no place in that sequence.
  */
@@ -132,7 +129,6 @@ function boundedInt(raw: string, min: number, max: number, fallback: number): nu
 export function ScopeSettingsCard({
   settings,
   topics,
-  dataSlots,
   costs,
   onSave,
   busy,
@@ -174,10 +170,6 @@ export function ScopeSettingsCard({
                 <li>
                   The <strong>opening</strong> gathers the signal, within whatever follow-up
                   allowance you set. It is the only step that happens before the decision.
-                </li>
-                <li>
-                  Your <strong>hard rules</strong> run first. A “never include” can never be undone
-                  by anything below it.
                 </li>
                 <li>
                   The <strong>agent</strong> judges each remaining conditional topic against its
@@ -292,24 +284,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          {/* The data-slot dependency is named in the heading itself, not left to the ⓘ. A rule
-              tests one data slot, so with none on the version there is nothing to author a rule
-              against — and the admin who most needs telling is the one who never opens the help. */}
-          {/* Names the ACTION, not a category. "The cases you are certain about" told an admin
-              nothing about what to put in the field — "cases" is an abstraction, and the data-slot
-              dependency read as decoration rather than as the thing the rule is built from. */}
-          <SectionLabel step={2}>Always or never ask a topic based on one answer</SectionLabel>
-          <ScopeRulesEditor
-            rules={draft.rules}
-            onChange={(next: ScopeRule[]) => set({ rules: next })}
-            topics={topics}
-            dataSlots={dataSlots}
-            disabled={busy}
-          />
-        </div>
-
-        <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={3}>How much the agent may cover</SectionLabel>
+          <SectionLabel step={2}>How much the agent may cover</SectionLabel>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
@@ -423,7 +398,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-2 border-t pt-4">
-          <SectionLabel step={4}>Guard against a narrow result</SectionLabel>
+          <SectionLabel step={3}>Guard against a narrow result</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-check-topic" className="text-sm font-medium">
@@ -470,7 +445,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-1.5 border-t pt-4">
-          <SectionLabel step={5}>When the agent cannot decide</SectionLabel>
+          <SectionLabel step={4}>When the agent cannot decide</SectionLabel>
           <Label className="text-sm font-medium">
             Ask these instead{' '}
             <FieldHelp title="Ask these instead">
@@ -491,7 +466,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={6}>What the respondent is told</SectionLabel>
+          <SectionLabel step={5}>What the respondent is told</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-announce" className="text-sm font-medium">
@@ -558,10 +533,9 @@ export function ScopeSettingsCard({
               <br />
               <br />
               It’s advice, not a rule: the agent weighs it up rather than obeying it, so anything
-              you can’t compromise on belongs in a hard rule. It can’t stretch the topic limit,
-              overrule a hard rule, or change the fallback list; those are applied afterwards
-              whatever this says. It also doesn’t change how questions are worded, only which topics
-              get covered.
+              you can’t compromise on belongs in a topic’s criteria. It can’t stretch the topic
+              limit or change the fallback list; those are applied afterwards whatever this says. It
+              also doesn’t change how questions are worded, only which topics get covered.
             </FieldHelp>
           </Label>
           <AutoTextarea

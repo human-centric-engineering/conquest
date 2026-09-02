@@ -55,11 +55,11 @@ import {
   planScope,
   type ScopeAnswer,
 } from '@/lib/app/questionnaire/scope/planner';
-import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
   narrowConditionalTopicsSettings,
   narrowInterviewPlan,
   type InterviewPlan,
+  type ScopeFill,
 } from '@/lib/app/questionnaire/scope/types';
 import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadPlanBudget } from '@/app/api/v1/app/questionnaires/_lib/plan-inputs';

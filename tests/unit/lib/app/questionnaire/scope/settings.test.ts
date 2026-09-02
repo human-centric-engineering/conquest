@@ -70,54 +70,6 @@ describe('narrowConditionalTopicsSettings', () => {
     const s = narrowConditionalTopicsSettings({ plannerInstructions: `  ${'x'.repeat(5_000)}  ` });
     expect(s.plannerInstructions.length).toBe(4_000);
   });
-
-  describe('rules', () => {
-    it('drops a rule that names no data slot or no topic', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: '', topicKey: 'x', operator: 'exists', action: 'include' },
-          { dataSlotKey: 'y', topicKey: '', operator: 'exists', action: 'include' },
-          { dataSlotKey: 'y', topicKey: 'x', operator: 'exists', action: 'include' },
-        ],
-      });
-      // A rule that can only ever no-op would read to an admin as a rule quietly failing.
-      expect(s.rules).toHaveLength(1);
-      expect(s.rules[0]).toMatchObject({ dataSlotKey: 'y', topicKey: 'x' });
-    });
-
-    it('falls back to safe operator and action on unknown values', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [{ dataSlotKey: 'y', topicKey: 'x', operator: 'wat', action: 'destroy' }],
-      });
-      expect(s.rules[0]).toMatchObject({ operator: 'exists', action: 'include' });
-    });
-
-    it('nulls a blank operand so `exists` never compares against an empty string', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: 'y', topicKey: 'x', operator: 'exists', action: 'include', value: '   ' },
-        ],
-      });
-      expect(s.rules[0]?.value).toBeNull();
-    });
-
-    it('sorts by ordinal and back-fills a missing one from position', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include', ordinal: 5 },
-          { dataSlotKey: 'b', topicKey: 't', operator: 'exists', action: 'include', ordinal: 1 },
-        ],
-      });
-      expect(s.rules.map((r) => r.dataSlotKey)).toEqual(['b', 'a']);
-    });
-
-    it('gives every rule a stable id even when none was stored', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [{ dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include' }],
-      });
-      expect(s.rules[0]?.id).toBeTruthy();
-    });
-  });
 });
 
 describe('narrowTopicMembers', () => {
@@ -286,16 +238,6 @@ describe('narrowProposedTopicSet', () => {
           replacesExisting: true,
         },
       ],
-      rules: [
-        {
-          dataSlotKey: 'headcount',
-          operator: 'gt',
-          value: '50',
-          action: 'include',
-          topicKey: 'pipeline',
-          rationale: 'Stated on the guardrails tab.',
-        },
-      ],
       gaps: [
         {
           sourceQuote: 'Use judgement for respondents outside these categories.',
@@ -318,7 +260,6 @@ describe('narrowProposedTopicSet', () => {
     expect(set?.topics[0]?.members.questionKeys).toEqual(['q1']);
     expect(set?.topics[0]?.sourceQuote).toBe('Only cover pipeline for sales-led businesses.');
     expect(set?.topics[0]?.replacesExisting).toBe(true);
-    expect(set?.rules[0]?.operator).toBe('gt');
     expect(set?.gaps[0]).toEqual({
       sourceQuote: 'Use judgement for respondents outside these categories.',
       explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
@@ -390,37 +331,6 @@ describe('narrowProposedTopicSet', () => {
     // that gets an invented topic set accepted as the author's intent.
     expect(narrowProposedTopicSet(stored({ fromDocument: 'yes' }))?.fromDocument).toBe(false);
     expect(narrowProposedTopicSet(stored({ fromDocument: undefined }))?.fromDocument).toBe(false);
-  });
-
-  it('drops a rule naming no data slot or no topic', () => {
-    const set = narrowProposedTopicSet(
-      stored({
-        rules: [
-          { dataSlotKey: '', operator: 'exists', action: 'include', topicKey: 'p', rationale: 'x' },
-          { dataSlotKey: 'd', operator: 'exists', action: 'include', topicKey: '', rationale: 'x' },
-        ],
-      })
-    );
-    expect(set?.rules).toEqual([]);
-  });
-
-  it('narrows an unknown operator or action to the safe default', () => {
-    const set = narrowProposedTopicSet(
-      stored({
-        rules: [
-          {
-            dataSlotKey: 'd',
-            operator: 'matches_regex',
-            value: 'x',
-            action: 'demolish',
-            topicKey: 'p',
-            rationale: 'x',
-          },
-        ],
-      })
-    );
-    expect(set?.rules[0]?.operator).toBe('exists');
-    expect(set?.rules[0]?.action).toBe('include');
   });
 });
 
@@ -517,7 +427,6 @@ describe('narrowProposedTopicSet — the F17.23 additions', () => {
           rationale: 'Routed.',
         },
       ],
-      rules: [],
       gaps: [],
       summary: 'Read from the routing tab.',
       fromDocument: true,
@@ -686,7 +595,6 @@ describe('narrowProposedTopicSet — a recorded trigger', () => {
           trigger,
         },
       ],
-      rules: [],
       gaps: [],
       summary: 'Read from the document.',
       fromDocument: true,

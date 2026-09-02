@@ -12,7 +12,7 @@
  *
  * Output contract (validated by `judge-schema.ts`): one JSON object with a continuous `score` in
  * [0, 1] and a `findings` array. Each finding addresses its target by `targetKey`: `topic:<key>`,
- * `rule:<id>`, or the literal `settings`.
+ * or the literal `settings`.
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
@@ -44,22 +44,9 @@ const DIMENSION_RUBRICS: Record<ScopeEvaluationDimension, ScopeDimensionRubric> 
 - 0.3 — Most conditional topics' criteria would not reliably separate respondents.
 - 0.0 — Criteria are pervasively vague, missing, or contradictory.`,
     ignore:
-      'Whether a topic has NO criteria at all, or is conditional with an empty criteria field — the coherence checker already flags that (`conditional_without_criteria`) as an error/warning; do not repeat it. Whether the hard rules are sound (Rule-Integrity judges that), the budget (Budget-Realism), or whether a topic is reachable at all (Coverage-and-Burden).',
+      'Whether a topic has NO criteria at all, or is conditional with an empty criteria field — the coherence checker already flags that (`conditional_without_criteria`) as an error/warning; do not repeat it. The budget (Budget-Realism judges that), or whether a topic is reachable at all (Coverage-and-Burden).',
     editGuidance:
       'When you can propose clearer criteria, target `"topic:<key>"` and attach `"proposedEdit": { "op": "edit_topic_criteria", "criteria": "<the full rewritten criteria text>" }`. Preserve the author\'s own list style (bullets, priority markers) where the original had one — you are sharpening the wording, not restructuring it, unless the structure itself is the problem.',
-  },
-  rule_integrity: {
-    focus:
-      'Judge the hard rules for internal conflicts (two rules that contradict on the same topic in a way the "exclude beats include" resolution does not obviously resolve as intended), redundancy (a rule that duplicates what another rule or a topic\'s own criteria already ensures), and rules that exclude a topic on weak or ambiguous evidence — a violation of "when in doubt, ask" that is not a mechanical defect the reachability checker would catch, but a judgement call about whether the evidence a rule keys on is strong enough to justify a hard veto rather than leaving it to the planner\'s judgement.',
-    scale: `- 1.0 — Every rule is sound, non-redundant, and keys on evidence strong enough to justify a hard veto.
-- 0.7 — Mostly sound; one rule is borderline (redundant, or keyed on soft evidence).
-- 0.5 — Several rules are redundant, or one materially conflicts with the author's evident intent.
-- 0.3 — The rule set has real problems that would misroute respondents.
-- 0.0 — The rules are incoherent or contradict each other pervasively.`,
-    ignore:
-      'A rule pointing at a topic or data slot that no longer exists, a veto that always fires because its slot is never gathered in the opening, or a rule aimed at an always-run topic — the coherence checker already catches all three (`rule_unknown_topic`, `rule_unknown_data_slot`, `rule_veto_always_fires`, `rule_slot_unreachable`, `rule_names_always_topic`) as errors or warnings; do not repeat them. Topic criteria wording (Criteria-Quality), the budget (Budget-Realism).',
-    editGuidance:
-      'To remove a rule that should not exist, target `"rule:<id>"` and attach `"proposedEdit": { "op": "delete_rule" }`. To fix a rule\'s condition, target `"rule:<id>"` with `{ "op": "edit_rule", "dataSlotKey": "<key>", "operator": "<operator>", "value": "<value or null>", "action": "include|exclude", "topicKey": "<key>" }` — the full replacement, not a partial patch. To propose a missing rule the document implies, target `"settings"` with `{ "op": "add_rule", ... }` (same fields). Only propose `dataSlotKey`/`topicKey` values you can see named in the config — never invent a key.',
   },
   budget_realism: {
     focus:
@@ -70,13 +57,13 @@ const DIMENSION_RUBRICS: Record<ScopeEvaluationDimension, ScopeDimensionRubric> 
 - 0.3 — The budget or caps make adaptation nearly impossible in practice.
 - 0.0 — The numbers are incoherent (e.g. the allowance cannot fit even the cheapest topic).`,
     ignore:
-      'Whether the budget is BELOW the mandatory floor, or too small for even the cheapest conditional topic — the coherence checker already catches both (`budget_below_floor`, `budget_admits_no_topic`) as an error/warning; do not repeat them. Rule soundness (Rule-Integrity), criteria wording (Criteria-Quality).',
+      'Whether the budget is BELOW the mandatory floor, or too small for even the cheapest conditional topic — the coherence checker already catches both (`budget_below_floor`, `budget_admits_no_topic`) as an error/warning; do not repeat them. Criteria wording (Criteria-Quality).',
     editGuidance:
       'Target `"settings"` and attach `"proposedEdit": { "op": "adjust_budget", "sessionBudgetSeconds": <seconds>, "maxOpeningProbes": <n>, "maxConditionalTopics": <n> }` — include only the field(s) you are actually changing. If the fix is to the planner\'s own guidance rather than a number, use `{ "op": "edit_planner_instructions", "plannerInstructions": "<the full replacement text>" }`.',
   },
   coverage_and_burden: {
     focus:
-      'Judge two things: (1) whether any conditional topic has no realistic path to ever being selected — its criteria describes something the opening cannot plausibly surface, or no rule and no fallback ever reaches it (an unreachable topic the respondent will never see, however relevant it might be); and (2) whether the topic set as a whole — its count and depth relative to the budget and cap — risks overburdening a respondent, i.e. there are so many plausible-sounding conditional topics that the planner is likely to seat as many as the cap allows on most respondents, defeating the purpose of narrowing at all.',
+      'Judge two things: (1) whether any conditional topic has no realistic path to ever being selected — its criteria describes something the opening cannot plausibly surface, or no fallback ever reaches it (an unreachable topic the respondent will never see, however relevant it might be); and (2) whether the topic set as a whole — its count and depth relative to the budget and cap — risks overburdening a respondent, i.e. there are so many plausible-sounding conditional topics that the planner is likely to seat as many as the cap allows on most respondents, defeating the purpose of narrowing at all.',
     scale: `- 1.0 — Every conditional topic is reachable, and the overall set is well-scoped to the budget.
 - 0.7 — Mostly fine; one topic looks hard to reach or the set is a little heavy.
 - 0.5 — A topic or two looks unreachable, or the topic count/depth looks likely to overburden most respondents.
@@ -132,11 +119,7 @@ function renderStructure(structure: ScopeStructureInput): string {
     `TOPICS (${structure.topics.length}):\n\n${structure.topics.map(renderTopic).join('\n\n')}`
   );
 
-  sections.push(
-    structure.rules.length > 0
-      ? `HARD RULES (${structure.rules.length}) — evaluated before the planner, every match applies, exclude beats include:\n${structure.rules.map((r) => `  [id=${r.id}] ${r.sentence}`).join('\n')}`
-      : 'HARD RULES: (none)'
-  );
+  sections.push();
 
   const s = structure.settings;
   sections.push(
@@ -163,7 +146,7 @@ function renderStructure(structure: ScopeStructureInput): string {
 /** The shared system frame, with the dimension's rubric spliced in. */
 function systemRules(dimension: ScopeEvaluationDimension): string {
   const rubric = DIMENSION_RUBRICS[dimension];
-  return `You are a design-time judge reviewing a conversational questionnaire's CONDITIONAL TOPICS configuration before it is launched — which topics are always asked, which are conditional and on what criteria, the hard rules that force a topic in or out, and the time budget. You evaluate ONE dimension and propose concrete edits.
+  return `You are a design-time judge reviewing a conversational questionnaire's CONDITIONAL TOPICS configuration before it is launched — which topics are always asked, which are conditional and on what criteria, and the time budget. You evaluate ONE dimension and propose concrete edits.
 
 The goal Conditional Topics serves: minimise how much a respondent is asked by skipping conditional topics that genuinely do not apply to them, WITHOUT ever silently dropping a topic that does apply. A topic wrongly excluded is a worse failure than a topic wrongly included.
 
@@ -179,27 +162,27 @@ ${rubric.ignore}
 FINDINGS
 - Emit a finding for each concrete issue you would fix on this dimension. A well-designed scope config yields an empty findings array — do not invent problems.
 - Emit at most ${MAX_SCOPE_FINDINGS_PER_JUDGE} findings, ordered most severe first.
-- **Lead with the fix, not the complaint.** Wherever an alternative is feasible, "proposedChange" must BE that alternative — the actual rewritten criteria, the specific rule fix, the specific number — not a description of what is wrong. Save the diagnosis for "rationale".
-- Address each finding's "targetKey" precisely: a topic by its key as "topic:<key>", a rule by its id as "rule:<id>", or the literal "settings" for something not about one topic or rule.
+- **Lead with the fix, not the complaint.** Wherever an alternative is feasible, "proposedChange" must BE that alternative — the actual rewritten criteria, the specific number — not a description of what is wrong. Save the diagnosis for "rationale".
+- Address each finding's "targetKey" precisely: a topic by its key as "topic:<key>", or the literal "settings" for something not about one topic.
 - "severity": "major" (fix before launch), "minor" (real but not blocking), or "info" (nice-to-have).
-- "proposedChange": the specific edit to make, in plain prose. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase in the criteria, a rule's rendered sentence, or the planner instructions.
+- "proposedChange": the specific edit to make, in plain prose. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase in the criteria or the planner instructions.
 
 STRUCTURED EDIT (optional)
 ${rubric.editGuidance}
-Prefer attaching "proposedEdit" whenever the fix maps to the op above — it is what lets the admin apply your suggestion in one click. Omit it when no op fits, or when a field would have to be guessed: never invent a topic key, rule id, or data-slot key you cannot see in the config.
+Prefer attaching "proposedEdit" whenever the fix maps to the op above — it is what lets the admin apply your suggestion in one click. Omit it when no op fits, or when a field would have to be guessed: never invent a topic key or data-slot key you cannot see in the config.
 
 OUTPUT — respond with ONLY this JSON object, no prose around it and no code fences:
 {
   "score": <number 0.0-1.0>,
   "findings": [
-    { "targetKey": "<topic:key | rule:id | settings>", "severity": "info|minor|major", "proposedChange": "<edit>", "rationale": "<why>", "sourceQuote": "<optional quote>", "proposedEdit": <optional structured op, omit if none fits> }
+    { "targetKey": "<topic:key | settings>", "severity": "info|minor|major", "proposedChange": "<edit>", "rationale": "<why>", "sourceQuote": "<optional quote>", "proposedEdit": <optional structured op, omit if none fits> }
   ]
 }`;
 }
 
 /**
  * Build the system + user messages for one judge over one version's scope config. The system
- * message carries the dimension rubric; the user message carries the serialised topics, rules,
+ * message carries the dimension rubric; the user message carries the serialised topics,
  * settings, pre-computed costs, and the known coherence-checker issues.
  */
 export function buildScopeJudgePrompt(

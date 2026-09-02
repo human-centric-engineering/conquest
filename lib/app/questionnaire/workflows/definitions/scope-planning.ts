@@ -3,14 +3,12 @@
  *
  * Runs ONCE per session, right after the turn that completes the opening topics —
  * `maybePlanScope` (`app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`), which triggers
- * `planScope` (`lib/app/questionnaire/scope/planner.ts`). Three tiers, in order, and the order is
+ * `planScope` (`lib/app/questionnaire/scope/planner.ts`). Two tiers, in order, and the order is
  * the whole design — **the model proposes, it never gets the last word on a hard constraint**:
  *
- *  1. **Hard rules** (`scope/rules.ts`) — the cases the author is certain about, resolved before
- *     any model call and never overridden by one.
- *  2. **The Scope Planner** — a judgement call over the author's criteria and what the respondent
- *     actually said, skipped entirely when the rules already settled every candidate.
- *  3. **Guardrails** (`scope/guardrails.ts`) — the cap, the fallback, the budget fit, the
+ *  1. **The Scope Planner** — a judgement call over the author's criteria and what the respondent
+ *     actually said.
+ *  2. **Guardrails** (`scope/guardrails.ts`) — the cap, the fallback, the budget fit, the
  *     blind-spot check — applied to whatever came back, so a model that ignores a limit cannot
  *     break it.
  *
@@ -40,30 +38,16 @@ export const scopePlanningWorkflow = diagram({
       meta: {
         note: 'A deterministic coverage check. Fail → the trigger is a no-op this turn; it re-checks after the next one.',
       },
-      next: [{ targetStepId: 'hard-rules', condition: 'Pass' }],
-    }),
-    node({
-      id: 'hard-rules',
-      name: 'Evaluate hard rules',
-      type: 'tool_call',
-      x: 220,
-      y: 0,
-      description:
-        'Every authored rule is checked against the session\'s data-slot fills — every match applies (not first-match-wins), and an exclude beats an include on the same topic. Resolved BEFORE the planner sees anything, so an author\'s "never" or "always" can never be second-guessed by a model.',
-      meta: { note: 'evaluateScopeRules() — pure, DB-free, no LLM.' },
-      next: [
-        { targetStepId: 'planner', condition: 'Unsettled candidates remain' },
-        { targetStepId: 'guardrails', condition: 'Every candidate already settled by a rule' },
-      ],
+      next: [{ targetStepId: 'planner', condition: 'Pass' }],
     }),
     node({
       id: 'planner',
       name: 'Scope Planner',
       type: 'agent_call',
-      x: 440,
+      x: 220,
       y: 0,
       description:
-        "Reads the author's per-topic criteria against what the respondent actually said in the opening — their answers and data-slot fills — and selects which conditional topics this interview should cover, with a rationale and a confidence score per pick. Skipped entirely when the hard rules already settled every candidate, so paying for a foregone conclusion never happens.",
+        "Reads the author's per-topic criteria against what the respondent actually said in the opening — their answers and data-slot fills — and selects which conditional topics this interview should cover, with a rationale and a confidence score per pick. Skipped entirely when there is no conditional topic to choose between, so paying for a foregone conclusion never happens.",
       meta: {
         agentSlug: SCOPE_PLANNER_AGENT_SLUG,
         note: 'Fail-soft: no agent configured, no provider, a timeout, or unparseable JSON all resolve to the fallback plan, not an exception.',
@@ -77,7 +61,7 @@ export const scopePlanningWorkflow = diagram({
       x: 660,
       y: 0,
       description:
-        "The planner's confidence is checked against the version's configured minimum. Pass → the model's picks proceed to the guardrails. Fail → the picks are discarded and the plan falls back to whatever the hard rules and the guardrails' own fallback produce — the model's explanatory message is discarded with it, so the respondent is never told about topics the fallback did not choose.",
+        "The planner's confidence is checked against the version's configured minimum. Pass → the model's picks proceed to the guardrails. Fail → the picks are discarded and the plan falls back to whatever the guardrails' own fallback produces — the model's explanatory message is discarded with it, so the respondent is never told about topics the fallback did not choose.",
       meta: {
         note: 'A deterministic scalar comparison (settings.minConfidence). A planner call that failed outright is treated the same as confidence 0.',
         settings: [

@@ -109,15 +109,6 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
   if (scoring.items.length === 0 || scoring.scales.length === 0) return issues;
 
   const cap = settings.maxConditionalTopics;
-  // Topics a hard rule forces in (and no rule vetoes back out) — seated regardless of the cap.
-  const excluded = new Set(
-    settings.rules.filter((r) => r.action === 'exclude').map((r) => r.topicKey)
-  );
-  const ruleIncluded = new Set(
-    settings.rules
-      .filter((r) => r.action === 'include' && !excluded.has(r.topicKey))
-      .map((r) => r.topicKey)
-  );
 
   for (const scale of scoring.scales) {
     const items = scoring.items.filter((i) => i.scaleKey === scale.key);
@@ -173,11 +164,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
     // Both tests use `unavoidable` rather than `touched`, so neither can fire on a scale that some
     // plan could in fact cover. See the module note on why the count is taken that way.
     //
-    // Rule-included topics are seated BEFORE the cap in `applyGuardrails` and are not truncated by
-    // it, so a plan can legitimately exceed `maxConditionalTopics`. Counting them against the cap
-    // would warn "no respondent is ever asked the whole scale" about a scale every respondent is
-    // asked in full — the exact false alarm this module promises not to raise.
-    const capBound = [...unavoidable].filter((key) => !ruleIncluded.has(key));
+    const capBound = [...unavoidable];
     if (capBound.length > cap) {
       issues.push({
         severity: 'warning',

@@ -2,7 +2,7 @@
 
 /**
  * The Conditional Topics judge panel — a second, structural review alongside the design-evaluation
- * panel, scoring the SCOPE CONFIG (topics, hard rules, planner instructions, budget) rather than
+ * panel, scoring the SCOPE CONFIG (topics, planner instructions, budget) rather than
  * the question structure.
  *
  * Ephemeral, like F5.1's own preview: this card runs the panel against the `evaluate-preview`
@@ -33,8 +33,7 @@ import {
   type ScopeEvaluationDimension,
   type ScopeJudgeFinding,
 } from '@/lib/app/questionnaire/scope-evaluation';
-import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
-import type { ScopeRule, Topic } from '@/lib/app/questionnaire/scope/types';
+import type { Topic } from '@/lib/app/questionnaire/scope/types';
 
 /** One dimension's outcome, as the preview route returns it. */
 interface ScopeDimensionResultView {
@@ -57,8 +56,6 @@ export interface ScopeEvaluationCardProps {
   questionnaireId: string;
   versionId: string;
   topics: readonly Topic[];
-  rules: readonly ScopeRule[];
-  dataSlots: readonly { key: string; name: string }[];
   disabled?: boolean;
 }
 
@@ -78,8 +75,6 @@ export function ScopeEvaluationCard({
   questionnaireId,
   versionId,
   topics,
-  rules,
-  dataSlots,
   disabled = false,
 }: ScopeEvaluationCardProps) {
   const [result, setResult] = useState<ScopeEvaluationPreviewResponse | null>(null);
@@ -87,21 +82,12 @@ export function ScopeEvaluationCard({
   const [running, setRunning] = useState(false);
 
   const topicLabelByKey = new Map(topics.map((t) => [t.key, t.label] as const));
-  const dataSlotLabelByKey = new Map(dataSlots.map((d) => [d.key, d.name] as const));
-  const ruleSentenceById = new Map(
-    rules.map((r) => [r.id, describeScopeRule(r, topicLabelByKey, dataSlotLabelByKey)] as const)
-  );
-
-  /** Resolve a finding's `targetKey` (`topic:<key>` | `rule:<id>` | `settings`) into a readable label. */
+  /** Resolve a finding's `targetKey` (`topic:<key>` | `settings`) into a readable label. */
   function resolveTarget(targetKey: string): string {
     if (targetKey === 'settings') return 'Conditional topics settings';
     if (targetKey.startsWith('topic:')) {
       const key = targetKey.slice('topic:'.length);
       return topicLabelByKey.get(key) ?? key;
-    }
-    if (targetKey.startsWith('rule:')) {
-      const id = targetKey.slice('rule:'.length);
-      return ruleSentenceById.get(id) ?? id;
     }
     return targetKey;
   }
@@ -136,13 +122,13 @@ export function ScopeEvaluationCard({
           AI review of this setup
           <FieldHelp title="What this does">
             <p>
-              Runs four judges over your topics, hard rules, budget and planner instructions —
-              independent of each other, each scoring one thing: whether topic criteria are specific
-              and observable, whether the rules are sound, whether the budget is realistic, and
-              whether any topic risks being unreachable or the set overburdens a respondent.
+              Runs three judges over your topics, budget and planner instructions — independent of
+              each other, each scoring one thing: whether topic criteria are specific and
+              observable, whether the budget is realistic, and whether any topic risks being
+              unreachable or the set overburdens a respondent.
             </p>
             <p className="mt-2">
-              It writes nothing. Each run costs four model calls. This is a structural review of
+              It writes nothing. Each run costs three model calls. This is a structural review of
               your config — it does not read any respondent session.
             </p>
           </FieldHelp>

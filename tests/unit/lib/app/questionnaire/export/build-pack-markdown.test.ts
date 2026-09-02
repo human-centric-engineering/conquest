@@ -794,7 +794,6 @@ describe('buildPackMarkdown', () => {
               },
             ],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -847,7 +846,6 @@ describe('buildPackMarkdown', () => {
                 trigger: null,
               },
             ],
-            rules: [],
             settings: [
               { label: 'Topics that depend on the respondent', value: 'Up to 3 per interview' },
               { label: 'Interview length', value: '10 min' },
@@ -901,7 +899,6 @@ describe('buildPackMarkdown', () => {
                 trigger: null,
               },
             ],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -935,7 +932,6 @@ describe('buildPackMarkdown', () => {
                 },
               },
             ],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -956,37 +952,6 @@ describe('buildPackMarkdown', () => {
       );
     });
 
-    it('renders hard rules under their own heading, and omits it when there are none', () => {
-      const withRules = buildPackMarkdown(
-        model({
-          conditionalTopics: {
-            enabled: true,
-            alwaysAsked: [],
-            conditional: [],
-            rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
-            settings: [],
-            evaluation: EMPTY_SCOPE_EVALUATION,
-          },
-        })
-      );
-      expect(withRules).toContain('### Hard rules');
-      expect(withRules).toContain('Always include "Talent & culture" when "Engagement" exists.');
-
-      const withoutRules = buildPackMarkdown(
-        model({
-          conditionalTopics: {
-            enabled: true,
-            alwaysAsked: [],
-            conditional: [],
-            rules: [],
-            settings: [],
-            evaluation: EMPTY_SCOPE_EVALUATION,
-          },
-        })
-      );
-      expect(withoutRules).not.toContain('### Hard rules');
-    });
-
     it('renders "None defined." under each heading when a version has no topics at all', () => {
       const md = buildPackMarkdown(
         model({
@@ -994,7 +959,6 @@ describe('buildPackMarkdown', () => {
             enabled: true,
             alwaysAsked: [],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: EMPTY_SCOPE_EVALUATION,
           },
@@ -1018,7 +982,6 @@ describe('buildPackMarkdown', () => {
             enabled: true,
             alwaysAsked: [],
             conditional: [],
-            rules: [],
             settings: [],
             evaluation: null,
           },
@@ -1034,7 +997,6 @@ describe('buildPackMarkdown', () => {
       enabled: true,
       alwaysAsked: [],
       conditional: [],
-      rules: [],
       settings: [],
     };
 

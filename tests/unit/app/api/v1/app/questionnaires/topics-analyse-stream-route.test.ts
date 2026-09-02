@@ -513,7 +513,6 @@ describe('POST …/topics/analyse/stream — the run', () => {
         detail: expect.objectContaining({
           topicCount: 1,
           conditionalCount: 1,
-          ruleCount: 0,
           gapCount: 1,
           usedDocument: false,
         }),

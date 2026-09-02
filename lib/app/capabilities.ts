@@ -80,7 +80,7 @@ export function initAppCapabilities(): void {
   registerAppCapability(new AppAnalyseGlossaryTermsCapability());
 
   // Conditional Topics (P17.4) — the Routing Analyst. Reads the uploaded instrument's own instruction
-  // pages and proposes the topics + hard rules they describe. Dispatched by the Topics tab's
+  // pages and proposes the topics they describe. Dispatched by the Topics tab's
   // analysis route; writes nothing live.
   registerAppCapability(new AppAnalyseRoutingCapability());
 

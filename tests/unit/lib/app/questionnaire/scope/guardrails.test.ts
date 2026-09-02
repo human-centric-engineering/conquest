@@ -7,7 +7,6 @@ import {
   DEFAULT_RESPONDENT_REASON,
   type ApplyGuardrailsInput,
 } from '@/lib/app/questionnaire/scope/guardrails';
-import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   LIGHT_DEPTH_MEMBER_COUNT,
@@ -44,10 +43,6 @@ function settings(over: Partial<ConditionalTopicsSettings> = {}): ConditionalTop
   };
 }
 
-function noRules(): RuleOutcome {
-  return { include: new Set(), exclude: new Set(), reasonByTopic: new Map() };
-}
-
 const TOPICS = [
   topic('open', 'opening'),
   topic('spine', 'core'),
@@ -62,7 +57,6 @@ function input(over: Partial<ApplyGuardrailsInput> = {}): ApplyGuardrailsInput {
   return {
     topics: TOPICS,
     proposed: [],
-    rules: noRules(),
     settings: settings(),
     confidence: 0.9,
     source: 'llm',
@@ -138,54 +132,6 @@ describe('applyGuardrails — unknown and ineligible keys', () => {
   });
 });
 
-describe('applyGuardrails — hard rules', () => {
-  function rules(over: Partial<RuleOutcome> = {}): RuleOutcome {
-    return { ...noRules(), ...over };
-  }
-
-  it('seats a rule-included topic before the model’s picks, so the cap cannot truncate it', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [
-          { key: 'pipeline', rationale: 'a' },
-          { key: 'forecast', rationale: 'b' },
-        ],
-        rules: rules({
-          include: new Set(['talent']),
-          reasonByTopic: new Map([['talent', 'because headcount > 500']]),
-        }),
-        settings: settings({ maxConditionalTopics: 2 }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent', 'pipeline']);
-    expect(plan.topics[0]).toMatchObject({ source: 'rule', rationale: 'because headcount > 500' });
-  });
-
-  it('never seats a rule-excluded topic, however confidently the model proposed it', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [{ key: 'data', rationale: 'they talked about CRM constantly' }],
-        rules: rules({ exclude: new Set(['data']) }),
-      })
-    );
-
-    expect(plan.topics).toEqual([]);
-    expect(plan.excluded.find((e) => e.key === 'data')?.source).toBe('rule');
-  });
-
-  it('lets exclude beat include on the same topic', () => {
-    // An author's "never" is a line drawn; a second rule they forgot must not cross it.
-    const plan = applyGuardrails(
-      input({
-        rules: rules({ include: new Set(['data']), exclude: new Set(['data']) }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).not.toContain('data');
-  });
-});
-
 describe('applyGuardrails — the fallback', () => {
   it('uses the fallback set only when nothing else was seated', () => {
     const plan = applyGuardrails(
@@ -197,36 +143,12 @@ describe('applyGuardrails — the fallback', () => {
     expect(plan.source).toBe('fallback');
   });
 
-  it('does NOT use the fallback when a rule already seated something', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [],
-        rules: { include: new Set(['talent']), exclude: new Set(), reasonByTopic: new Map() },
-        settings: settings({ fallbackTopicKeys: ['data'] }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
-  });
-
   it('produces an always-topics-only interview when the fallback is empty', () => {
     // Thin, but coherent — and strictly better than stranding the respondent.
     const plan = applyGuardrails(
       input({ proposed: [], settings: settings({ fallbackTopicKeys: [] }) })
     );
     expect(plan.topics).toEqual([]);
-  });
-
-  it('honours an exclude even inside the fallback set', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [],
-        rules: { include: new Set(), exclude: new Set(['data']), reasonByTopic: new Map() },
-        settings: settings({ fallbackTopicKeys: ['data', 'talent'] }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
   });
 });
 
@@ -360,30 +282,12 @@ describe('chooseCheckTopic', () => {
 
 describe('plannerCandidates', () => {
   it('offers only conditional topics', () => {
-    expect(plannerCandidates(TOPICS, noRules()).map((t) => t.key)).toEqual([
+    expect(plannerCandidates(TOPICS).map((t) => t.key)).toEqual([
       'pipeline',
       'forecast',
       'talent',
       'data',
     ]);
-  });
-
-  it('hides a rule-excluded topic from the planner entirely', () => {
-    const rules: RuleOutcome = {
-      include: new Set(),
-      exclude: new Set(['data']),
-      reasonByTopic: new Map(),
-    };
-    expect(plannerCandidates(TOPICS, rules).map((t) => t.key)).not.toContain('data');
-  });
-
-  it('KEEPS a rule-included topic visible, so the planner does not double up on the same ground', () => {
-    const rules: RuleOutcome = {
-      include: new Set(['data']),
-      exclude: new Set(),
-      reasonByTopic: new Map(),
-    };
-    expect(plannerCandidates(TOPICS, rules).map((t) => t.key)).toContain('data');
   });
 });
 
@@ -484,25 +388,6 @@ describe('applyGuardrails — the time budget', () => {
     const dropped = plan.excluded.filter((e) => e.source === 'budget').map((e) => e.key);
     expect(dropped).toEqual(['talent', 'data']);
     expect(plan.excluded.find((e) => e.key === 'talent')?.rationale).toContain('5m 20s');
-  });
-
-  it('never drops a rule-included topic — an author’s “always” outranks the arithmetic', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [{ key: 'pipeline', rationale: 'a' }],
-        rules: {
-          include: new Set(['talent']),
-          exclude: new Set(),
-          reasonByTopic: new Map([['talent', 'headcount > 500']]),
-        },
-        settings: settings({ maxConditionalTopics: 4 }),
-        budget: { budgetSeconds: 200, costs: costs() },
-      })
-    );
-
-    // 200s − 120s floor = 80s, less than either topic. The rule survives; the model's pick does not.
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
-    expect(plan.estimatedSeconds).toBeGreaterThan(200);
   });
 
   it('fits the fallback too — a safety net is not a licence to run long', () => {

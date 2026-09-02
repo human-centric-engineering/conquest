@@ -342,12 +342,6 @@ export function buildPackCsv(model: PackModel): string {
       ]);
     }
 
-    blocks.push([
-      '# Conditional topics rules',
-      row(['rule']),
-      ...model.conditionalTopics.rules.map((rule) => row([rule.sentence])),
-    ]);
-
     // Both routing-review blocks are skipped wholesale when the admin excluded the review. A
     // header-only block reads as "reviewed, nothing found"; an absent one reads as "not in this
     // pack", which is what actually happened.

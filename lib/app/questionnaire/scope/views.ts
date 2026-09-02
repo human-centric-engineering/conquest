@@ -11,7 +11,6 @@
 import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
 import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
-  NEGATIVE_SCOPE_OPERATOR,
   type ConditionalTopicsSettings,
   type InterviewPlan,
   type ProposedTopicSet,
@@ -100,8 +99,8 @@ export interface TopicsPayload {
    */
   draft: ProposedTopicSet | null;
   /**
-   * What the plan-preview form needs to render (F17.14). Derived from the same topics and rules
-   * carried above, server-side, so "which questions are in the opening" has one implementation.
+   * What the plan-preview form needs to render (F17.14). Derived from the same topics carried
+   * above, server-side, so "which questions are in the opening" has one implementation.
    */
   preview: PlanPreviewForm;
   /**
@@ -178,21 +177,13 @@ export interface PreviewOpeningQuestion {
 export interface PreviewFillTarget {
   key: string;
   name: string;
-  /**
-   * True when a hard rule tests this slot for ABSENCE (`not_exists`).
-   *
-   * Surfaced because leaving the box empty is then not an omission but the whole experiment: the
-   * veto is the single most valuable thing a preview can demonstrate, and an author who does not
-   * know which slot it watches will fill every box out of tidiness and never see it fire.
-   */
-  watchedByVeto: boolean;
 }
 
 /**
  * What the preview form needs to render itself, derived server-side from the version.
  *
  * Part of {@link TopicsPayload} rather than its own fetch: the form's shape is a function of the
- * topics and rules already in that payload, and deriving it in the browser would mean a second
+ * topics already in that payload, and deriving it in the browser would mean a second
  * implementation of "which questions are in the opening" that could disagree with the planner's.
  */
 export interface PlanPreviewForm {
@@ -207,7 +198,7 @@ export interface PlanPreviewForm {
  * proposed before the guardrails touched it.
  *
  * The plan already carries most of the trace — `PlannedTopic.source` and `ExcludedTopic.source`
- * name the rule / the model / the fallback / the budget / the check for every topic. The one thing
+ * name the model / the fallback / the budget / the check for every topic. The one thing
  * it cannot carry is the difference between "the model never picked this" and "the model picked it
  * and a guardrail took it back", which is exactly the difference an author is trying to see.
  */
@@ -222,7 +213,7 @@ export interface PlanPreviewResult {
 }
 
 /**
- * Derive the preview form from the version's own topics, rules and slot inventory.
+ * Derive the preview form from the version's own topics and slot inventory.
  *
  * Pure, and server-side by convention (the route calls it) for the same reason `issues` and `costs`
  * are computed there: "which questions are in the opening" is a question the planner already
@@ -233,7 +224,6 @@ export interface PlanPreviewResult {
  */
 export function buildPlanPreviewForm(
   topics: readonly Topic[],
-  settings: ConditionalTopicsSettings,
   dataSlots: readonly TopicDataSlotRef[],
   questionPrompts: ReadonlyMap<string, string>
 ): PlanPreviewForm {
@@ -251,16 +241,11 @@ export function buildPlanPreviewForm(
     }
   }
 
-  const vetoed = new Set(
-    settings.rules.filter((r) => r.operator === NEGATIVE_SCOPE_OPERATOR).map((r) => r.dataSlotKey)
-  );
-
   return {
     openingQuestions,
     fillTargets: dataSlots.map((slot) => ({
       key: slot.key,
       name: slot.name,
-      watchedByVeto: vetoed.has(slot.key),
     })),
   };
 }

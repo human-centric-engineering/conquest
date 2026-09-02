@@ -55,7 +55,7 @@ components/app/questionnaire/behind-the-scenes/          # client: explorer, can
 | `conversation-turn`        | per-turn orchestrator: extract → gates → contradiction → assess → respond branch                                                   | `orchestrator/orchestrator.ts`           |
 | `answer-extraction`        | message → extract → normalise → validate → propagate                                                                               | `extraction/extraction-prompt.ts`        |
 | `data-slot-turn`           | combined extract → park → contradiction → respond (offer/question/next-slot)                                                       | `orchestrator/data-slot-orchestrator.ts` |
-| `scope-planning`           | opening gate → hard rules → Scope Planner → confidence gate → guardrails (cap/fallback/fit/blind-spot) → persist plan              | `_lib/plan-scope.ts`                     |
+| `scope-planning`           | opening gate → Scope Planner → confidence gate → guardrails (cap/fallback/fit/blind-spot) → persist plan                           | `_lib/plan-scope.ts`                     |
 | `respondent-report`        | load → transcript → (client KB) → (before-research) → generate → format → (after-research) → (appendix) → deliver                  | `report/generate.ts`                     |
 | `report-config-assistant`  | gather chat + current config → craft reply/suggestions → admin applies                                                             | `report/craft.ts`                        |
 | `cohort-report`            | dataset → material → (context KB) → synthesise → charts → publish                                                                  | `cohort-report/generate.ts`              |

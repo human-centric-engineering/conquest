@@ -68,14 +68,6 @@ vi.mock('@/components/ui/multi-select', () => ({
     </button>
   ),
 }));
-vi.mock('@/components/admin/questionnaires/topics/scope-rules-editor', () => ({
-  ScopeRulesEditor: ({ onChange }: { onChange: (next: unknown[]) => void }) => (
-    <button type="button" data-testid="rules-editor" onClick={() => onChange([RULE])}>
-      rules
-    </button>
-  ),
-}));
-
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
@@ -83,7 +75,6 @@ import {
   MIN_CONDITIONAL_TOPICS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
@@ -91,16 +82,6 @@ import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                   */
 /* -------------------------------------------------------------------------- */
-
-const RULE: ScopeRule = {
-  id: 'r1',
-  dataSlotKey: 'licence',
-  operator: 'not_exists',
-  value: '',
-  action: 'exclude',
-  topicKey: 'audit',
-  ordinal: 0,
-};
 
 function topic(key: string, phase: Topic['phase']): Topic {
   return {
@@ -136,7 +117,6 @@ function renderCard(
     <ScopeSettingsCard
       settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings }}
       topics={topics}
-      dataSlots={[]}
       costs={COSTS}
       onSave={onSave}
       busy={busy}
@@ -378,14 +358,6 @@ describe('ScopeSettingsCard — the remaining fields', () => {
     expect((await savedDraft(onSave)).allowRespondentAmendment).toBe(false);
   });
 
-  it('takes the rules editor’s list as-is', async () => {
-    const { onSave } = renderCard();
-
-    fireEvent.click(screen.getByTestId('rules-editor'));
-
-    expect((await savedDraft(onSave)).rules).toEqual([RULE]);
-  });
-
   it('stores planner guidance', async () => {
     const { onSave } = renderCard();
 
@@ -454,7 +426,6 @@ describe('ScopeSettingsCard — dirty state', () => {
       <ScopeSettingsCard
         settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true }}
         topics={CONDITIONALS}
-        dataSlots={[]}
         costs={COSTS}
         onSave={onSave}
         busy={false}

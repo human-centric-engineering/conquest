@@ -92,18 +92,15 @@ export interface ApplyScopeAuditContext {
 }
 
 const TOPIC_PREFIX = 'topic:';
-const RULE_PREFIX = 'rule:';
 
 /**
  * Validate an op against a concrete version before it is written. Topic ops need the topic to
  * still exist; rule ops need the rule id to still exist. Settings-level additions
  * (`add_rule`/`adjust_budget`/`edit_planner_instructions`/`add_fallback_topic`) always pass — the
- * `settings` blob always exists on a version, and the authoring surface itself is permissive
- * about a rule naming a topic/slot it can't yet see (`validate.ts` warns, never blocks).
+ * `settings` blob always exists on a version.
  */
 async function validateScopeOpAgainst(
   versionId: string,
-  op: ScopeProposedEdit,
   targetKey: string
 ): Promise<UnapplicableScopeReason | null> {
   if (targetKey.startsWith(TOPIC_PREFIX)) {
@@ -114,12 +111,6 @@ async function validateScopeOpAgainst(
     });
     if (!topic) return 'target_gone';
     return null;
-  }
-  if (targetKey.startsWith(RULE_PREFIX)) {
-    if (op.op !== 'edit_rule' && op.op !== 'delete_rule') return null;
-    const id = targetKey.slice(RULE_PREFIX.length);
-    const settings = await loadConditionalTopicsSettings(versionId);
-    return settings.rules.some((r) => r.id === id) ? null : 'target_gone';
   }
   return null;
 }
@@ -165,13 +156,13 @@ export async function applyScopeFinding(args: {
 
   const reuseDraft = await findRunReviewDraft(runId, scoped.questionnaireId);
   if (reuseDraft) {
-    const reason = await validateScopeOpAgainst(reuseDraft.id, op, finding.targetKey);
+    const reason = await validateScopeOpAgainst(reuseDraft.id, finding.targetKey);
     if (reason) return { status: 'unapplicable', reason };
     editVersionId = reuseDraft.id;
     forked = false;
     editVersionNumber = reuseDraft.versionNumber;
   } else {
-    const reason = await validateScopeOpAgainst(scoped.id, op, finding.targetKey);
+    const reason = await validateScopeOpAgainst(scoped.id, finding.targetKey);
     if (reason) return { status: 'unapplicable', reason };
     const fork = await forkVersionIfLaunched(scoped, {
       userId: audit.userId,
@@ -260,52 +251,6 @@ async function writeScopeOp(
         });
         return 'target_gone';
       }
-      return null;
-    }
-
-    case 'add_rule': {
-      const settings = await loadConditionalTopicsSettings(editVersionId, tx);
-      await patchConditionalTopicsSettings(
-        editVersionId,
-        {
-          rules: [
-            ...settings.rules,
-            {
-              dataSlotKey: op.dataSlotKey,
-              operator: op.operator,
-              value: op.value,
-              action: op.action,
-              topicKey: op.topicKey,
-            },
-          ],
-        },
-        tx
-      );
-      return null;
-    }
-
-    case 'edit_rule':
-    case 'delete_rule': {
-      const id = targetKey.slice(RULE_PREFIX.length);
-      const settings = await loadConditionalTopicsSettings(editVersionId, tx);
-      const exists = settings.rules.some((r) => r.id === id);
-      if (!exists) return 'target_gone';
-      const rules =
-        op.op === 'delete_rule'
-          ? settings.rules.filter((r) => r.id !== id)
-          : settings.rules.map((r) =>
-              r.id === id
-                ? {
-                    id: r.id,
-                    dataSlotKey: op.dataSlotKey,
-                    operator: op.operator,
-                    value: op.value,
-                    action: op.action,
-                    topicKey: op.topicKey,
-                  }
-                : r
-            );
-      await patchConditionalTopicsSettings(editVersionId, { rules }, tx);
       return null;
     }
 

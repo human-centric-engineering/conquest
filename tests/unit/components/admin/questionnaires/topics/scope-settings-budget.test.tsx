@@ -38,10 +38,6 @@ vi.mock('@/components/ui/switch', () => ({
 vi.mock('@/components/ui/multi-select', () => ({
   MultiSelect: () => <div data-testid="multi-select" />,
 }));
-vi.mock('@/components/admin/questionnaires/topics/scope-rules-editor', () => ({
-  ScopeRulesEditor: () => <div data-testid="rules-editor" />,
-}));
-
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
@@ -65,7 +61,6 @@ function renderCard(settings: Partial<ConditionalTopicsSettings>, costView = cos
     <ScopeSettingsCard
       settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings }}
       topics={[]}
-      dataSlots={[]}
       costs={costView}
       onSave={onSave}
       busy={false}

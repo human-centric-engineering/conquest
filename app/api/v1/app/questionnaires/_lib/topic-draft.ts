@@ -19,7 +19,6 @@ import {
   narrowProposedTopicSet,
   type ConditionalTopicsSettings,
   type ProposedTopicSet,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { TOPIC_SELECT, toTopic } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
@@ -127,22 +126,8 @@ export async function acceptTopicDraft(
     });
     const current = narrowConditionalTopicsSettings(config?.conditionalTopics);
 
-    // Rules REPLACE rather than append. The analyst read the document's routing instructions as one
-    // piece and proposed the rules they describe; appending would leave an admin who re-ran the
-    // analysis with two copies of every rule and no way to tell which run authored which.
-    const rules: ScopeRule[] = (body.rules ?? current.rules).map((r, i) => ({
-      id: 'id' in r && typeof r.id === 'string' && r.id.length > 0 ? r.id : `rule-${i}`,
-      dataSlotKey: r.dataSlotKey,
-      operator: r.operator,
-      value: r.value ?? null,
-      action: r.action,
-      topicKey: r.topicKey,
-      ordinal: i,
-    }));
-
     const merged: ConditionalTopicsSettings = {
       ...current,
-      rules,
       ...(body.maxConditionalTopics !== undefined
         ? { maxConditionalTopics: body.maxConditionalTopics }
         : {}),

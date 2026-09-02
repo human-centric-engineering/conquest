@@ -43,10 +43,6 @@ vi.mock('@/components/ui/switch', () => ({
 vi.mock('@/components/ui/multi-select', () => ({
   MultiSelect: () => <div data-testid="multi-select" />,
 }));
-vi.mock('@/components/admin/questionnaires/topics/scope-rules-editor', () => ({
-  ScopeRulesEditor: () => <div data-testid="rules-editor" />,
-}));
-
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
@@ -68,7 +64,6 @@ function renderCard(settings: Partial<ConditionalTopicsSettings> = {}) {
     <ScopeSettingsCard
       settings={{ ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...settings }}
       topics={[]}
-      dataSlots={[]}
       costs={COSTS}
       onSave={onSave}
       busy={false}
@@ -140,6 +135,6 @@ describe('ScopeSettingsCard — the opening follow-up allowance (G03)', () => {
     renderCard();
     const heading = screen.getByText(/Before the decision/);
     expect(heading.textContent).toMatch(/^1/);
-    expect(screen.getByText(/Always or never ask a topic/).textContent).toMatch(/^2/);
+    expect(screen.getByText(/How much the agent may cover/).textContent).toMatch(/^2/);
   });
 });

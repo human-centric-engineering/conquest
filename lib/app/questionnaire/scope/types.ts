@@ -105,76 +105,12 @@ export const TOPIC_SOURCES = ['seeded', 'manual', 'analyst'] as const;
 export type TopicSource = (typeof TOPIC_SOURCES)[number];
 
 /**
- * How a hard rule compares a filled data slot against its operand.
- *
- * Deliberately the same small vocabulary as `ROUTING_RULE_OPERATORS`
- * (`experiences/routing/types.ts`), and for the same reason: rules exist to hard-pin the handful of
- * cases an author is certain about, and a flat list is legible at a glance in a way a boolean tree
- * is not. Anything richer is what the planner's plain-English criteria are for.
- */
-export const SCOPE_RULE_OPERATORS = [
-  'equals',
-  'contains',
-  'gt',
-  'lt',
-  'exists',
-  'not_exists',
-] as const;
-export type ScopeRuleOperator = (typeof SCOPE_RULE_OPERATORS)[number];
-
-/** Human labels for the operator select. */
-export const SCOPE_RULE_OPERATOR_LABELS: Record<ScopeRuleOperator, string> = {
-  equals: 'is exactly',
-  contains: 'mentions',
-  gt: 'is greater than',
-  lt: 'is less than',
-  exists: 'has any answer',
-  not_exists: 'was never answered',
-};
-
-/** Operators that ignore `value` — the admin form hides the operand field for these. */
-export const VALUELESS_SCOPE_OPERATORS: readonly ScopeRuleOperator[] = ['exists', 'not_exists'];
-
-/**
- * The one operator that matches on ABSENCE, and therefore the one exception to "an unfilled slot
- * never matches".
- *
- * It exists because the most valuable hard rules are vetoes — "never score them on AI readiness
- * when they never named an outcome they want it to move" — and a veto is a statement about
- * something the respondent did NOT say. Without it, that rule can only be written as prose criteria
- * for the planner to weigh, which is precisely the failure mode hard rules exist to avoid: a
- * constraint obeyed most of the time.
- *
- * Named as a constant rather than inlined because two places have to agree about it — the evaluator
- * (which must let it past the unfilled-slot guard) and the admin form (which must not ask for an
- * operand).
- */
-export const NEGATIVE_SCOPE_OPERATOR: ScopeRuleOperator = 'not_exists';
-
-/**
- * What a matching rule does. `include` forces a conditional topic in; `exclude` forces it out.
- *
- * Exclude exists because the most valuable hard rules are usually negative — "never score them
- * against AI readiness when they never named an outcome they want it to move" — and expressing that
- * as an include on every other topic is both fragile and unreadable.
- */
-export const SCOPE_RULE_ACTIONS = ['include', 'exclude'] as const;
-export type ScopeRuleAction = (typeof SCOPE_RULE_ACTIONS)[number];
-
-/** Human labels for the action selector. */
-export const SCOPE_RULE_ACTION_LABELS: Record<ScopeRuleAction, string> = {
-  include: 'always include',
-  exclude: 'never include',
-};
-
-/**
  * Why a topic ended up in (or out of) a plan. Recorded per topic so an admin can tell an AI
- * judgement from a hard rule from a safety net from the respondent's own request — the same
+ * judgement from a safety net from the respondent's own request — the same
  * distinction `RoutingDecision.source` draws for the Experience switcher.
  */
 export const SCOPE_DECISION_SOURCES = [
   'phase',
-  'rule',
   'llm',
   'fallback',
   'check',
@@ -186,7 +122,6 @@ export type ScopeDecisionSource = (typeof SCOPE_DECISION_SOURCES)[number];
 /** Human labels for the decision-source badge on admin surfaces. */
 export const SCOPE_DECISION_SOURCE_LABELS: Record<ScopeDecisionSource, string> = {
   phase: 'Always asked',
-  rule: 'Matched a rule you set',
   llm: 'Chosen by the agent',
   fallback: 'Safe default',
   check: 'Blind-spot check',
@@ -230,7 +165,6 @@ export const MEMBER_KEY_MAX_LENGTH = 512;
 export const TOPIC_LABEL_MAX_LENGTH = 200;
 export const TOPIC_DESCRIPTION_MAX_LENGTH = 1_000;
 export const TOPIC_CRITERIA_MAX_LENGTH = 2_000;
-export const SCOPE_RULE_VALUE_MAX_LENGTH = 500;
 export const PLANNER_INSTRUCTIONS_MAX_LENGTH = 4_000;
 export const RESPONDENT_MESSAGE_MAX_LENGTH = 1_000;
 /**
@@ -413,17 +347,6 @@ export interface ProposedTopic {
   replacesExisting?: boolean;
 }
 
-/** One hard rule as the analyst proposes it. Same shape as {@link ScopeRule}, plus the provenance. */
-export interface ProposedScopeRule {
-  dataSlotKey: string;
-  operator: ScopeRuleOperator;
-  value: string | null;
-  action: ScopeRuleAction;
-  topicKey: string;
-  rationale: string;
-  sourceQuote?: string;
-}
-
 /**
  * Routing language the analyst recognized but could not formalize into a topic or a hard rule
  * (Phase 2, F17.19) — a vague eligibility clause, a rule that would need a data slot the instrument
@@ -439,16 +362,14 @@ export interface ProposedGap {
 /**
  * The reviewable proposal stored on `AppQuestionnaireTopicDraft.topics`.
  *
- * Topics and rules travel together on purpose: the analyst reads a document's routing instructions
- * as one piece of prose ("ask about pricing only for companies over 50 staff — and never score
- * enterprise accounts on self-serve onboarding"), and splitting that across two review surfaces
- * would make each half un-reviewable on its own.
+ * Topics and the gaps beside them travel together on purpose: the analyst reads a document's
+ * routing instructions as one piece of prose, and splitting what it could formalize from what it
+ * could not across two review surfaces would make each half un-reviewable on its own.
  */
 export interface ProposedTopicSet {
   v: 1;
   topics: ProposedTopic[];
-  rules: ProposedScopeRule[];
-  /** Routing language recognized but not formalized into a topic or rule (Phase 2, F17.19). */
+  /** Routing language recognized but not formalized into a topic (Phase 2, F17.19). */
   gaps: ProposedGap[];
   /**
    * The topic limit the document itself implies, when it states one ("no more than three areas per
@@ -490,7 +411,7 @@ export interface ProposedTopicSet {
    * Whether the source document actually contained routing instructions.
    *
    * False means the analyst inferred everything from the questionnaire's own structure, which is a
-   * materially weaker proposal and must be labelled as one. "I read your routing rules" and "I
+   * materially weaker proposal and must be labelled as one. "I read your routing instructions" and "I
    * guessed from your section headings" are different claims.
    */
   fromDocument: boolean;
@@ -499,28 +420,21 @@ export interface ProposedTopicSet {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Hard rules                                                                 */
+/* Session evidence                                                           */
 /* -------------------------------------------------------------------------- */
 
 /**
- * One hard rule. Evaluated before the planner; every match applies (unlike the Experience router's
- * first-match-wins), because include and exclude are independent assertions about different topics
- * and "the first one wins" would silently drop the rest.
+ * One data-slot fill, as the planner reads it.
  *
- * `exclude` beats `include` on the same topic: a rule saying "never" is an author drawing a line,
- * and a line drawn should not be crossed by a second rule they forgot about.
+ * Addressed by KEY rather than row id, so the same shape serves a live session and the
+ * authoring dry-run, which has no session and invents its fills from a form.
  */
-export interface ScopeRule {
-  id: string;
-  /** The data-slot key this rule tests against the session's fills. */
-  dataSlotKey: string;
-  operator: ScopeRuleOperator;
-  /** Comparison operand. Null for `exists`, which tests only for a filled slot. */
-  value: string | null;
-  action: ScopeRuleAction;
-  /** The `key` of the topic this rule acts on. An unresolvable key is skipped and logged. */
-  topicKey: string;
-  ordinal: number;
+export interface ScopeFill {
+  key: string;
+  /** The structured value, when the slot has one. */
+  value: unknown;
+  /** The natural-language rendering of what the respondent conveyed. */
+  paraphrase: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -648,9 +562,6 @@ export interface ConditionalTopicsSettings {
    * shared rather than per item.
    */
   maxOpeningProbes: number;
-
-  /** The hard rules, evaluated before the planner. */
-  rules: ScopeRule[];
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
@@ -671,7 +582,6 @@ export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   // Off. The allowance below is what an author gets when they turn it on, not what they run today.
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
-  rules: [],
 };
 
 /* -------------------------------------------------------------------------- */
@@ -994,35 +904,6 @@ export function narrowTopicTrigger(value: unknown): TopicTrigger | null {
   };
 }
 
-/** Project one stored rule. Returns null when it could never match anything useful. */
-function narrowScopeRule(value: unknown, index: number): ScopeRule | null {
-  if (!isRecord(value)) return null;
-  const dataSlotKey = asText(value.dataSlotKey, MEMBER_KEY_MAX_LENGTH, '');
-  const topicKey = asText(value.topicKey, TOPIC_KEY_MAX_LENGTH, '');
-  // A rule naming no slot or no topic is unresolvable by construction — drop it rather than keep a
-  // row that can only ever no-op, which would read to an admin as a rule that is quietly failing.
-  if (dataSlotKey.length === 0 || topicKey.length === 0) return null;
-  const operator = narrowToEnum(
-    typeof value.operator === 'string' ? value.operator : '',
-    SCOPE_RULE_OPERATORS,
-    'exists'
-  );
-  const rawValue = typeof value.value === 'string' ? value.value.trim() : '';
-  return {
-    id: asText(value.id, 64, '') || `rule-${index}`,
-    dataSlotKey,
-    operator,
-    value: rawValue.length > 0 ? rawValue.slice(0, SCOPE_RULE_VALUE_MAX_LENGTH) : null,
-    action: narrowToEnum(
-      typeof value.action === 'string' ? value.action : '',
-      SCOPE_RULE_ACTIONS,
-      'include'
-    ),
-    topicKey,
-    ordinal: asNumber(value.ordinal, 0, 10_000, index),
-  };
-}
-
 /**
  * Project the stored `conditionalTopics` Json onto a complete {@link ConditionalTopicsSettings}.
  *
@@ -1033,13 +914,6 @@ function narrowScopeRule(value: unknown, index: number): ScopeRule | null {
 export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopicsSettings {
   const obj = isRecord(value) ? value : {};
   const d = DEFAULT_CONDITIONAL_TOPICS_SETTINGS;
-  const rules: ScopeRule[] = Array.isArray(obj.rules)
-    ? obj.rules
-        .map((r, i) => narrowScopeRule(r, i))
-        .filter((r): r is ScopeRule => r !== null)
-        .sort((a, b) => a.ordinal - b.ordinal)
-    : d.rules;
-
   return {
     enabled: asBool(obj.enabled, d.enabled),
     maxConditionalTopics: Math.round(
@@ -1088,7 +962,6 @@ export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopi
         d.maxOpeningProbes
       )
     ),
-    rules,
   };
 }
 
@@ -1263,36 +1136,6 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
       })
     : [];
 
-  const rules: ProposedScopeRule[] = Array.isArray(value.rules)
-    ? value.rules.flatMap((r): ProposedScopeRule[] => {
-        if (!isRecord(r)) return [];
-        const dataSlotKey = asText(r.dataSlotKey, MEMBER_KEY_MAX_LENGTH, '');
-        const topicKey = asText(r.topicKey, TOPIC_KEY_MAX_LENGTH, '');
-        if (dataSlotKey.length === 0 || topicKey.length === 0) return [];
-        const rawValue = asText(r.value, SCOPE_RULE_VALUE_MAX_LENGTH, '');
-        const sourceQuote = asText(r.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
-        return [
-          {
-            dataSlotKey,
-            operator: narrowToEnum(
-              typeof r.operator === 'string' ? r.operator : '',
-              SCOPE_RULE_OPERATORS,
-              'exists'
-            ),
-            value: rawValue.length > 0 ? rawValue : null,
-            action: narrowToEnum(
-              typeof r.action === 'string' ? r.action : '',
-              SCOPE_RULE_ACTIONS,
-              'include'
-            ),
-            topicKey,
-            rationale: asText(r.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
-            ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
-          },
-        ];
-      })
-    : [];
-
   const gaps: ProposedGap[] = Array.isArray(value.gaps)
     ? value.gaps.flatMap((g): ProposedGap[] => {
         if (!isRecord(g)) return [];
@@ -1342,7 +1185,6 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
   return {
     v: 1,
     topics,
-    rules,
     gaps,
     ...(cap !== null ? { maxConditionalTopics: cap } : {}),
     ...(fallbackTopicKeys.length > 0 ? { fallbackTopicKeys } : {}),

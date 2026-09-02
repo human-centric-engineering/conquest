@@ -132,13 +132,13 @@ describe('assembleRoutingAnalytics — counting rules', () => {
 
   it('splits selections by the layer that decided them', () => {
     const result = assembleRoutingAnalytics(
-      [plan({ topics: [planned('a', 'rule')] }), plan({ topics: [planned('a', 'llm')] })],
+      [plan({ topics: [planned('a', 'llm')] }), plan({ topics: [planned('a', 'llm')] })],
       [topic('a')],
       META
     );
 
     expect(rowFor(result, 'a')).toMatchObject({ selected: 2, chosen: 2, chosenRate: 1 });
-    expect(rowFor(result, 'a')?.bySource).toMatchObject({ rule: 1, llm: 1, fallback: 0 });
+    expect(rowFor(result, 'a')?.bySource).toMatchObject({ llm: 2, fallback: 0 });
   });
 
   it('separates a budget drop from an ordinary exclusion', () => {

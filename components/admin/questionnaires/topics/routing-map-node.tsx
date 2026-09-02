@@ -10,9 +10,6 @@
  *
  * - Blue = the agent (the planner). The one node on the map whose output is a judgement.
  * - Slate, solid border = deterministic code an author configured (guardrails).
- * - Emerald / rose = a hard rule's include and exclude — an author's own certainty, and the two
- *   directions must never be confused at a glance.
- * - Amber = the "not gathered in the opening" marker, the only node that is a problem rather than a part.
  * - Muted, dashed = the always-asked band, drawn to recede: nothing on the map decides anything about it.
  *
  * Handles are left-in / right-out, with exactly one exception: the always-asked band's **head** takes
@@ -29,17 +26,7 @@
  */
 
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import {
-  Bot,
-  CircleAlert,
-  CirclePlay,
-  Layers,
-  ListChecks,
-  MinusCircle,
-  PlusCircle,
-  ShieldCheck,
-  Sparkles,
-} from 'lucide-react';
+import { Bot, CirclePlay, Layers, ListChecks, ShieldCheck, Sparkles } from 'lucide-react';
 
 import {
   ROUTING_MAP_NODE_WIDTH,
@@ -78,21 +65,6 @@ const TONES: Record<ScopeNodeKind, Tone> = {
     box: 'border-slate-300 bg-white text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100',
     plate: 'bg-slate-100 dark:bg-slate-800',
     Icon: ListChecks,
-  },
-  ungathered: {
-    box: 'border-amber-400 bg-amber-50 text-amber-950 dark:border-amber-500 dark:bg-amber-950/50 dark:text-amber-100',
-    plate: 'bg-amber-100 dark:bg-amber-900/60',
-    Icon: CircleAlert,
-  },
-  ruleInclude: {
-    box: 'border-emerald-400 bg-emerald-50 text-emerald-950 dark:border-emerald-500 dark:bg-emerald-950/50 dark:text-emerald-100',
-    plate: 'bg-emerald-100 dark:bg-emerald-900/60',
-    Icon: PlusCircle,
-  },
-  ruleExclude: {
-    box: 'border-rose-400 bg-rose-50 text-rose-950 dark:border-rose-500 dark:bg-rose-950/50 dark:text-rose-100',
-    plate: 'bg-rose-100 dark:bg-rose-900/60',
-    Icon: MinusCircle,
   },
   planner: {
     box: 'border-blue-400 bg-blue-50 text-blue-950 dark:border-blue-500 dark:bg-blue-950/50 dark:text-blue-100',
@@ -227,9 +199,6 @@ export const scopeNodeTypes = { scope: ScopeMapNode } as const;
 const MINIMAP_COLORS: Record<ScopeNodeKind, string> = {
   start: '#64748b',
   opening: '#64748b',
-  ungathered: '#f59e0b',
-  ruleInclude: '#059669',
-  ruleExclude: '#e11d48',
   planner: '#2563eb',
   guardrails: '#334155',
   conditional: '#7c3aed',

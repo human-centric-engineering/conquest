@@ -198,22 +198,26 @@ describe('buildRoutingAnalysisPrompt', () => {
     const content = userContent(
       buildRoutingAnalysisPrompt({ questions: QUESTIONS, dataSlots: DATA_SLOTS })
     );
-    expect(content).toContain('DATA SLOTS (the only keys a rule may test):');
+    expect(content).toContain('DATA SLOTS (use these keys exactly):');
     expect(content).toContain('channel_type [Go-to-market]: Channel type');
     expect(content).toContain('company_size: Company size');
   });
 
-  it('tells the analyst to propose no rules when there are no data slots', () => {
+  it('tells the analyst to propose question-only topics when there are no data slots', () => {
     const content = userContent(buildRoutingAnalysisPrompt({ questions: QUESTIONS }));
-    expect(content).toContain('DATA SLOTS: none. Propose no hard rules');
-    expect(content).not.toContain('the only keys a rule may test');
+    expect(content).toContain(
+      'DATA SLOTS: none. Propose topics whose membership is questions alone.'
+    );
+    expect(content).not.toContain('DATA SLOTS (use these keys exactly)');
   });
 
   it('also falls back to the no-data-slots message when given an empty array', () => {
     const content = userContent(
       buildRoutingAnalysisPrompt({ questions: QUESTIONS, dataSlots: [] })
     );
-    expect(content).toContain('DATA SLOTS: none. Propose no hard rules');
+    expect(content).toContain(
+      'DATA SLOTS: none. Propose topics whose membership is questions alone.'
+    );
   });
 
   it('lists existing topics with their key, phase, source and criteria, telling the analyst to reuse keys', () => {
@@ -284,7 +288,6 @@ describe('buildRoutingAnalysisPrompt', () => {
     expect(rubric).toContain('"conditional"');
     expect(rubric).toContain('"closing"');
     expect(rubric).toContain('Propose at most 40 topics');
-    expect(rubric).toContain('Propose at most 20 rules');
     expect(rubric).toContain('Output ONLY a single JSON object');
   });
 
@@ -321,7 +324,7 @@ describe('buildRoutingAnalysisPrompt', () => {
     it('names the empty-DATA-SLOTS case, which is every ingest', () => {
       const text = rubric();
       expect(text).toContain('is NOT on its own a gap');
-      expect(text).toContain('When DATA SLOTS is empty EVERY condition is untestable by a rule');
+      expect(text).toContain('data slot behind a condition is NOT on its own a gap');
     });
 
     it('no longer offers "not in DATA SLOTS" as a stand-alone reason to gap', () => {
@@ -461,7 +464,6 @@ describe('buildRoutingAnalysisRetryMessage', () => {
     expect(message).toContain('"topics"');
     expect(message).toContain('lowercase_snake_case');
     expect(message).toContain('"criteria"');
-    expect(message).toContain('"rules"');
     expect(message).toContain('"gaps"');
     expect(message).toContain('"fromDocument"');
     expect(message).toContain('No prose, no code fences');

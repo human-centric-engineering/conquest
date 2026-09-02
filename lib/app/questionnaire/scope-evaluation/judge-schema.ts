@@ -6,8 +6,8 @@
  * part of this contract: the caller stamps which dimension the verdict belongs to.
  *
  * The `proposedEdit` fields reuse the SAME Zod fragments the Topics tab's own authoring routes
- * validate against (`topicKeySchema`, `scopeRuleInputSchema`'s field-level bounds, the `scope/types`
- * numeric ceilings) — one definition of "a valid rule" / "a valid budget", not a second one that
+ * validate against (`topicKeySchema`, the `scope/types` numeric ceilings) — one definition of
+ * "a valid budget", not a second one that
  * could silently accept something the authoring surface would reject.
  *
  * Pure: Zod only, no Prisma / Next.
@@ -25,18 +25,14 @@ import {
   MIN_OPENING_PROBES,
   MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
-  SCOPE_RULE_ACTIONS,
-  SCOPE_RULE_OPERATORS,
-  SCOPE_RULE_VALUE_MAX_LENGTH,
   TOPIC_CRITERIA_MAX_LENGTH,
   TOPIC_DEPTHS,
-  MEMBER_KEY_MAX_LENGTH,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeProposedEdit } from '@/lib/app/questionnaire/scope-evaluation/types';
 
 /**
  * Upper bound on findings per judge — same rationale and same number as `MAX_FINDINGS_PER_JUDGE`
- * in `evaluation/judge-schema.ts`, though a scope config (a handful of topics and rules) is far
+ * in `evaluation/judge-schema.ts`, though a scope config (a handful of topics) is far
  * smaller than a long instrument, so this is very unlikely to bind in practice.
  */
 export const MAX_SCOPE_FINDINGS_PER_JUDGE = 50;
@@ -56,15 +52,6 @@ const budgetSecondsSchema = z
     message: `Must be 0 (no budget) or at least ${MIN_SESSION_BUDGET_SECONDS} seconds`,
   });
 
-/** The rule-field trio shared by `add_rule` and `edit_rule` — one definition, two ops. */
-const ruleFieldsSchema = {
-  dataSlotKey: z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH),
-  operator: z.enum(SCOPE_RULE_OPERATORS),
-  value: z.string().trim().max(SCOPE_RULE_VALUE_MAX_LENGTH).nullable(),
-  action: z.enum(SCOPE_RULE_ACTIONS),
-  topicKey: topicKeySchema,
-};
-
 /**
  * The structured `proposedEdit` contract — a discriminated union on `op` mirroring
  * {@link ScopeProposedEdit}. Not sent to the provider; parses and validates the model's
@@ -76,9 +63,6 @@ export const scopeProposedEditSchema = z.discriminatedUnion('op', [
     criteria: z.string().trim().min(1).max(TOPIC_CRITERIA_MAX_LENGTH),
   }),
   z.object({ op: z.literal('edit_topic_depth'), depth: z.enum(TOPIC_DEPTHS) }),
-  z.object({ op: z.literal('add_rule'), ...ruleFieldsSchema }),
-  z.object({ op: z.literal('edit_rule'), ...ruleFieldsSchema }),
-  z.object({ op: z.literal('delete_rule') }),
   z
     .object({
       op: z.literal('adjust_budget'),

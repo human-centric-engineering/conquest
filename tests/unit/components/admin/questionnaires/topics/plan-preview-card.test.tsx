@@ -40,8 +40,8 @@ function topic(key: string, label: string, phase: Topic['phase'] = 'conditional'
 const FORM: PlanPreviewForm = {
   openingQuestions: [{ key: 'open_a', prompt: 'What brought you here?' }],
   fillTargets: [
-    { key: 'outcome', name: 'Outcome named', watchedByVeto: true },
-    { key: 'situation', name: 'Situation', watchedByVeto: false },
+    { key: 'outcome', name: 'Outcome named' },
+    { key: 'situation', name: 'Situation' },
   ],
 };
 
@@ -94,12 +94,6 @@ describe('PlanPreviewCard — the form', () => {
   it('offers a box per opening question, labelled with what it asked', () => {
     renderCard();
     expect(screen.getByLabelText('What brought you here?')).toBeInTheDocument();
-  });
-
-  it('marks the slot a rule watches, so leaving it empty reads as deliberate', () => {
-    renderCard();
-    // Without this an author fills every box out of tidiness and never sees the veto fire.
-    expect(screen.getByText('a rule watches this')).toBeInTheDocument();
   });
 
   it('explains itself rather than vanishing when no topic is conditional', () => {

@@ -1,13 +1,11 @@
 /**
  * The Scope Planner (P17) — "which parts of this questionnaire is this interview about?"
  *
- * Runs ONCE per session, the moment the opening topics are covered. Three tiers, in order:
+ * Runs ONCE per session, the moment the opening topics are covered. Two tiers, in order:
  *
- *  1. **Hard rules** (`scope/rules.ts`) — the cases the author is certain about. Resolved before
- *     any model call, and never overridden by one.
- *  2. **This module's `askPlanner`** — a judgement over the author's criteria and what the
+ *  1. **This module's `askPlanner`** — a judgement over the author's criteria and what the
  *     respondent actually said.
- *  3. **Guardrails** (`scope/guardrails.ts`) — the cap, the blind-spot check, the fallback. Applied
+ *  2. **Guardrails** (`scope/guardrails.ts`) — the cap, the blind-spot check, the fallback. Applied
  *     to whatever came back, so a model that ignores the limit cannot break it.
  *
  * `planScope` **never throws**. The respondent has just finished answering the opening and is
@@ -42,7 +40,6 @@ import {
   SCOPE_PLANNER_MAX_TOKENS,
   SCOPE_PLANNER_TIMEOUT_MS,
 } from '@/lib/app/questionnaire/scope/constants';
-import { evaluateScopeRules, type ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
   applyGuardrails,
   alwaysTopics,
@@ -53,6 +50,7 @@ import {
 import type {
   ConditionalTopicsSettings,
   InterviewPlan,
+  ScopeFill,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
 
@@ -416,9 +414,9 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
 /**
  * Produce the interview plan. Never throws.
  *
- * Skips the model entirely when there is nothing to decide — no conditional topics, or every one
- * already settled by a rule — because paying for a foregone conclusion is waste and the latency
- * lands on someone who is waiting.
+ * Skips the model entirely when there is nothing to decide — no conditional topics at all —
+ * because paying for a foregone conclusion is waste and the latency lands on someone who is
+ * waiting.
  */
 export async function planScope(params: PlanScopeParams): Promise<PlanScopeResult> {
   const noCall = {
@@ -430,30 +428,22 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
   const decidedAt = new Date().toISOString();
 
-  const validKeys = params.topics.map((t) => t.key);
-  const rules = evaluateScopeRules(params.settings.rules, params.fills, validKeys);
-  const candidates = plannerCandidates(params.topics, rules);
+  const candidates = plannerCandidates(params.topics);
 
   const base = {
     topics: params.topics,
-    rules,
     settings: params.settings,
     decidedAtTurn: params.decidedAtTurn,
     decidedAt,
     // Carried on EVERY path, including the ones that never call a model: a fallback plan is still
-    // an interview someone has to sit through, and a rule-only plan is the one most likely to be
-    // long. A budget that applied only to the model's picks would be a budget with a hole in it.
+    // an interview someone has to sit through. A budget that applied only to the model's picks
+    // would be a budget with a hole in it.
     budget: params.budget,
   };
 
-  // Nothing to choose between: no candidates at all, or every candidate already force-INCLUDED by a
-  // rule. `applyGuardrails` seats rule-included topics BEFORE the model's picks, so in that second
-  // case every proposal could only land on a key already seated — a foregone conclusion the
-  // respondent would still wait on. They stay in `candidates` on purpose (the model must know what
-  // is already in the interview to order the rest); it is only when there is nothing left for it to
-  // order that the call itself is waste.
-  const unsettled = candidates.filter((t) => !rules.include.has(t.key));
-  if (candidates.length === 0 || unsettled.length === 0) {
+  // Nothing to choose between: no conditional topics at all. Paying for a call that could only
+  // return an empty selection is waste, and the latency lands on someone who is waiting.
+  if (candidates.length === 0) {
     return {
       plan: applyGuardrails({
         ...base,
@@ -561,8 +551,7 @@ export interface OpeningQuestionCoverage {
  * Both kinds of member count. Judging the opening on its data slots alone made an opening topic
  * built only from questions complete before it had been asked, so the planner ran on the first turn
  * with nothing captured: a judgement over an empty transcript, and — worse — every `not_exists`
- * hard rule matching, because absence is exactly what a veto tests for. A veto meant for a few
- * respondents applied to all of them, in a plan that looks entirely plausible.
+ * a judgement over an empty transcript.
  *
  * `questions` is optional so a caller that genuinely has no answer data still gets the data-slot
  * gate rather than nothing. The direction on everything unjudgeable stays as it was: planning

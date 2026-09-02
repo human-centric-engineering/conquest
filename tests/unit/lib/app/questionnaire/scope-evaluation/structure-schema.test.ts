@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_SCOPE_EVAL_TOPICS,
   MAX_SCOPE_EVAL_MEMBERS_PER_TOPIC,
-  MAX_SCOPE_EVAL_RULES,
   MAX_SCOPE_EVAL_ISSUES,
   scopeStructureSchema,
 } from '@/lib/app/questionnaire/scope-evaluation';
@@ -19,7 +18,6 @@ const base = {
       members: [{ key: 'q1', label: 'Tell me about today.' }],
     },
   ],
-  rules: [],
   settings: {
     maxConditionalTopics: 3,
     includeCheckTopic: true,
@@ -76,23 +74,6 @@ describe('scopeStructureSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects a rule with an unknown operator', () => {
-    const result = scopeStructureSchema.safeParse({
-      ...base,
-      rules: [
-        {
-          id: 'r1',
-          sentence: 'x',
-          dataSlotKey: 'ds1',
-          topicKey: 'background',
-          operator: 'mystery',
-          action: 'include',
-        },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-
   it('accepts a knownIssue with and without the optional topicKey', () => {
     const withKey = scopeStructureSchema.safeParse({
       ...base,
@@ -132,18 +113,6 @@ describe('scopeStructureSchema', () => {
       topics: [{ ...base.topics[0], members }],
     });
     expect(result.success).toBe(false);
-  });
-
-  it('rejects more rules than the cap', () => {
-    const rules = Array.from({ length: MAX_SCOPE_EVAL_RULES + 1 }, (_, i) => ({
-      id: `r${i}`,
-      sentence: 'x',
-      dataSlotKey: 'ds1',
-      topicKey: 'background',
-      operator: 'exists',
-      action: 'include',
-    }));
-    expect(scopeStructureSchema.safeParse({ ...base, rules }).success).toBe(false);
   });
 
   it('rejects more knownIssues than the cap', () => {

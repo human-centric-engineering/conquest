@@ -28,11 +28,11 @@ import { cn } from '@/lib/utils';
 import type { ConditionalTopicsTab } from '@/lib/constants/conditional-topics-tabs';
 
 /**
- * The four authoring steps, in the order they must actually happen — and, since F17.26, which
+ * The three authoring steps, in the order they must actually happen — and, since F17.26, which
  * sub-tab each one is done on.
  *
  * The mapping is why the split was worth doing: the sequence this panel has always described now
- * has somewhere to point. `tab: null` is step four, which is the header switch a few pixels above
+ * has somewhere to point. `tab: null` is the last step, which is the header switch a few pixels above
  * this panel rather than a tab, so a jump would be theatre.
  */
 const STEPS: ReadonlyArray<{ title: string; body: string; tab: ConditionalTopicsTab | null }> = [
@@ -47,13 +47,8 @@ const STEPS: ReadonlyArray<{ title: string; body: string; tab: ConditionalTopics
     tab: 'topics',
   },
   {
-    title: 'Pin anything you are certain about',
-    body: 'Hard rules read the answers your opening captured and decide before the agent does — “when they are not a licence holder, never include the audit questions”. Use them for certainties; leave the judgement calls to the criteria.',
-    tab: 'rules',
-  },
-  {
     title: 'Switch it on',
-    body: 'When the opening finishes, the plan is decided once: your rules, then the agent judging your criteria, then your limits. The respondent is told what was chosen, and every report says which topics were never covered.',
+    body: 'When the opening finishes, the plan is decided once: the agent judges your criteria, then your limits are applied to its answer. The respondent is told what was chosen, and every report says which topics were never covered.',
     tab: null,
   },
 ];

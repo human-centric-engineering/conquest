@@ -107,15 +107,6 @@ describe('scope judge finding.proposedEdit', () => {
     rationale: 'It duplicates what the topic criteria already ensures.',
   };
 
-  it('accepts a finding carrying a delete_rule op', () => {
-    const result = validateScopeJudgeVerdict({
-      score: 0.5,
-      findings: [{ ...base, proposedEdit: { op: 'delete_rule' } }],
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.findings[0].proposedEdit).toEqual({ op: 'delete_rule' });
-  });
-
   it('accepts a finding with no proposedEdit (prose-only)', () => {
     const result = validateScopeJudgeVerdict({ score: 0.5, findings: [base] });
     expect(result.ok).toBe(true);
@@ -149,7 +140,6 @@ describe('scope judge finding.proposedEdit', () => {
 
 describe('coerceScopeProposedEdit', () => {
   it('returns the validated op for a well-formed edit', () => {
-    expect(coerceScopeProposedEdit({ op: 'delete_rule' })).toEqual({ op: 'delete_rule' });
     expect(coerceScopeProposedEdit({ op: 'edit_topic_depth', depth: 'light' })).toEqual({
       op: 'edit_topic_depth',
       depth: 'light',
@@ -162,18 +152,6 @@ describe('coerceScopeProposedEdit', () => {
     expect(coerceScopeProposedEdit({ op: 'edit_topic_depth', depth: 'extreme' })).toBeNull();
     expect(coerceScopeProposedEdit({ op: 'edit_topic_criteria' })).toBeNull(); // missing criteria
     expect(coerceScopeProposedEdit('garbage')).toBeNull();
-  });
-
-  it('accepts a well-formed add_rule op', () => {
-    const op = coerceScopeProposedEdit({
-      op: 'add_rule',
-      dataSlotKey: 'headcount',
-      operator: 'gt',
-      value: '50',
-      action: 'include',
-      topicKey: 'talent',
-    });
-    expect(op).toMatchObject({ op: 'add_rule', dataSlotKey: 'headcount', action: 'include' });
   });
 
   it('accepts add_fallback_topic', () => {

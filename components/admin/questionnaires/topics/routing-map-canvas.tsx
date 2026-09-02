@@ -43,25 +43,17 @@ import {
 
 /**
  * How each edge kind paints. Hex rather than Tailwind classes because React Flow strokes an SVG path
- * with an inline style; a `dark:` variant would never apply. These six read acceptably on both the light
+ * with an inline style; a `dark:` variant would never apply. These read acceptably on both the light
  * and dark canvas backgrounds, which is why the palette is mid-tone throughout.
  */
 const EDGE_STYLES: Record<ScopeEdgeKind, { stroke: string; dashed: boolean; width: number }> = {
   always: { stroke: '#64748b', dashed: false, width: 1.5 },
   candidate: { stroke: '#7c3aed', dashed: true, width: 1.5 },
-  ruleInclude: { stroke: '#059669', dashed: false, width: 2 },
-  ruleExclude: { stroke: '#e11d48', dashed: false, width: 2 },
-  evidence: { stroke: '#64748b', dashed: false, width: 1.5 },
-  evidenceWeak: { stroke: '#f59e0b', dashed: true, width: 1.5 },
 };
 
 /** The legend, in the order the pipeline uses each kind. */
 const LEGEND: { kind: ScopeEdgeKind; label: string }[] = [
   { kind: 'always', label: 'Always happens' },
-  { kind: 'evidence', label: 'Evidence a rule reads' },
-  { kind: 'evidenceWeak', label: 'Evidence that may not be there yet' },
-  { kind: 'ruleInclude', label: 'Rule: always include' },
-  { kind: 'ruleExclude', label: 'Rule: never include' },
   { kind: 'candidate', label: 'The agent may choose it' },
 ];
 

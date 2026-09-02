@@ -85,8 +85,8 @@ describe('pendingRescanTopics', () => {
   it('ignores the always-run phases — they were never out of the extractor’s sight', () => {
     const pending = pendingRescanTopics(
       plan([
-        { key: 'open', depth: 'full', source: 'rule', rationale: 'r' },
-        { key: 'core', depth: 'full', source: 'rule', rationale: 'r' },
+        { key: 'open', depth: 'full', source: 'llm', rationale: 'r' },
+        { key: 'core', depth: 'full', source: 'llm', rationale: 'r' },
       ]),
       TOPICS,
       []

@@ -21,11 +21,10 @@ import userEvent from '@testing-library/user-event';
 
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 
-/** The four authoring steps, in the order the panel must present them. */
+/** The three authoring steps, in the order the panel must present them. */
 const STEP_TITLES = [
   'Group every question into a topic',
   'Mark the ones that are conditional',
-  'Pin anything you are certain about',
   'Switch it on',
 ];
 
@@ -43,7 +42,7 @@ describe('ScopeExplainer', () => {
     expect(screen.queryByText(STEP_TITLES[0])).not.toBeInTheDocument();
   });
 
-  it('reveals the four authoring steps, in order, when expanded', async () => {
+  it('reveals the three authoring steps, in order, when expanded', async () => {
     const user = userEvent.setup();
     render(<ScopeExplainer />);
 
@@ -61,7 +60,7 @@ describe('ScopeExplainer', () => {
     await user.click(toggle());
 
     const numbers = screen.getAllByRole('listitem').map((li) => li.firstElementChild?.textContent);
-    expect(numbers).toEqual(['1', '2', '3', '4']);
+    expect(numbers).toEqual(['1', '2', '3']);
   });
 
   it('collapses again on a second click', async () => {
@@ -136,25 +135,14 @@ describe('ScopeExplainer — the steps deep-link into the sub-tabs (F17.26)', ()
     expect(onGoToTab).toHaveBeenLastCalledWith('topics');
   });
 
-  it('sends the hard-rules step to Rules & limits', async () => {
-    const user = userEvent.setup();
-    const onGoToTab = vi.fn();
-    render(<ScopeExplainer onGoToTab={onGoToTab} />);
-    await user.click(toggle());
-
-    await user.click(screen.getByRole('button', { name: STEP_TITLES[2] }));
-
-    expect(onGoToTab).toHaveBeenCalledWith('rules');
-  });
-
   it('leaves "Switch it on" as plain text — it is the header a few pixels above', async () => {
     // A jump would be theatre: the switch is already on screen, above this panel.
     const user = userEvent.setup();
     render(<ScopeExplainer onGoToTab={vi.fn()} />);
     await user.click(toggle());
 
-    expect(screen.queryByRole('button', { name: STEP_TITLES[3] })).not.toBeInTheDocument();
-    expect(screen.getByText(STEP_TITLES[3])).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: STEP_TITLES[2] })).not.toBeInTheDocument();
+    expect(screen.getByText(STEP_TITLES[2])).toBeInTheDocument();
   });
 
   it('renders every step as plain text when there is nowhere to send them', async () => {

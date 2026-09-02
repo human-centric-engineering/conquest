@@ -147,17 +147,6 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
               rationale: 'Runs for everyone.',
             },
           ],
-          rules: [
-            {
-              dataSlotKey: 'channel_type',
-              operator: 'equals',
-              value: 'reseller',
-              action: 'include',
-              topicKey: 'partner_channel',
-              rationale: 'Stated as a certainty on the Guardrails page.',
-              sourceQuote: 'always include Partner Channel when channel_type is reseller',
-            },
-          ],
           gaps: [
             {
               sourceQuote: 'Use judgement for respondents outside these categories.',
@@ -176,7 +165,6 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
     // Shape is useful and non-identifying.
     expect(resultPreview).toContain('"topicCount":2');
     expect(resultPreview).toContain('"conditionalCount":1');
-    expect(resultPreview).toContain('"ruleCount":1');
     expect(resultPreview).toContain('"gapCount":1');
     expect(resultPreview).toContain('"fromDocument":true');
     // The criteria, rationale and — critically — the quoted document spans must not appear.

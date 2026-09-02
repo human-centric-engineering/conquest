@@ -62,10 +62,8 @@ describe('tabForScopeIssue', () => {
     }
   });
 
-  it('sends rule, limit and budget findings to Rules & limits', () => {
+  it('sends limit, budget and fallback findings to Limits & fallbacks', () => {
     for (const code of [
-      'rule_unknown_topic',
-      'rule_veto_always_fires',
       'budget_below_floor',
       'cap_exceeds_candidates',
       'fallback_unknown_topic',
@@ -92,7 +90,7 @@ describe('tabForScopeIssue', () => {
     const src = readFileSync('lib/app/questionnaire/scope/validate.ts', 'utf8');
     const codes = [...src.matchAll(/code: '([a-z_]+)'/g)].map((m) => m[1]);
 
-    expect(codes.length).toBeGreaterThan(20);
+    expect(codes.length).toBeGreaterThan(15);
     const unmapped = codes.filter((code) => {
       // A mapped code resolves to something; an unmapped one resolves to the default. Only the
       // codes the map genuinely lists should ever be indistinguishable from the fallback.

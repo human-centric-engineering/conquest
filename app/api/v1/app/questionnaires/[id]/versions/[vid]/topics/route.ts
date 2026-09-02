@@ -199,7 +199,6 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       draft,
       preview: buildPlanPreviewForm(
         topics,
-        settings,
         inventory.dataSlots,
         new Map(inventory.questions.map((q) => [q.key, q.prompt] as const))
       ),

@@ -276,7 +276,6 @@ describe('a worked example: floor, allowance, and what fits', () => {
         { key: 'big2', rationale: 'b' },
         { key: 'big3', rationale: 'c' },
       ],
-      rules: { include: new Set(), exclude: new Set(), reasonByTopic: new Map() },
       settings: { ...budgeted, enabled: true, maxConditionalTopics: 3, includeCheckTopic: true },
       confidence: 0.9,
       source: 'llm',

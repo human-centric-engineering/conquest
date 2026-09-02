@@ -8,11 +8,9 @@
  *
  * The severity split is the whole point:
  *
- * - **`error`** — turning this on would make the questionnaire behave wrongly. Two matter most: the
- *   orphaned-question check (with scope active, a question belonging to no topic can never be asked,
- *   and nothing else in the system would ever tell you) and `rule_veto_always_fires` (a hard rule
- *   testing for the absence of something the opening never gathers is not inert — it applies to
- *   every respondent).
+ * - **`error`** — turning this on would make the questionnaire behave wrongly. The one that matters
+ *   most is the orphaned-question check: with scope active, a question belonging to no topic can
+ *   never be asked, and nothing else in the system would ever tell you.
  * - **`warning`** — it will run, but not as the author probably intends.
  *
  * Every check is inert while `enabled` is false, except three that an admin needs to see BEFORE
@@ -51,7 +49,7 @@ export interface ValidateScopeInput {
   settings: ConditionalTopicsSettings;
   /** Every question key in the version — for the orphan check. */
   allQuestionKeys: readonly string[];
-  /** Every data-slot key in the version — for the rule and orphan checks. */
+  /** Every data-slot key in the version — for the orphan check. */
   allDataSlotKeys?: readonly string[];
   /**
    * The time arithmetic (C7), when the caller has it: what the always-run phases cost, and the
@@ -390,69 +388,6 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
   }
 
   // ── Dangling key references ───────────────────────────────────────────────────────────────
-  const dataSlotKeys = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
-
-  // Hard-rule reachability. Rules are evaluated at exactly ONE moment — when the opening completes
-  // and the planner runs — so a rule testing a slot the interview has not gathered by then is not a
-  // rule that fires later. It is a rule that never fires at all. Only the opening is reliably
-  // gathered by then: `core` runs alongside it in an order nothing guarantees, and `conditional` and
-  // `closing` topics are, by construction, not in scope until after the plan exists.
-  //
-  // Reported only when there IS an opening topic. Without one the planner runs on the first turn
-  // and every rule is unreachable, which `no_opening_topic` already says once — repeating it per
-  // rule buries the finding that has to be fixed first.
-  const hasOpeningTopic = topics.some((t) => t.phase === 'opening');
-  const openingSlotKeys = new Set<string>();
-  const coreSlotKeys = new Set<string>();
-  for (const topic of topics) {
-    if (topic.phase === 'opening') {
-      for (const key of topic.members.dataSlotKeys) openingSlotKeys.add(key);
-    } else if (topic.phase === 'core') {
-      for (const key of topic.members.dataSlotKeys) coreSlotKeys.add(key);
-    }
-  }
-
-  for (const rule of settings.rules) {
-    if (!topicKeys.has(rule.topicKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_unknown_topic',
-        message: `A rule points at the topic "${rule.topicKey}", which no longer exists. It can never match.`,
-      });
-    }
-    if (dataSlotKeys && !dataSlotKeys.has(rule.dataSlotKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_unknown_data_slot',
-        message: `A rule tests the data slot "${rule.dataSlotKey}", which no longer exists. It can never match.`,
-      });
-      continue;
-    }
-    if (!hasOpeningTopic || openingSlotKeys.has(rule.dataSlotKey)) continue;
-
-    if (coreSlotKeys.has(rule.dataSlotKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_slot_not_in_opening',
-        message: `A rule tests "${rule.dataSlotKey}", which is gathered by a topic that always runs but is not the opening. The rules are evaluated the moment the opening completes, so whether this has been asked by then is not something the rule can rely on. Move it into an opening topic.`,
-      });
-    } else if (rule.operator === 'not_exists') {
-      // The sharp one. `not_exists` matches on ABSENCE, so a slot that is never gathered before the
-      // planner runs is not an inert rule — it is one that fires for every respondent. An author
-      // who wrote a veto for the few gets it applied to all, and the plan looks entirely plausible.
-      issues.push({
-        severity: settings.enabled ? 'error' : 'warning',
-        code: 'rule_veto_always_fires',
-        message: `A rule tests "${rule.dataSlotKey}" for absence, but no opening topic gathers it — so it is always absent when the rules run, and the rule would ${rule.action} "${rule.topicKey}" for every respondent. Add the slot to an opening topic.`,
-      });
-    } else {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_slot_unreachable',
-        message: `A rule tests "${rule.dataSlotKey}", but no opening topic gathers it, so it is never filled when the rules run and the rule can never match. Add the slot to an opening topic.`,
-      });
-    }
-  }
   for (const key of settings.fallbackTopicKeys) {
     if (!topicKeys.has(key)) {
       issues.push({
@@ -486,21 +421,6 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
       });
     }
   }
-  // A hard rule aimed at an always-run topic is the same no-op, reached from the other direction:
-  // `applyGuardrails` acts within the conditional set, and `resolveScope` puts every other phase in
-  // scope regardless. Reported separately from the check above because the fix is different — the
-  // author either meant a different topic or meant to make this one conditional — and because a rule
-  // is the surface where a silent no-op is most expensive: it reads as the certainty it is not.
-  for (const rule of settings.rules) {
-    if (!alwaysKeys.has(rule.topicKey)) continue;
-    issues.push({
-      severity: 'warning',
-      code: 'rule_names_always_topic',
-      topicKey: rule.topicKey,
-      message: `A rule ${rule.action === 'include' ? 'includes' : 'excludes'} "${rule.topicKey}", but that topic is asked in every interview, so the rule changes nothing. Rules only act on topics set to "Ask when it fits".`,
-    });
-  }
-
   // ── Comparability (F17.15) ────────────────────────────────────────────────────────────────
   // Skipped only when the caller has no scoring schema to check against, which is most versions.
   if (input.scoring) {

@@ -11,7 +11,7 @@
  * appendices render last, right before the closing page — the appendix position.
  *
  * Two judge panels render nested inside the thing they judge rather than as sections of their own:
- * the F17.21 scope panel closes conditional topics, after the hard rules, and the F18.8 policy panel
+ * the F17.21 scope panel closes conditional topics, and the F18.8 policy panel
  * closes the interviewer section. That interviewer section did not exist here at all until
  * recently — the model built it and the Markdown and CSV serialisers rendered it, so ticking the box
  * produced a section in two formats out of three and nothing in the one most packs are downloaded
@@ -982,15 +982,6 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                   model.conditionalTopics.conditional.map((topic) => (
                     <ScopeTopicBlock key={topic.key} topic={topic} />
                   ))
-                )}
-
-                {model.conditionalTopics.rules.length > 0 && (
-                  <>
-                    <Text style={styles.scopeSubheading}>Hard rules</Text>
-                    {model.conditionalTopics.rules.map((rule, i) => (
-                      <Text key={i} style={styles.scopeRule}>{`•  ${rule.sentence}`}</Text>
-                    ))}
-                  </>
                 )}
 
                 {/* Skipped wholesale when the admin excluded it. The "has not been reviewed" line

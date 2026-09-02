@@ -223,17 +223,6 @@ const SETTINGS_FIXTURE: ConditionalTopicsSettings = {
   plannerInstructions: 'prefer breadth',
   limitOpeningProbes: true,
   maxOpeningProbes: 2,
-  rules: [
-    {
-      id: 'r1',
-      dataSlotKey: 'licence',
-      operator: 'not_exists',
-      value: '',
-      action: 'exclude',
-      topicKey: 'audit',
-      ordinal: 0,
-    },
-  ],
 };
 
 /** Drafts carrying the whitespace and blanks the panel is responsible for normalising. */
@@ -463,7 +452,7 @@ describe('TopicsPanel — the routing map reaches the editor from any tab', () =
     const user = userEvent.setup();
     renderPanel();
 
-    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+    await user.click(screen.getByRole('tab', { name: 'Limits & fallbacks' }));
     await user.click(screen.getByTestId('routing-map'));
 
     expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
@@ -496,7 +485,7 @@ describe('TopicsPanel — the three sub-tabs', () => {
     const user = userEvent.setup();
     renderPanel();
 
-    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+    await user.click(screen.getByRole('tab', { name: 'Limits & fallbacks' }));
 
     expect(new URL(window.location.href).searchParams.get('tab')).toBe('rules');
     // The whole reason this hook exists rather than `useUrlTabs`: `router.replace` here would be
@@ -525,7 +514,7 @@ describe('TopicsPanel — the three sub-tabs', () => {
 
     expect(screen.getByTestId('topic-list')).toHaveAttribute('data-active', 'true');
 
-    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+    await user.click(screen.getByRole('tab', { name: 'Limits & fallbacks' }));
 
     // A mounted-but-hidden editor still commits effects. Without this the focus and seed handoffs
     // would be spent against a node with no layout — see F17.24.
@@ -557,57 +546,6 @@ describe('TopicsPanel — the issue strip', () => {
     expect(screen.getByTestId('focus')).toHaveAttribute('data-nonce', '1');
     // And it lands on the tab that owns the fix, not just anywhere.
     expect(screen.getByRole('tab', { name: 'Topics' })).toHaveAttribute('data-state', 'active');
-  });
-
-  it('sends a rule-shaped finding to Rules & limits', async () => {
-    const user = userEvent.setup();
-    renderPanel(
-      payload({
-        issues: [
-          {
-            severity: 'error',
-            code: 'rule_unknown_topic',
-            topicKey: 'gone',
-            message: 'A rule points at a topic that no longer exists.',
-          },
-        ],
-      })
-    );
-
-    await user.click(screen.getByRole('button', { name: /A rule points at a topic/i }));
-
-    expect(screen.getByRole('tab', { name: 'Rules & limits' })).toHaveAttribute(
-      'data-state',
-      'active'
-    );
-  });
-
-  it('does NOT queue a topic focus for a finding fixed on the Rules tab', async () => {
-    // `always_topic_named_as_choice` and `rule_names_always_topic` both carry a `topicKey`, but
-    // what is wrong is the rule or the list pointing AT that topic, not the topic. Focusing it
-    // would park a request the hidden editor cannot act on, which then fires unprompted the next
-    // time the admin opens Topics for an unrelated reason.
-    const user = userEvent.setup();
-    renderPanel(
-      payload({
-        issues: [
-          {
-            severity: 'warning',
-            code: 'rule_names_always_topic',
-            topicKey: 'spine',
-            message: 'A rule includes "spine", but that topic is asked in every interview.',
-          },
-        ],
-      })
-    );
-
-    await user.click(screen.getByRole('button', { name: /A rule includes/i }));
-
-    expect(screen.getByRole('tab', { name: 'Rules & limits' })).toHaveAttribute(
-      'data-state',
-      'active'
-    );
-    expect(screen.getByTestId('focus')).toHaveAttribute('data-key', '');
   });
 
   it('renders nothing when the setup is coherent', () => {
@@ -657,27 +595,6 @@ describe('TopicsPanel — saving the settings', () => {
     // toggle the admin made in the header seconds earlier.
     expect(body).not.toHaveProperty('enabled');
   });
-
-  it('maps rules field by field rather than passing the objects through', async () => {
-    const user = userEvent.setup();
-    renderPanel();
-
-    await user.click(screen.getByTestId('save-settings'));
-
-    await waitFor(() => expect(authoringMutateMock).toHaveBeenCalled());
-    const body = lastMutation().body as { rules: Record<string, unknown>[] };
-
-    expect(body.rules).toEqual([
-      {
-        id: 'r1',
-        dataSlotKey: 'licence',
-        operator: 'not_exists',
-        value: '',
-        action: 'exclude',
-        topicKey: 'audit',
-      },
-    ]);
-  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -711,7 +628,7 @@ describe('TopicsPanel — fork on launch', () => {
     });
     renderPanel();
 
-    await user.click(screen.getByRole('tab', { name: 'Rules & limits' }));
+    await user.click(screen.getByRole('tab', { name: 'Limits & fallbacks' }));
     await user.click(screen.getByTestId('save-topics'));
 
     expect(routerMock.replace).toHaveBeenCalledWith(

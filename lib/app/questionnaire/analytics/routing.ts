@@ -86,7 +86,7 @@ const BUDGET_PATTERN_SHARE = 0.5;
  * `undefined` that increments to `NaN` and quietly empties a column.
  */
 function emptySourceCounts(): Record<ScopeDecisionSource, number> {
-  return { phase: 0, rule: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0 };
+  return { phase: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0 };
 }
 
 /**
@@ -158,7 +158,7 @@ export function assembleRoutingAnalytics(
       // `check` is the one source that means the OPPOSITE of selection — the topic is sampled
       // because nothing chose it. `fallback` is likewise not a judgement about this topic; it is
       // what happens when there was no signal to judge on at all.
-      if (topic.source === 'llm' || topic.source === 'rule') target.chosen += 1;
+      if (topic.source === 'llm') target.chosen += 1;
       else if (topic.source === 'check') target.sampled += 1;
     }
 
