@@ -673,6 +673,16 @@ export const SETTING_DESCRIPTORS = {
             : 'Not limited',
         },
         {
+          // F17.36. Reported even when off, unlike the follow-up allowance above, because "no
+          // limit" is the answer to a question an operator holding a stalled session is actually
+          // asking — the opening ran forever and nothing stopped it.
+          label: 'Longest the opening may run',
+          value:
+            c.conditionalTopics.maxOpeningTurns > 0
+              ? `${c.conditionalTopics.maxOpeningTurns} turns, then decide on what there is`
+              : 'No limit',
+        },
+        {
           label: 'Unraised-area check topic',
           value: yesNo(c.conditionalTopics.includeCheckTopic),
         },
@@ -1276,6 +1286,19 @@ const ROUTING_SETTING_DESCRIPTORS = {
   // Reported by `limitOpeningProbes` above, where the number means something. On its own it would
   // print an allowance that is not in force.
   maxOpeningProbes: { tier: 'technical', rows: () => [] },
+
+  maxOpeningTurns: {
+    tier: 'technical',
+    rows: (s) => [
+      {
+        label: 'Longest the opening may run',
+        value:
+          s.maxOpeningTurns > 0
+            ? `${s.maxOpeningTurns} turns, then decide on what there is`
+            : 'No limit',
+      },
+    ],
+  },
 
   secondsPerQuestionType: {
     tier: 'technical',

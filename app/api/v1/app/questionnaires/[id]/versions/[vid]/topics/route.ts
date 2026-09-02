@@ -86,7 +86,10 @@ async function loadKeyInventory(versionId: string, settings: ConditionalTopicsSe
     prisma.appDataSlot.findMany({
       where: { versionId },
       orderBy: { ordinal: 'asc' },
-      select: { key: true, name: true, theme: true, weight: true },
+      // `description` is loaded for the uncoverable-member check (F17.36) and deliberately NOT
+      // returned in the payload below: the pickers show a name, and shipping every slot's full
+      // description to the browser would grow the response for nothing.
+      select: { key: true, name: true, description: true, theme: true, weight: true },
     }),
   ]);
 
@@ -116,6 +119,15 @@ async function loadKeyInventory(versionId: string, settings: ConditionalTopicsSe
     weights: {
       byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
       byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
+    },
+    // F17.36 — the wording the uncoverable-member check reads. A data slot's name and description
+    // together, because either alone can be the half that gives it away: a slot named "routing"
+    // described neutrally, or one named neutrally whose description says the interviewer fills it.
+    memberText: {
+      byQuestionKey: Object.fromEntries(questions.map((q) => [q.key, q.prompt] as const)),
+      byDataSlotKey: Object.fromEntries(
+        dataSlots.map((d) => [d.key, `${d.name}. ${d.description}`] as const)
+      ),
     },
   };
 }
@@ -174,6 +186,8 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       // G03: the per-slot re-ask cap, so the tab can say when an opening follow-up limit cannot
       // bind. It lives on the Settings tab, which is why the author cannot see it from here.
       maxDataSlotAttempts,
+      // F17.36: so the check can tell an opening question from a scripted handoff line.
+      memberText: inventory.memberText,
     });
     const costs = {
       budgetSeconds: settings.sessionBudgetSeconds,

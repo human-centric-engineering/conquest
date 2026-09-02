@@ -77,6 +77,16 @@ export interface AdminInterviewPlanView {
    */
   budgetSeconds: number | null;
   estimatedSeconds: number | null;
+  /**
+   * Set when the opening was closed on the turn limit rather than by finishing (F17.36). Null on
+   * every ordinary plan.
+   *
+   * On the viewer rather than only in the log because a forced plan and a considered one are
+   * identical in `selected` and `excluded`, and the difference is the first thing worth knowing
+   * about a thin report: the interview did not decide badly, it decided early because something
+   * in the opening could not be answered.
+   */
+  forcedClose: { atTurn: number; limitTurns: number; uncovered: string[] } | null;
 }
 
 /**
@@ -407,6 +417,19 @@ async function resolvePlanView(
     decidedAt: plan.decidedAt,
     budgetSeconds: plan.budgetSeconds ?? null,
     estimatedSeconds: plan.estimatedSeconds ?? null,
+    // The two key lists are flattened into one: an admin reading this wants to know WHAT was never
+    // covered, and whether a stuck member happened to be a question slot or a data slot is a
+    // distinction they cannot act on from here.
+    forcedClose: plan.forcedClose
+      ? {
+          atTurn: plan.forcedClose.atTurn,
+          limitTurns: plan.forcedClose.limitTurns,
+          uncovered: [
+            ...plan.forcedClose.uncovered.questionKeys,
+            ...plan.forcedClose.uncovered.dataSlotKeys,
+          ],
+        }
+      : null,
   };
 }
 

@@ -84,6 +84,18 @@ export interface ValidateScopeInput {
    * other finding.
    */
   maxDataSlotAttempts?: number;
+  /**
+   * The wording behind each member key, when the caller has it — for the uncoverable-member check
+   * (F17.36). Questions map to their prompt; data slots to their name and description together.
+   *
+   * Optional like everything else here: a caller without it gets every other finding. Passed as
+   * plain records rather than Maps to match `seconds.byTopicKey`, and because the callers that
+   * have this are route handlers assembling a payload, not holding a lookup.
+   */
+  memberText?: {
+    byQuestionKey?: Readonly<Record<string, string>>;
+    byDataSlotKey?: Readonly<Record<string, string>>;
+  };
 }
 
 /**
@@ -385,6 +397,52 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
           'The blind-spot check needs a conditional topic that was NOT selected to sample from, and there are too few to leave one out.',
       });
     }
+
+    // ── Opening members no respondent can ever cover (F17.36) ──────────────────────────────
+    //
+    // The opening gate is all-or-nothing, so ONE member nobody can cover means the plan is never
+    // made — for every respondent, silently, forever. Session CPY3-1C6S was exactly this: an
+    // opening topic naming a question slot that held a scripted handoff line, and a data slot
+    // whose description recorded the interview's own routing decision. Neither is answerable.
+    //
+    // Inside the `enabled` block on purpose. The gate this is about only exists when the feature
+    // is on, and warning every version that has never used Conditional Topics about the wording
+    // of its opening questions would be noise on a tab that has to stay worth reading.
+    //
+    // Heuristic and therefore ADVISORY. It reads wording, which means it will occasionally be
+    // wrong in both directions, and a wrong error would block a launch over a phrasing opinion.
+    // `maxOpeningTurns` is the runtime cover for the ones this misses; this is the authoring-time
+    // cover for the ones it catches, and the message says so when the backstop is off.
+    const openingTopics = topics.filter((t) => t.phase === 'opening');
+    const knownQuestions = input.allQuestionKeys ? new Set(input.allQuestionKeys) : null;
+    const knownDataSlots = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
+    const uncoverable: string[] = [];
+
+    for (const key of new Set(openingTopics.flatMap((t) => t.members.questionKeys))) {
+      if (knownQuestions && !knownQuestions.has(key)) continue;
+      const prompt = input.memberText?.byQuestionKey?.[key];
+      if (prompt !== undefined && !asksSomething(prompt)) uncoverable.push(key);
+    }
+    for (const key of new Set(openingTopics.flatMap((t) => t.members.dataSlotKeys))) {
+      if (knownDataSlots && !knownDataSlots.has(key)) continue;
+      const text = input.memberText?.byDataSlotKey?.[key];
+      if (text !== undefined && describesTheInterview(text)) uncoverable.push(key);
+    }
+
+    if (uncoverable.length > 0) {
+      const backstop =
+        settings.maxOpeningTurns > 0
+          ? ` The opening closes itself after ${settings.maxOpeningTurns} turns, so an interview will still reach a decision — but on less than the opening was meant to gather.`
+          : ' Nothing currently stops that: set “longest the opening may run” so an interview decides on what it has rather than waiting forever.';
+      issues.push({
+        severity: 'warning',
+        code: 'opening_member_uncoverable',
+        message:
+          uncoverable.length === 1
+            ? `“${uncoverable[0]}” is in the opening but does not look like something a respondent can answer, so the opening may never register as finished.${backstop}`
+            : `${uncoverable.length} opening items (including “${uncoverable[0]}”) do not look like something a respondent can answer, so the opening may never register as finished.${backstop}`,
+      });
+    }
   }
 
   // ── Dangling key references ───────────────────────────────────────────────────────────────
@@ -453,6 +511,119 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
 }
 
 /** True when nothing would behave wrongly. Convenience for the launch checklist. */
+/* -------------------------------------------------------------------------- */
+/* Uncoverable-member heuristics (F17.36)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Words that open a request for something from the respondent.
+ *
+ * Not just interrogatives: a good interview prompt is as often an imperative ("Describe the last
+ * time…", "Walk me through…") as a question, and treating those as uncoverable would flag the best
+ * questions in most instruments.
+ */
+const ASKING_OPENERS = [
+  'what',
+  'why',
+  'how',
+  'when',
+  'where',
+  'who',
+  'which',
+  'whose',
+  'do',
+  'does',
+  'did',
+  'is',
+  'are',
+  'was',
+  'were',
+  'can',
+  'could',
+  'would',
+  'will',
+  'should',
+  'have',
+  'has',
+  'had',
+  'tell',
+  'describe',
+  'explain',
+  'list',
+  'name',
+  'rate',
+  'rank',
+  'score',
+  'select',
+  'choose',
+  'pick',
+  'share',
+  'walk',
+  'think',
+  'consider',
+  'give',
+  'in',
+  'on',
+  'to',
+  'roughly',
+  'approximately',
+  'briefly',
+] as const;
+
+/**
+ * Whether a question prompt asks the respondent for anything at all.
+ *
+ * Deliberately generous: a question mark anywhere, or an opener from {@link ASKING_OPENERS},
+ * passes. The finding this feeds is advisory, and the asymmetry is on purpose — a missed handoff
+ * line costs an author one confusing session, while a false positive on a perfectly good question
+ * costs every author who reads the tab a reason to stop trusting it.
+ */
+function asksSomething(prompt: string): boolean {
+  const text = prompt.trim().toLowerCase();
+  if (text.length === 0) return false;
+  if (text.includes('?')) return true;
+  const firstWord = /^[a-z']+/.exec(text)?.[0] ?? '';
+  return (ASKING_OPENERS as readonly string[]).includes(firstWord);
+}
+
+/**
+ * Phrases that say a data slot records the INTERVIEW'S behaviour rather than a respondent fact.
+ *
+ * `diagnostic_routing` on the session that produced this check described itself as recording "the
+ * interviewer's routing decision" — a slot the respondent is never asked to fill, sitting in an
+ * opening topic, holding every interview open forever.
+ */
+const SELF_DESCRIBING_CUES = [
+  'the interviewer',
+  "the interview's",
+  'the agent',
+  'the assistant',
+  'the system',
+  'the platform',
+  'routing decision',
+  'the decision this',
+  'internal use',
+  'internal only',
+  'not asked',
+  'never asked',
+  'do not ask',
+  'set by the',
+  'recorded by the',
+  'filled by the',
+] as const;
+
+/**
+ * Whether a data slot's wording describes the interview rather than the respondent.
+ *
+ * Phrase matching, not word matching. "The agent" as a phrase is about the software; "agent" alone
+ * is a job title, and an instrument for estate agents would otherwise have its whole opening
+ * flagged.
+ */
+function describesTheInterview(text: string): boolean {
+  const lower = text.toLowerCase();
+  return SELF_DESCRIBING_CUES.some((cue) => lower.includes(cue));
+}
+
 export function hasScopeErrors(issues: readonly ScopeIssue[]): boolean {
   return issues.some((i) => i.severity === 'error');
 }

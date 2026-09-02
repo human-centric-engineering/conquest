@@ -727,3 +727,117 @@ describe('validateConditionalTopics — recorded triggers', () => {
     expect(issues.map((i) => i.code)).not.toContain('trigger_without_cues');
   });
 });
+
+describe('opening_member_uncoverable (F17.36)', () => {
+  // The gate is all-or-nothing, so ONE member nobody can cover means no plan is ever made — for
+  // every respondent, silently. Session CPY3-1C6S was exactly this.
+  const open = (members: { dataSlotKeys: string[]; questionKeys: string[] }) =>
+    topic('open', 'opening', { members });
+
+  function run(
+    over: {
+      members?: { dataSlotKeys: string[]; questionKeys: string[] };
+      memberText?: {
+        byQuestionKey?: Record<string, string>;
+        byDataSlotKey?: Record<string, string>;
+      };
+      maxOpeningTurns?: number;
+      enabled?: boolean;
+    } = {}
+  ) {
+    const members = over.members ?? { dataSlotKeys: [], questionKeys: ['opening_handoff'] };
+    return validateConditionalTopics({
+      topics: [open(members), topic('cond_a', 'conditional'), topic('cond_b', 'conditional')],
+      settings: settings({
+        enabled: over.enabled ?? true,
+        maxOpeningTurns: over.maxOpeningTurns ?? 0,
+      }),
+      allQuestionKeys: [...members.questionKeys, 'cond_a_q', 'cond_b_q'],
+      allDataSlotKeys: members.dataSlotKeys,
+      ...(over.memberText ? { memberText: over.memberText } : {}),
+    }).filter((i) => i.code === 'opening_member_uncoverable');
+  }
+
+  it('flags a question slot whose prompt asks nothing', () => {
+    const issues = run({
+      memberText: {
+        byQuestionKey: {
+          opening_handoff: 'Thanks. Now let us move on to the areas that matter most for you.',
+        },
+      },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe('warning');
+    expect(issues[0]?.message).toContain('opening_handoff');
+  });
+
+  it('does not flag a real question, whether it ends in a question mark or not', () => {
+    // The heuristic has to survive an imperative prompt, which is how half the good questions in
+    // any instrument are written.
+    expect(
+      run({ memberText: { byQuestionKey: { opening_handoff: 'What is slowing you down?' } } })
+    ).toHaveLength(0);
+    expect(
+      run({
+        memberText: {
+          byQuestionKey: { opening_handoff: 'Describe the last deal that stalled on you.' },
+        },
+      })
+    ).toHaveLength(0);
+    expect(
+      run({
+        memberText: { byQuestionKey: { opening_handoff: 'Walk me through a typical week.' } },
+      })
+    ).toHaveLength(0);
+  });
+
+  it("flags a data slot whose description records the interview's own behaviour", () => {
+    const issues = run({
+      members: { dataSlotKeys: ['diagnostic_routing'], questionKeys: [] },
+      memberText: {
+        byDataSlotKey: {
+          diagnostic_routing:
+            "Routing. Records the interviewer's routing decision for this session.",
+        },
+      },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message).toContain('diagnostic_routing');
+  });
+
+  it('does not flag a data slot that is about the respondent', () => {
+    // "agent" as a job title must survive. An instrument for estate agents would otherwise have
+    // its whole opening flagged.
+    expect(
+      run({
+        members: { dataSlotKeys: ['agency_size'], questionKeys: [] },
+        memberText: {
+          byDataSlotKey: { agency_size: 'Agency size. How many agents work at their branch.' },
+        },
+      })
+    ).toHaveLength(0);
+  });
+
+  it('points at the backstop when there is none, and reports it when there is', () => {
+    const text = {
+      byQuestionKey: { opening_handoff: 'Thanks for that. Here is what happens next.' },
+    };
+
+    expect(run({ memberText: text })[0]?.message).toContain('longest the opening may run');
+    expect(run({ memberText: text, maxOpeningTurns: 12 })[0]?.message).toContain('after 12 turns');
+  });
+
+  it('says nothing when the caller passes no wording, and nothing while the feature is off', () => {
+    // Every other input to this module is optional the same way: a caller without it gets every
+    // other finding rather than a fabricated one.
+    expect(run({})).toHaveLength(0);
+    expect(
+      run({
+        enabled: false,
+        memberText: { byQuestionKey: { opening_handoff: 'Here is what happens next.' } },
+      })
+    ).toHaveLength(0);
+  });
+});

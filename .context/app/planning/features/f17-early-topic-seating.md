@@ -2,10 +2,10 @@
 feature: F17.36
 title: Early topic seating — deciding during the opening, not only at the end of it
 phase: P17 — Conditional Topics
-status: proposed — needs sign-off on §8.3, §9 and §10. §5 is DONE: hard rules were deleted on 2026-09-02
+status: phases 1 and 2 SHIPPED (2026-09-02). Phases 3–6 proposed; §16 settled below
 owner: TBD
 opened: 2026-09-02
-revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added)
+revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added; §16 settled and phases 1+2 built)
 docs: .context/app/questionnaire/conditional-topics.md
 supersedes-in-part: .context/app/planning/features/f17-mid-interview-triggers.md (§6.2, "no plan exists")
 evidence: session CPY3-1C6S (Growth Assessor Lead-Gen, version cmthh70e40009ym5ngmdu8veo)
@@ -393,30 +393,57 @@ not drift; nothing in this spec depends on F17.31 shipping.
 
 ## 15. Phasing
 
-| Phase | Scope                                                                                                                 | Ships behaviour?                 |
-| ----- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| **1** | §5 suspend hard rules (+ the "say it is inactive" surfaces) + §6 `maxOpeningTurns` + §12 `opening_member_uncoverable` | Yes: fixes the stall class       |
-| **2** | §4 readiness module, `isOpeningComplete` rewired as a wrapper                                                         | No: pure, no behaviour change    |
-| **3** | §7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks                        | Yes, behind a default-off switch |
-| **4** | §9 lever 3: orchestrator bridge to a seated topic                                                                     | Yes, own sign-off                |
-| **5** | §10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`                                                  | Surfaces                         |
-| **6** | §13 restore hard rules, when a client needs one                                                                       | Deferred, not pending            |
+| Phase | Scope                                                                                                              | Ships behaviour?                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| **1** | ~~§5 hard rules~~ (deleted, not suspended) + §6 `maxOpeningTurns` + §12 `opening_member_uncoverable` — **SHIPPED** | Yes: fixes the stall class       |
+| **2** | §4 readiness module, `isOpeningComplete` rewired as a wrapper — **SHIPPED**                                        | No: pure, no behaviour change    |
+| **3** | §7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks                     | Yes, behind a default-off switch |
+| **4** | §9 lever 3: orchestrator bridge to a seated topic                                                                  | Yes, own sign-off                |
+| **5** | §10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`                                               | Surfaces                         |
+| **6** | §13 restore hard rules, when a client needs one                                                                    | Deferred, not pending            |
 
 **Migration note.** Phase 3 adds one nullable column to an app-tier table: generate with
 `--create-only` and strip the phantom pgvector DDL before applying, or `migrate dev` will spawn a
 DROP-INDEX migration over the platform's five vector indexes. Verify the indexes afterwards.
 
-## 16. Open decisions
+## 16. Decisions — settled 2026-09-02
 
-1. **§8.3** — separate column (recommended) or unsealed plan blob.
-2. **§4** — readiness excludes parked fills (recommended). Confirm.
-3. **§9** — is lever 3 in scope at all, or do we measure after phases 1 and 2 first (recommended)?
-4. **§10** — announce at seat time (recommended) or only at the final handover.
-5. **§7** — eight settings is a lot. `earlySeatingCadence` could be a constant for v1; the evidence-change
-   gate in §8.1 already does most of what it is for.
-6. **§7** — should the second and subsequent seats within one turn require a higher confidence bar than
-   the first? It would make `maxRoutingDecisionsPerTurn` above 1 self-limiting rather than purely
-   capped. Proposed as an option, not a default.
+All six were taken as recommended.
+
+1. **§8.3** — a **separate nullable `earlySeatedTopics` column**. `interviewPlan` keeps meaning
+   exactly what it means today and the once-only write guard stays intact in all three places that
+   depend on it.
+2. **§4** — readiness **excludes parked fills** for the floor and keeps counting them for the gate.
+   Shipped in phase 2: `openingReadiness(…, { countParked })`, one function, both readers.
+3. **§9** — **lever 3 is deferred.** Ship phases 1–3, measure whether the opening still drags, then
+   decide. Phase 4 keeps its own sign-off.
+4. **§10** — **announce at seat time**, coalesced to at most one announcement per turn.
+5. **§7** — `earlySeatingCadence` becomes a **module constant, not a setting**, for v1. The
+   evidence-change gate in §8.1 does most of what it was for, and seven settings on one tab is
+   already at the edge of readable. That leaves six new fields in phase 3.
+6. **§7** — **no escalating confidence bar** for the second and subsequent seats within a turn. The
+   per-turn cap is the control; a second, subtler control governing the same thing is one an admin
+   cannot reason about, and it can be added later if multi-seat turns prove noisy.
+
+### What phases 1 and 2 actually shipped
+
+- `lib/app/questionnaire/scope/readiness.ts` — `openingReadiness`, pure, with the parked-fill flag.
+  `isOpeningComplete` is now a thin wrapper over it and keeps its signature, so no caller changed.
+- `maxOpeningTurns` on `ConditionalTopicsSettings` (default `0` = off), carried through the Zod
+  patch schema, the settings registry, the Questionnaire Pack, and the Conditional topics card's
+  step 1 with a `<FieldHelp>`.
+- `InterviewPlan.forcedClose` (`{ atTurn, limitTurns, uncovered }`), written by `plan-scope.ts`,
+  recorded on the `AppAiRun` detail, logged at `warn`, and rendered at the top of the session
+  viewer's plan panel.
+- `opening_member_uncoverable` in `scope/validate.ts`, fed by a new optional `memberText` input the
+  Topics route supplies. Advisory warning; two conservative heuristics, both documented at the
+  call site.
+
+**Not shipped, and deliberately:** §5's "say it is inactive" surfaces are moot — hard rules were
+deleted rather than suspended, so there is no inactive tier to announce and no
+`hard_rules_suspended` check. §12's three early-seating validation checks
+(`early_confidence_below_floor`, `cap_hierarchy_inverted`,
+`early_seating_without_conditional_topics`) belong to phase 3, with the settings they check.
 
 ## 17. Risks
 

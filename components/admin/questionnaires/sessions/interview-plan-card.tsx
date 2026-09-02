@@ -63,6 +63,22 @@ export function InterviewPlanCard({ plan }: InterviewPlanCardProps) {
       </summary>
 
       <div className="space-y-3 border-t px-3 py-3">
+        {/* F17.36. First in the panel, above the topics, because it changes how everything below it
+            should be read: these topics were chosen from an opening that never finished. */}
+        {plan.forcedClose && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            The opening did not finish. It was closed at turn {plan.forcedClose.atTurn}, the limit
+            set for this questionnaire, and the topics below were chosen on what had been gathered
+            by then.
+            {plan.forcedClose.uncovered.length > 0 && (
+              <>
+                {' '}
+                Never covered: {plan.forcedClose.uncovered.join(', ')}. An item that no interview
+                ever covers is usually one a respondent cannot answer.
+              </>
+            )}
+          </p>
+        )}
         <div className="space-y-1.5">
           <p className="text-xs font-medium">Covered</p>
           {plan.selected.length === 0 ? (

@@ -15,11 +15,13 @@ import { z } from 'zod';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_OPENING_TURNS_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MAX_TRIGGER_CUES,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_OPENING_TURNS,
   MIN_SECONDS_PER_ITEM,
   MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
@@ -143,6 +145,14 @@ export const conditionalTopicsSettingsSchema = z.object({
     .int()
     .min(MIN_OPENING_PROBES)
     .max(MAX_OPENING_PROBES_CEILING)
+    .optional(),
+  // F17.36 — the opening's turn backstop. No `refine` beside it, unlike `sessionBudgetSeconds`:
+  // the floor here IS 0, so "off" and "the smallest legal limit" are not in tension.
+  maxOpeningTurns: z
+    .number()
+    .int()
+    .min(MIN_OPENING_TURNS)
+    .max(MAX_OPENING_TURNS_CEILING)
     .optional(),
 });
 

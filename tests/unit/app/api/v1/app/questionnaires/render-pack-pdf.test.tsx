@@ -157,6 +157,7 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   secondsPerDataSlot: 40,
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
+  maxOpeningTurns: 0,
 };
 
 /** The PDF magic header: every PDF byte stream starts with "%PDF". */

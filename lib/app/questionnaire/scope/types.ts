@@ -233,6 +233,17 @@ export const MAX_SESSION_BUDGET_SECONDS = 14_400;
 export const MIN_OPENING_PROBES = 0;
 export const MAX_OPENING_PROBES_CEILING = 5;
 
+/**
+ * Bounds on how long the opening may run before it is closed on what there is (F17.36).
+ *
+ * `0` is the default and means "no limit", which is how every version behaved before this existed.
+ * The ceiling is generous rather than tight: this is a backstop against an opening that can never
+ * complete, not a pacing control — an author who wants a shorter opening should ask fewer opening
+ * questions, and one who sets 40 has expressed that they never want this to fire.
+ */
+export const MIN_OPENING_TURNS = 0;
+export const MAX_OPENING_TURNS_CEILING = 40;
+
 /** Bounds on a per-question-type time estimate, in seconds. */
 export const MIN_SECONDS_PER_ITEM = 1;
 export const MAX_SECONDS_PER_ITEM = 600;
@@ -562,6 +573,26 @@ export interface ConditionalTopicsSettings {
    * shared rather than per item.
    */
   maxOpeningProbes: number;
+
+  /**
+   * The longest the opening may run before the plan is made on what there is (F17.36). **`0` means
+   * no limit**, which is the default and what every version did before this existed.
+   *
+   * The opening gate is all-or-nothing: every member of every opening topic, or no plan. That is
+   * the right default, because a plan made over half an opening is a worse plan. But it has no
+   * escape, and an instrument can be authored so that the gate can never pass — an opening topic
+   * naming a question that holds a scripted handoff line rather than a question, or a data slot
+   * whose description records the interview's own routing decision rather than a respondent fact.
+   * Neither can ever be covered by a respondent, so such a session plans nothing, ever, and says
+   * nothing about it.
+   *
+   * A data slot self-heals: after `maxDataSlotAttempts` the orchestrator parks it and the park
+   * counts as covered. A question slot has no equivalent, and this is the cover for that half.
+   *
+   * The count is the session's turns, which is the same number `decidedAtTurn` records — so an
+   * admin comparing a forced plan against a considered one is comparing like with like.
+   */
+  maxOpeningTurns: number;
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
@@ -582,6 +613,8 @@ export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   // Off. The allowance below is what an author gets when they turn it on, not what they run today.
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
+  // 0 = no limit. The opening gate keeps its own counsel unless an author says otherwise.
+  maxOpeningTurns: 0,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -713,6 +746,33 @@ export interface InterviewPlan {
    * an amended topic as a successful selection would make the planner look better the worse it got.
    */
   amendments?: PlanAmendment[];
+  /**
+   * Present when the opening was closed by {@link ConditionalTopicsSettings.maxOpeningTurns} rather
+   * than by being finished (F17.36). Absent on every ordinary plan, which is nearly all of them.
+   *
+   * Recorded rather than inferred because the two are indistinguishable afterwards: a plan made
+   * over a complete opening and a plan made over three quarters of one look identical in `topics`,
+   * and an admin holding a thin report needs to know which they have. The uncovered members are
+   * carried with it because "the opening did not finish" is not actionable on its own — *which*
+   * members never got covered is what tells the author their instrument has a question no
+   * respondent can answer.
+   */
+  forcedClose?: ForcedClose;
+}
+
+/**
+ * Why and where an opening was closed early, and what was still outstanding when it was.
+ *
+ * A separate interface rather than a boolean because a bare `forcedClose: true` answers the
+ * cheapest question and none of the useful ones.
+ */
+export interface ForcedClose {
+  /** The turn the opening was closed at — the same count `decidedAtTurn` records. */
+  atTurn: number;
+  /** The limit that closed it, so a later settings change cannot make the record unreadable. */
+  limitTurns: number;
+  /** What was still outstanding. Bounded on write; a stall is usually one or two stuck members. */
+  uncovered: { dataSlotKeys: string[]; questionKeys: string[] };
 }
 
 /**
@@ -962,6 +1022,13 @@ export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopi
         d.maxOpeningProbes
       )
     ),
+    // The floor is 0, and 0 means "no limit". So anything unusable — a negative, a NaN, a string
+    // — reads as OFF rather than as a limit of one turn, which would close every opening on its
+    // first turn. The direction matters more here than the clamp: a limit nobody asked for is a
+    // silently shortened interview.
+    maxOpeningTurns: Math.round(
+      asNumber(obj.maxOpeningTurns, MIN_OPENING_TURNS, MAX_OPENING_TURNS_CEILING, d.maxOpeningTurns)
+    ),
   };
 }
 
@@ -1032,6 +1099,12 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
   const budgetSeconds = Math.round(asNumber(value.budgetSeconds, 0, 100_000, 0));
   const estimatedSeconds = Math.round(asNumber(value.estimatedSeconds, 0, 100_000, 0));
 
+  // F17.36. Absent on every plan written before forced close existed and on every plan whose
+  // opening simply finished — which is why an unreadable blob yields `null` rather than a
+  // `forcedClose` with zeroes in it. "This plan was forced" is a claim about the interview, and a
+  // fabricated one would read on the admin surface as an instrument fault that never happened.
+  const forcedClose = narrowForcedClose(value.forcedClose);
+
   const amendments: PlanAmendment[] = Array.isArray(value.amendments)
     ? value.amendments.flatMap((a): PlanAmendment[] => {
         if (!isRecord(a)) return [];
@@ -1071,6 +1144,20 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
     // before budgets existed are the same plan, and inventing a `0` here would read on the admin
     // surface as "fitted to a budget of nothing".
     ...(budgetSeconds > 0 ? { budgetSeconds, estimatedSeconds } : {}),
+    ...(forcedClose ? { forcedClose } : {}),
+  };
+}
+
+/** Narrow a stored {@link ForcedClose}, or null. See the call site for why null and not a default. */
+function narrowForcedClose(value: unknown): ForcedClose | null {
+  if (!isRecord(value)) return null;
+  return {
+    atTurn: Math.round(asNumber(value.atTurn, 0, 100_000, 0)),
+    limitTurns: Math.round(asNumber(value.limitTurns, 0, 100_000, 0)),
+    uncovered: {
+      dataSlotKeys: asKeyList(isRecord(value.uncovered) ? value.uncovered.dataSlotKeys : []),
+      questionKeys: asKeyList(isRecord(value.uncovered) ? value.uncovered.questionKeys : []),
+    },
   };
 }
 

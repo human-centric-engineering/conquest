@@ -6,6 +6,7 @@ import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MEMBER_KEY_MAX_LENGTH,
   MAX_OPENING_PROBES_CEILING,
+  MAX_OPENING_TURNS_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_SESSION_BUDGET_SECONDS,
@@ -145,6 +146,31 @@ describe('narrowConditionalTopicsSettings — the opening follow-up allowance (G
   });
 });
 
+describe('narrowConditionalTopicsSettings — the opening turn backstop (F17.36)', () => {
+  it('is off by default, so no existing version starts closing its opening early', () => {
+    expect(narrowConditionalTopicsSettings({}).maxOpeningTurns).toBe(0);
+  });
+
+  it('keeps a real limit, rounded', () => {
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 12 }).maxOpeningTurns).toBe(12);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 11.4 }).maxOpeningTurns).toBe(11);
+  });
+
+  it('clamps to the ceiling', () => {
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 999 }).maxOpeningTurns).toBe(
+      MAX_OPENING_TURNS_CEILING
+    );
+  });
+
+  it('reads anything unusable as OFF, never as a limit of one turn', () => {
+    // The direction is the point. A limit of 1 would close every opening on its first turn, so a
+    // negative, a NaN or a string must land on "no limit" rather than on the smallest limit.
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: -5 }).maxOpeningTurns).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 'ten' }).maxOpeningTurns).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: NaN }).maxOpeningTurns).toBe(0);
+  });
+});
+
 describe('narrowInterviewPlan', () => {
   const valid = {
     v: 1,
@@ -217,6 +243,56 @@ describe('narrowInterviewPlan', () => {
     expect(narrowInterviewPlan({ ...valid, estimatedSeconds: 548 })).not.toHaveProperty(
       'estimatedSeconds'
     );
+  });
+});
+
+describe('narrowInterviewPlan — forcedClose (F17.36)', () => {
+  const base = {
+    v: 1,
+    topics: [],
+    excluded: [],
+    checkTopicKey: null,
+    confidence: 0.8,
+    source: 'llm',
+    respondentMessage: '',
+    decidedAtTurn: 9,
+    decidedAt: '2026-09-02T10:00:00.000Z',
+  };
+
+  it('is absent on an ordinary plan, so a forced close and a finished opening never blur', () => {
+    expect(narrowInterviewPlan(base)?.forcedClose).toBeUndefined();
+  });
+
+  it('reads back the turn, the limit and the uncovered members', () => {
+    const plan = narrowInterviewPlan({
+      ...base,
+      forcedClose: {
+        atTurn: 14,
+        limitTurns: 12,
+        uncovered: { dataSlotKeys: ['diagnostic_routing'], questionKeys: ['opening_handoff'] },
+      },
+    });
+
+    expect(plan?.forcedClose).toEqual({
+      atTurn: 14,
+      limitTurns: 12,
+      uncovered: { dataSlotKeys: ['diagnostic_routing'], questionKeys: ['opening_handoff'] },
+    });
+  });
+
+  it('drops an unreadable record rather than fabricating one with zeroes', () => {
+    // "This interview was forced" is a claim about the instrument. Inventing it from a malformed
+    // blob would show an authoring fault on the session viewer that never happened.
+    expect(narrowInterviewPlan({ ...base, forcedClose: 'yes' })?.forcedClose).toBeUndefined();
+    expect(narrowInterviewPlan({ ...base, forcedClose: null })?.forcedClose).toBeUndefined();
+  });
+
+  it('survives a record whose uncovered lists are missing', () => {
+    // Bounded on write, but read defensively: an empty list is a coherent record ("we know it was
+    // forced, we no longer know on what"), and refusing it would lose the fact entirely.
+    expect(
+      narrowInterviewPlan({ ...base, forcedClose: { atTurn: 3, limitTurns: 3 } })?.forcedClose
+    ).toEqual({ atTurn: 3, limitTurns: 3, uncovered: { dataSlotKeys: [], questionKeys: [] } });
   });
 });
 

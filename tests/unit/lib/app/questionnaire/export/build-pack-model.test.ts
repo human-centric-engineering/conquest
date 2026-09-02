@@ -287,6 +287,7 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   secondsPerDataSlot: 40,
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
+  maxOpeningTurns: 0,
 };
 
 const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {

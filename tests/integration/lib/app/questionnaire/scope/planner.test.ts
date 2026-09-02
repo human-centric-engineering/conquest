@@ -385,8 +385,8 @@ describe('isOpeningComplete', () => {
 
   it('is false until every opening QUESTION is answered too', () => {
     // The gate that was missing. An opening built only from questions read as complete before it
-    // had been asked, so the planner decided on turn one with nothing captured — and every
-    // `not_exists` hard rule matched, because absence is what a veto tests for.
+    // had been asked, so the planner decided on turn one with nothing captured — a judgement over
+    // an empty transcript.
     const topics = [
       topic('open', 'opening', { members: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] } }),
     ];

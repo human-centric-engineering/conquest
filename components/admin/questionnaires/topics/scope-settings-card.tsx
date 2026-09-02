@@ -32,9 +32,11 @@ import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_OPENING_TURNS_CEILING,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_OPENING_TURNS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type ConditionalTopicsSettings,
   type Topic,
@@ -281,6 +283,55 @@ export function ScopeSettingsCard({
               </div>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Longest the opening may run{' '}
+              <FieldHelp title="Longest the opening may run">
+                <p>
+                  The agent normally waits for <strong>every</strong> opening question and every
+                  opening data slot before it chooses topics. That is the right wait: a decision
+                  made over half an opening is a worse decision.
+                </p>
+                <p>
+                  But it has no escape. If one opening item can never be answered — a slot the
+                  interview fills for itself, or a &ldquo;question&rdquo; that is really a scripted
+                  line with nothing to answer — the agent waits forever, and the respondent gets the
+                  same interview as everyone else with no sign anything went wrong.
+                </p>
+                <p>
+                  Set a number of turns and the agent stops waiting at that point and decides on
+                  what it has. It is a safety net, not a pace setting: leave it well above how long
+                  your opening actually takes. Leave at 0 for no limit.
+                </p>
+              </FieldHelp>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                className="max-w-28"
+                min={MIN_OPENING_TURNS}
+                max={MAX_OPENING_TURNS_CEILING}
+                value={draft.maxOpeningTurns}
+                onChange={(e) =>
+                  set({
+                    maxOpeningTurns: boundedInt(
+                      e.target.value,
+                      MIN_OPENING_TURNS,
+                      MAX_OPENING_TURNS_CEILING,
+                      draft.maxOpeningTurns
+                    ),
+                  })
+                }
+                disabled={busy}
+              />
+              <span className="text-muted-foreground shrink-0 text-xs">
+                {draft.maxOpeningTurns === 0
+                  ? 'no limit — wait for the whole opening'
+                  : `turns, then choose topics on what there is`}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3 border-t pt-4">

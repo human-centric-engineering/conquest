@@ -570,6 +570,45 @@ An opening member naming a question that no longer exists is skipped, not waited
 keys are skipped everywhere in this feature, and here the alternative is a stale member holding
 every interview of that version in its opening forever.
 
+The arithmetic behind the gate lives in `scope/readiness.ts` (`openingReadiness`), not in the gate
+itself. `isOpeningComplete` is a thin wrapper over it — one implementation, because a second
+definition of "how much of the opening is in" already cost this codebase one defect, and because
+early topic seating (F17.36 phase 3) needs the same measurement read slightly differently. The
+difference is parking: `countParked: true` is the gate, and a parked slot counts as covered;
+`countParked: false` is what a decision made on partial evidence will read, and it does not.
+
+### When the opening can never finish (F17.36)
+
+The gate is all-or-nothing and has no escape, so **one** opening member no respondent can ever cover
+means the plan is never made — for every respondent of that version, silently, forever. Two real
+shapes, both from session `CPY3-1C6S`:
+
+- a question slot holding a **scripted handoff line**, which contains no question;
+- a data slot whose description records **the interview's own routing decision** rather than a fact
+  about the respondent.
+
+A data slot self-heals — after `maxDataSlotAttempts` the orchestrator parks it with a synthesised
+`provisional` fill, and the park counts as covered — so the slot half of the gate degrades
+gracefully. The question half has no equivalent.
+
+Two covers, one at each end:
+
+| Cover                        | Where                                        | What it does                                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `opening_member_uncoverable` | `scope/validate.ts`, Topics tab              | Reads the wording of every opening member and warns when one does not look answerable. Advisory: it is a heuristic, and a wrong error would block a launch over a phrasing opinion. |
+| `maxOpeningTurns`            | `ConditionalTopicsSettings`, `plan-scope.ts` | Closes the opening on what there is once the session has taken that many turns. **`0` (off) by default**, so no existing version changes.                                           |
+
+When the backstop fires, the plan carries a `forcedClose` record — the turn, the limit, and the
+members that were never covered — and the session viewer leads the plan panel with it. A forced plan
+and a considered one are identical in `topics` and `excluded`, and the difference is the first thing
+worth knowing about a thin report: the interview did not decide badly, it decided early because
+something in the opening could not be answered. The trigger also logs it at `warn`, because reaching
+that point means the instrument has an authoring fault the operator should not have to go looking
+for.
+
+`maxOpeningTurns` is a backstop, not a pace setting. Set it well above how long the opening actually
+takes; an author who wants a shorter opening should ask fewer opening questions.
+
 The announcement rides the existing **briefing** seam into the phraser, on the one turn following the
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still

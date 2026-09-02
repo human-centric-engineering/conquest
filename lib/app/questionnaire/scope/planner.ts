@@ -42,17 +42,24 @@ import {
 } from '@/lib/app/questionnaire/scope/constants';
 import {
   applyGuardrails,
-  alwaysTopics,
   plannerCandidates,
   type PlanBudget,
   type ProposedTopic,
 } from '@/lib/app/questionnaire/scope/guardrails';
+import {
+  openingReadiness,
+  type OpeningQuestionCoverage,
+} from '@/lib/app/questionnaire/scope/readiness';
 import type {
   ConditionalTopicsSettings,
   InterviewPlan,
   ScopeFill,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
+
+// Re-exported because this module owned the type before `readiness.ts` existed, and the trigger
+// imports it from here. One definition, two import paths — not two definitions.
+export type { OpeningQuestionCoverage };
 
 const plannerSchema = z.object({
   selected: z.array(
@@ -530,28 +537,20 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
 }
 
-/** What the caller knows about the session's question answers, for the opening gate. */
-export interface OpeningQuestionCoverage {
-  /** Question keys this session already holds an answer for. */
-  answered: ReadonlySet<string>;
-  /**
-   * Every question key the version actually has.
-   *
-   * An opening topic may name a key that no longer resolves — a question deleted after the topic
-   * was authored — and that key can never be answered. Unresolvable member keys are silently
-   * skipped everywhere else in this feature; skipping them here too is what stops a stale member
-   * from holding every interview in its opening forever.
-   */
-  known: ReadonlySet<string>;
-}
-
 /**
  * Whether the opening is complete enough to plan — every opening topic's members are covered.
  *
+ * A thin wrapper over {@link openingReadiness}, which is where the arithmetic lives. It keeps this
+ * signature so no caller has to change, and it keeps the gate and the early-seating floor reading
+ * one implementation: two numbers that must agree, computed in two places, disagree eventually.
+ *
  * Both kinds of member count. Judging the opening on its data slots alone made an opening topic
  * built only from questions complete before it had been asked, so the planner ran on the first turn
- * with nothing captured: a judgement over an empty transcript, and — worse — every `not_exists`
- * a judgement over an empty transcript.
+ * with nothing captured — a judgement over an empty transcript.
+ *
+ * `filledDataSlotKeys` is the caller's already-merged set: a park counts as filled here, which is
+ * `countParked: true` and is exactly what the gate has always done. Parking is what stops a vague
+ * answer holding an interview in its opening forever, and the gate must keep honouring it.
  *
  * `questions` is optional so a caller that genuinely has no answer data still gets the data-slot
  * gate rather than nothing. The direction on everything unjudgeable stays as it was: planning
@@ -563,21 +562,15 @@ export function isOpeningComplete(
   filledDataSlotKeys: ReadonlySet<string>,
   questions?: OpeningQuestionCoverage
 ): boolean {
-  const opening = alwaysTopics(topics).filter((t) => t.phase === 'opening');
-  if (opening.length === 0) return true;
-
-  const requiredSlots = opening.flatMap((t) => t.members.dataSlotKeys);
-  if (!requiredSlots.every((key) => filledDataSlotKeys.has(key))) return false;
-
-  if (questions) {
-    const requiredQuestions = opening
-      .flatMap((t) => t.members.questionKeys)
-      .filter((key) => questions.known.has(key));
-    if (!requiredQuestions.every((key) => questions.answered.has(key))) return false;
-  }
-
-  return true;
+  return (
+    openingReadiness(topics, { filled: filledDataSlotKeys, parked: EMPTY_KEYS }, questions, {
+      countParked: true,
+    }).ratio === 1
+  );
 }
+
+/** Shared empty set, so the wrapper allocates nothing on the hot path. */
+const EMPTY_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**
  * The topic keys the model itself proposed, read back out of a recorded output snapshot.
