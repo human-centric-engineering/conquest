@@ -48,7 +48,7 @@ const STATUS_LABELS: Record<SectionStatus, string> = {
  */
 const CLOSE_REASON_LABELS: Record<SectionCloseReason, string> = {
   respondent: 'Respondent moved on',
-  agent_offer: 'Accepted the offer to move on',
+  agent_offer: 'Interviewer moved on',
   cap: 'Released by the turn limit',
   auto: 'Nothing left to ask',
 };

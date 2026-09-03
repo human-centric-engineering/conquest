@@ -874,11 +874,16 @@ export async function runDataSlotTurn(
     // interview is not finished. Falling through to `remainingQuestions[0]` here asked a question
     // from a part the respondent has not reached and tagged the turn with the part they are in.
     // The honest reply is that this part is covered.
-    const { key, label, nextLabel } = state.sectionMeta;
+    const { key, label, nextLabel, firstHandover } = state.sectionMeta;
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = {
       kind: 'section_covered',
-      text: sectionCoveredMessage(label, nextLabel, state.config.sections.agentOffersClose),
+      text: sectionCoveredMessage({
+        label,
+        nextLabel,
+        offersClose: state.config.sections.agentOffersClose,
+        ...(firstHandover !== undefined ? { firstHandover } : {}),
+      }),
       sectionKey: key,
       nextLabel,
     };

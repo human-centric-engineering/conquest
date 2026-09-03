@@ -91,7 +91,7 @@ sections".
 | `closeCoverage`      | `1`            | Fraction of the section's in-scope questions that must be answered before the "move on" control unlocks. Edited as a whole percent.    |
 | `closeMinAnswered`   | `0`            | A second bar applied **on top of** the percentage, not instead of it. `0` is off.                                                      |
 | `maxTurnsPerSection` | `0`            | Turn cap that releases a stuck respondent. `0` is off.                                                                                 |
-| `agentOffersClose`   | `true`         | Whether the interviewer offers the move, as well as the respondent having the control.                                                 |
+| `agentOffersClose`   | `true`         | Whether the interviewer MAKES the move, as well as the respondent having the control. See "The handover".                              |
 | `showLockedSections` | `true`         | Whether sections not yet reachable are drawn locked or hidden entirely.                                                                |
 
 A malformed blob degrades to "feature off". That is the only safe direction for
@@ -187,16 +187,69 @@ a part the respondent has not reached and tagging the turn with the part they ar
 
 `agentOffersClose` shapes that message and nothing else:
 
-| Setting | Not the last section                              | Last section               |
-| ------- | ------------------------------------------------- | -------------------------- |
-| `true`  | "That's everything for X. Ready to move on to Y?" | "That's everything for X." |
-| `false` | "That's everything for X."                        | "That's everything for X." |
+| Setting | Not the last section                                        | Last section               |
+| ------- | ----------------------------------------------------------- | -------------------------- |
+| `true`  | "That's everything for X. I'll take us on to Y now."        | "That's everything for X." |
+| `false` | "That's everything for X. Y is next whenever you're ready." | "That's everything for X." |
 
-The last section never offers a move whatever the setting says: there is nowhere to move on to,
-and the whole-interview completion offer is the affordance that matters there. With
-`agentOffersClose` off the interviewer reports the fact and leaves the move to the respondent's own
-control, which is what an author running a facilitated session wants: an interviewer that keeps
-proposing the move is pressure.
+The last section never names a move whatever the setting says: there is nowhere to go, and the
+whole-interview completion offer is the affordance that matters there. With `agentOffersClose` off
+the interviewer reports the fact and leaves the move to the respondent's own control, which is what
+an author running a facilitated session wants.
+
+**It states the move; it does not propose one.** The first build asked "Ready to move on to Y?",
+and nothing consumed the answer: a respondent who said "yes" spent a turn on it, the next turn found
+the same empty section, and the same sentence came back. A question the interview cannot hear is
+worse than no question. What makes stating it honest is the handover below, which is the surface
+actually doing it.
+
+**The revisit reassurance is said once**, at the FIRST handover of the run: "You can come back to X
+at any point if you want to revisit anything you've said." It is true at every boundary — a visited
+section is reachable again under both navigations — but it is NEWS only the first time, and at every
+boundary of a seven-part instrument it stops being a reassurance and becomes a tic. `firstHandover`
+on `sectionMeta` is resolved from the RUN ("has this respondent finished a part yet"), not from the
+ordinal, so it still lands under `free` navigation where the first part finished need not be the
+first in the list.
+
+---
+
+## The handover
+
+The move the reply just promised, made.
+
+`/messages` emits a `section_covered` frame — `{ sectionKey, nextLabel }` — immediately before
+`done`, and only when the reply actually made the promise: `agentOffersClose` on, and a section to
+move to. **The frame says what the interviewer SAID, not what the server will permit.** It carries
+no gate of its own, because it cannot honestly carry one: the close gate the route holds was
+assessed before this turn's answers landed.
+
+Three parties then have to agree before the respondent is moved, and they are deliberately three:
+
+1. **The server said the promise was made** — the frame. `useQuestionnaireSessionStream` publishes
+   it as `sectionHandover` only on a turn that settled cleanly, because a turn that streamed the
+   sentence and then died is not a promise the surface should keep. It is cleared the instant the
+   NEXT turn starts, which is what lets a respondent cancel the move simply by carrying on talking.
+2. **The strip agrees the section may be finished** — `useSessionWorkspace` requires
+   `view.canClose` and `view.activeKey === handover.sectionKey`. The strip is refetched as this same
+   turn settles, so that is the gate assessed AFTER the answers landed, not the copy the reply was
+   composed against.
+3. **Both of the turn's clocks have settled** — `composerReady`. The beat belongs to
+   `ConversationProvider` rather than the workspace for exactly this reason: it must not start while
+   the sentence explaining the move is still typing itself in, and the reveal cursor lives here.
+
+The beat is `SECTION_HANDOVER_DWELL_MS` (2s) of "Moving on to _{section}_…" in the transcript's own
+`TurnProgress` row, the same row the stage labels use during a turn. The two can never collide: a
+stage label exists only while a turn is in flight, and the beat only runs when none is.
+
+**The cue retires itself when the beat is up, whatever happens to the move.** Usually the move leads
+straight into the next section's opening turn, whose stage labels take the row over. But a refused
+move (the gate widened under them) leaves the respondent with the reply and their own control, and a
+cue still claiming the interview was moving would be a lie for the rest of the session.
+
+The move is recorded with `closeReason` `'agent_offer'` rather than `'respondent'`. Both arrive at
+`/sections` as one identical POST, so the client says which it was; it is an audit label on the run
+and never a gate, which is why accepting it from the client costs nothing. `'cap'` still outranks
+it: a turn budget releasing a section is the more important fact about that close.
 
 ### Closing a section
 
@@ -353,7 +406,8 @@ Two slots in `RESPONDENT_SLOTS`, both in `ESSENTIAL_SLOTS`:
   for a section that is never coming.
 - **`sectionClose`**, "finish this section and move on". Its label names
   `onwardSectionKey(view.sections)`, so it and the list agree on where the move
-  goes.
+  goes. It stays on screen with `agentOffersClose` on: the handover is the
+  interview's own pace, and this is how a respondent moves sooner than that.
 
 Both are essential on the same test: can the respondent finish, correctly,
 without it? Under `sequential` navigation `sectionClose` is the **only** way past

@@ -2962,34 +2962,37 @@ describe('sectioned interviews (P21)', () => {
     };
   }
 
+  /** The resolved section state a sectioned turn context carries, with `over` patching it. */
+  function sectionRunState(over: Record<string, unknown> = {}) {
+    return {
+      active: true,
+      sections: [section('a', 'About you', 0), section('b', 'Your work', 1)],
+      run: {
+        v: 1,
+        activeKey: 'a',
+        sections: [
+          {
+            key: 'a',
+            status: 'in_progress',
+            openedAtTurn: 0,
+            closedAtTurn: null,
+            closeReason: null,
+            reopenCount: 0,
+            turnsSpent: 0,
+          },
+        ],
+      },
+      activeSection: section('a', 'About you', 0),
+      isSectionOpening: true,
+      close: null,
+      allClosed: false,
+      ...over,
+    };
+  }
+
   /** A turn context whose interview is sectioned, with `over` patching the section state. */
   function sectionedContext(over: Record<string, unknown> = {}) {
-    return loadedContext({
-      sectionState: {
-        active: true,
-        sections: [section('a', 'About you', 0), section('b', 'Your work', 1)],
-        run: {
-          v: 1,
-          activeKey: 'a',
-          sections: [
-            {
-              key: 'a',
-              status: 'in_progress',
-              openedAtTurn: 0,
-              closedAtTurn: null,
-              closeReason: null,
-              reopenCount: 0,
-              turnsSpent: 0,
-            },
-          ],
-        },
-        activeSection: section('a', 'About you', 0),
-        isSectionOpening: true,
-        close: null,
-        allClosed: false,
-        ...over,
-      },
-    });
+    return loadedContext({ sectionState: sectionRunState(over) });
   }
 
   it('gives the phraser the section, its position and the one that follows', async () => {
@@ -3055,6 +3058,108 @@ describe('sectioned interviews (P21)', () => {
     expect(persisted.sectionKey).toBe('a');
     expect(persisted.sectionRun?.activeKey).toBe('a');
     expect(persisted.sectionRun?.sections.find((s) => s.key === 'a')?.turnsSpent).toBe(1);
+  });
+
+  /**
+   * A turn whose ACTIVE section has nothing left to ask, on an interview that is not finished.
+   *
+   * Two questions, one per section, and only the first answered — so the whole-interview assessment
+   * is `not_ready` while the section-scoped selector reports the part covered. That gap is the
+   * whole of `section_covered`.
+   */
+  function coveredSectionContext(over: Record<string, unknown> = {}) {
+    const defaults = loadedContext();
+    const q1 = defaults.base.questions[0];
+    const q2 = {
+      ...q1,
+      id: 'q2',
+      key: 'q2',
+      sectionId: 's2',
+      sectionOrdinal: 1,
+      ordinal: 1,
+      prompt: 'What would you change?',
+    };
+    const meta = {
+      key: 'a',
+      label: 'About you',
+      nextLabel: 'Your work' as string | null,
+      firstHandover: true,
+      ...((over.sectionMeta as Record<string, unknown>) ?? {}),
+    };
+    const base = over.base as Record<string, unknown> | undefined;
+    return loadedContext({
+      sectionState: sectionRunState(),
+      base: {
+        ...defaults.base,
+        questions: [q1, q2],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+        sectionQuestions: [q1],
+        sectionMeta: meta,
+        ...base,
+      },
+    });
+  }
+
+  /** The selector reporting the SECTION covered — the verdict the route has to read narrowly. */
+  function sectionCoveredInvokers() {
+    return {
+      ...stubInvokers(),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'complete' as const, rationale: 'section covered', costUsd: 0 },
+      })),
+    };
+  }
+
+  it('tells the surface which move the reply just promised', async () => {
+    // Without the frame the reply said "I'll take us on to Your work" and nothing happened. The
+    // respondent's "yes" was consumed by a turn that found the same empty part and said it again.
+    ctxMock.buildTurnContext.mockResolvedValue(coveredSectionContext());
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    const handover = frames.find((f) => f.event === 'section_covered');
+
+    expect(handover?.data).toMatchObject({ sectionKey: 'a', nextLabel: 'Your work' });
+    // Before `done`, so the surface has it by the time the turn settles.
+    expect(frames.findIndex((f) => f.event === 'section_covered')).toBeLessThan(
+      frames.findIndex((f) => f.event === 'done')
+    );
+  });
+
+  it('promises nothing on the last part, where there is nowhere to move on to', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({ sectionMeta: { nextLabel: null } })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
+  });
+
+  it('promises nothing when the version leaves the move to the respondent', async () => {
+    // `agentOffersClose` off is a facilitated session: the interviewer says the part is covered and
+    // waits. A frame here would have the surface move them on anyway, which is the setting inverted.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        base: {
+          config: {
+            ...defaults.base.config,
+            sections: { ...defaults.base.config.sections, agentOffersClose: false },
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
+  });
+
+  it('promises nothing on an ordinary question turn', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sectionedContext());
+    const frames = await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
   });
 
   it('sends no section block and tags no section when the interview is not sectioned', async () => {

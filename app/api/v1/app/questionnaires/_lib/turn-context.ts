@@ -636,11 +636,19 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   // P21: what the active section is called, and what follows it. Read only to compose the
   // section-covered reply. `ordinal` is a contiguous index over the resolved list, so the next
   // section is simply the next entry.
+  //
+  // `firstHandover` asks the run, not the ordinal: "has this respondent finished a part yet". It is
+  // what gates the one-off reassurance that a finished part can still be returned to, and reading
+  // the ordinal instead would withhold it from anyone whose first finished part was not the first
+  // in the list.
   const sectionMeta = inSection
     ? {
         key: inSection.key,
         label: inSection.label,
         nextLabel: sectionState.sections[inSection.ordinal + 1]?.label ?? null,
+        firstHandover: !(sectionState.run?.sections ?? []).some(
+          (entry) => entry.status === 'closed'
+        ),
       }
     : null;
 

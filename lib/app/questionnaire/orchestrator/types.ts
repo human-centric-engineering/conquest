@@ -156,7 +156,20 @@ export interface TurnState {
    * Present exactly when {@link sectionQuestions} is. Read only to compose the section-covered
    * reply, never to decide anything.
    */
-  sectionMeta?: { key: string; label: string; nextLabel: string | null };
+  sectionMeta?: {
+    key: string;
+    label: string;
+    nextLabel: string | null;
+    /**
+     * True when no section has been finished yet this run — the first handover the respondent will
+     * meet. It is what earns the one-off "you can come back to this part" reassurance a place in
+     * the reply; said at every boundary it would be a tic rather than a reassurance.
+     *
+     * Resolved from the RUN rather than from the ordinal, so it still lands on the first part a
+     * respondent actually finishes when they are free to work in any order.
+     */
+    firstHandover?: boolean;
+  };
   /**
    * Sectioned interviews (P21): the questions in the ACTIVE section, for targeting only.
    *

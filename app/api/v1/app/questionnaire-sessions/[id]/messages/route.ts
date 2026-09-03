@@ -859,6 +859,9 @@ async function handleMessage(
     // Diagnostics: hoisted so the streaming generator (where TS loses `loaded`'s narrowing) can
     // attribute any captured error to this version without re-reading the session.
     const turnVersionId = loaded.session.versionId;
+    // P21: whether the interviewer drives the move between parts. Hoisted for the same reason, and
+    // read only to decide whether this turn emits a `section_covered` frame.
+    const agentDrivesSectionMove = loaded.base.config.sections.agentOffersClose;
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
@@ -868,6 +871,7 @@ async function handleMessage(
       | { type: 'warning'; code: string; message: string; detail?: string }
       | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
       | { type: 'question_card'; card: QuestionCardPayload }
+      | { type: 'section_covered'; sectionKey: string; nextLabel: string }
     > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
@@ -1525,6 +1529,27 @@ async function handleMessage(
       // to a preview session with the toggle on, so it never reaches a real respondent.
       if (inspectorOn && inspectorCalls.length > 0) {
         yield { type: 'inspector', turnIndex: state.selectionRound, calls: inspectorCalls };
+      }
+
+      // Sectioned interviews (P21): this part is covered and the interviewer has just said it is
+      // taking the respondent on to the next one. The frame is what lets the surface KEEP that
+      // promise — it holds a "Moving on to X" cue for a beat and then performs the move.
+      //
+      // Emitted only when the reply actually made the promise: `agentOffersClose` off leaves the
+      // move to the respondent's own control, and the last part has nowhere to go. It carries no
+      // gate of its own — whether the part may actually be finished is re-asserted by `/sections`
+      // on the move, and the surface reads its own refreshed strip before starting the beat. This
+      // frame says what the interviewer SAID, not what the server will permit.
+      if (
+        result.response.kind === 'section_covered' &&
+        result.response.nextLabel !== null &&
+        agentDrivesSectionMove
+      ) {
+        yield {
+          type: 'section_covered',
+          sectionKey: result.response.sectionKey,
+          nextLabel: result.response.nextLabel,
+        };
       }
 
       yield {

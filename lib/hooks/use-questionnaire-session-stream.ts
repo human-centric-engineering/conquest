@@ -45,6 +45,20 @@ import type { ChatAttachment } from '@/lib/orchestration/chat/types';
  *  and this sender can't drift. */
 export type MessageAttachment = ChatAttachment;
 
+/**
+ * Sectioned interviews (P21): the move the interviewer just said it was making.
+ *
+ * `nextLabel` is carried alongside the key because the cue the surface shows names the destination
+ * ("Moving on to Growth Strategy"), and the strip's own view is fetched separately and may not have
+ * caught up by the time the beat starts.
+ */
+export interface SectionHandover {
+  /** The section to finish. The one the reply was spoken in. */
+  sectionKey: string;
+  /** What the interview moves on to. Never empty — the last section announces no move. */
+  nextLabel: string;
+}
+
 export interface UseQuestionnaireSessionStreamOptions {
   /** The session id (the `:id` in `/questionnaire-sessions/:id/messages`). */
   sessionId: string;
@@ -102,6 +116,21 @@ export interface UseQuestionnaireSessionStreamReturn {
    * and never replayed on resume.
    */
   stageLabel: string | null;
+  /**
+   * Sectioned interviews (P21): the handover the reply on screen announced, or `null`.
+   *
+   * Non-null only after a turn that settled cleanly AND ended with the interviewer saying it was
+   * taking the respondent on to the named part. That is the server's `section_covered` frame, which
+   * it emits only when it actually made that promise — the interviewer drives the move on this
+   * version, and there is a part to move to.
+   *
+   * It says what was SAID, never what is permitted: whether the part may be finished is the
+   * `/sections` gate's answer, re-asserted on the move itself.
+   *
+   * Cleared when the next turn starts, so a respondent who answers into a covered part cancels the
+   * move simply by speaking.
+   */
+  sectionHandover: SectionHandover | null;
   /**
    * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
    * oldest first. Seeded from the persisted traces on resume (`initialInspectorTurns`) and extended
@@ -285,6 +314,10 @@ export function useQuestionnaireSessionStream(
   // design — it is never committed onto a turn, and it clears the instant the first content delta
   // lands, because from then on the reply itself is the progress.
   const [stageLabel, setStageLabel] = useState<string | null>(null);
+  // P21: the handover the LAST settled turn announced, or null. Set once the turn settles cleanly
+  // and cleared the moment another turn starts, so it describes the reply currently on screen and
+  // nothing else.
+  const [sectionHandover, setSectionHandover] = useState<SectionHandover | null>(null);
   // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
   // `inspector` frame. Seeded from the persisted traces on resume (so a reload re-hydrates the
   // drawer instead of waiting for the next turn). Never populated for a real respondent — the
@@ -396,6 +429,10 @@ export function useQuestionnaireSessionStream(
       setError(null);
       setStatus('streaming');
       setStreaming(true);
+      // P21: whatever the previous turn announced is over. Cleared HERE rather than on settle, so a
+      // respondent who types during the handover beat cancels the move by speaking — the beat's
+      // timer is keyed on this value, and it is gone before their message is on screen.
+      setSectionHandover(null);
       typing.reset();
 
       const controller = new AbortController();
@@ -411,6 +448,9 @@ export function useQuestionnaireSessionStream(
       let streamReasoning: ReasoningStep[] = [];
       // Question fidelity (P18): the answer control to render inside this turn, if any.
       let streamCard: QuestionCardPayload | null = null;
+      // P21: the section handover this turn announced (one frame, before `done`), published only
+      // once the turn settles cleanly — an interrupted turn made no promise to keep.
+      let streamHandover: SectionHandover | null = null;
       let streamError: ChatErrorState | null = null;
 
       try {
@@ -478,6 +518,10 @@ export function useQuestionnaireSessionStream(
               } else if (ev.type === 'question_card') {
                 // One frame, emitted after the lead-in prose — attached to the committed turn below.
                 streamCard = ev.card;
+              } else if (ev.type === 'section_covered') {
+                // One frame per turn at most. Held rather than applied here: applying it mid-stream
+                // would start the handover beat under a reply still arriving.
+                streamHandover = { sectionKey: ev.sectionKey, nextLabel: ev.nextLabel };
               } else if (ev.type === 'inspector') {
                 // Admin preview only — append this turn's agent-call trace to the session log.
                 const turn = { turnIndex: ev.turnIndex, calls: ev.calls };
@@ -518,6 +562,9 @@ export function useQuestionnaireSessionStream(
           setStatus('idle');
           // Settled cleanly — the attempt succeeded, so drop it: a later send mints a fresh key.
           lastAttemptRef.current = null;
+          // P21: published only on the clean path. A turn that errored out may still have streamed
+          // the sentence promising the move, but the surface must not act on a stream that broke.
+          if (streamHandover) setSectionHandover(streamHandover);
           // The turn (and any answers it captured) is now persisted — let the panel refresh.
           onTurnSettledRef.current?.();
         }
@@ -617,6 +664,7 @@ export function useQuestionnaireSessionStream(
     streaming,
     streamingText: typing.displayText,
     stageLabel,
+    sectionHandover,
     inspectorTurns,
     status,
     error,

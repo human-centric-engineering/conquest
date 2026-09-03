@@ -1958,7 +1958,9 @@ describe('sectioned interviews (P21)', () => {
     fireEvent.change(numberNear(/section is done at/i), { target: { value: '60' } });
     fireEvent.change(numberNear(/this many answered/i), { target: { value: '3' } });
     fireEvent.change(numberNear(/most turns in one section/i), { target: { value: '12' } });
-    fireEvent.click(screen.getByRole('switch', { name: /let the interviewer offer to move on/i }));
+    fireEvent.click(
+      screen.getByRole('switch', { name: /let the interviewer move the interview on/i })
+    );
     fireEvent.click(screen.getByRole('switch', { name: /show sections not yet reached/i }));
 
     clickSave();

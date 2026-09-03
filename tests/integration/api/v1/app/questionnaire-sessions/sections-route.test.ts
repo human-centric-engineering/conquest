@@ -574,6 +574,20 @@ describe('POST /sections — close', () => {
     expect(body.data.activeKey).toBe('s3');
   });
 
+  it('records "agent_offer" when the surface kept the promise the interviewer made', async () => {
+    // The interviewer said "I'll take us on to X" and the surface performed the move after its beat.
+    // An admin reading the session timeline later has to be able to tell that from a respondent who
+    // pressed the control themselves; both arrive here as one POST, so the client says which it was.
+    const res = await POST(req({}, { action: 'close', key: 's2', reason: 'agent_offer' }), ctx);
+    expect(res.status).toBe(200);
+
+    const call = prismaMock.prisma.appQuestionnaireSession.update.mock.calls[0][0] as {
+      data: { sectionRun: SectionRun };
+    };
+    const s2Entry = call.data.sectionRun.sections.find((s) => s.key === 's2');
+    expect(s2Entry).toMatchObject({ status: 'closed', closeReason: 'agent_offer' });
+  });
+
   it('200s and closes with reason "cap" when the turn budget released it, not the bars', async () => {
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -594,6 +608,31 @@ describe('POST /sections — close', () => {
     };
     const s2Entry = call.data.sectionRun.sections.find((s) => s.key === 's2');
     expect(s2Entry).toMatchObject({ status: 'closed', closeReason: 'cap' });
+  });
+
+  it('lets "cap" outrank the client\'s account of who asked for the move', async () => {
+    // A turn budget releasing a section is the more important fact about that close: it is the one
+    // reason that says the gate was never satisfied. It must not be overwritten by a label the
+    // client supplied, forged or otherwise.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        state: sectionState({
+          close: closeGate({
+            assessment: assessment(true),
+            canClose: true,
+            blockedOnRequired: false,
+          }),
+        }),
+      })
+    );
+    const res = await POST(req({}, { action: 'close', key: 's2', reason: 'agent_offer' }), ctx);
+    expect(res.status).toBe(200);
+
+    const call = prismaMock.prisma.appQuestionnaireSession.update.mock.calls[0][0] as {
+      data: { sectionRun: SectionRun };
+    };
+    const s2Entry = call.data.sectionRun.sections.find((s) => s.key === 's2');
+    expect(s2Entry).toMatchObject({ closeReason: 'cap' });
   });
 
   it('closing the last open section leaves the run with no active key, and no active tab', async () => {

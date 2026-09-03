@@ -303,6 +303,8 @@ export function SessionWorkspace({
     sections,
     onSelectSection,
     onCloseSection,
+    onHandoverSection,
+    sectionHandover,
     sectionFocusKey,
     clearSectionFocus,
     lifecycle,
@@ -932,7 +934,12 @@ export function SessionWorkspace({
           share — the reveal queue, and the `composerReady` gate it feeds — therefore rides a
           provider mounted here, above every layout, for the same reason `--cq-chat-scale` does: so
           no layout has to remember it, and so the composer can never open mid-reveal. */}
-      <ConversationProvider stream={stream} animateOpening={autoStart}>
+      <ConversationProvider
+        stream={stream}
+        animateOpening={autoStart}
+        sectionHandover={sectionHandover}
+        onSectionHandover={onHandoverSection}
+      >
         <Layout slots={slots} state={state} />
       </ConversationProvider>
     </div>

@@ -142,6 +142,7 @@ export function CurrentExchange({
     composerReady,
     isTerminal,
     stageLabel,
+    handoverLabel,
   } = useConversation();
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -178,7 +179,9 @@ export function CurrentExchange({
   // whichever ancestor actually scrolls, which is the layout's business rather than this one's.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streaming, revealCursor]);
+    // `handoverLabel` is in here for the same reason `streaming` is: the beat appears below the
+    // reply that announced it, and a cue the respondent has to scroll to find is not a cue.
+  }, [turns.length, streaming, revealCursor, handoverLabel]);
 
   return (
     <div className={cn('flex flex-col gap-6', className)}>
@@ -268,7 +271,7 @@ export function CurrentExchange({
           (above). Only shown once the reveal queue has caught up to every committed turn, so it
           never doubles with an active turn's own beat/typing while earlier opening messages are
           still revealing. */}
-      {streaming && revealCursor >= turns.length && (
+      {(streaming || handoverLabel !== null) && revealCursor >= turns.length && (
         <AssistantTurn>
           {/* P20 Phase 2: the stage the server is actually on — paced and faded so a fast sequence
               is readable (F20.5) — plus an elapsed clock once the wait is long enough to warrant
@@ -276,7 +279,11 @@ export function CurrentExchange({
               the one that gets both. It owns its own row height, which has to stay one row: the
               accent mark beside it is pinned to the turn's first line. The reasoning trace still
               reveals on the settled turn (above), tucking itself away under "Animated". */}
-          <TurnProgress label={stageLabel} />
+          {/* P21: between turns the same row carries the section handover beat — "Moving on to
+              Growth Strategy…" — for the couple of seconds between the reply announcing the move
+              and the move happening. The two can never collide: a stage label only exists while a
+              turn is in flight, and the beat only runs when none is. */}
+          <TurnProgress label={streaming ? stageLabel : handoverLabel} />
         </AssistantTurn>
       )}
 

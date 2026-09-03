@@ -755,7 +755,7 @@ export const SETTING_DESCRIPTORS = {
             c.sections.maxTurnsPerSection > 0 ? String(c.sections.maxTurnsPerSection) : 'No limit',
         },
         {
-          label: 'Interviewer offers to move on',
+          label: 'Interviewer moves the interview on',
           value: yesNo(c.sections.agentOffersClose),
         },
         {

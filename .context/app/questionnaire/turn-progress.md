@@ -147,6 +147,21 @@ the dwell; the fade only softens the change the dwell schedules.
 The component decides how a change LOOKS; the hook decides WHEN one happens. That split is why the
 component's tests never touch timing and the hook's never touch the DOM.
 
+### The one other thing that row carries
+
+Between turns, `TurnProgress` holds the **section handover beat** — "Moving on to Growth Strategy…" —
+for the couple of seconds between the reply saying the interview is moving on and the move happening.
+See [`sectioned-interviews.md`](./sectioned-interviews.md#the-handover).
+
+It shares the row deliberately rather than getting one of its own: it is the same promise the stage
+labels make, that something is happening and the conversation has not stalled. The two can never
+collide, because a stage label exists only while a turn is in flight and the beat only runs when none
+is — so `CurrentExchange` shows `stageLabel` when `streaming` and `handoverLabel` otherwise, and the
+row is mounted when either exists.
+
+The beat is NOT paced by `usePacedStageLabel`. It is a single label with its own dwell, and running
+it through the queue would add a second clock to a two-second window.
+
 ### Where it renders
 
 `TurnProgress` (`components/app/questionnaire/chat/turn-progress.tsx`), mounted by `CurrentExchange`

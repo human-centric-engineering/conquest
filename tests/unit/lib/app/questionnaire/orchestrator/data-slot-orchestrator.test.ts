@@ -1725,7 +1725,7 @@ describe('runDataSlotTurn — sectioned interviews (P21)', () => {
     if (result.response.kind === 'section_covered') {
       expect(result.response.sectionKey).toBe('about');
       expect(result.response.text).toBe(
-        "That's everything for About you. Ready to move on to Your work?"
+        "That's everything for About you. I'll take us on to Your work now."
       );
     }
     expect(result.targetedQuestionId).toBeNull();

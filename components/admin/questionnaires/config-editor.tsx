@@ -1937,16 +1937,17 @@ export function ConfigEditor({
                       checked={sections.agentOffersClose}
                       onCheckedChange={(v) => setSections((x) => ({ ...x, agentOffersClose: v }))}
                       disabled={busy}
-                      aria-label="Let the interviewer offer to move on"
+                      aria-label="Let the interviewer move the interview on"
                     />
                     <span>
-                      Let the interviewer offer to move on{' '}
-                      <FieldHelp title="Interviewer offers to move on">
-                        With this on, the interviewer says when a section is covered and names the
-                        one that follows, as well as the button appearing. Without it the button
-                        appears on its own, and someone who is not watching for it will keep
-                        answering a section that is already finished. Either way, once a section has
-                        nothing left to ask the interviewer says so rather than going quiet.
+                      Let the interviewer move the interview on{' '}
+                      <FieldHelp title="Interviewer moves the interview on">
+                        With this on, once a section has nothing left to ask the interviewer says
+                        so, names the one that follows, and takes the respondent there after a
+                        couple of seconds. The button is still there for anyone who wants to move on
+                        sooner. Without it the interviewer still says the section is covered, but
+                        waits: the move is the respondent&rsquo;s to make, which is what a
+                        facilitated session usually wants.
                       </FieldHelp>
                     </span>
                   </label>

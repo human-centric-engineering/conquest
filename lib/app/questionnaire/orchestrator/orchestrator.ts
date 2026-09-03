@@ -93,25 +93,51 @@ export const COMPLETE_MESSAGE =
 export const NONE_MESSAGE =
   "We've reached the end of the available questions. Thanks for your answers.";
 
+/** What {@link sectionCoveredMessage} needs to know to compose the handover. */
+export interface SectionCoveredMessageInput {
+  /** The part that has just been covered. */
+  label: string;
+  /** The part that follows, or `null` on the last one. */
+  nextLabel: string | null;
+  /** `sections.agentOffersClose` — whether the interviewer moves the interview on itself. */
+  offersClose: boolean;
+  /** True when no part has been finished yet this run. Drives the one-off revisit reassurance. */
+  firstHandover?: boolean;
+}
+
 /**
  * Sectioned interviews (P21): what to say when THIS section has nothing left to ask.
  *
- * `agentOffersClose` is the version's decision about whether the interviewer offers the move or
- * simply reports the part is covered and leaves the move to the respondent's own control. The
- * difference is a real one: an author running a facilitated session may want the respondent to
- * decide when to leave a part, and an interviewer that keeps proposing it is pressure.
+ * **It states the move rather than proposing it.** It used to ask "Ready to move on to X?", and
+ * nothing consumed the answer: a respondent who said "yes" got the same sentence back, because the
+ * next turn found the same empty section and composed the same reply. A question the interview
+ * cannot hear is worse than no question, so with `agentOffersClose` on the interviewer says what it
+ * is about to do and the surface then does it (see the `section_covered` frame on `/messages`).
  *
- * The last section never offers, whatever the setting says: there is nowhere to move on to, and
- * the whole-interview completion offer is the affordance that matters there.
+ * `agentOffersClose` is the version's decision about whether the interviewer drives that move or
+ * leaves it to the respondent's own control. The difference is a real one: an author running a
+ * facilitated session may want the respondent to decide when to leave a part.
+ *
+ * The last section never moves on, whatever the setting says: there is nowhere to go, and the
+ * whole-interview completion offer is the affordance that matters there.
+ *
+ * **The revisit reassurance is said once**, at the first handover of the run. It is true at every
+ * boundary (a visited part is always reachable again, under both navigations), but it is NEWS only
+ * the first time; repeating it at every boundary of a seven-part instrument turns a reassurance
+ * into a tic. `firstHandover` is resolved from the run, not from the ordinal, so it still lands on
+ * the first part a respondent actually finishes under `free` navigation.
  */
-export function sectionCoveredMessage(
-  label: string,
-  nextLabel: string | null,
-  offersClose: boolean
-): string {
+export function sectionCoveredMessage(input: SectionCoveredMessageInput): string {
+  const { label, nextLabel, offersClose, firstHandover = false } = input;
   const covered = `That's everything for ${label}.`;
-  if (!offersClose || nextLabel === null) return covered;
-  return `${covered} Ready to move on to ${nextLabel}?`;
+  if (nextLabel === null) return covered;
+  const move = offersClose
+    ? `I'll take us on to ${nextLabel} now.`
+    : `${nextLabel} is next whenever you're ready.`;
+  const revisit = firstHandover
+    ? ` You can come back to ${label} at any point if you want to revisit anything you've said.`
+    : '';
+  return `${covered} ${move}${revisit}`;
 }
 
 /** Look up a question's display prompt; empty when the loader didn't populate it. */
@@ -554,10 +580,15 @@ export async function runTurn(
       targetedQuestionId = decision.questionId;
       selectionRationale = decision.rationale;
     } else if (sectionEnded && state.sectionMeta) {
-      const { key, label, nextLabel } = state.sectionMeta;
+      const { key, label, nextLabel, firstHandover } = state.sectionMeta;
       response = {
         kind: 'section_covered',
-        text: sectionCoveredMessage(label, nextLabel, state.config.sections.agentOffersClose),
+        text: sectionCoveredMessage({
+          label,
+          nextLabel,
+          offersClose: state.config.sections.agentOffersClose,
+          ...(firstHandover !== undefined ? { firstHandover } : {}),
+        }),
         sectionKey: key,
         nextLabel,
       };

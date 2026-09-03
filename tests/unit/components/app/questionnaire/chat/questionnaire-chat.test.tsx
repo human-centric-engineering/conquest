@@ -81,6 +81,7 @@ function makeReturn(
     streaming: false,
     streamingText: '',
     stageLabel: null,
+    sectionHandover: null,
     inspectorTurns: [],
     status: 'idle',
     error: null,

@@ -1124,4 +1124,88 @@ describe('useQuestionnaireSessionStream — turn stage label', () => {
     // Nothing was committed — proving the label was cleared by the teardown, not by a content delta.
     expect(result.current.turns).toEqual([{ role: 'user', content: 'hi' }]);
   });
+
+  describe('the section handover (P21)', () => {
+    const HANDOVER_FRAMES = [
+      frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+      frame('content', { delta: "That's everything for Opening. I'll take us on to Growth now." }),
+      frame('section_covered', { sectionKey: 'opening', nextLabel: 'Growth' }),
+      frame('done', { costUsd: 0.001 }),
+    ];
+
+    it('publishes the handover the settled reply announced', async () => {
+      fetchMock.mockResolvedValue(streamResponse(HANDOVER_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+
+      expect(result.current.sectionHandover).toEqual({
+        sectionKey: 'opening',
+        nextLabel: 'Growth',
+      });
+    });
+
+    it('publishes nothing on an ordinary turn', async () => {
+      fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('hi');
+      });
+
+      expect(result.current.sectionHandover).toBeNull();
+    });
+
+    it('withholds the handover when the stream broke, however far the sentence got', async () => {
+      // The reply may well have streamed the promise before the connection died. Acting on it would
+      // move the respondent on the strength of a turn the surface could not finish reading.
+      const encoder = new TextEncoder();
+      let read = 0;
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (read++ === 0) {
+                return {
+                  value: encoder.encode(
+                    frame('section_covered', { sectionKey: 'opening', nextLabel: 'Growth' })
+                  ),
+                  done: false,
+                };
+              }
+              throw new TypeError('network error');
+            },
+          }),
+        },
+        json: async () => ({}),
+      });
+
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.sectionHandover).toBeNull();
+    });
+
+    it('retires the handover the moment the next turn starts', async () => {
+      // What lets a respondent cancel the move by speaking: the beat is keyed on this value, so it
+      // has to be gone before their message is on screen, not when the next reply settles.
+      fetchMock.mockResolvedValue(streamResponse(HANDOVER_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+      expect(result.current.sectionHandover).not.toBeNull();
+
+      fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+      await act(async () => {
+        await result.current.sendMessage('actually, one more thing');
+      });
+      expect(result.current.sectionHandover).toBeNull();
+    });
+  });
 });

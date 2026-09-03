@@ -30,6 +30,7 @@ import { useRouter } from 'next/navigation';
 
 import { useHorizontalSwipe } from '@/lib/hooks/use-horizontal-swipe';
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
+import type { SectionHandover } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
 import { useSectionStrip } from '@/lib/hooks/use-section-strip';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
@@ -164,6 +165,14 @@ export interface SessionWorkspaceState {
   sections: ReturnType<typeof useSectionStrip>;
   /** Move to a section: opens it, brings its answers into focus, and opens it in conversation. */
   onSelectSection: (key: string) => void;
+  /** Finish the active section BECAUSE the interviewer said it would. Records `agent_offer`. */
+  onHandoverSection: () => void;
+  /**
+   * Sectioned interviews (P21): the move the reply on screen announced, when the strip agrees the
+   * part may be finished. Null the rest of the time. The surface holds a "Moving on to Y" cue for a
+   * beat and then calls {@link onCloseSection}.
+   */
+  sectionHandover: SectionHandover | null;
   /** Finish the active section and hand the run to the next one. */
   onCloseSection: () => void;
   /**
@@ -963,6 +972,41 @@ export function useSessionWorkspace({
     if (sections.view.activeKey) sections.close(sections.view.activeKey);
   }, [sections]);
 
+  /**
+   * The same move, taken because the interviewer said it was taking it. Separate from
+   * {@link onCloseSection} only so the run records WHO decided: an admin reading the session
+   * timeline later can tell a respondent who pressed the control from one the interview carried.
+   */
+  const onHandoverSection = useCallback(() => {
+    if (sections.view.activeKey) sections.close(sections.view.activeKey, 'agent_offer');
+  }, [sections]);
+
+  /* ── The handover the interviewer promised (P21) ───────────────────────────────────────────
+     The reply that has just landed said "That's everything for X. I'll take us on to Y." Something
+     has to make that true, or the respondent is left saying "yes" to a question no turn consumes —
+     which is exactly what the offer used to do.
+
+     Two things have to agree before the move is taken:
+
+     - The SERVER said the interviewer made the promise. That is the `section_covered` frame, which
+       is emitted only when the version lets the interviewer drive the move and there is a part to
+       move to.
+     - The STRIP says the part may actually be finished. Its view is refetched as this same turn
+       settles, so `canClose` here is the gate assessed AFTER this turn's answers landed — not the
+       stale copy the reply was composed against. The `/sections` route re-asserts it on the move
+       regardless; this check is what stops the surface promising a beat the server will refuse.
+
+     Keyed on the active section too, so a respondent who moves somewhere else during the beat does
+     not have the interview finish a part they have already left. */
+  const streamHandover = stream.sectionHandover;
+  const sectionHandover =
+    streamHandover &&
+    sections.view.active &&
+    sections.view.canClose &&
+    sections.view.activeKey === streamHandover.sectionKey
+      ? streamHandover
+      : null;
+
   return {
     phase,
 
@@ -989,6 +1033,8 @@ export function useSessionWorkspace({
     sections,
     onSelectSection,
     onCloseSection,
+    onHandoverSection,
+    sectionHandover,
     sectionFocusKey,
     clearSectionFocus,
     lifecycle,

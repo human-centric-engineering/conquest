@@ -48,8 +48,16 @@ export interface UseSectionStripReturn {
   moving: boolean;
   refetch: () => void;
   open: (key: string) => void;
-  close: (key: string) => void;
+  /**
+   * Finish a section. `reason` records WHO decided: omitted, the respondent pressed the control;
+   * `agent_offer`, the interviewer announced the move and the surface kept that promise. It is an
+   * audit label on the run, never a gate — the server assesses the close itself either way.
+   */
+  close: (key: string, reason?: SectionCloseTrigger) => void;
 }
+
+/** Who asked for a section to be finished. See {@link UseSectionStripReturn.close}. */
+export type SectionCloseTrigger = 'agent_offer';
 
 interface SuccessEnvelope {
   data: SectionStripView;
@@ -109,7 +117,7 @@ export function useSectionStrip(options: UseSectionStripOptions): UseSectionStri
   }, [sessionId, enabled, headers]);
 
   const move = useCallback(
-    (action: 'open' | 'close', key: string) => {
+    (action: 'open' | 'close', key: string, reason?: SectionCloseTrigger) => {
       if (!enabled || moving) return;
       setMoving(true);
 
@@ -117,7 +125,7 @@ export function useSectionStrip(options: UseSectionStripOptions): UseSectionStri
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...headers() },
-        body: JSON.stringify({ action, key }),
+        body: JSON.stringify({ action, key, ...(reason ? { reason } : {}) }),
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -138,7 +146,10 @@ export function useSectionStrip(options: UseSectionStripOptions): UseSectionStri
   );
 
   const open = useCallback((key: string) => move('open', key), [move]);
-  const close = useCallback((key: string) => move('close', key), [move]);
+  const close = useCallback(
+    (key: string, reason?: SectionCloseTrigger) => move('close', key, reason),
+    [move]
+  );
 
   useEffect(() => {
     if (initialView === undefined) refetch();
