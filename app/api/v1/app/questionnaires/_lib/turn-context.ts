@@ -291,6 +291,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Null on every ordinary session, and before the planner has run on an adaptive one —
       // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
       interviewPlan: true,
+      earlySeatedTopics: true,
       // P21: the section run state, read every turn from the row already loaded.
       sectionRun: true,
       version: {
@@ -538,6 +539,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     versionId: session.versionId,
     settings: config.conditionalTopics,
     interviewPlan: session.interviewPlan,
+    earlySeatedTopics: session.earlySeatedTopics,
     weightByQuestionKey: new Map(questions.map((q) => [q.key, q.weight])),
     weightByDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight])),
   });
@@ -551,6 +553,27 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const scopedDataSlots = scope.scope.active
     ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
     : dataSlots;
+
+  // ── The early-seating bridge (F17.36 phase 4) ────────────────────────────────────────────────
+  // The data slots belonging to topics this interview seated DURING its opening, so the targeting
+  // can MOVE to the area the respondent made obvious rather than only counting it as in scope.
+  //
+  // Only while the plan is still null. After the seal the opening is over, the plan governs, and a
+  // preference for one topic over another would be re-ordering a decision that has been made.
+  // Empty (and therefore absent) on every session that never seated one early, which is nearly all
+  // of them — and absent leaves the pick exactly as it was.
+  const bridgeDataSlotKeys =
+    scope.settings.earlyTopicSeating &&
+    scope.settings.bridgeToSeatedTopics &&
+    scope.plan === null &&
+    scope.earlySeated !== null
+      ? (() => {
+          const seatedTopicKeys = new Set(scope.earlySeated.seated.map((t) => t.key));
+          return scopedDataSlots
+            .filter((d) => seatedTopicKeys.has(scope.scope.topicByDataSlotKey.get(d.key) ?? ''))
+            .map((d) => d.key);
+        })()
+      : [];
 
   // ── Sectioned interviews (P21) ────────────────────────────────────────────────────────────────
   // The second choke point, and deliberately AFTER scope rather than beside it: sections decide the
@@ -613,11 +636,19 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   // P21: what the active section is called, and what follows it. Read only to compose the
   // section-covered reply. `ordinal` is a contiguous index over the resolved list, so the next
   // section is simply the next entry.
+  //
+  // `firstHandover` asks the run, not the ordinal: "has this respondent finished a part yet". It is
+  // what gates the one-off reassurance that a finished part can still be returned to, and reading
+  // the ordinal instead would withhold it from anyone whose first finished part was not the first
+  // in the list.
   const sectionMeta = inSection
     ? {
         key: inSection.key,
         label: inSection.label,
         nextLabel: sectionState.sections[inSection.ordinal + 1]?.label ?? null,
+        firstHandover: !(sectionState.run?.sections ?? []).some(
+          (entry) => entry.status === 'closed'
+        ),
       }
     : null;
 
@@ -718,6 +749,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Data Slots feature: present always (cheap); the route decides whether to run data-slot
       // mode (flag on + dataSlots non-empty). The pure orchestrators read these only in that mode.
       dataSlots: scopedDataSlots,
+      ...(bridgeDataSlotKeys.length > 0 ? { bridgeDataSlotKeys } : {}),
       dataSlotAnswered,
       activeDataSlotKey,
       dataSlotAttempts,

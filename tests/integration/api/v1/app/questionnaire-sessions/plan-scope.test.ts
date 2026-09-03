@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
     appDataSlot: { findMany: vi.fn() },
   },
   planScope: vi.fn(),
-  recordAiRun: vi.fn(async () => undefined),
+  recordAiRun: vi.fn(async (_input: { detail: Record<string, unknown> }) => undefined),
 }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
@@ -64,25 +64,49 @@ function topicRow(
 }
 
 /** A session whose opening is a question-only topic — the shape the old gate mis-read. */
-function session(over: { answers?: string[]; fills?: string[] } = {}) {
+function session(
+  over: {
+    answers?: string[];
+    fills?: string[];
+    /** Slots the orchestrator gave up on and parked with a synthesised `provisional` fill. */
+    parkedFills?: string[];
+    turns?: number;
+    settings?: Record<string, unknown>;
+    earlySeatedTopics?: unknown;
+  } = {}
+) {
   return {
     versionId: 'v1',
     interviewPlan: null,
-    version: { goal: 'find the constraint', config: { conditionalTopics: { enabled: true } } },
-    dataSlotFills: (over.fills ?? []).map((key) => ({
-      confidence: 0.9,
-      value: 'said something',
-      paraphrase: null,
-      provisional: false,
-      provenanceLabel: 'direct',
-      dataSlot: { key },
-    })),
+    earlySeatedTopics: over.earlySeatedTopics ?? null,
+    version: {
+      goal: 'find the constraint',
+      config: { conditionalTopics: { enabled: true, ...over.settings } },
+    },
+    dataSlotFills: [
+      ...(over.fills ?? []).map((key) => ({
+        confidence: 0.9,
+        value: 'said something',
+        paraphrase: null,
+        provisional: false,
+        provenanceLabel: 'direct',
+        dataSlot: { key },
+      })),
+      ...(over.parkedFills ?? []).map((key) => ({
+        confidence: 0.2,
+        value: 'best guess',
+        paraphrase: null,
+        provisional: true,
+        provenanceLabel: 'inferred',
+        dataSlot: { key },
+      })),
+    ],
     answers: (over.answers ?? []).map((key) => ({
       value: null,
       paraphrase: `what they said about ${key}`,
       questionSlot: { key, prompt: `the question behind ${key}?` },
     })),
-    _count: { turns: 1 },
+    _count: { turns: over.turns ?? 1 },
   };
 }
 
@@ -353,5 +377,176 @@ describe('maybePlanScope — the time budget', () => {
 
     expect(mocks.planScope.mock.calls[0][0].budget).toBeUndefined();
     expect(mocks.prisma.appDataSlot.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('maybePlanScope — the opening turn backstop (F17.36)', () => {
+  /** The stall shape: an opening member no respondent can ever cover. */
+  function stalled(over: { turns?: number; settings?: Record<string, unknown> } = {}) {
+    return session({ answers: ['q1'], ...over });
+  }
+
+  it('does not fire below the limit', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      stalled({ turns: 8, settings: { maxOpeningTurns: 12 } })
+    );
+
+    expect(await maybePlanScope('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'opening still in progress',
+    });
+    expect(mocks.planScope).not.toHaveBeenCalled();
+  });
+
+  it('never fires while the setting is 0, however many turns have passed', async () => {
+    // 0 is "no limit", not "close immediately". Getting this backwards would close every opening
+    // on its first turn, on every version that never asked for this.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(stalled({ turns: 400 }));
+
+    expect(await maybePlanScope('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'opening still in progress',
+    });
+  });
+
+  it('closes the opening at the limit and plans on what there is', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      stalled({ turns: 12, settings: { maxOpeningTurns: 12 } })
+    );
+
+    const result = await maybePlanScope('s1');
+
+    expect(result.kind).toBe('planned');
+    expect(mocks.planScope).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the turn, the limit and what was never covered', async () => {
+    // A forced plan and a considered one are identical in `topics`. Without this record an admin
+    // holding a thin report cannot tell that the interview decided early rather than decided badly.
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { questionKeys: ['q1', 'q2'], dataSlotKeys: ['routing'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      stalled({ turns: 15, settings: { maxOpeningTurns: 12 } })
+    );
+
+    const result = await maybePlanScope('s1');
+
+    expect(result.kind).toBe('planned');
+    if (result.kind !== 'planned') return;
+    expect(result.plan.forcedClose).toEqual({
+      atTurn: 15,
+      limitTurns: 12,
+      uncovered: { dataSlotKeys: ['routing'], questionKeys: ['q2'] },
+    });
+
+    // And it is what was written, not only what was returned.
+    const written = mocks.prisma.appQuestionnaireSession.updateMany.mock.calls[0]?.[0] as {
+      data: { interviewPlan: { forcedClose?: unknown } };
+    };
+    expect(written.data.interviewPlan.forcedClose).toEqual(result.plan.forcedClose);
+  });
+
+  it('leaves no forcedClose on a plan whose opening simply finished', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'], turns: 30, settings: { maxOpeningTurns: 12 } })
+    );
+
+    const result = await maybePlanScope('s1');
+
+    expect(result.kind).toBe('planned');
+    if (result.kind !== 'planned') return;
+    expect(result.plan.forcedClose).toBeUndefined();
+  });
+
+  it('still counts a parked data slot as covered, so parking is not undone by this', async () => {
+    // The orchestrator parks a slot it has given up re-asking, and that park is what stops a vague
+    // answer holding the interview open. The gate must keep honouring it — the early-seating floor
+    // is the reader that will not.
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { questionKeys: ['q1'], dataSlotKeys: ['situation'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1'], parkedFills: ['situation'], turns: 2 })
+    );
+
+    const result = await maybePlanScope('s1');
+
+    expect(result.kind).toBe('planned');
+    if (result.kind !== 'planned') return;
+    expect(result.plan.forcedClose).toBeUndefined();
+  });
+});
+
+describe('maybePlanScope — absorbing early seats (F17.36)', () => {
+  const early = {
+    v: 1,
+    seated: [
+      {
+        key: 'pipeline',
+        depth: 'full',
+        confidence: 0.93,
+        rationale: 'seated early',
+        respondentReason: 'you mentioned it',
+        atTurn: 3,
+      },
+    ],
+    deferred: [],
+    lastPassAtTurn: 3,
+    evidenceKey: 'e',
+    overCap: false,
+  };
+
+  it('hands the seated topics to the planner as pre-seated', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'], earlySeatedTopics: early })
+    );
+
+    await maybePlanScope('s1');
+
+    const params = mocks.planScope.mock.calls[0]?.[0] as {
+      preSeated?: Array<{ key: string }>;
+    };
+    expect(params.preSeated?.map((s) => s.key)).toEqual(['pipeline']);
+  });
+
+  it('passes nothing when the session seated nothing early, which is nearly all of them', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'] })
+    );
+
+    await maybePlanScope('s1');
+
+    const params = mocks.planScope.mock.calls[0]?.[0] as { preSeated?: unknown };
+    expect(params.preSeated).toBeUndefined();
+  });
+
+  it('records which topics were already committed to on the audit row', async () => {
+    // Without it the audit row cannot tell a planner choice from a ratified one, which is the
+    // difference between "the agent chose this" and "the interview had already asked about it".
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'], earlySeatedTopics: early })
+    );
+
+    await maybePlanScope('s1');
+
+    const run = mocks.recordAiRun.mock.calls[0]?.[0];
+    expect(run?.detail.preSeatedKeys).toEqual(['pipeline']);
+  });
+
+  it('ignores an unreadable early-seating blob rather than failing the plan', async () => {
+    // Null means "nothing was seated early", which resolves to the plan alone — exactly the
+    // pre-F17.36 behaviour, and the safe direction for a record whose absence costs nothing.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'], earlySeatedTopics: { v: 99, seated: 'nonsense' } })
+    );
+
+    const result = await maybePlanScope('s1');
+
+    expect(result.kind).toBe('planned');
+    const params = mocks.planScope.mock.calls[0]?.[0] as { preSeated?: unknown };
+    expect(params.preSeated).toBeUndefined();
   });
 });

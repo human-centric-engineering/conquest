@@ -28,6 +28,30 @@ export interface ReasoningTraceOptions {
   dataSlots?: DataSlotTarget[];
   /** True on the opening/kickoff turn, so the selection step reads as a warm "let's begin". */
   isOpening?: boolean;
+  /**
+   * Conditional Topics: the areas this turn's reply is announcing, if any.
+   *
+   * Passed in rather than read off the {@link TurnResult} because the decision is not part of the
+   * turn: the plan is sealed at the END of the turn that completes the opening, and announced on the
+   * next one. The route already resolves exactly that ("is the announcement due this turn"), so
+   * handing the answer down keeps one rule for when the respondent is told, in the chat and here.
+   *
+   * The rule this must not break is the same one the announcement itself obeys: say WHAT will now be
+   * covered and why, never that a decision was made about them, and never a key, score or criterion.
+   */
+  scopeDecision?: ScopeDecisionNote;
+}
+
+/** One announcement's worth of areas, as {@link ReasoningTraceOptions.scopeDecision} carries it. */
+export interface ScopeDecisionNote {
+  /**
+   * Whether the whole interview was just shaped (`planned`), or one area was brought in while the
+   * opening was still running (`seated`). Two genuinely different moments, and the trace should not
+   * describe a partial decision as the whole one.
+   */
+  kind: 'planned' | 'seated';
+  /** Respondent-facing area labels, in the order the interview will meet them. */
+  labels: string[];
 }
 
 /** Most extraction steps a single turn may show — a side-effect-heavy reply shouldn't flood the feed. */
@@ -197,6 +221,29 @@ export function buildReasoningTrace(
           : 'Tracking your progress',
       detail: `${pct}% covered so far`,
       tone: 'neutral',
+    });
+  }
+
+  // 4b. Scope — Conditional Topics has just decided which areas of the questionnaire this
+  //     respondent gets, and the reply is saying so. Without this the interview visibly changed
+  //     shape and the one surface whose whole job is to account for its choices said nothing about
+  //     the largest choice it makes.
+  //
+  //     Before the selection step, because it is the reason behind it: what the interview will now
+  //     cover, then the question it is asking out of that.
+  const scope = opts.scopeDecision;
+  if (scope && scope.labels.length > 0) {
+    steps.push({
+      kind: 'scope',
+      label:
+        scope.kind === 'planned'
+          ? 'Focusing on what matters for you'
+          : 'Adding something worth going into',
+      detail:
+        scope.labels.length === 1
+          ? `We'll cover ${scope.labels[0]}.`
+          : `We'll cover ${scope.labels.slice(0, -1).join(', ')} and ${scope.labels[scope.labels.length - 1]}.`,
+      tone: 'insight',
     });
   }
 

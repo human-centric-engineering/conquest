@@ -35,6 +35,11 @@ and then proposes them as conditional topics anyway, because a block belonging t
 unaskable questions (`validate.ts` → `orphaned_questions`). The silence was fixed in the post-R010
 prompt work. The coercion cannot be: it is a missing mechanism, and this is that mechanism.
 
+> **Note (2026-09-02): hard rules were deleted.** The framing below still describes the shape of a
+> trigger correctly — a deterministic assertion resolved before the model — but there is no longer
+> a hard-rules tier for it to sit beside, so §6.1's "evaluate triggers exactly as
+> `evaluateScopeRules` does" now means writing that evaluation rather than reusing it.
+
 ## 2. The one-line architecture
 
 > **A trigger is a hard rule whose input is the transcript instead of the opening's data slots.**

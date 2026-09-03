@@ -2,7 +2,7 @@
  * Workflow diagram: Conditional Topics evaluation (judge panel) (F17.21).
  *
  * A second "panel of judges" — sibling to the design-evaluation panel (`design-evaluation.ts`) —
- * but scoring the AUTHORED CONDITIONAL-TOPICS CONFIG (topics, hard rules, planner instructions, budget)
+ * but scoring the AUTHORED CONDITIONAL-TOPICS CONFIG (topics, planner instructions, budget)
  * rather than the question structure. One structured judge runs per dimension — criteria quality,
  * rule integrity, budget realism, coverage-and-burden — fanned out concurrently, each returning a
  * 0–1 score plus actionable findings. Each judge is its own seeded agent, so they render as
@@ -74,7 +74,7 @@ export const scopeEvaluationWorkflow = diagram({
       x: 0,
       y: 0,
       description:
-        "Flatten the version's authored topics, hard rules, planner settings and session budget into the judge input, alongside the issues the deterministic validateConditionalTopics checker already caught — the single snapshot every judge reads.",
+        "Flatten the version's authored topics, planner settings and session budget into the judge input, alongside the issues the deterministic validateConditionalTopics checker already caught — the single snapshot every judge reads.",
       meta: { note: 'buildScopeEvaluationStructure → the ScopeStructureInput every judge scores.' },
       // Fan out to all four judges concurrently.
       next: judgeNodes.map((j) => j.id),

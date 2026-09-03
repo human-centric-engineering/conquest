@@ -1142,6 +1142,16 @@ model AppQuestionnaireSession {
   // the auditable record of HOW the plan was reached (prompt, model output, confidence, candidates)
   // lives in the AppAiRun snapshot, so this column only has to carry the decision itself.
   interviewPlan        Json?
+  // Conditional Topics (F17.36): topics seated DURING the opening, before the plan was sealed, plus
+  // any the per-turn cap judged but deferred (EarlySeating — lib/.../scope/types.ts). Null on every
+  // session that never seated one early, which is nearly all of them.
+  //
+  // A SEPARATE column rather than a partial `interviewPlan`, because the once-only write guard
+  // above keys on `interviewPlan` being null: a partial plan written there would make the session
+  // look sealed and the final planner would never run. `resolveScope` unions the two, and at seal
+  // time the early seats are handed to the planner as pre-seated keys and survive the cap. Kept
+  // after sealing as the record of when each was seated and on what evidence.
+  earlySeatedTopics    Json?
 
   // Sectioned interviews (P21): SectionRun — which section this respondent is in, and the state of
   // each one. `{ v: 1, activeKey, sections: [{ key, status, openedAtTurn, closedAtTurn,

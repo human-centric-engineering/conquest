@@ -13,7 +13,6 @@ import type { ScopeStructureInput } from '@/lib/app/questionnaire/scope-evaluati
 import type { ScopeFindingTargetView } from '@/lib/app/questionnaire/views';
 
 const TOPIC_PREFIX = 'topic:';
-const RULE_PREFIX = 'rule:';
 const SETTINGS_KEY = 'settings';
 const SETTINGS_LABEL = 'Conditional topics settings';
 
@@ -45,21 +44,6 @@ export function resolveScopeFindingTarget(
       kind: 'topic',
       key: targetKey,
       label: located.label,
-      removed: current !== null && live === null,
-    };
-  }
-
-  if (targetKey.startsWith(RULE_PREFIX)) {
-    const id = targetKey.slice(RULE_PREFIX.length);
-    const live = current?.rules.find((r) => r.id === id) ?? null;
-    const located = live ?? snapshot?.rules.find((r) => r.id === id) ?? null;
-    if (!located) {
-      return { kind: 'unknown', key: targetKey, label: targetKey, removed: false };
-    }
-    return {
-      kind: 'rule',
-      key: targetKey,
-      label: located.sentence,
       removed: current !== null && live === null,
     };
   }

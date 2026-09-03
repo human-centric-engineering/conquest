@@ -1816,34 +1816,63 @@ export function ConfigEditor({
                     </Select>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
+                  {/* The two bars are AND'd, and the label used to say "Or", which read as the
+                      opposite of what `assessSectionCompletion` does. Stated up-front here because
+                      neither field can carry it alone. */}
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    Each section is judged on its <strong>own</strong> questions, so a short section
+                    and a long one both reach 100% when everything in them is answered. The move to
+                    the next section unlocks once <strong>both</strong> bars below are met and no
+                    required question in the section is still open. Leave the count at{' '}
+                    <code className="text-xs">0</code> (the usual setting) and the percentage
+                    decides on its own.
+                  </p>
+                  {/* Subgrid rather than two independent stacks: the right-hand label wraps to two
+                      lines at this width, which pushed its input a row lower than the left one.
+                      Sharing the three rows keeps label / input / hint aligned however they wrap. */}
+                  <div className="grid gap-x-4 gap-y-4 sm:grid-cols-2 sm:grid-rows-[auto_auto_auto] sm:gap-y-1.5">
+                    <div className="flex flex-col gap-1.5 sm:row-span-3 sm:grid sm:grid-rows-subgrid">
                       <Label className="text-sm font-medium">
-                        Section is done at (%){' '}
+                        Section is done at{' '}
                         <FieldHelp title="When a section counts as done">
-                          How much of a section has to be covered before the respondent is offered
-                          the move to the next one. 100% means every question in the section is
-                          answered. Lower it to let people move on sooner. If you also set an
-                          answered-count beside this, both have to be met.
+                          How much of <strong>this section</strong> has to be covered before the
+                          respondent is offered the move to the next one. It is measured against the
+                          section&rsquo;s own questions and weighted by question weight, so a
+                          heavier question moves it further. <code className="text-xs">100</code> =
+                          everything in the section is answered (the default);{' '}
+                          <code className="text-xs">80</code> lets people move on with a bit
+                          outstanding. The count beside this has to be met as well, not instead.
                         </FieldHelp>
                       </Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={sectionCloseCoveragePct}
-                        onChange={(e) => setSectionCloseCoveragePct(e.target.value)}
-                        disabled={busy}
-                      />
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={sectionCloseCoveragePct}
+                          onChange={(e) => setSectionCloseCoveragePct(e.target.value)}
+                          disabled={busy}
+                          className="pr-8"
+                        />
+                        <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
+                          %
+                        </span>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        Percentage of the section the respondent is in.
+                      </p>
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="flex flex-col gap-1.5 sm:row-span-3 sm:grid sm:grid-rows-subgrid">
                       <Label className="text-sm font-medium">
-                        Or this many answered{' '}
+                        And this many answered{' '}
                         <FieldHelp title="Answered-count bar">
-                          A second bar, applied on top of the percentage rather than instead of it:
-                          the section also needs at least this many questions answered. Leave it at
-                          0 unless you have a reason, so the percentage gates alone.
+                          A second bar on top of the percentage, not an alternative to it: the
+                          section also needs at least this many of its own questions answered. It is
+                          the same number for every section, so where sections differ in length it
+                          tends to bind on the short ones and do nothing on the long ones. That is
+                          why <code className="text-xs">0</code> is the default, meaning it is not a
+                          criterion at all.
                         </FieldHelp>
                       </Label>
                       <Input
@@ -1859,33 +1888,48 @@ export function ConfigEditor({
                         }
                         disabled={busy}
                       />
+                      <p className="text-muted-foreground text-xs">
+                        {sections.closeMinAnswered > 0
+                          ? 'Applied on top of the percentage, and the same number in every section.'
+                          : 'Off. The percentage decides on its own.'}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 sm:max-w-xs">
-                    <Label className="text-sm font-medium">
-                      Most turns in one section{' '}
-                      <FieldHelp title="Most turns in one section">
-                        A safety net, and worth setting if you are running sections in order. A
-                        section containing a required question the respondent will not answer can
-                        never satisfy the bars above, and without a cap here they can neither finish
-                        it nor leave it. Reaching this always lets them move on. 0 means no limit.
-                      </FieldHelp>
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={MAX_TURNS_PER_SECTION}
-                      step={1}
-                      value={sections.maxTurnsPerSection}
-                      onChange={(e) =>
-                        setSections((x) => ({
-                          ...x,
-                          maxTurnsPerSection: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      disabled={busy}
-                    />
+                  <div className="grid gap-x-4 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-sm font-medium">
+                        Most turns in one section (a way out){' '}
+                        <FieldHelp title="Most turns in one section">
+                          A safety net, and worth setting if you are running sections in order. A
+                          section holding a required question the respondent will not answer can
+                          never meet the bars above, so without a limit here they can neither finish
+                          it nor leave it. Reaching this limit always unlocks the move, whatever the
+                          bars say. Turns are counted per section and across visits, so leaving a
+                          section and coming back continues its count rather than restarting it.{' '}
+                          <code className="text-xs">0</code> means no limit.
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={MAX_TURNS_PER_SECTION}
+                        step={1}
+                        value={sections.maxTurnsPerSection}
+                        onChange={(e) =>
+                          setSections((x) => ({
+                            ...x,
+                            maxTurnsPerSection: Math.max(0, Number(e.target.value) || 0),
+                          }))
+                        }
+                        disabled={busy}
+                      />
+                      <p className="text-muted-foreground text-xs">
+                        {sections.maxTurnsPerSection > 0
+                          ? `After ${sections.maxTurnsPerSection} turn${sections.maxTurnsPerSection === 1 ? '' : 's'} in a section they can always move on, even if the bars above are unmet.`
+                          : 'No limit. A section a respondent cannot complete has no way out.'}
+                      </p>
+                    </div>
                   </div>
 
                   <label className="flex cursor-pointer items-start gap-2 text-sm select-none">
@@ -1893,16 +1937,17 @@ export function ConfigEditor({
                       checked={sections.agentOffersClose}
                       onCheckedChange={(v) => setSections((x) => ({ ...x, agentOffersClose: v }))}
                       disabled={busy}
-                      aria-label="Let the interviewer offer to move on"
+                      aria-label="Let the interviewer move the interview on"
                     />
                     <span>
-                      Let the interviewer offer to move on{' '}
-                      <FieldHelp title="Interviewer offers to move on">
-                        With this on, the interviewer says when a section is covered and names the
-                        one that follows, as well as the button appearing. Without it the button
-                        appears on its own, and someone who is not watching for it will keep
-                        answering a section that is already finished. Either way, once a section has
-                        nothing left to ask the interviewer says so rather than going quiet.
+                      Let the interviewer move the interview on{' '}
+                      <FieldHelp title="Interviewer moves the interview on">
+                        With this on, once a section has nothing left to ask the interviewer says
+                        so, names the one that follows, and takes the respondent there after a
+                        couple of seconds. The button is still there for anyone who wants to move on
+                        sooner. Without it the interviewer still says the section is covered, but
+                        waits: the move is the respondent&rsquo;s to make, which is what a
+                        facilitated session usually wants.
                       </FieldHelp>
                     </span>
                   </label>

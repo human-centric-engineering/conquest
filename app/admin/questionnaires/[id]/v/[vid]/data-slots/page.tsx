@@ -57,8 +57,8 @@ export default async function DataSlotsTab({ params }: PageProps) {
   /**
    * Whether pointing the admin at the Routing Analyst after they save is signal or noise.
    *
-   * Saving data slots is the moment hard rules become possible — until then the analyst is told
-   * "DATA SLOTS: none. Propose no hard rules". Any of these four means conditional topics are
+   * Saving data slots is the moment a topic can name one — until then the analyst is told
+   * "DATA SLOTS: none". Any of these four means conditional topics are
    * genuinely in play: the feature is on, a conditional topic exists, a proposal is waiting, or the
    * ingest check said the document describes routing. `getVersionTopicsCached` is `cache()`-wrapped
    * and degrades to "feature off, nothing to say" on failure, so this costs at most one shared

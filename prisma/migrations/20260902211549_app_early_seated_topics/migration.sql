@@ -1,0 +1,12 @@
+-- F17.36 Early topic seating: topics seated DURING the opening, before the plan was sealed, plus
+-- any picks the per-turn cap judged but deferred (EarlySeating — lib/.../scope/types.ts).
+--
+-- Null on every existing session, which is the correct reading: nothing was ever seated early.
+-- Deliberately a separate column rather than a partial `interviewPlan`, because the planner's
+-- once-only write guard keys on `interviewPlan` being null.
+--
+-- NOTE: the schema-fold phantom DDL Prisma generated alongside this (5 pgvector DROP INDEX plus a
+-- `searchVector` DROP DEFAULT) was stripped by hand. Those indexes are created by raw SQL in an
+-- earlier migration and are invisible to the Prisma schema, so every app migration regenerates
+-- them as drops. Applying them would silently remove the platform's vector search.
+ALTER TABLE "app_questionnaire_session" ADD COLUMN "earlySeatedTopics" JSONB;

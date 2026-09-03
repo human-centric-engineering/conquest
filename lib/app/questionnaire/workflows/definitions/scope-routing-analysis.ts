@@ -12,7 +12,7 @@
  *     whether the full analysis is worth surfacing.
  *  2. The **Routing Analyst** — a proposer, not an auto-apply — reads the pages the extractor
  *     ignored, plus the version's questions and any already-authored topics, and proposes the
- *     topic set, criteria and hard rules they describe. Everything lands in
+ *     topic set and criteria they describe. Everything lands in
  *     `AppQuestionnaireTopicDraft` for review; nothing forks a launched version until the admin
  *     accepts.
  *
@@ -75,7 +75,7 @@ export const scopeRoutingAnalysisWorkflow = diagram({
       x: 440,
       y: 0,
       description:
-        "Reads the version's questions AND its uploaded source document — exactly the pages structure extraction discarded — plus any already-authored topics, and proposes a topic set, hard rules and gaps. Runs at the `reasoning` tier, a full read unlike the candidacy check's cheap triage. Also reachable directly from the Topics tab's \"Run\" button, independent of the candidacy verdict.",
+        "Reads the version's questions AND its uploaded source document — exactly the pages structure extraction discarded — plus any already-authored topics, and proposes a topic set and gaps. Runs at the `reasoning` tier, a full read unlike the candidacy check's cheap triage. Also reachable directly from the Topics tab's \"Run\" button, independent of the candidacy verdict.",
       meta: {
         agentSlug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
         promptCatalogSlug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,

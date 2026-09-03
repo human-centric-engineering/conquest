@@ -26,14 +26,14 @@ export const DEFAULT_CONDITIONAL_TOPICS_TAB: ConditionalTopicsTab = 'topics';
  */
 export const CONDITIONAL_TOPICS_TAB_LABELS: Record<ConditionalTopicsTab, string> = {
   topics: 'Topics',
-  rules: 'Rules & limits',
+  rules: 'Limits & fallbacks',
   check: 'Check',
 };
 
 /** One line under each tab's heading, saying what the tab is for. */
 export const CONDITIONAL_TOPICS_TAB_HINTS: Record<ConditionalTopicsTab, string> = {
   topics: 'Group the questions, then decide which groups are conditional.',
-  rules: 'Pin the certainties, and set how much one interview may cover.',
+  rules: 'Set how much one interview may cover, and what happens when the agent cannot decide.',
   check: 'Try the decision before anyone answers, and see what it did afterwards.',
 };
 
@@ -68,8 +68,12 @@ const TAB_BY_ISSUE_CODE: Readonly<Record<string, ConditionalTopicsTab>> = {
   // supply a cue. The mapping stays because the mid-interview-trigger spec raises it as an error
   // once something reads cues, and it belongs on the same tab when it comes back.
   trigger_without_cues: 'topics',
+  // F17.36. The only one of the four early-seating findings that is about an AUTHORED member
+  // rather than a setting: a question no respondent can ever answer is fixed by rewording it, which
+  // is done here.
+  opening_member_uncoverable: 'topics',
 
-  // Fixed in the settings: a rule, a limit, a list of keys.
+  // Fixed in the settings: a limit, or a list of keys.
   cap_exceeds_candidates: 'rules',
   budget_below_floor: 'rules',
   budget_admits_no_topic: 'rules',
@@ -79,12 +83,11 @@ const TAB_BY_ISSUE_CODE: Readonly<Record<string, ConditionalTopicsTab>> = {
   check_preference_unknown_topic: 'rules',
   fallback_unknown_topic: 'rules',
   always_topic_named_as_choice: 'rules',
-  rule_unknown_topic: 'rules',
-  rule_unknown_data_slot: 'rules',
-  rule_slot_not_in_opening: 'rules',
-  rule_veto_always_fires: 'rules',
-  rule_slot_unreachable: 'rules',
-  rule_names_always_topic: 'rules',
+  // F17.36. All three are the settings disagreeing with each other or with themselves: a bar below
+  // the one it must not undercut, caps that do not nest, and a switch with nothing it could seat.
+  early_confidence_below_floor: 'rules',
+  cap_hierarchy_inverted: 'rules',
+  early_seating_without_conditional_topics: 'rules',
 };
 
 /** The tab that owns a finding. Unknown codes land on the topic set — see the note above. */

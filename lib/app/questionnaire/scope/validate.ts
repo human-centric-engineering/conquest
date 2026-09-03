@@ -8,11 +8,9 @@
  *
  * The severity split is the whole point:
  *
- * - **`error`** — turning this on would make the questionnaire behave wrongly. Two matter most: the
- *   orphaned-question check (with scope active, a question belonging to no topic can never be asked,
- *   and nothing else in the system would ever tell you) and `rule_veto_always_fires` (a hard rule
- *   testing for the absence of something the opening never gathers is not inert — it applies to
- *   every respondent).
+ * - **`error`** — turning this on would make the questionnaire behave wrongly. The one that matters
+ *   most is the orphaned-question check: with scope active, a question belonging to no topic can
+ *   never be asked, and nothing else in the system would ever tell you.
  * - **`warning`** — it will run, but not as the author probably intends.
  *
  * Every check is inert while `enabled` is false, except three that an admin needs to see BEFORE
@@ -51,7 +49,7 @@ export interface ValidateScopeInput {
   settings: ConditionalTopicsSettings;
   /** Every question key in the version — for the orphan check. */
   allQuestionKeys: readonly string[];
-  /** Every data-slot key in the version — for the rule and orphan checks. */
+  /** Every data-slot key in the version — for the orphan check. */
   allDataSlotKeys?: readonly string[];
   /**
    * The time arithmetic (C7), when the caller has it: what the always-run phases cost, and the
@@ -86,6 +84,18 @@ export interface ValidateScopeInput {
    * other finding.
    */
   maxDataSlotAttempts?: number;
+  /**
+   * The wording behind each member key, when the caller has it — for the uncoverable-member check
+   * (F17.36). Questions map to their prompt; data slots to their name and description together.
+   *
+   * Optional like everything else here: a caller without it gets every other finding. Passed as
+   * plain records rather than Maps to match `seconds.byTopicKey`, and because the callers that
+   * have this are route handlers assembling a payload, not holding a lookup.
+   */
+  memberText?: {
+    byQuestionKey?: Readonly<Record<string, string>>;
+    byDataSlotKey?: Readonly<Record<string, string>>;
+  };
 }
 
 /**
@@ -387,72 +397,89 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
           'The blind-spot check needs a conditional topic that was NOT selected to sample from, and there are too few to leave one out.',
       });
     }
+
+    // ── Early topic seating (F17.36) ───────────────────────────────────────────────────────
+    if (settings.earlyTopicSeating) {
+      if (conditionalCount === 0) {
+        issues.push({
+          severity: 'warning',
+          code: 'early_seating_without_conditional_topics',
+          message:
+            'Choosing areas early is on, but no topic is conditional — there is nothing it could ever choose, so it will never do anything.',
+        });
+      }
+      // Deciding on LESS evidence must mean deciding LESS readily. A bar below the final planner's
+      // makes early seating the loose gate and the considered decision the strict one, which is
+      // backwards and produces exactly the thin-evidence seats the floor exists to prevent.
+      if (settings.earlySeatingMinConfidence < settings.minConfidence) {
+        issues.push({
+          severity: 'warning',
+          code: 'early_confidence_below_floor',
+          message: `Areas can be chosen early at ${pct(settings.earlySeatingMinConfidence)} confidence but the full decision needs ${pct(settings.minConfidence)}. That makes the early choice, which sees less of the opening, the easier one to pass.`,
+        });
+      }
+      // The three caps must nest, or the configuration expresses an intent the runtime cannot
+      // honour: an inner cap above an outer one is simply never reached.
+      if (
+        settings.maxRoutingDecisionsPerTurn > settings.maxEarlySeatedTopics ||
+        settings.maxEarlySeatedTopics > settings.maxConditionalTopics
+      ) {
+        issues.push({
+          severity: 'warning',
+          code: 'cap_hierarchy_inverted',
+          message: `These limits do not nest: up to ${settings.maxRoutingDecisionsPerTurn} from one answer, ${settings.maxEarlySeatedTopics} early in total, ${settings.maxConditionalTopics} for the whole interview. Each should be no larger than the one after it, or the smaller limit is the only one that ever applies.`,
+        });
+      }
+    }
+
+    // ── Opening members no respondent can ever cover (F17.36) ──────────────────────────────
+    //
+    // The opening gate is all-or-nothing, so ONE member nobody can cover means the plan is never
+    // made — for every respondent, silently, forever. Session CPY3-1C6S was exactly this: an
+    // opening topic naming a question slot that held a scripted handoff line, and a data slot
+    // whose description recorded the interview's own routing decision. Neither is answerable.
+    //
+    // Inside the `enabled` block on purpose. The gate this is about only exists when the feature
+    // is on, and warning every version that has never used Conditional Topics about the wording
+    // of its opening questions would be noise on a tab that has to stay worth reading.
+    //
+    // Heuristic and therefore ADVISORY. It reads wording, which means it will occasionally be
+    // wrong in both directions, and a wrong error would block a launch over a phrasing opinion.
+    // `maxOpeningTurns` is the runtime cover for the ones this misses; this is the authoring-time
+    // cover for the ones it catches, and the message says so when the backstop is off.
+    const openingTopics = topics.filter((t) => t.phase === 'opening');
+    const knownQuestions = input.allQuestionKeys ? new Set(input.allQuestionKeys) : null;
+    const knownDataSlots = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
+    const uncoverable: string[] = [];
+
+    for (const key of new Set(openingTopics.flatMap((t) => t.members.questionKeys))) {
+      if (knownQuestions && !knownQuestions.has(key)) continue;
+      const prompt = input.memberText?.byQuestionKey?.[key];
+      if (prompt !== undefined && !asksSomething(prompt)) uncoverable.push(key);
+    }
+    for (const key of new Set(openingTopics.flatMap((t) => t.members.dataSlotKeys))) {
+      if (knownDataSlots && !knownDataSlots.has(key)) continue;
+      const text = input.memberText?.byDataSlotKey?.[key];
+      if (text !== undefined && describesTheInterview(text)) uncoverable.push(key);
+    }
+
+    if (uncoverable.length > 0) {
+      const backstop =
+        settings.maxOpeningTurns > 0
+          ? ` The opening closes itself after ${settings.maxOpeningTurns} turns, so an interview will still reach a decision — but on less than the opening was meant to gather.`
+          : ' Nothing currently stops that: set “longest the opening may run” so an interview decides on what it has rather than waiting forever.';
+      issues.push({
+        severity: 'warning',
+        code: 'opening_member_uncoverable',
+        message:
+          uncoverable.length === 1
+            ? `“${uncoverable[0]}” is in the opening but does not look like something a respondent can answer, so the opening may never register as finished.${backstop}`
+            : `${uncoverable.length} opening items (including “${uncoverable[0]}”) do not look like something a respondent can answer, so the opening may never register as finished.${backstop}`,
+      });
+    }
   }
 
   // ── Dangling key references ───────────────────────────────────────────────────────────────
-  const dataSlotKeys = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
-
-  // Hard-rule reachability. Rules are evaluated at exactly ONE moment — when the opening completes
-  // and the planner runs — so a rule testing a slot the interview has not gathered by then is not a
-  // rule that fires later. It is a rule that never fires at all. Only the opening is reliably
-  // gathered by then: `core` runs alongside it in an order nothing guarantees, and `conditional` and
-  // `closing` topics are, by construction, not in scope until after the plan exists.
-  //
-  // Reported only when there IS an opening topic. Without one the planner runs on the first turn
-  // and every rule is unreachable, which `no_opening_topic` already says once — repeating it per
-  // rule buries the finding that has to be fixed first.
-  const hasOpeningTopic = topics.some((t) => t.phase === 'opening');
-  const openingSlotKeys = new Set<string>();
-  const coreSlotKeys = new Set<string>();
-  for (const topic of topics) {
-    if (topic.phase === 'opening') {
-      for (const key of topic.members.dataSlotKeys) openingSlotKeys.add(key);
-    } else if (topic.phase === 'core') {
-      for (const key of topic.members.dataSlotKeys) coreSlotKeys.add(key);
-    }
-  }
-
-  for (const rule of settings.rules) {
-    if (!topicKeys.has(rule.topicKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_unknown_topic',
-        message: `A rule points at the topic "${rule.topicKey}", which no longer exists. It can never match.`,
-      });
-    }
-    if (dataSlotKeys && !dataSlotKeys.has(rule.dataSlotKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_unknown_data_slot',
-        message: `A rule tests the data slot "${rule.dataSlotKey}", which no longer exists. It can never match.`,
-      });
-      continue;
-    }
-    if (!hasOpeningTopic || openingSlotKeys.has(rule.dataSlotKey)) continue;
-
-    if (coreSlotKeys.has(rule.dataSlotKey)) {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_slot_not_in_opening',
-        message: `A rule tests "${rule.dataSlotKey}", which is gathered by a topic that always runs but is not the opening. The rules are evaluated the moment the opening completes, so whether this has been asked by then is not something the rule can rely on. Move it into an opening topic.`,
-      });
-    } else if (rule.operator === 'not_exists') {
-      // The sharp one. `not_exists` matches on ABSENCE, so a slot that is never gathered before the
-      // planner runs is not an inert rule — it is one that fires for every respondent. An author
-      // who wrote a veto for the few gets it applied to all, and the plan looks entirely plausible.
-      issues.push({
-        severity: settings.enabled ? 'error' : 'warning',
-        code: 'rule_veto_always_fires',
-        message: `A rule tests "${rule.dataSlotKey}" for absence, but no opening topic gathers it — so it is always absent when the rules run, and the rule would ${rule.action} "${rule.topicKey}" for every respondent. Add the slot to an opening topic.`,
-      });
-    } else {
-      issues.push({
-        severity: 'warning',
-        code: 'rule_slot_unreachable',
-        message: `A rule tests "${rule.dataSlotKey}", but no opening topic gathers it, so it is never filled when the rules run and the rule can never match. Add the slot to an opening topic.`,
-      });
-    }
-  }
   for (const key of settings.fallbackTopicKeys) {
     if (!topicKeys.has(key)) {
       issues.push({
@@ -486,21 +513,6 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
       });
     }
   }
-  // A hard rule aimed at an always-run topic is the same no-op, reached from the other direction:
-  // `applyGuardrails` acts within the conditional set, and `resolveScope` puts every other phase in
-  // scope regardless. Reported separately from the check above because the fix is different — the
-  // author either meant a different topic or meant to make this one conditional — and because a rule
-  // is the surface where a silent no-op is most expensive: it reads as the certainty it is not.
-  for (const rule of settings.rules) {
-    if (!alwaysKeys.has(rule.topicKey)) continue;
-    issues.push({
-      severity: 'warning',
-      code: 'rule_names_always_topic',
-      topicKey: rule.topicKey,
-      message: `A rule ${rule.action === 'include' ? 'includes' : 'excludes'} "${rule.topicKey}", but that topic is asked in every interview, so the rule changes nothing. Rules only act on topics set to "Ask when it fits".`,
-    });
-  }
-
   // ── Comparability (F17.15) ────────────────────────────────────────────────────────────────
   // Skipped only when the caller has no scoring schema to check against, which is most versions.
   if (input.scoring) {
@@ -533,6 +545,124 @@ export function validateConditionalTopics(input: ValidateScopeInput): ScopeIssue
 }
 
 /** True when nothing would behave wrongly. Convenience for the launch checklist. */
+/** A confidence as a percentage, for a message an admin reads. */
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Uncoverable-member heuristics (F17.36)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Words that open a request for something from the respondent.
+ *
+ * Not just interrogatives: a good interview prompt is as often an imperative ("Describe the last
+ * time…", "Walk me through…") as a question, and treating those as uncoverable would flag the best
+ * questions in most instruments.
+ */
+const ASKING_OPENERS = [
+  'what',
+  'why',
+  'how',
+  'when',
+  'where',
+  'who',
+  'which',
+  'whose',
+  'do',
+  'does',
+  'did',
+  'is',
+  'are',
+  'was',
+  'were',
+  'can',
+  'could',
+  'would',
+  'will',
+  'should',
+  'have',
+  'has',
+  'had',
+  'tell',
+  'describe',
+  'explain',
+  'list',
+  'name',
+  'rate',
+  'rank',
+  'score',
+  'select',
+  'choose',
+  'pick',
+  'share',
+  'walk',
+  'think',
+  'consider',
+  'give',
+  'in',
+  'on',
+  'to',
+  'roughly',
+  'approximately',
+  'briefly',
+] as const;
+
+/**
+ * Whether a question prompt asks the respondent for anything at all.
+ *
+ * Deliberately generous: a question mark anywhere, or an opener from {@link ASKING_OPENERS},
+ * passes. The finding this feeds is advisory, and the asymmetry is on purpose — a missed handoff
+ * line costs an author one confusing session, while a false positive on a perfectly good question
+ * costs every author who reads the tab a reason to stop trusting it.
+ */
+function asksSomething(prompt: string): boolean {
+  const text = prompt.trim().toLowerCase();
+  if (text.length === 0) return false;
+  if (text.includes('?')) return true;
+  const firstWord = /^[a-z']+/.exec(text)?.[0] ?? '';
+  return (ASKING_OPENERS as readonly string[]).includes(firstWord);
+}
+
+/**
+ * Phrases that say a data slot records the INTERVIEW'S behaviour rather than a respondent fact.
+ *
+ * `diagnostic_routing` on the session that produced this check described itself as recording "the
+ * interviewer's routing decision" — a slot the respondent is never asked to fill, sitting in an
+ * opening topic, holding every interview open forever.
+ */
+const SELF_DESCRIBING_CUES = [
+  'the interviewer',
+  "the interview's",
+  'the agent',
+  'the assistant',
+  'the system',
+  'the platform',
+  'routing decision',
+  'the decision this',
+  'internal use',
+  'internal only',
+  'not asked',
+  'never asked',
+  'do not ask',
+  'set by the',
+  'recorded by the',
+  'filled by the',
+] as const;
+
+/**
+ * Whether a data slot's wording describes the interview rather than the respondent.
+ *
+ * Phrase matching, not word matching. "The agent" as a phrase is about the software; "agent" alone
+ * is a job title, and an instrument for estate agents would otherwise have its whole opening
+ * flagged.
+ */
+function describesTheInterview(text: string): boolean {
+  const lower = text.toLowerCase();
+  return SELF_DESCRIBING_CUES.some((cue) => lower.includes(cue));
+}
+
 export function hasScopeErrors(issues: readonly ScopeIssue[]): boolean {
   return issues.some((i) => i.severity === 'error');
 }

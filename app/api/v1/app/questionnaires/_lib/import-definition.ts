@@ -329,20 +329,8 @@ export async function persistDefinitionImport(
       //     helper the Topics tab's settings PATCH uses, rather than a raw write, so rule ordinals get
       //     re-stamped and every field is normalised exactly as a live read would produce — a fresh
       //     version has no "current" settings to merge onto, so this effectively seeds from defaults.
-      //     Runs AFTER the data-slot dedup map (step 7) exists: a hard rule's `dataSlotKey` is a key
-      //     reference exactly like a topic's membership, and needs the same remap onto whatever key a
-      //     collided data slot actually landed on — `topicKey` needs no such remap because topic keys
-      //     are never deduped (uniqueness is enforced by the import schema, not `nextAvailableKey`).
       if (version.conditionalTopics !== undefined) {
-        const rules = version.conditionalTopics.rules?.map((rule) => ({
-          ...rule,
-          dataSlotKey: dedupedSlotKeyByOriginal.get(rule.dataSlotKey) ?? rule.dataSlotKey,
-        }));
-        await patchConditionalTopicsSettings(
-          versionId,
-          { ...version.conditionalTopics, ...(rules !== undefined ? { rules } : {}) },
-          tx
-        );
+        await patchConditionalTopicsSettings(versionId, version.conditionalTopics, tx);
       }
 
       // 9. Scoring schema (1:1) — authored, so source 'manual'. Its item/band refs use question +

@@ -1193,16 +1193,6 @@ const SAMPLE_SCOPE_STRUCTURE: ScopeStructureInput = {
       members: [{ key: 'q1', label: '{{ question 1 }}' }],
     },
   ],
-  rules: [
-    {
-      id: 'rule_1',
-      sentence: '{{ Never ask "topic 1" when "data slot 1" equals "no" }}',
-      dataSlotKey: 'slot_1',
-      topicKey: 'topic_1',
-      operator: 'equals',
-      action: 'exclude',
-    },
-  ],
   settings: {
     maxConditionalTopics: 3,
     includeCheckTopic: true,

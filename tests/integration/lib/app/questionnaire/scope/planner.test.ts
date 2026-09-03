@@ -136,6 +136,61 @@ describe('planScope — the happy path', () => {
   });
 });
 
+describe('planScope — topics already seated during the opening (F17.36)', () => {
+  /** One early seat, in the shape `EarlySeating.seated` holds. */
+  function seat(key: string) {
+    return {
+      key,
+      depth: 'full' as const,
+      confidence: 0.94,
+      rationale: `already clear: ${key}`,
+      respondentReason: `you mentioned ${key}`,
+      atTurn: 2,
+    };
+  }
+
+  it('does not offer the model a topic the interview is already covering', async () => {
+    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    const result = await planScope(params({ preSeated: [seat('pipeline')] }));
+
+    // Showing it spends prompt inviting a choice that cannot be declined: the topic is decided,
+    // and the interview has already asked about it.
+    expect(result.promptSnapshot).not.toContain('pipeline');
+    expect(result.promptSnapshot).toContain('forecast');
+  });
+
+  it('carries the early seat into the plan even when the model chooses nothing', async () => {
+    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    const result = await planScope(params({ preSeated: [seat('pipeline')] }));
+
+    // A plan that dropped the topic the interview had already asked about would contradict the
+    // transcript behind it.
+    expect(result.plan.topics.map((t) => t.key)).toContain('pipeline');
+    expect(result.plan.topics.find((t) => t.key === 'pipeline')?.source).toBe('early');
+  });
+
+  it('carries the early seat on the fallback path too, not just the model one', async () => {
+    (mocks.runStructuredCompletion as Mock).mockRejectedValue(new Error('down'));
+
+    const result = await planScope(
+      params({
+        preSeated: [seat('pipeline')],
+        settings: settings({ fallbackTopicKeys: ['talent'] }),
+      })
+    );
+
+    // An early seat suppresses the fallback rather than being padded by it: the seat is a
+    // judgement on real evidence, and the fallback's precondition is that there was none.
+    expect(result.plan.topics.map((t) => t.key)).toContain('pipeline');
+  });
+});
+
 describe('planScope — every way the model call can fail', () => {
   const fallback = settings({ fallbackTopicKeys: ['talent'] });
 
@@ -248,93 +303,6 @@ describe('planScope — skipping the call', () => {
     expect(mocks.runStructuredCompletion).not.toHaveBeenCalled();
     expect(result.costUsd).toBe(0);
     expect(result.plan.topics).toEqual([]);
-  });
-
-  it('does not call the model when every candidate is rule-excluded', async () => {
-    const result = await planScope(
-      params({
-        settings: settings({
-          rules: [
-            {
-              id: 'r1',
-              dataSlotKey: 'open_ds',
-              operator: 'exists',
-              value: null,
-              action: 'exclude',
-              topicKey: 'pipeline',
-              ordinal: 0,
-            },
-            {
-              id: 'r2',
-              dataSlotKey: 'open_ds',
-              operator: 'exists',
-              value: null,
-              action: 'exclude',
-              topicKey: 'forecast',
-              ordinal: 1,
-            },
-            {
-              id: 'r3',
-              dataSlotKey: 'open_ds',
-              operator: 'exists',
-              value: null,
-              action: 'exclude',
-              topicKey: 'talent',
-              ordinal: 2,
-            },
-          ],
-        }),
-      })
-    );
-
-    expect(mocks.runStructuredCompletion).not.toHaveBeenCalled();
-    expect(result.plan.topics).toEqual([]);
-  });
-});
-
-describe('planScope — hard rules reach the prompt correctly', () => {
-  it('hides a rule-excluded topic from the candidate list the model sees', async () => {
-    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
-      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
-    );
-
-    await planScope(
-      params({
-        settings: settings({
-          rules: [
-            {
-              id: 'r1',
-              dataSlotKey: 'open_ds',
-              operator: 'contains',
-              value: 'procurement',
-              action: 'exclude',
-              topicKey: 'talent',
-              ordinal: 0,
-            },
-          ],
-        }),
-      })
-    );
-
-    const call = (mocks.runStructuredCompletion as Mock).mock.calls[0][0] as {
-      messages: Array<{ content: string }>;
-    };
-    const system = call.messages[0].content;
-    expect(system).toContain('pipeline');
-    expect(system).not.toContain('key: talent');
-  });
-
-  it('tells the model the limit it is choosing under', async () => {
-    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
-      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
-    );
-
-    await planScope(params({ settings: settings({ maxConditionalTopics: 3 }) }));
-
-    const call = (mocks.runStructuredCompletion as Mock).mock.calls[0][0] as {
-      messages: Array<{ content: string }>;
-    };
-    expect(call.messages[0].content).toContain('AT MOST 3');
   });
 });
 
@@ -472,8 +440,8 @@ describe('isOpeningComplete', () => {
 
   it('is false until every opening QUESTION is answered too', () => {
     // The gate that was missing. An opening built only from questions read as complete before it
-    // had been asked, so the planner decided on turn one with nothing captured — and every
-    // `not_exists` hard rule matched, because absence is what a veto tests for.
+    // had been asked, so the planner decided on turn one with nothing captured — a judgement over
+    // an empty transcript.
     const topics = [
       topic('open', 'opening', { members: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] } }),
     ];

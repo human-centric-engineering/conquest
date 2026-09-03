@@ -1,13 +1,11 @@
 /**
  * The Scope Planner (P17) — "which parts of this questionnaire is this interview about?"
  *
- * Runs ONCE per session, the moment the opening topics are covered. Three tiers, in order:
+ * Runs ONCE per session, the moment the opening topics are covered. Two tiers, in order:
  *
- *  1. **Hard rules** (`scope/rules.ts`) — the cases the author is certain about. Resolved before
- *     any model call, and never overridden by one.
- *  2. **This module's `askPlanner`** — a judgement over the author's criteria and what the
+ *  1. **This module's `askPlanner`** — a judgement over the author's criteria and what the
  *     respondent actually said.
- *  3. **Guardrails** (`scope/guardrails.ts`) — the cap, the blind-spot check, the fallback. Applied
+ *  2. **Guardrails** (`scope/guardrails.ts`) — the cap, the blind-spot check, the fallback. Applied
  *     to whatever came back, so a model that ignores the limit cannot break it.
  *
  * `planScope` **never throws**. The respondent has just finished answering the opening and is
@@ -31,30 +29,37 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import {
-  MAX_ANSWERS_IN_PLANNER_PROMPT,
-  MAX_FILLS_IN_PLANNER_PROMPT,
-  MAX_PLANNER_ITEM_CHARS,
-  MAX_PLANNER_ITEMS_PER_TOPIC,
-  MAX_PLANNER_RENDERED_ITEMS,
-  PLANNER_ANSWER_CHARS,
-  PLANNER_FILL_CHARS,
   SCOPE_PLANNER_AGENT_SLUG,
   SCOPE_PLANNER_MAX_TOKENS,
   SCOPE_PLANNER_TIMEOUT_MS,
 } from '@/lib/app/questionnaire/scope/constants';
-import { evaluateScopeRules, type ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
   applyGuardrails,
-  alwaysTopics,
   plannerCandidates,
   type PlanBudget,
   type ProposedTopic,
 } from '@/lib/app/questionnaire/scope/guardrails';
+import {
+  openingReadiness,
+  type OpeningQuestionCoverage,
+} from '@/lib/app/questionnaire/scope/readiness';
+import {
+  renderCandidates,
+  renderConveyed,
+  type ScopeAnswer,
+} from '@/lib/app/questionnaire/scope/planner-prompt';
 import type {
   ConditionalTopicsSettings,
+  EarlySeat,
   InterviewPlan,
+  ScopeFill,
   Topic,
 } from '@/lib/app/questionnaire/scope/types';
+
+// Both re-exported because this module owned them before the shared prompt module existed, and the
+// triggers import them from here. One definition, two import paths — not two definitions.
+export type { OpeningQuestionCoverage };
+export type { ScopeAnswer };
 
 const plannerSchema = z.object({
   selected: z.array(
@@ -85,17 +90,6 @@ const plannerSchema = z.object({
  * The `prompt` is not decoration: an answer without the question it answers is not evidence. "About
  * two years" means nothing until you know it answered "how long has this been a problem?".
  */
-export interface ScopeAnswer {
-  /** The question's key. */
-  key: string;
-  /** What the question asked. */
-  prompt: string;
-  /** The stored answer — a mapped form value (a choice slug, a scale point) for typed questions. */
-  value: unknown;
-  /** The living natural-language account of what they conveyed, when the answer has one. */
-  paraphrase: string | null;
-}
-
 export interface PlanScopeParams {
   sessionId: string;
   /** Every topic in the version. */
@@ -134,6 +128,15 @@ export interface PlanScopeParams {
    * was before budgets existed.
    */
   budget?: PlanBudget;
+  /**
+   * Topics already seated during the opening (F17.36).
+   *
+   * Handed straight to `applyGuardrails`, which seats them BEFORE the cap. They are also excluded
+   * from the candidate list the model is shown: asking it to judge a topic the interview is already
+   * covering spends prompt on a decision that has been taken, and invites it to "choose" something
+   * it cannot decline.
+   */
+  preSeated?: readonly EarlySeat[];
 }
 
 /** The plan plus what producing it cost, so the caller can bill and audit it. */
@@ -145,106 +148,6 @@ export interface PlanScopeResult {
   /** Raw prompt + output for the AppAiRun snapshot. Null when no model call was made. */
   promptSnapshot: string | null;
   outputSnapshot: unknown;
-}
-
-/** A readable rendering of a stored answer value, or null when there is nothing worth printing. */
-function answerText(answer: ScopeAnswer): string | null {
-  // Paraphrase first, always. It is the natural-language account of what they conveyed; `value`
-  // holds the MAPPED form value for a typed question — a choice slug like `gt3` — and feeding form
-  // codes to a model that is reading for meaning is noise at best.
-  if (answer.paraphrase && answer.paraphrase.trim() !== '') return answer.paraphrase.trim();
-  if (typeof answer.value === 'string' && answer.value.trim() !== '') return answer.value.trim();
-  if (typeof answer.value === 'number' || typeof answer.value === 'boolean') {
-    return String(answer.value);
-  }
-  if (Array.isArray(answer.value) && answer.value.length > 0) {
-    return answer.value.map((v) => String(v)).join(', ');
-  }
-  return null;
-}
-
-function renderAnswers(answers: readonly ScopeAnswer[]): string[] {
-  const lines: string[] = [];
-  for (const answer of answers) {
-    if (lines.length >= MAX_ANSWERS_IN_PLANNER_PROMPT) break;
-    const text = answerText(answer);
-    if (!text) continue;
-    lines.push(`- Asked: ${answer.prompt}\n  Answered: ${text.slice(0, PLANNER_ANSWER_CHARS)}`);
-  }
-  return lines;
-}
-
-/**
- * The evidence block: what they said, then what was captured from it.
- *
- * Their own words come first because that is what they are — the primary record. A fill is an
- * extraction from those words, so it can be thin, stale, or simply absent, and a planner that reads
- * only fills is reading a summary of a conversation it was never shown.
- */
-function renderConveyed(
-  fills: readonly ScopeFill[],
-  answers: readonly ScopeAnswer[],
-  briefing: string | null | undefined
-): string {
-  const answerLines = renderAnswers(answers);
-  const fillLines = fills.slice(0, MAX_FILLS_IN_PLANNER_PROMPT).map((f) => {
-    const text =
-      typeof f.value === 'string' && f.value.trim() !== ''
-        ? f.value
-        : (f.paraphrase ?? '(no answer captured)');
-    return `- [${f.key}] ${text.slice(0, PLANNER_FILL_CHARS)}`;
-  });
-
-  const parts: string[] = [];
-  if (answerLines.length > 0) parts.push(`In their own words:\n${answerLines.join('\n')}`);
-  if (fillLines.length > 0) parts.push(`Captured from what they said:\n${fillLines.join('\n')}`);
-  if (parts.length === 0) parts.push('(nothing was captured in the opening)');
-  if (briefing) parts.push(`Summary of the conversation so far:\n${briefing}`);
-  return parts.join('\n\n');
-}
-
-/**
- * Render the candidates, with each topic's questions when the caller supplied their wording.
- *
- * Bounded three ways, because this is the part of the prompt that grows with the instrument: a
- * per-question character cap, a per-topic item cap, and a whole-prompt item budget spent in
- * candidate order (best first, which is the order the planner reads them in anyway). A topic whose
- * items were not rendered simply cannot be partially selected — which is why the line saying so is
- * printed rather than the items being dropped in silence.
- */
-function renderCandidates(
-  candidates: readonly Topic[],
-  itemPrompts: ReadonlyMap<string, string> | undefined
-): string {
-  let budget = MAX_PLANNER_RENDERED_ITEMS;
-
-  return candidates
-    .map((t) => {
-      const lines = [`- key: ${t.key}`, `  name: ${t.label}`];
-      if (t.criteria) lines.push(`  choose when: ${t.criteria}`);
-
-      if (itemPrompts && t.members.questionKeys.length > 0) {
-        const known = t.members.questionKeys.filter((key) => itemPrompts.has(key));
-        const room = Math.min(known.length, MAX_PLANNER_ITEMS_PER_TOPIC, Math.max(0, budget));
-        if (room < known.length) {
-          lines.push('  questions: not listed — choose this topic whole or not at all');
-        } else if (room > 0) {
-          budget -= room;
-          lines.push('  questions:');
-          for (const key of known.slice(0, room)) {
-            const prompt = (itemPrompts.get(key) ?? '').replace(/\s+/g, ' ').trim();
-            const text =
-              prompt.length > MAX_PLANNER_ITEM_CHARS
-                ? `${prompt.slice(0, MAX_PLANNER_ITEM_CHARS)}…`
-                : prompt;
-            lines.push(`    - ${key}: ${text}`);
-          }
-        }
-      }
-
-      return lines.join('\n');
-    })
-    .join('\n\n');
 }
 
 /**
@@ -416,9 +319,9 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
 /**
  * Produce the interview plan. Never throws.
  *
- * Skips the model entirely when there is nothing to decide — no conditional topics, or every one
- * already settled by a rule — because paying for a foregone conclusion is waste and the latency
- * lands on someone who is waiting.
+ * Skips the model entirely when there is nothing to decide — no conditional topics at all —
+ * because paying for a foregone conclusion is waste and the latency lands on someone who is
+ * waiting.
  */
 export async function planScope(params: PlanScopeParams): Promise<PlanScopeResult> {
   const noCall = {
@@ -430,30 +333,30 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
   const decidedAt = new Date().toISOString();
 
-  const validKeys = params.topics.map((t) => t.key);
-  const rules = evaluateScopeRules(params.settings.rules, params.fills, validKeys);
-  const candidates = plannerCandidates(params.topics, rules);
+  // F17.36: a topic already seated during the opening is not a candidate. It has been decided, the
+  // interview is already asking about it, and showing it to the model spends prompt inviting a
+  // choice that cannot be declined.
+  const preSeatedKeys = new Set((params.preSeated ?? []).map((s) => s.key));
+  const candidates = plannerCandidates(params.topics).filter((t) => !preSeatedKeys.has(t.key));
 
   const base = {
     topics: params.topics,
-    rules,
     settings: params.settings,
     decidedAtTurn: params.decidedAtTurn,
     decidedAt,
+    // F17.36. Carried on EVERY path for the same reason `budget` is: a fallback plan that dropped
+    // the topics the interview had already asked about would be a plan contradicting the transcript
+    // behind it.
+    ...(params.preSeated ? { preSeated: params.preSeated } : {}),
     // Carried on EVERY path, including the ones that never call a model: a fallback plan is still
-    // an interview someone has to sit through, and a rule-only plan is the one most likely to be
-    // long. A budget that applied only to the model's picks would be a budget with a hole in it.
+    // an interview someone has to sit through. A budget that applied only to the model's picks
+    // would be a budget with a hole in it.
     budget: params.budget,
   };
 
-  // Nothing to choose between: no candidates at all, or every candidate already force-INCLUDED by a
-  // rule. `applyGuardrails` seats rule-included topics BEFORE the model's picks, so in that second
-  // case every proposal could only land on a key already seated — a foregone conclusion the
-  // respondent would still wait on. They stay in `candidates` on purpose (the model must know what
-  // is already in the interview to order the rest); it is only when there is nothing left for it to
-  // order that the call itself is waste.
-  const unsettled = candidates.filter((t) => !rules.include.has(t.key));
-  if (candidates.length === 0 || unsettled.length === 0) {
+  // Nothing to choose between: no conditional topics at all. Paying for a call that could only
+  // return an empty selection is waste, and the latency lands on someone who is waiting.
+  if (candidates.length === 0) {
     return {
       plan: applyGuardrails({
         ...base,
@@ -540,29 +443,20 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
 }
 
-/** What the caller knows about the session's question answers, for the opening gate. */
-export interface OpeningQuestionCoverage {
-  /** Question keys this session already holds an answer for. */
-  answered: ReadonlySet<string>;
-  /**
-   * Every question key the version actually has.
-   *
-   * An opening topic may name a key that no longer resolves — a question deleted after the topic
-   * was authored — and that key can never be answered. Unresolvable member keys are silently
-   * skipped everywhere else in this feature; skipping them here too is what stops a stale member
-   * from holding every interview in its opening forever.
-   */
-  known: ReadonlySet<string>;
-}
-
 /**
  * Whether the opening is complete enough to plan — every opening topic's members are covered.
  *
+ * A thin wrapper over {@link openingReadiness}, which is where the arithmetic lives. It keeps this
+ * signature so no caller has to change, and it keeps the gate and the early-seating floor reading
+ * one implementation: two numbers that must agree, computed in two places, disagree eventually.
+ *
  * Both kinds of member count. Judging the opening on its data slots alone made an opening topic
  * built only from questions complete before it had been asked, so the planner ran on the first turn
- * with nothing captured: a judgement over an empty transcript, and — worse — every `not_exists`
- * hard rule matching, because absence is exactly what a veto tests for. A veto meant for a few
- * respondents applied to all of them, in a plan that looks entirely plausible.
+ * with nothing captured — a judgement over an empty transcript.
+ *
+ * `filledDataSlotKeys` is the caller's already-merged set: a park counts as filled here, which is
+ * `countParked: true` and is exactly what the gate has always done. Parking is what stops a vague
+ * answer holding an interview in its opening forever, and the gate must keep honouring it.
  *
  * `questions` is optional so a caller that genuinely has no answer data still gets the data-slot
  * gate rather than nothing. The direction on everything unjudgeable stays as it was: planning
@@ -574,21 +468,15 @@ export function isOpeningComplete(
   filledDataSlotKeys: ReadonlySet<string>,
   questions?: OpeningQuestionCoverage
 ): boolean {
-  const opening = alwaysTopics(topics).filter((t) => t.phase === 'opening');
-  if (opening.length === 0) return true;
-
-  const requiredSlots = opening.flatMap((t) => t.members.dataSlotKeys);
-  if (!requiredSlots.every((key) => filledDataSlotKeys.has(key))) return false;
-
-  if (questions) {
-    const requiredQuestions = opening
-      .flatMap((t) => t.members.questionKeys)
-      .filter((key) => questions.known.has(key));
-    if (!requiredQuestions.every((key) => questions.answered.has(key))) return false;
-  }
-
-  return true;
+  return (
+    openingReadiness(topics, { filled: filledDataSlotKeys, parked: EMPTY_KEYS }, questions, {
+      countParked: true,
+    }).ratio === 1
+  );
 }
+
+/** Shared empty set, so the wrapper allocates nothing on the hot path. */
+const EMPTY_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**
  * The topic keys the model itself proposed, read back out of a recorded output snapshot.

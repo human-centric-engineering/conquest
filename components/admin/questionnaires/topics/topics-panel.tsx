@@ -242,14 +242,16 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       plannerInstructions: settings.plannerInstructions,
       limitOpeningProbes: settings.limitOpeningProbes,
       maxOpeningProbes: settings.maxOpeningProbes,
-      rules: settings.rules.map((r) => ({
-        id: r.id,
-        dataSlotKey: r.dataSlotKey,
-        operator: r.operator,
-        value: r.value,
-        action: r.action,
-        topicKey: r.topicKey,
-      })),
+      // F17.36. Every one of these has a control on the card above, so a field missing here is not
+      // a smaller save — it is a switch that reports success and reverts on reload.
+      maxOpeningTurns: settings.maxOpeningTurns,
+      earlyTopicSeating: settings.earlyTopicSeating,
+      earlySeatingFloor: settings.earlySeatingFloor,
+      earlySeatingMinConfidence: settings.earlySeatingMinConfidence,
+      maxEarlySeatedTopics: settings.maxEarlySeatedTopics,
+      maxRoutingDecisionsPerTurn: settings.maxRoutingDecisionsPerTurn,
+      bridgeToSeatedTopics: settings.bridgeToSeatedTopics,
+      announceEarlySeating: settings.announceEarlySeating,
     });
 
   const conditionalCount = payload.topics.filter((t) => t.phase === 'conditional').length;
@@ -318,7 +320,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           // Remount on the payload for the reason its neighbours do, and one this view sharpens: a
           // map is only true of the settings that produced it, so a stale graph sitting behind a
           // button after a save would be a picture of a version that no longer exists.
-          key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
+          key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
           payload={payload}
           overlays={overlays}
           onEditTopic={openTopic}
@@ -475,14 +477,13 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         >
           <ScopeSettingsCard
             // Remount the card when the server payload changes so a save's normalised result (clamped
-            // numbers, dropped blanks, sorted rules) replaces the local draft rather than being hidden
+            // numbers, dropped blanks) replaces the local draft rather than being hidden
             // behind it — the admin must see what a later read will actually produce.
             // NOT keyed on `enabled` — the header owns that now, and remounting this card when it
             // flips would discard an admin's unsaved settings edits for a change made elsewhere.
-            key={`settings-${payload.settings.rules.length}`}
+            key={`settings-${payload.settings.maxConditionalTopics}`}
             settings={payload.settings}
             topics={payload.topics}
-            dataSlots={payload.inventory.dataSlots}
             onSave={saveSettings}
             costs={payload.costs}
             busy={busy}
@@ -502,7 +503,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             // and one this card makes sharper. A verdict is only true of the settings that produced it,
             // so an author who runs the preview, edits a topic's criteria and saves would otherwise be
             // left looking at last run's plan sitting next to criteria that no longer produced it.
-            key={`preview-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}-${payload.settings.rules.length}`}
+            key={`preview-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
             questionnaireId={questionnaireId}
             versionId={versionId}
             form={payload.preview}
@@ -530,8 +531,6 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             questionnaireId={questionnaireId}
             versionId={versionId}
             topics={payload.topics}
-            rules={payload.settings.rules}
-            dataSlots={payload.inventory.dataSlots}
             disabled={busy}
           />
         </TabsContent>

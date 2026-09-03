@@ -24,7 +24,6 @@ import {
   narrowTopicMembers,
   narrowTopicTrigger,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
   type TopicSource,
 } from '@/lib/app/questionnaire/scope/types';
@@ -206,17 +205,7 @@ export async function patchConditionalTopicsSettings(
 ): Promise<ConditionalTopicsSettings> {
   const current = await loadConditionalTopicsSettings(versionId, client);
 
-  const rules: ScopeRule[] = (patch.rules ?? current.rules).map((r, i) => ({
-    id: 'id' in r && typeof r.id === 'string' && r.id.length > 0 ? r.id : `rule-${i}`,
-    dataSlotKey: r.dataSlotKey,
-    operator: r.operator,
-    value: r.value ?? null,
-    action: r.action,
-    topicKey: r.topicKey,
-    ordinal: i,
-  }));
-
-  const merged: ConditionalTopicsSettings = { ...current, ...patch, rules };
+  const merged: ConditionalTopicsSettings = { ...current, ...patch };
 
   await client.appQuestionnaireConfig.upsert({
     where: { versionId },

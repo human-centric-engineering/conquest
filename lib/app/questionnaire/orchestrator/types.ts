@@ -156,7 +156,20 @@ export interface TurnState {
    * Present exactly when {@link sectionQuestions} is. Read only to compose the section-covered
    * reply, never to decide anything.
    */
-  sectionMeta?: { key: string; label: string; nextLabel: string | null };
+  sectionMeta?: {
+    key: string;
+    label: string;
+    nextLabel: string | null;
+    /**
+     * True when no section has been finished yet this run — the first handover the respondent will
+     * meet. It is what earns the one-off "you can come back to this part" reassurance a place in
+     * the reply; said at every boundary it would be a tic rather than a reassurance.
+     *
+     * Resolved from the RUN rather than from the ordinal, so it still lands on the first part a
+     * respondent actually finishes when they are free to work in any order.
+     */
+    firstHandover?: boolean;
+  };
   /**
    * Sectioned interviews (P21): the questions in the ACTIVE section, for targeting only.
    *
@@ -238,6 +251,20 @@ export interface TurnState {
    * Absent (the default) means question mode — `runDataSlotTurn` is not used.
    */
   dataSlots?: DataSlotTarget[];
+  /**
+   * Conditional Topics (F17.36 phase 4): the data-slot keys belonging to topics seated DURING the
+   * opening, before the plan was sealed.
+   *
+   * Absent on every session that has not seated one early, which is nearly all of them — and absent
+   * leaves targeting exactly as it was. Present, the pick prefers one of these at the next theme
+   * TRANSITION (never mid-theme), so the interview moves to the area the respondent made obvious
+   * rather than to the next opening theme. Bounded by `MAX_BRIDGED_SLOTS_BEFORE_PLAN`, after which
+   * the preference inverts and the opening is preferred again.
+   *
+   * Keys rather than ids because that is what scope and topic membership speak in, and the
+   * orchestrator already resolves keys to slots.
+   */
+  bridgeDataSlotKeys?: string[];
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
   /**

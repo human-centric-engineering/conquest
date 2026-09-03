@@ -29,6 +29,7 @@ import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import type { StitchedHistory } from '@/lib/app/questionnaire/experiences/run/types';
 import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import { turnInSection } from '@/lib/app/questionnaire/chat/exchange';
 
 export interface ChatHistoryProps {
   /** The shared stream state, owned by `SessionWorkspace`. Read for `turns` alone. */
@@ -54,15 +55,21 @@ export interface ChatHistoryProps {
    * Sectioned interviews (P21): show only the history belonging to this section.
    *
    * Undefined on every unsectioned interview, where the whole history renders as it always has.
-   * The CURRENT exchange is deliberately never filtered — a respondent can only speak in the active
-   * section, so the live end of the conversation is in it by construction, and filtering it would
-   * risk blanking the screen on a turn whose tag has not landed yet.
+   * `CurrentExchange` takes the same key and applies the same predicate: a section move can leave
+   * the previous section's last exchange sitting past the history boundary, and half a filtered
+   * transcript is worse than none.
    *
    * A turn carrying no key at all (recorded before P21, or before this session was sectioned) is
    * KEPT rather than hidden: it is part of the conversation, and hiding it would make the transcript
    * lie about what was said.
    */
   sectionKey?: string | null;
+  /**
+   * Sectioned interviews (P21): where a turn carrying NO section of its own belongs — the run's
+   * first section. See {@link turnInSection}; the surface passes it so the client-built greeting
+   * does not reappear at the top of every section.
+   */
+  untaggedSectionKey?: string | null;
   className?: string;
 }
 
@@ -73,6 +80,7 @@ export function ChatHistory({
   stitchedHistory,
   stitchedSeamLabel,
   sectionKey,
+  untaggedSectionKey,
   className,
 }: ChatHistoryProps) {
   const { turns } = stream;
@@ -84,8 +92,10 @@ export function ChatHistory({
   const segments = stitchedHistory?.segments ?? [];
   const settled = turns
     .slice(0, historyEnd)
-    // P21: this section's history. A no-op when unsectioned, and an untagged turn is kept.
-    .filter((turn) => !sectionKey || !turn.sectionKey || turn.sectionKey === sectionKey);
+    // P21: this section's history. A no-op when unsectioned, and an untagged turn is kept. The
+    // same predicate `CurrentExchange` applies, so the two halves of one transcript cannot disagree
+    // about what a section move hides.
+    .filter((turn) => turnInSection(turn, sectionKey, untaggedSectionKey));
 
   // Nothing behind the current exchange: render no box at all rather than an empty one, so a
   // column that spaces its children with a gap does not open a gap around nothing. The container

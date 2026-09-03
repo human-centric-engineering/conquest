@@ -98,8 +98,6 @@ import {
 import type { RoutingAnalysisEvent } from '@/lib/app/questionnaire/scope/analysis-events';
 import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
-  SCOPE_RULE_ACTION_LABELS,
-  SCOPE_RULE_OPERATOR_LABELS,
   TOPIC_PHASE_LABELS,
   type ProposedGap,
   type ProposedTopicSet,
@@ -114,7 +112,7 @@ export interface RoutingAnalystCardProps {
   questionKeys: readonly string[];
   /**
    * How many data slots the version has, so the card can say when running the analyst now will
-   * cost it the hard rules.
+   * cost it the proposal.
    *
    * A rule tests one data slot and the analyst's prompt is told "DATA SLOTS: none. Propose no hard
    * rules" when there are none — and no ingest path generates data slots, so a freshly uploaded
@@ -357,13 +355,6 @@ export function RoutingAnalystCard({
             // proposal that gets thrown away.
             trigger: t.trigger ?? null,
           })),
-          rules: draft.rules.map((r) => ({
-            dataSlotKey: r.dataSlotKey,
-            operator: r.operator,
-            value: r.value,
-            action: r.action,
-            topicKey: r.topicKey,
-          })),
           ...(draft.maxConditionalTopics !== undefined
             ? { maxConditionalTopics: draft.maxConditionalTopics }
             : {}),
@@ -564,7 +555,6 @@ export function RoutingAnalystCard({
             <p className="text-muted-foreground text-sm">
               {draft.topics.length} proposed {draft.topics.length === 1 ? 'topic' : 'topics'} ·{' '}
               {conditionalCount} conditional
-              {draft.rules.length > 0 && <> · {draft.rules.length} hard rules</>}
               {draft.gaps.length > 0 && (
                 <>
                   {' '}
@@ -695,33 +685,6 @@ export function RoutingAnalystCard({
               ))}
             </ul>
 
-            {draft.rules.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Hard rules</p>
-                <ul className="space-y-2">
-                  {draft.rules.map((rule, i) => (
-                    <li
-                      key={`${rule.topicKey}-${rule.dataSlotKey}-${i}`}
-                      className="bg-muted/20 space-y-1 rounded-md border p-3 text-xs"
-                    >
-                      <p>
-                        When <code>{rule.dataSlotKey}</code>{' '}
-                        {SCOPE_RULE_OPERATOR_LABELS[rule.operator]}
-                        {rule.value !== null && <> “{rule.value}”</>},{' '}
-                        {SCOPE_RULE_ACTION_LABELS[rule.action]} <code>{rule.topicKey}</code>.
-                      </p>
-                      <p className="text-muted-foreground">{rule.rationale}</p>
-                      {rule.sourceQuote && (
-                        <p className="text-muted-foreground border-l-2 pl-2 italic">
-                          {rule.sourceQuote}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             {draft.gaps.length > 0 && (
               <div className="space-y-2">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
@@ -729,10 +692,10 @@ export function RoutingAnalystCard({
                   Recognized but not formalized
                   <FieldHelp title="Things it could not turn into a topic">
                     The document plainly states a routing or eligibility instruction here, but the
-                    analyst could not turn it into a topic or a hard rule — often because it names
-                    something not modeled as a data slot, or is too vague to check mechanically.
-                    Accepting the proposal below does not cover these; review them and add a topic,
-                    criteria, or rule by hand if they matter.
+                    analyst could not turn it into a topic — often because it names something not
+                    modeled as a data slot, or is too vague to check mechanically. Accepting the
+                    proposal below does not cover these; review them and add a topic, criteria, or
+                    rule by hand if they matter.
                   </FieldHelp>
                 </p>
                 <ul className="space-y-2">
@@ -812,7 +775,6 @@ export function RoutingAnalystCard({
               {liveTopicCount > 0
                 ? `This replaces all ${liveTopicCount} of your current topics with the ${draft?.topics.length ?? 0} proposed here`
                 : `This writes the ${draft?.topics.length ?? 0} proposed topics`}
-              {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}
               {draft?.plannerInstructions ? ', and replaces your guidance across all topics' : ''}.
               You can still edit everything afterwards.{' '}
               {scopeEnabled

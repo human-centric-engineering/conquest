@@ -291,9 +291,17 @@ export function allSectionsClosed(run: SectionRun, sections: readonly InterviewS
 /**
  * Whether a respondent may open this section right now.
  *
- * `free` allows any of them. `sequential` allows the active one, any section already closed (the
- * reopen right), and the first section that is not closed. It refuses a jump forward past unfinished
- * ground, which is the whole point of the setting.
+ * `free` allows any of them. `sequential` allows the active one, any section already VISITED —
+ * closed (the reopen right) or left in progress — and the first section that is not closed. It
+ * refuses a jump forward past unfinished ground, which is the whole point of the setting.
+ *
+ * The visited clause is not a loosening of that rule. A section only reaches `in_progress` by
+ * having been opened, which required it to be permitted at the time, so nothing new is skipped by
+ * letting the respondent return to it. Without the clause, going back to an earlier section to add
+ * a line re-locked everything they had already been through: section one reopens, becomes the
+ * first-not-closed again, and the section they had just been working in is a padlock. Sequential
+ * navigation is there to stop a respondent racing ahead of the interview, not to trap them behind
+ * ground they have already covered.
  */
 export function canOpenSection(
   run: SectionRun,
@@ -305,6 +313,6 @@ export function canOpenSection(
   if (!entry) return false;
   if (navigation === 'free') return true;
   if (run.activeKey === key) return true;
-  if (entry.status === 'closed') return true;
+  if (entry.status !== 'not_started') return true;
   return nextOpenSectionKey(run, sections) === key;
 }

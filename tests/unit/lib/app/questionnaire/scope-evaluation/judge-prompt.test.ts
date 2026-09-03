@@ -35,16 +35,6 @@ const STRUCTURE: ScopeStructureInput = {
       members: [],
     },
   ],
-  rules: [
-    {
-      id: 'rule-1',
-      sentence: 'Always include "Talent & culture" when "Engagement" is greater than "50".',
-      dataSlotKey: 'engagement',
-      topicKey: 'talent',
-      operator: 'gt',
-      action: 'include',
-    },
-  ],
   settings: {
     maxConditionalTopics: 3,
     includeCheckTopic: true,
@@ -62,7 +52,7 @@ const STRUCTURE: ScopeStructureInput = {
     perTopic: [{ key: 'talent', fullSeconds: 120, lightSeconds: 40 }],
   },
   knownIssues: [
-    { severity: 'warning', code: 'rule_slot_unreachable', message: 'Already flagged elsewhere.' },
+    { severity: 'warning', code: 'orphaned_questions', message: 'Already flagged elsewhere.' },
   ],
 };
 
@@ -116,28 +106,21 @@ describe('buildScopeJudgePrompt', () => {
     }
   });
 
-  it('serialises topics, rules, settings, costs, and known issues into the user message', () => {
+  it('serialises topics, settings, costs, and known issues into the user message', () => {
     const user = buildScopeJudgePrompt('criteria_quality', STRUCTURE)[1].content;
     expect(user).toContain('TOPICS (3)');
     expect(user).toContain('key=background');
     expect(user).toContain('key=talent');
     expect(user).toContain('The respondent mentions hiring difficulty or turnover.');
-    expect(user).toContain('HARD RULES (1)');
-    expect(user).toContain('Always include "Talent & culture"');
     expect(user).toContain('max conditional topics per interview: 3');
     expect(user).toContain('TIME ARITHMETIC');
     expect(user).toContain('ALREADY CAUGHT BY THE MECHANICAL COHERENCE CHECKER');
-    expect(user).toContain('rule_slot_unreachable');
+    expect(user).toContain('orphaned_questions');
   });
 
   it('marks always-run topics as needing no criteria', () => {
     const user = buildScopeJudgePrompt('criteria_quality', STRUCTURE)[1].content;
     expect(user).toContain('(always run — no criteria needed)');
-  });
-
-  it('renders "(none)" for a config with no hard rules', () => {
-    const user = buildScopeJudgePrompt('rule_integrity', { ...STRUCTURE, rules: [] })[1].content;
-    expect(user).toContain('HARD RULES: (none)');
   });
 
   it('renders "(none)" for a topic with no members', () => {
@@ -168,15 +151,14 @@ describe('buildScopeJudgePrompt', () => {
   });
 
   it('states the targetKey addressing convention so findings are appliable', () => {
-    const system = buildScopeJudgePrompt('rule_integrity', STRUCTURE)[0].content;
+    const system = buildScopeJudgePrompt('coverage_and_burden', STRUCTURE)[0].content;
     expect(system).toContain('targetKey');
     expect(system).toContain('topic:<key>');
-    expect(system).toContain('rule:<id>');
   });
 
   it('builds a non-trivial system prompt for every dimension (every dimension has a rubric)', () => {
     for (const dimension of SCOPE_EVALUATION_DIMENSIONS) {
-      const messages = buildScopeJudgePrompt(dimension, { ...STRUCTURE, topics: [], rules: [] });
+      const messages = buildScopeJudgePrompt(dimension, { ...STRUCTURE, topics: [] });
       expect(messages).toHaveLength(2);
       expect(messages[0].role).toBe('system');
       expect(messages[0].content.length).toBeGreaterThan(200);

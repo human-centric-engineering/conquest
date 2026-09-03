@@ -287,35 +287,14 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   secondsPerDataSlot: 40,
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
-  rules: [
-    {
-      id: 'rule-include',
-      dataSlotKey: 'engagement',
-      operator: 'gt',
-      value: '50',
-      action: 'include',
-      topicKey: 'talent',
-      ordinal: 0,
-    },
-    {
-      id: 'rule-exclude',
-      dataSlotKey: 'engagement',
-      operator: 'not_exists',
-      value: null,
-      action: 'exclude',
-      topicKey: 'compliance-check',
-      ordinal: 1,
-    },
-    {
-      id: 'rule-orphan',
-      dataSlotKey: 'deleted-slot',
-      operator: 'exists',
-      value: null,
-      action: 'include',
-      topicKey: 'deleted-topic',
-      ordinal: 2,
-    },
-  ],
+  maxOpeningTurns: 0,
+  earlyTopicSeating: false,
+  earlySeatingFloor: 0.6,
+  earlySeatingMinConfidence: 0.85,
+  maxEarlySeatedTopics: 1,
+  maxRoutingDecisionsPerTurn: 1,
+  bridgeToSeatedTopics: true,
+  announceEarlySeating: true,
 };
 
 const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {
@@ -1249,7 +1228,7 @@ describe('buildPackModel', () => {
     });
 
     it('keeps a membership key that no longer resolves, rather than dropping it', () => {
-      // Same choice the hard rules make: a stale membership stays visible as something to clean
+      // A stale membership stays visible as something to clean
       // up. Dropping it would quietly shrink the list of what a topic covers.
       const topics = SCOPE_TOPICS.map((t) =>
         t.key === 'background'
@@ -1385,65 +1364,14 @@ describe('buildPackModel', () => {
       expect(check?.sampledOnly).toBe(true);
     });
 
-    it('renders a hard rule with an operand as a plain sentence naming the topic and data-slot labels', () => {
-      const model = buildPackModel(
-        'T',
-        graphOf(SECTIONS),
-        DATA_SLOTS,
-        null,
-        null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
-        null,
-        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
-        'now'
-      );
-      expect(model.conditionalTopics?.rules[0].sentence).toBe(
-        'Always include "Talent & culture" when "Engagement" is greater than "50".'
-      );
-    });
-
-    it('renders a valueless (not_exists) rule without a trailing operand', () => {
-      const model = buildPackModel(
-        'T',
-        graphOf(SECTIONS),
-        DATA_SLOTS,
-        null,
-        null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
-        null,
-        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
-        'now'
-      );
-      expect(model.conditionalTopics?.rules[1].sentence).toBe(
-        'Never include "Compliance blind-spot check" when "Engagement" was never answered.'
-      );
-    });
-
-    it('falls back to the raw key when a rule points at a topic or data slot that no longer resolves', () => {
-      const model = buildPackModel(
-        'T',
-        graphOf(SECTIONS),
-        DATA_SLOTS,
-        null,
-        null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
-        null,
-        { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
-        'now'
-      );
-      expect(model.conditionalTopics?.rules[2].sentence).toBe(
-        'Always include "deleted-topic" when "deleted-slot" has any answer.'
-      );
-    });
-
-    it('produces empty topic/rule lists, not a crash, for a version with no topics or rules at all', () => {
+    it('produces an empty topic list, not a crash, for a version with no topics at all', () => {
       const model = buildPackModel(
         'T',
         graphOf(SECTIONS),
         [],
         null,
         null,
-        { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
+        { topics: [], settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         null,
         { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
         'now'
@@ -1451,7 +1379,6 @@ describe('buildPackModel', () => {
       expect(model.conditionalTopics).toMatchObject({
         alwaysAsked: [],
         conditional: [],
-        rules: [],
       });
     });
   });
@@ -1497,7 +1424,7 @@ describe('buildPackModel', () => {
       expect(model.conditionalTopics).toBeNull();
     });
 
-    it('carries all four judge scores, in SCOPE_EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
+    it('carries all three judge scores, in SCOPE_EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
       const model = buildPackModel(
         'T',
         graphOf(SECTIONS),
@@ -1515,7 +1442,6 @@ describe('buildPackModel', () => {
       );
       expect(model.conditionalTopics?.evaluation?.scores.map((d) => d.dimension)).toEqual([
         'criteria_quality',
-        'rule_integrity',
         'budget_realism',
         'coverage_and_burden',
       ]);
@@ -1533,7 +1459,10 @@ describe('buildPackModel', () => {
         diagnostic: 'judge_error',
       });
       // `rule_integrity` has no dimensionSummary entry in the fixture — n/a, not 0.
-      expect(byDimension.get('rule_integrity')).toMatchObject({ score: null, diagnostic: null });
+      expect(byDimension.get('coverage_and_burden')).toMatchObject({
+        score: null,
+        diagnostic: null,
+      });
     });
 
     it('names a flagged topic ONCE, with both findings beneath it — one carrying a plain-English proposed edit', () => {

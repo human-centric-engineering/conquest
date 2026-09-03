@@ -16,7 +16,6 @@
  * - the model never picked it → the criteria are wrong
  * - the model picked it and the cap trimmed it → the limit is too tight
  * - the budget dropped it → the seconds, not the criteria
- * - a hard rule excluded it → the rule, and only the rule
  *
  * The plan already carries `source` on every topic in and out. The one thing it cannot carry is the
  * difference between the first two, which is why `proposedKeys` comes back separately.
@@ -79,7 +78,6 @@ export interface PlanPreviewCardProps {
  */
 const EXCLUDED_SOURCE_LABELS: Record<ScopeDecisionSource, string> = {
   llm: 'Not chosen by the agent',
-  rule: 'Excluded by a rule you set',
   budget: 'Dropped — over the time budget',
   // Structurally unreachable on an excluded topic; present so the map stays exhaustive and a future
   // source cannot silently fall through to `undefined`.
@@ -87,20 +85,23 @@ const EXCLUDED_SOURCE_LABELS: Record<ScopeDecisionSource, string> = {
   fallback: 'Not in the fallback set',
   check: 'Not the blind-spot check',
   respondent: 'Not requested',
+  early: 'Not chosen during the opening',
 };
 
 /** Shown instead of the stored source when the agent proposed a topic a later layer removed. */
 const EXCLUDED_TAKEN_BACK_LABEL = 'Removed by a limit you set';
 
-/** Tone per decision source, so a rule and a model pick never read the same at a glance. */
+/** Tone per decision source, so two kinds of decision never read the same at a glance. */
 const SOURCE_TONE: Record<ScopeDecisionSource, string> = {
   phase: 'bg-muted text-muted-foreground',
-  rule: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
   llm: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
   fallback: 'bg-orange-500/15 text-orange-700 dark:text-orange-300',
   check: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
   budget: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
   respondent: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  // Related to `llm` and distinct from it, because it is the same judgement made earlier on less:
+  // a teal family member rather than a colour of its own.
+  early: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
 };
 
 export function PlanPreviewCard({
@@ -227,11 +228,6 @@ export function PlanPreviewCard({
                     className="text-muted-foreground flex items-center gap-1.5 text-xs"
                   >
                     {target.name}
-                    {target.watchedByVeto && (
-                      <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                        a rule watches this
-                      </span>
-                    )}
                   </Label>
                   <Input
                     id={`preview-f-${target.key}`}

@@ -403,3 +403,105 @@ describe('a plan that names a SUBSET of a topic (C6 / F17.29)', () => {
     expect(isDataSlotInScope(scope, 'wide_ds2')).toBe(true);
   });
 });
+
+describe('early seats (F17.36)', () => {
+  function early(
+    seats: Array<{ key: string; depth?: 'full' | 'light' }>
+  ): import('@/lib/app/questionnaire/scope/types').EarlySeating {
+    return {
+      v: 1,
+      seated: seats.map((s) => ({
+        key: s.key,
+        depth: s.depth ?? 'full',
+        confidence: 0.9,
+        rationale: `because ${s.key}`,
+        respondentReason: `you mentioned ${s.key}`,
+        atTurn: 3,
+      })),
+      deferred: [],
+      lastPassAtTurn: 3,
+      evidenceKey: 'e',
+      overCap: false,
+    };
+  }
+
+  const TOPICS = [
+    topic('open', 'opening'),
+    topic('spine', 'core'),
+    topic('cond_a', 'conditional'),
+    topic('cond_b', 'conditional'),
+  ];
+
+  it('puts a seated topic in scope with NO plan at all', () => {
+    // The whole point. Before this, `plan: null` meant the always-run phases only, so a decision
+    // taken during the opening had nowhere to land and no effect.
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: null,
+      earlySeated: early([{ key: 'cond_a' }]),
+      settings: settings(),
+    });
+
+    expect([...scope.topicKeys].sort()).toEqual(['cond_a', 'open', 'spine']);
+    expect(isQuestionInScope(scope, 'cond_a_q1')).toBe(true);
+    expect(isQuestionInScope(scope, 'cond_b_q1')).toBe(false);
+  });
+
+  it('defaults an unqualified seat to full depth', () => {
+    // `ResolvedScope` carries no per-topic source, deliberately: it answers "what is in scope and
+    // how deeply", not "who decided". Telling an early seat from a planner pick is the plan's job,
+    // and that contract is proven where it lives, in guardrails.test.ts ("does not double-seat a
+    // topic the model also proposed"). What resolution owes the seat is its depth.
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: null,
+      earlySeated: early([{ key: 'cond_a' }]),
+      settings: settings(),
+    });
+    expect(scope.depthByTopicKey.get('cond_a')).toBe('full');
+  });
+
+  it('honours a light-depth seat', () => {
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: null,
+      earlySeated: early([{ key: 'cond_a', depth: 'light' }]),
+      settings: settings(),
+    });
+    expect(scope.depthByTopicKey.get('cond_a')).toBe('light');
+  });
+
+  it('unions with the plan rather than replacing it', () => {
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: plan([{ key: 'cond_b', depth: 'full', source: 'llm', rationale: 'chosen' }]),
+      earlySeated: early([{ key: 'cond_a' }]),
+      settings: settings(),
+    });
+
+    expect([...scope.topicKeys].sort()).toEqual(['cond_a', 'cond_b', 'open', 'spine']);
+  });
+
+  it('lets the sealed plan win on a topic both carry', () => {
+    // After sealing, every early seat appears in the plan too (`preSeated`). Sealing is where the
+    // depth and any member subset are finally decided, so the plan's entry is the authority.
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: plan([{ key: 'cond_a', depth: 'light', source: 'early', rationale: 'ratified' }]),
+      earlySeated: early([{ key: 'cond_a', depth: 'full' }]),
+      settings: settings(),
+    });
+
+    expect(scope.depthByTopicKey.get('cond_a')).toBe('light');
+  });
+
+  it('changes nothing on a version that never opted in', () => {
+    const scope = resolveScope({
+      topics: TOPICS,
+      plan: null,
+      earlySeated: early([{ key: 'cond_a' }]),
+      settings: settings({ enabled: false }),
+    });
+    expect(scope.active).toBe(false);
+  });
+});

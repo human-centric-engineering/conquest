@@ -29,7 +29,10 @@ const handleAdminTranscript = withAdminAuth<{ id: string; sessionId: string }>(
       const log = await getRouteLogger(request);
       const { id: questionnaireId, sessionId } = await params;
 
-      const view = await loadAdminSessionView(sessionId);
+      // No section timeline: this route returns the transcript and the redaction fields, and never
+      // puts the timeline in its response. Asking for one would buy a turn-context build per
+      // download and throw it away.
+      const view = await loadAdminSessionView(sessionId, { sectionTimeline: false });
       // 404 when the session is unknown OR belongs to a different questionnaire — one response
       // either way, so the route never confirms a cross-questionnaire session.
       if (!view || view.questionnaireId !== questionnaireId) {

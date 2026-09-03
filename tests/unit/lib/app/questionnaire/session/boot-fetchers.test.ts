@@ -37,8 +37,8 @@ import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 // ---------------------------------------------------------------------------
 
 /** A `Response`-alike carrying `body` as JSON. Only `ok` and `json()` are read by the module. */
-function jsonRes(body: unknown, ok = true): Response {
-  return { ok, json: async () => body } as unknown as Response;
+function jsonRes(body: unknown, ok = true, status = ok ? 200 : 500): Response {
+  return { ok, status, json: async () => body } as unknown as Response;
 }
 
 /** Stub `fetch` and hand back the mock so the request can be asserted. */
@@ -117,7 +117,7 @@ const FETCHERS = [
     name: 'fetchTranscript',
     call: fetchTranscript,
     path: '/transcript',
-    degraded: { turns: [], inspectorTurns: [] },
+    degraded: { turns: [], inspectorTurns: [], sessionGone: false },
   },
   { name: 'fetchIntro', call: fetchIntro, path: '/intro', degraded: null },
   { name: 'fetchPersonas', call: fetchPersonas, path: '/persona', degraded: null },
@@ -138,7 +138,8 @@ describe.each(FETCHERS)('$name — fail-soft boot read', ({ call, path, degraded
   });
 
   it('degrades instead of throwing when the response is not ok', async () => {
-    // 401/404/500 all land here — the surface must still open, just plainer.
+    // A 500 — the surface must still open, just plainer. (401/404 additionally tell
+    // `fetchTranscript` the session is gone; see its own describe below.)
     stubFetch(jsonRes({ success: false }, false));
     await expect(call('sess_1', 'tok_abc')).resolves.toEqual(degraded);
   });
@@ -330,6 +331,56 @@ describe('fetchTranscript', () => {
     await expect(fetchTranscript('sess_1', 'tok_abc')).resolves.toEqual({
       turns: [],
       inspectorTurns: [],
+      sessionGone: false,
+    });
+  });
+
+  it('carries the section a turn was said in', async () => {
+    // P21: the respondent surface divides the conversation by section. Zod strips what it does not
+    // enumerate, so an unlisted `sectionKey` came back undefined and a resumed interview showed
+    // every section's turns under whichever one the respondent was in.
+    stubFetch(
+      jsonRes({
+        success: true,
+        data: {
+          turns: [
+            { role: 'assistant', content: 'How is the team set up?', sectionKey: 's1' },
+            { role: 'assistant', content: 'Where do you want to grow?', sectionKey: 's2' },
+          ],
+        },
+      })
+    );
+
+    const { turns } = await fetchTranscript('sess_1', 'tok_abc');
+
+    expect(turns.map((t) => t.sectionKey)).toEqual(['s1', 's2']);
+  });
+
+  describe('sessionGone — the credential no longer opens a session', () => {
+    it.each([404, 401, 403])('reports it on %i', async (status) => {
+      // The dead end it closes: the boot entered a session the server does not have, every read
+      // failed soft to nothing, and the first turn came back "Session not found" with a Try again
+      // that asked the same dead session forever.
+      stubFetch(jsonRes({ success: false }, false, status));
+      const result = await fetchTranscript('sess_1', 'tok_abc');
+      expect(result.sessionGone).toBe(true);
+    });
+
+    it('does NOT report it on a server error', async () => {
+      // Abandoning a live session over a blip would lose a respondent's thread to fix a problem
+      // they did not have.
+      stubFetch(jsonRes({ success: false }, false, 500));
+      expect((await fetchTranscript('sess_1', 'tok_abc')).sessionGone).toBe(false);
+    });
+
+    it('does NOT report it when the network call rejects', async () => {
+      stubFetch(new Error('network down'));
+      expect((await fetchTranscript('sess_1', 'tok_abc')).sessionGone).toBe(false);
+    });
+
+    it('does NOT report it on a healthy read', async () => {
+      stubFetch(jsonRes({ success: true, data: { turns: [] } }));
+      expect((await fetchTranscript('sess_1', 'tok_abc')).sessionGone).toBe(false);
     });
   });
 });

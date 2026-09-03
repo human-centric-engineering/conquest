@@ -4,13 +4,13 @@
  * The Conditional Topics knobs — the master switch and everything that governs how the plan is decided.
  *
  * These live beside the topics rather than on the Settings tab because most of them *address*
- * topics: the fallback set, the blind-spot preference and every hard rule name a topic key. Split
- * across two tabs, an admin would be picking from a list they cannot see.
+ * topics: the fallback set and the blind-spot preference both name a topic key. Split across two
+ * tabs, an admin would be picking from a list they cannot see.
  *
  * Everything on this card is one PATCH of the `conditionalTopics` blob. The order of the fields follows
- * the order of the decision itself, and the steps are numbered to say so: the hard rules that run
- * before the agent, then the cap the model cannot exceed, the blind-spot check, what happens when
- * the model cannot decide, and what the respondent is told.
+ * the order of the decision itself, and the steps are numbered to say so: what the opening may
+ * spend, then the cap the model cannot exceed, the blind-spot check, what happens when the model
+ * cannot decide, and what the respondent is told.
  *
  * Numbering them is not decoration. The failure this card exists to prevent is an admin reading the
  * cap as a request the model tries to honour; seeing it sit *after* the agent's turn in a sequence
@@ -29,16 +29,22 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { Switch } from '@/components/ui/switch';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
-import { ScopeRulesEditor } from '@/components/admin/questionnaires/topics/scope-rules-editor';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_EARLY_SEATED_TOPICS_CEILING,
+  MAX_EARLY_SEATING_FLOOR,
+  MAX_OPENING_TURNS_CEILING,
+  MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_EARLY_SEATED_TOPICS,
+  MIN_EARLY_SEATING_FLOOR,
+  MIN_OPENING_TURNS,
+  MIN_ROUTING_DECISIONS_PER_TURN,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
@@ -48,7 +54,6 @@ import { cn } from '@/lib/utils';
 export interface ScopeSettingsCardProps {
   settings: ConditionalTopicsSettings;
   topics: readonly Topic[];
-  dataSlots: TopicsPayload['inventory']['dataSlots'];
   /**
    * The version's time arithmetic (C7), computed server-side: what the always-run questions cost
    * and what a budget therefore leaves for routed topics.
@@ -101,8 +106,8 @@ function BudgetReadout({
 /**
  * A numbered step heading inside the card.
  *
- * The numbers are the DECISION ORDER, not a wizard: hard rules really are evaluated before the
- * agent, and the agent's answer really is filtered by the limits that follow. Ordering the controls
+ * The numbers are the DECISION ORDER, not a wizard: the agent's answer really is filtered by the
+ * limits that follow. Ordering the controls
  * the way the runtime orders them is what stops an admin reading the cap as something the model
  * merely tries to respect. `step` is omitted for the aside that has no place in that sequence.
  */
@@ -132,7 +137,6 @@ function boundedInt(raw: string, min: number, max: number, fallback: number): nu
 export function ScopeSettingsCard({
   settings,
   topics,
-  dataSlots,
   costs,
   onSave,
   busy,
@@ -174,10 +178,6 @@ export function ScopeSettingsCard({
                 <li>
                   The <strong>opening</strong> gathers the signal, within whatever follow-up
                   allowance you set. It is the only step that happens before the decision.
-                </li>
-                <li>
-                  Your <strong>hard rules</strong> run first. A “never include” can never be undone
-                  by anything below it.
                 </li>
                 <li>
                   The <strong>agent</strong> judges each remaining conditional topic against its
@@ -289,27 +289,59 @@ export function ScopeSettingsCard({
               </div>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Longest the opening may run{' '}
+              <FieldHelp title="Longest the opening may run">
+                <p>
+                  The agent normally waits for <strong>every</strong> opening question and every
+                  opening data slot before it chooses topics. That is the right wait: a decision
+                  made over half an opening is a worse decision.
+                </p>
+                <p>
+                  But it has no escape. If one opening item can never be answered — a slot the
+                  interview fills for itself, or a &ldquo;question&rdquo; that is really a scripted
+                  line with nothing to answer — the agent waits forever, and the respondent gets the
+                  same interview as everyone else with no sign anything went wrong.
+                </p>
+                <p>
+                  Set a number of turns and the agent stops waiting at that point and decides on
+                  what it has. It is a safety net, not a pace setting: leave it well above how long
+                  your opening actually takes. Leave at 0 for no limit.
+                </p>
+              </FieldHelp>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                className="max-w-28"
+                min={MIN_OPENING_TURNS}
+                max={MAX_OPENING_TURNS_CEILING}
+                value={draft.maxOpeningTurns}
+                onChange={(e) =>
+                  set({
+                    maxOpeningTurns: boundedInt(
+                      e.target.value,
+                      MIN_OPENING_TURNS,
+                      MAX_OPENING_TURNS_CEILING,
+                      draft.maxOpeningTurns
+                    ),
+                  })
+                }
+                disabled={busy}
+              />
+              <span className="text-muted-foreground shrink-0 text-xs">
+                {draft.maxOpeningTurns === 0
+                  ? 'no limit — wait for the whole opening'
+                  : `turns, then choose topics on what there is`}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          {/* The data-slot dependency is named in the heading itself, not left to the ⓘ. A rule
-              tests one data slot, so with none on the version there is nothing to author a rule
-              against — and the admin who most needs telling is the one who never opens the help. */}
-          {/* Names the ACTION, not a category. "The cases you are certain about" told an admin
-              nothing about what to put in the field — "cases" is an abstraction, and the data-slot
-              dependency read as decoration rather than as the thing the rule is built from. */}
-          <SectionLabel step={2}>Always or never ask a topic based on one answer</SectionLabel>
-          <ScopeRulesEditor
-            rules={draft.rules}
-            onChange={(next: ScopeRule[]) => set({ rules: next })}
-            topics={topics}
-            dataSlots={dataSlots}
-            disabled={busy}
-          />
-        </div>
-
-        <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={3}>How much the agent may cover</SectionLabel>
+          <SectionLabel step={2}>How much the agent may cover</SectionLabel>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
@@ -422,6 +454,231 @@ export function ScopeSettingsCard({
           </div>
         </div>
 
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={3}>Choosing before the opening finishes</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-early-seating" className="text-sm font-medium">
+                Start choosing areas before the opening finishes{' '}
+                <FieldHelp title="Choosing areas during the opening">
+                  <p>
+                    Normally the agent waits for the whole opening, then chooses. That is the right
+                    wait: a decision made over half an opening is a worse decision.
+                  </p>
+                  <p>
+                    But sometimes a respondent makes an area obvious on their second answer, and
+                    then spends four more turns finishing an opening whose conclusion is already
+                    settled. Turn this on and the agent may act on something that has become
+                    unmistakable, while the opening is still running.
+                  </p>
+                  <p>
+                    <strong>It only ever adds.</strong> Nothing chosen this way can be taken back,
+                    and the full decision still happens at the end of the opening exactly as it does
+                    now — it simply starts from what has already been settled.
+                  </p>
+                  <p>
+                    Off by default. Leave it off unless your openings are long enough that waiting
+                    costs the respondent something.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Off means every area is chosen once, when the opening finishes.
+              </p>
+            </div>
+            <Switch
+              id="scope-early-seating"
+              checked={draft.earlyTopicSeating}
+              onCheckedChange={(v) => set({ earlyTopicSeating: v })}
+              disabled={busy}
+            />
+          </div>
+
+          {draft.earlyTopicSeating && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  How much of the opening must be answered first{' '}
+                  <FieldHelp title="How much of the opening must be answered first">
+                    <p>
+                      Nothing is considered until this much of the opening has been answered. It is
+                      the guard against acting on a first impression.
+                    </p>
+                    <p>
+                      Questions the agent gave up on do <strong>not</strong> count toward this. A
+                      question it stopped asking is one nobody answered, and letting three of those
+                      carry a respondent over the line would mean choosing areas on evidence they
+                      never gave.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    min={Math.round(MIN_EARLY_SEATING_FLOOR * 100)}
+                    max={Math.round(MAX_EARLY_SEATING_FLOOR * 100)}
+                    value={Math.round(draft.earlySeatingFloor * 100)}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      set({
+                        earlySeatingFloor: Number.isFinite(parsed)
+                          ? Math.min(
+                              MAX_EARLY_SEATING_FLOOR,
+                              Math.max(MIN_EARLY_SEATING_FLOOR, parsed / 100)
+                            )
+                          : draft.earlySeatingFloor,
+                      });
+                    }}
+                    disabled={busy}
+                  />
+                  <span className="text-muted-foreground shrink-0 text-xs">% of the opening</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  How sure it must be to choose early{' '}
+                  <FieldHelp title="How sure it must be to choose early">
+                    <p>
+                      How confident the agent must be about one area before it may act on it this
+                      early. Anything less sure is discarded and left to the full decision.
+                    </p>
+                    <p>
+                      Keep this at or above the confidence you set above for the full decision.
+                      Choosing on less of the conversation should mean choosing less readily, not
+                      more.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    min={0}
+                    max={100}
+                    value={Math.round(draft.earlySeatingMinConfidence * 100)}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      set({
+                        earlySeatingMinConfidence: Number.isFinite(parsed)
+                          ? Math.min(1, Math.max(0, parsed / 100))
+                          : draft.earlySeatingMinConfidence,
+                      });
+                    }}
+                    disabled={busy}
+                  />
+                  <span className="text-muted-foreground shrink-0 text-xs">% confident</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  Most areas that may be chosen early{' '}
+                  <FieldHelp title="Most areas that may be chosen early">
+                    Counts toward the overall limit above, never on top of it. It bounds how much of
+                    the interview may be decided before the opening has finished, leaving the rest
+                    for the full decision.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  className="max-w-28"
+                  min={MIN_EARLY_SEATED_TOPICS}
+                  max={MAX_EARLY_SEATED_TOPICS_CEILING}
+                  value={draft.maxEarlySeatedTopics}
+                  onChange={(e) =>
+                    set({
+                      maxEarlySeatedTopics: boundedInt(
+                        e.target.value,
+                        MIN_EARLY_SEATED_TOPICS,
+                        MAX_EARLY_SEATED_TOPICS_CEILING,
+                        draft.maxEarlySeatedTopics
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+              </div>
+
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-0.5">
+                    <Label htmlFor="scope-bridge" className="text-sm font-medium">
+                      Move to an area as soon as it is chosen{' '}
+                      <FieldHelp title="Moving to an area chosen early">
+                        <p>
+                          Choosing an area early decides what the interview will{' '}
+                          <strong>cover</strong>. On its own it does not change what is{' '}
+                          <strong>asked next</strong> — the opening questions still come first, so
+                          the respondent would notice nothing until the opening finished.
+                        </p>
+                        <p>
+                          Turn this on and the interview moves to the chosen area at the next
+                          natural change of subject. It never interrupts a line of questioning
+                          mid-flow; it only changes which subject comes next when one was about to
+                          change anyway.
+                        </p>
+                        <p>
+                          It is a visit, not a move: after a question or two it returns to the
+                          opening, which still has to finish before the full decision is made.
+                        </p>
+                        <p>
+                          Turn it off if respondents tell you the conversation feels like it jumps
+                          around. The area is still covered, just later and in the usual order.
+                        </p>
+                      </FieldHelp>
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Off means a chosen area is covered later, in the usual order.
+                    </p>
+                  </div>
+                  <Switch
+                    id="scope-bridge"
+                    checked={draft.bridgeToSeatedTopics}
+                    onCheckedChange={(v) => set({ bridgeToSeatedTopics: v })}
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">
+                  Most areas from a single answer{' '}
+                  <FieldHelp title="Most areas from a single answer">
+                    <p>
+                      A respondent can say one thing that plainly warrants three areas. This paces
+                      that, so one answer cannot spend the whole allowance at once.
+                    </p>
+                    <p>
+                      Nothing is thrown away: anything it judged and could not take is picked up on
+                      later answers, without asking again.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  className="max-w-28"
+                  min={MIN_ROUTING_DECISIONS_PER_TURN}
+                  max={MAX_ROUTING_DECISIONS_PER_TURN_CEILING}
+                  value={draft.maxRoutingDecisionsPerTurn}
+                  onChange={(e) =>
+                    set({
+                      maxRoutingDecisionsPerTurn: boundedInt(
+                        e.target.value,
+                        MIN_ROUTING_DECISIONS_PER_TURN,
+                        MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
+                        draft.maxRoutingDecisionsPerTurn
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-2 border-t pt-4">
           <SectionLabel step={4}>Guard against a narrow result</SectionLabel>
           <div className="flex items-start justify-between gap-3">
@@ -515,6 +772,45 @@ export function ScopeSettingsCard({
             />
           </div>
 
+          {/* Only where it means something. Early seating is off by default, and a switch governing
+              an announcement that can never happen is a control an author cannot verify. */}
+          {draft.earlyTopicSeating && (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <Label htmlFor="scope-announce-early" className="text-sm font-medium">
+                  Say when an area is chosen during the opening{' '}
+                  <FieldHelp title="Announce an area chosen early">
+                    <p>
+                      The announcement above is said once, when the full decision is made. This one
+                      covers the areas chosen <strong>before</strong> that, while the opening is
+                      still running.
+                    </p>
+                    <p>
+                      It matters more, not less: an area that appears in the middle of a
+                      conversation with no explanation is the moment a respondent starts wondering
+                      what else is being decided about them. The agent names the area, says roughly
+                      how much of it there is, and ties it to what they actually said.
+                    </p>
+                    <p>
+                      One acknowledgement per answer, however many areas that answer brought in.
+                      Turn it off only if you want the interview to change subject without saying
+                      why.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <p className="text-muted-foreground text-xs">
+                  Woven into the interviewer’s own voice on the turn after the area is chosen.
+                </p>
+              </div>
+              <Switch
+                id="scope-announce-early"
+                checked={draft.announceEarlySeating}
+                onCheckedChange={(v) => set({ announceEarlySeating: v })}
+                disabled={busy}
+              />
+            </div>
+          )}
+
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-amendment" className="text-sm font-medium">
@@ -558,10 +854,9 @@ export function ScopeSettingsCard({
               <br />
               <br />
               It’s advice, not a rule: the agent weighs it up rather than obeying it, so anything
-              you can’t compromise on belongs in a hard rule. It can’t stretch the topic limit,
-              overrule a hard rule, or change the fallback list; those are applied afterwards
-              whatever this says. It also doesn’t change how questions are worded, only which topics
-              get covered.
+              you can’t compromise on belongs in a topic’s criteria. It can’t stretch the topic
+              limit or change the fallback list; those are applied afterwards whatever this says. It
+              also doesn’t change how questions are worded, only which topics get covered.
             </FieldHelp>
           </Label>
           <AutoTextarea

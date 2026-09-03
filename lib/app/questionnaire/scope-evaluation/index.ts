@@ -16,7 +16,6 @@ export {
   type ScopeJudgeFinding,
   type ScopeJudgeVerdict,
   type ScopeStructureTopic,
-  type ScopeStructureRule,
   type ScopeStructureSettings,
   type ScopeStructureCosts,
   type ScopeStructureIssue,
@@ -50,7 +49,6 @@ export {
 export {
   MAX_SCOPE_EVAL_TOPICS,
   MAX_SCOPE_EVAL_MEMBERS_PER_TOPIC,
-  MAX_SCOPE_EVAL_RULES,
   MAX_SCOPE_EVAL_ISSUES,
   scopeStructureSchema,
 } from '@/lib/app/questionnaire/scope-evaluation/structure-schema';

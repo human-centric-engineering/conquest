@@ -5,12 +5,10 @@
  * the assertions here are mostly about which edges exist and where they come from. Two families matter
  * most:
  *
- * 1. **Rule edges bypass the planner and the guardrails.** That is not decoration — it is the picture of
- *    `applyGuardrails` seating rule includes before the cap and never truncating them. An edge routed
- *    through the guardrails node would draw a limit that does not apply.
- * 2. **A rule's evidence is classified exactly as `validateConditionalTopics` classifies it** — opening,
- *    `core`, or neither. The map is rendered directly beneath that validator's warnings, so a
- *    disagreement between the two would be visible on one screen.
+ * 1. **Every edge runs left to right**, because React Flow draws a same-column edge as a backwards
+ *    loop around both of its endpoints.
+ * 2. **No edge points at a node that is not on the canvas** — React Flow drops such an edge
+ *    silently, so a dangling reference is an arrow that quietly disappears rather than a crash.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,18 +18,15 @@ import {
   GUARDRAILS_NODE_ID,
   PLANNER_NODE_ID,
   START_NODE_ID,
-  UNGATHERED_NODE_ID,
   buildScopeGraph,
   estimateNodeHeight,
   ROUTING_MAP_NODE_WIDTH,
   type BuildScopeGraphInput,
   type ScopeGraph,
 } from '@/lib/app/questionnaire/scope/graph';
-import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -63,19 +58,6 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
     ordinal: 0,
     source: 'seeded',
     trigger: null,
-    ...overrides,
-  };
-}
-
-function rule(overrides: Partial<ScopeRule> = {}): ScopeRule {
-  return {
-    id: 'r1',
-    dataSlotKey: 'headcount',
-    operator: 'gt',
-    value: '50',
-    action: 'include',
-    topicKey: 'pricing',
-    ordinal: 0,
     ...overrides,
   };
 }
@@ -162,7 +144,7 @@ describe('buildScopeGraph', () => {
      *
      * This is a whole-graph invariant rather than a fact about one edge, because the way it was
      * introduced was a layout decision made for unrelated reasons — the band sat one column too far
-     * right, which quietly put its expanded topics in the rule column. The `start` → band-head edge is
+     * right. The `start` → band-head edge is
      * the one deliberate exception: the head is directly below `start`, and it is drawn vertically
      * because that node takes its inbound edge on the top.
      */
@@ -174,14 +156,11 @@ describe('buildScopeGraph', () => {
             topic('open', 'opening', {
               members: { dataSlotKeys: ['headcount'], questionKeys: [] },
             }),
-            // Gathers the slot the rule reads, which is what produces the weak-evidence edge.
             topic('spine', 'core', { members: { dataSlotKeys: ['tenure'], questionKeys: [] } }),
             topic('pricing', 'conditional'),
             topic('wrap', 'closing'),
           ],
-          settings: settings({
-            rules: [rule(), rule({ id: 'r2', dataSlotKey: 'tenure', topicKey: 'pricing' })],
-          }),
+          settings: settings(),
           dataSlots: [slot('headcount'), slot('tenure')],
         });
 
@@ -203,7 +182,7 @@ describe('buildScopeGraph', () => {
           topic('spine', 'core', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
           topic('pricing', 'conditional'),
         ],
-        settings: settings({ rules: [rule()] }),
+        settings: settings(),
         dataSlots: [slot('headcount'), slot('tenure')],
       });
 
@@ -227,7 +206,7 @@ describe('buildScopeGraph', () => {
           topic('spine', 'core'),
           topic('wrap', 'closing'),
         ],
-        settings: settings({ rules: [rule()] }),
+        settings: settings(),
         dataSlots: [slot('headcount')],
       });
 
@@ -241,9 +220,7 @@ describe('buildScopeGraph', () => {
     it('gives every node and every edge a unique id', () => {
       const graph = build({
         topics: [topic('open', 'opening'), topic('a', 'conditional'), topic('b', 'conditional')],
-        settings: settings({
-          rules: [rule({ id: 'r1', topicKey: 'a' }), rule({ id: 'r2', topicKey: 'b' })],
-        }),
+        settings: settings(),
         dataSlots: [slot('headcount')],
       });
 
@@ -278,160 +255,6 @@ describe('buildScopeGraph', () => {
       const graph = build({ topics: [topic('pricing', 'conditional')] });
 
       expect(edgeBetween(graph, START_NODE_ID, PLANNER_NODE_ID)).toBeDefined();
-    });
-  });
-
-  describe('hard rules', () => {
-    it('routes a rule straight to its topic, bypassing the planner and the guardrails', () => {
-      const graph = build({
-        topics: [topic('open', 'opening'), topic('pricing', 'conditional')],
-        settings: settings({ rules: [rule({ topicKey: 'pricing' })] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      const edge = edgeBetween(graph, 'rule:r1', 'conditional:pricing');
-      expect(edge?.kind).toBe('ruleInclude');
-      // The geometry is the argument: an include seated before the cap is not subject to it.
-      expect(edgeBetween(graph, 'rule:r1', GUARDRAILS_NODE_ID)).toBeUndefined();
-      expect(edgeBetween(graph, 'rule:r1', PLANNER_NODE_ID)).toBeUndefined();
-    });
-
-    it('distinguishes an exclude from an include', () => {
-      const graph = build({
-        topics: [topic('open', 'opening'), topic('pricing', 'conditional')],
-        settings: settings({ rules: [rule({ action: 'exclude', topicKey: 'pricing' })] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(edgeBetween(graph, 'rule:r1', 'conditional:pricing')?.kind).toBe('ruleExclude');
-      expect(graph.nodes.find((n) => n.id === 'rule:r1')?.badges).toContainEqual({
-        label: 'Exclude',
-        tone: 'negative',
-      });
-    });
-
-    it('draws no target edge for a rule naming a topic that does not exist, and badges it instead', () => {
-      const graph = build({
-        topics: [topic('open', 'opening')],
-        settings: settings({ rules: [rule({ topicKey: 'gone' })] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      // An arrow into nothing reads as a rendering fault; a badge reads as the authoring fault it is.
-      expect(graph.edges.filter((e) => e.source === 'rule:r1')).toHaveLength(0);
-      expect(graph.nodes.find((n) => n.id === 'rule:r1')?.badges).toContainEqual({
-        label: 'Unknown topic',
-        tone: 'warning',
-      });
-    });
-
-    it('names the data slot rather than its key, and omits the operand for a valueless operator', () => {
-      const graph = build({
-        topics: [topic('open', 'opening')],
-        settings: settings({ rules: [rule({ operator: 'not_exists', value: null })] }),
-        dataSlots: [slot('headcount', 'How many staff')],
-      });
-
-      const label = graph.nodes.find((n) => n.id === 'rule:r1')?.label ?? '';
-      expect(label).toContain('How many staff');
-      expect(label).toContain('was never answered');
-      // `not_exists` takes no operand — an empty pair of quotes would read as a blank field.
-      expect(label).not.toContain('“');
-    });
-  });
-
-  describe('where a rule reads its evidence from', () => {
-    const conditional = topic('pricing', 'conditional');
-
-    it('draws a solid evidence edge when an opening topic gathers the slot', () => {
-      const graph = build({
-        topics: [
-          topic('open', 'opening', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(edgeBetween(graph, 'opening:open', 'rule:r1')?.kind).toBe('evidence');
-      expect(ids(graph)).not.toContain(UNGATHERED_NODE_ID);
-    });
-
-    it('weakens the edge when only a core topic gathers the slot', () => {
-      // `rule_slot_not_in_opening`: core runs alongside the opening in an order nothing guarantees.
-      const graph = build({
-        topics: [
-          topic('open', 'opening'),
-          topic('spine', 'core', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      const edge = graph.edges.find((e) => e.target === 'rule:r1');
-      expect(edge?.kind).toBe('evidenceWeak');
-      expect(edge?.label).toBe('timing not guaranteed');
-      // Collapsed, the core topic is not on the canvas, so the edge anchors to the band's head.
-      expect(edge?.source).toBe(ALWAYS_BAND_NODE_ID);
-    });
-
-    it('sharpens that edge to the exact core topic once the band is expanded', () => {
-      const graph = build({
-        topics: [
-          topic('open', 'opening'),
-          topic('spine', 'core', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-        expandAlways: true,
-      });
-
-      expect(graph.edges.find((e) => e.target === 'rule:r1')?.source).toBe('always:spine');
-    });
-
-    it('hangs the rule off an explicit marker when nothing reachable gathers the slot', () => {
-      const graph = build({
-        topics: [topic('open', 'opening'), conditional],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(ids(graph)).toContain(UNGATHERED_NODE_ID);
-      const edge = edgeBetween(graph, UNGATHERED_NODE_ID, 'rule:r1');
-      expect(edge?.kind).toBe('evidenceWeak');
-      expect(edge?.label).toBe('never gathered in time');
-    });
-
-    it('treats a conditional topic gathering the slot as no better than nothing', () => {
-      // Matching `validateConditionalTopics`, which buckets conditional and closing with "never gathered":
-      // neither is in scope until after the decision that would have read it has been taken.
-      const graph = build({
-        topics: [
-          topic('open', 'opening'),
-          topic('pricing', 'conditional', {
-            members: { dataSlotKeys: ['headcount'], questionKeys: [] },
-          }),
-        ],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(edgeBetween(graph, UNGATHERED_NODE_ID, 'rule:r1')).toBeDefined();
-    });
-
-    it('adds no marker when every rule reads an opening slot', () => {
-      const graph = build({
-        topics: [
-          topic('open', 'opening', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(ids(graph)).not.toContain(UNGATHERED_NODE_ID);
     });
   });
 
@@ -514,18 +337,14 @@ describe('buildScopeGraph', () => {
         settings: settings({
           fallbackTopicKeys: ['growth'],
           checkTopicPreference: ['growth'],
-          rules: [
-            rule({ id: 'a', ordinal: 0, topicKey: 'pricing' }),
-            rule({ id: 'b', ordinal: 1, topicKey: 'gone', action: 'exclude' }),
-          ],
         }),
         dataSlots: [slot('headcount')],
       });
 
       const badged = graph.nodes.filter((n) => (n.badges?.length ?? 0) > 0);
-      // start, opening, planner, guardrails, two rules, two conditional topics — the badged ones are
-      // the planner, both rules and both conditional topics.
-      expect(badged.length).toBeGreaterThanOrEqual(5);
+      // start, opening, planner, guardrails, two conditional topics — the badged ones are the
+      // planner and both conditional topics.
+      expect(badged.length).toBeGreaterThanOrEqual(3);
 
       for (const node of badged) {
         expect(
@@ -586,19 +405,6 @@ describe('buildScopeGraph', () => {
   });
 
   describe('it is structural, never predictive', () => {
-    it('offers every conditional topic to the guardrails even when a rule already excludes it', () => {
-      // A rule's match depends on a session's fills, which do not exist while authoring. Suppressing the
-      // candidate edge here would draw an outcome the map cannot know — the failure the dry-run exists
-      // to answer instead.
-      const graph = build({
-        topics: [topic('open', 'opening'), topic('pricing', 'conditional')],
-        settings: settings({ rules: [rule({ action: 'exclude', topicKey: 'pricing' })] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      expect(edgeBetween(graph, GUARDRAILS_NODE_ID, 'conditional:pricing')?.kind).toBe('candidate');
-    });
-
     it('draws the whole pipeline while the feature is switched off', () => {
       // "What would routing do to this instrument" is the question to answer BEFORE switching on — the
       // same stance the comparability checks take.
@@ -609,74 +415,6 @@ describe('buildScopeGraph', () => {
 
       expect(edgeBetween(graph, GUARDRAILS_NODE_ID, 'conditional:pricing')).toBeDefined();
       expect(graph.nodes.find((n) => n.id === START_NODE_ID)?.sublabel).toContain('off');
-    });
-  });
-
-  // The map is rendered on the same screen as `validateConditionalTopics`'s findings, so the two must agree
-  // about whether a rule can read what it tests. They compute it independently — the validator to word a
-  // warning, the builder to choose an edge — which is exactly the pair that drifts silently.
-  describe('it agrees with the validator about a rule’s reachability', () => {
-    const conditional = topic('pricing', 'conditional');
-    const REACHABILITY_CODES = [
-      'rule_slot_unreachable',
-      'rule_veto_always_fires',
-      'rule_slot_not_in_opening',
-    ];
-
-    function verdicts(topics: Topic[], r: ScopeRule) {
-      const s = settings({ rules: [r] });
-      const graph = build({ topics, settings: s, dataSlots: [slot('headcount')] });
-      const issues = validateConditionalTopics({
-        topics,
-        settings: s,
-        allQuestionKeys: topics.flatMap((t) => t.members.questionKeys),
-        allDataSlotKeys: ['headcount'],
-      });
-      return {
-        graphSaysWeak:
-          graph.edges.find((e) => e.target === `rule:${r.id}`)?.kind === 'evidenceWeak',
-        validatorComplains: issues.some((i) => REACHABILITY_CODES.includes(i.code)),
-      };
-    }
-
-    it('agrees when the opening gathers the slot — solid edge, no finding', () => {
-      const v = verdicts(
-        [
-          topic('open', 'opening', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        rule()
-      );
-      expect(v.graphSaysWeak).toBe(false);
-      expect(v.validatorComplains).toBe(false);
-    });
-
-    it('agrees when only a core topic gathers it — weak edge, and a finding', () => {
-      const v = verdicts(
-        [
-          topic('open', 'opening'),
-          topic('spine', 'core', { members: { dataSlotKeys: ['headcount'], questionKeys: [] } }),
-          conditional,
-        ],
-        rule()
-      );
-      expect(v.graphSaysWeak).toBe(true);
-      expect(v.validatorComplains).toBe(true);
-    });
-
-    it('agrees when nothing gathers it — weak edge, and a finding', () => {
-      const v = verdicts([topic('open', 'opening'), conditional], rule());
-      expect(v.graphSaysWeak).toBe(true);
-      expect(v.validatorComplains).toBe(true);
-    });
-
-    it('agrees about a veto reading an ungathered slot — the sharpest case of all', () => {
-      const v = verdicts(
-        [topic('open', 'opening'), conditional],
-        rule({ operator: 'not_exists', value: null, action: 'exclude' })
-      );
-      expect(v.graphSaysWeak).toBe(true);
-      expect(v.validatorComplains).toBe(true);
     });
   });
 
@@ -708,10 +446,6 @@ describe('buildScopeGraph', () => {
         settings: settings({
           fallbackTopicKeys: ['c0'],
           checkTopicPreference: ['c0'],
-          rules: [
-            rule({ id: 'a', ordinal: 0, topicKey: 'c1' }),
-            rule({ id: 'b', ordinal: 1, topicKey: 'c2', action: 'exclude' }),
-          ],
         }),
         dataSlots: [slot('headcount')],
       });
@@ -780,7 +514,7 @@ describe('buildScopeGraph', () => {
     it('gives every column its own vertical lane, so no two adjacent columns share an edge run', () => {
       const graph = build({
         topics: crowded,
-        settings: settings({ rules: [rule({ topicKey: 'c0' })] }),
+        settings: settings(),
         dataSlots: [slot('headcount')],
       });
 
@@ -792,18 +526,6 @@ describe('buildScopeGraph', () => {
       // The spine alternates rather than running dead flat...
       expect(Math.abs(centre('opening:open') - centre(START_NODE_ID))).toBeGreaterThan(24);
       expect(Math.abs(centre(PLANNER_NODE_ID) - centre('opening:open'))).toBeGreaterThan(24);
-
-      // ...and a hard rule runs in a lane well below it, which is what keeps its edge to a conditional
-      // topic from being drawn straight through the planner and the guardrails it bypasses.
-      const ruleNode = graph.nodes.find((n) => n.id.startsWith('rule:'))!;
-      expect(ruleNode.y).toBeGreaterThan(
-        centre(PLANNER_NODE_ID) +
-          estimateNodeHeight(graph.nodes.find((n) => n.id === PLANNER_NODE_ID)!)
-      );
-      expect(ruleNode.y).toBeGreaterThan(
-        centre(GUARDRAILS_NODE_ID) +
-          estimateNodeHeight(graph.nodes.find((n) => n.id === GUARDRAILS_NODE_ID)!)
-      );
     });
   });
 
@@ -818,22 +540,6 @@ describe('buildScopeGraph', () => {
 
       const y = (key: string) => graph.nodes.find((n) => n.id === `conditional:${key}`)!.y;
       expect(y('first')).toBeLessThan(y('second'));
-    });
-
-    it('lays rules out in ordinal order', () => {
-      const graph = build({
-        topics: [topic('open', 'opening'), topic('a', 'conditional')],
-        settings: settings({
-          rules: [
-            rule({ id: 'late', ordinal: 9, topicKey: 'a' }),
-            rule({ id: 'early', ordinal: 0, topicKey: 'a' }),
-          ],
-        }),
-        dataSlots: [slot('headcount')],
-      });
-
-      const y = (id: string) => graph.nodes.find((n) => n.id === `rule:${id}`)!.y;
-      expect(y('early')).toBeLessThan(y('late'));
     });
   });
 
@@ -1056,67 +762,6 @@ describe('buildScopeGraph', () => {
       expect(own!.id).not.toBe(ALWAYS_BAND_NODE_ID);
       expect(edgeBetween(graph, ALWAYS_BAND_NODE_ID, own!.id)).toBeDefined();
       expect(graph.edges.filter((e) => e.source === e.target)).toEqual([]);
-    });
-  });
-
-  describe('a rule aimed at a topic that always runs', () => {
-    // `applyGuardrails` seats and vetoes within the CONDITIONAL set, and `resolveScope` puts every
-    // other phase in scope regardless — so this rule cannot add or block anything for anybody. It
-    // used to draw identically to a live rule: no edge (correct), but also no badge and a plain
-    // `Topic` row, which is the same silent no-op `rule_veto_always_fires` exists to prevent.
-    const withAlwaysTarget = (phase: TopicPhase = 'core') =>
-      build({
-        topics: [topic('audit', phase), topic('pricing', 'conditional')],
-        settings: settings({ rules: [rule({ action: 'exclude', topicKey: 'audit' })] }),
-        dataSlots: [slot('headcount')],
-      });
-
-    it('badges the rule node as having no effect', () => {
-      const node = withAlwaysTarget().nodes.find((n) => n.id === 'rule:r1');
-
-      expect(node?.badges?.map((b) => b.label)).toContain('No effect');
-    });
-
-    it('says so on the detail row rather than printing the label unqualified', () => {
-      const node = withAlwaysTarget().nodes.find((n) => n.id === 'rule:r1');
-
-      expect(node?.detail.rows.find((r) => r.label === 'Topic')?.value).toBe(
-        'Topic audit — always asked, so this rule changes nothing'
-      );
-    });
-
-    it('explains the badge in the panel, like every other badge', () => {
-      const node = withAlwaysTarget().nodes.find((n) => n.id === 'rule:r1');
-
-      const note = node?.detail.badgeNotes?.find((n) => n.label === 'No effect');
-      expect(note?.meaning).toContain('asked in every interview');
-    });
-
-    it.each<TopicPhase>(['core', 'opening', 'closing'])(
-      'treats a %s target the same way — none of them is ever chosen between',
-      (phase) => {
-        const node = withAlwaysTarget(phase).nodes.find((n) => n.id === 'rule:r1');
-
-        expect(node?.badges?.map((b) => b.label)).toContain('No effect');
-      }
-    );
-
-    it('leaves a live rule unbadged', () => {
-      const graph = build({
-        topics: [topic('pricing', 'conditional')],
-        settings: settings({ rules: [rule()] }),
-        dataSlots: [slot('headcount')],
-      });
-
-      const node = graph.nodes.find((n) => n.id === 'rule:r1');
-      expect(node?.badges?.map((b) => b.label)).not.toContain('No effect');
-      expect(node?.detail.rows.find((r) => r.label === 'Topic')?.value).toBe('Topic pricing');
-    });
-
-    it('still draws no edge, because the runtime still does nothing', () => {
-      const graph = withAlwaysTarget();
-
-      expect(graph.edges.filter((e) => e.source === 'rule:r1')).toEqual([]);
     });
   });
 });

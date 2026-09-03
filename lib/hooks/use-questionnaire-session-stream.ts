@@ -45,6 +45,20 @@ import type { ChatAttachment } from '@/lib/orchestration/chat/types';
  *  and this sender can't drift. */
 export type MessageAttachment = ChatAttachment;
 
+/**
+ * Sectioned interviews (P21): the move the interviewer just said it was making.
+ *
+ * `nextLabel` is carried alongside the key because the cue the surface shows names the destination
+ * ("Moving on to Growth Strategy"), and the strip's own view is fetched separately and may not have
+ * caught up by the time the beat starts.
+ */
+export interface SectionHandover {
+  /** The section to finish. The one the reply was spoken in. */
+  sectionKey: string;
+  /** What the interview moves on to. Never empty — the last section announces no move. */
+  nextLabel: string;
+}
+
 export interface UseQuestionnaireSessionStreamOptions {
   /** The session id (the `:id` in `/questionnaire-sessions/:id/messages`). */
   sessionId: string;
@@ -71,6 +85,22 @@ export interface UseQuestionnaireSessionStreamOptions {
    * does not churn `sendMessage`'s identity.
    */
   onTurnSettled?: () => void;
+  /**
+   * Sectioned interviews (P21): the section the conversation is currently in.
+   *
+   * Stamped onto every turn this hook appends, because the server stamps the persisted row with
+   * the same key — `activeSection` on the turn it just ran — and a live transcript whose turns
+   * carry no section is one the surface cannot divide. Without it a section move looked like it
+   * changed nothing until the page was reloaded, which is the point at which the tagged rows came
+   * back from `/transcript`.
+   *
+   * The two keys cannot disagree: both are `run.activeKey ?? nextOpenSectionKey(...)` over the
+   * same stored run, and a move is only offered while no turn is in flight.
+   *
+   * Undefined on every unsectioned interview, which leaves the turns untagged and every reader on
+   * its flat path.
+   */
+  sectionKey?: string | null;
 }
 
 export interface UseQuestionnaireSessionStreamReturn {
@@ -86,6 +116,21 @@ export interface UseQuestionnaireSessionStreamReturn {
    * and never replayed on resume.
    */
   stageLabel: string | null;
+  /**
+   * Sectioned interviews (P21): the handover the reply on screen announced, or `null`.
+   *
+   * Non-null only after a turn that settled cleanly AND ended with the interviewer saying it was
+   * taking the respondent on to the named part. That is the server's `section_covered` frame, which
+   * it emits only when it actually made that promise — the interviewer drives the move on this
+   * version, and there is a part to move to.
+   *
+   * It says what was SAID, never what is permitted: whether the part may be finished is the
+   * `/sections` gate's answer, re-asserted on the move itself.
+   *
+   * Cleared when the next turn starts, so a respondent who answers into a covered part cancels the
+   * move simply by speaking.
+   */
+  sectionHandover: SectionHandover | null;
   /**
    * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
    * oldest first. Seeded from the persisted traces on resume (`initialInspectorTurns`) and extended
@@ -103,7 +148,7 @@ export interface UseQuestionnaireSessionStreamReturn {
    * Proactive opening: stream the first question without a respondent message (no user bubble).
    * Fired once on a fresh session by {@link SessionWorkspace}'s `autoStart`. No-ops when blocked.
    */
-  kickoff: () => Promise<void>;
+  kickoff: (opts?: { sectionKey?: string | null }) => Promise<void>;
   /** Run a follow-up turn after an in-chat answer control was submitted (no respondent bubble). */
   continueAfterCard: (questionKey: string) => Promise<void>;
   /** Clear a transient error banner. */
@@ -245,6 +290,7 @@ export function useQuestionnaireSessionStream(
     initialInspectorTurns,
     initialStatus,
     onTurnSettled,
+    sectionKey,
   } = options;
   const anonymous = Boolean(accessToken);
 
@@ -253,12 +299,25 @@ export function useQuestionnaireSessionStream(
   const onTurnSettledRef = useRef(onTurnSettled);
   onTurnSettledRef.current = onTurnSettled;
 
+  // Held in a ref for the same reason, and read at the START of a turn rather than when it commits:
+  // the section is what it was when the respondent spoke, and the strip refetches on settle.
+  const sectionKeyRef = useRef(sectionKey);
+  sectionKeyRef.current = sectionKey;
+
+  /** The section stamp for a turn appended now. Empty (not `{ sectionKey: null }`) when unsectioned. */
+  const sectionStamp = (key = sectionKeyRef.current): { sectionKey?: string } =>
+    key ? { sectionKey: key } : {};
+
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
   // P20 Phase 2: which stage of the turn the server says is running right now. Transient by
   // design — it is never committed onto a turn, and it clears the instant the first content delta
   // lands, because from then on the reply itself is the progress.
   const [stageLabel, setStageLabel] = useState<string | null>(null);
+  // P21: the handover the LAST settled turn announced, or null. Set once the turn settles cleanly
+  // and cleared the moment another turn starts, so it describes the reply currently on screen and
+  // nothing else.
+  const [sectionHandover, setSectionHandover] = useState<SectionHandover | null>(null);
   // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
   // `inspector` frame. Seeded from the persisted traces on resume (so a reload re-hydrates the
   // drawer instead of waiting for the next turn). Never populated for a real respondent — the
@@ -311,7 +370,12 @@ export function useQuestionnaireSessionStream(
   const appendAgentTurn = useCallback((content: string, warnings?: SessionWarning[]) => {
     setTurns((prev) => [
       ...prev,
-      { role: 'assistant', content, ...(warnings && warnings.length > 0 ? { warnings } : {}) },
+      {
+        role: 'assistant',
+        content,
+        ...(warnings && warnings.length > 0 ? { warnings } : {}),
+        ...sectionStamp(),
+      },
     ]);
   }, []);
 
@@ -320,7 +384,22 @@ export function useQuestionnaireSessionStream(
   // carries no respondent message); `body` is the POST payload (`{ message, attachments }` or
   // `{ kickoff: true }`).
   const streamTurn = useCallback(
-    async (opts: { body: Record<string, unknown>; userTurn?: string; isRetry?: boolean }) => {
+    async (opts: {
+      body: Record<string, unknown>;
+      userTurn?: string;
+      isRetry?: boolean;
+      /**
+       * Override the section this turn is stamped with (P21).
+       *
+       * For the one turn that opens a section the respondent has just moved to. The move posts,
+       * the strip's new view is set, and the kickoff fires from that same callback — before React
+       * has re-rendered, so `sectionKeyRef` still holds the section they LEFT. The server tags the
+       * persisted row from the run it just wrote, so the two disagreed: the new section's opening
+       * question rendered in the old section, below a later turn, and the section just opened
+       * showed nothing but the greeting.
+       */
+      sectionKey?: string | null;
+    }) => {
       // `BLOCKING_STATUSES` (streaming + the terminal cost-cap / not-active / expired states)
       // is the single source of truth for "no further input is meaningful" — the same set
       // `canSend` is derived from, so the guard and the composer can never disagree.
@@ -331,17 +410,29 @@ export function useQuestionnaireSessionStream(
       // a transient failure can resend the same body + key.
       const prior = lastAttemptRef.current;
       const key = opts.isRetry && prior ? prior.key : crypto.randomUUID();
+      // The section this turn is being spoken in, fixed now rather than read again when the reply
+      // commits: it is the key the server will stamp on the persisted row, and a move that landed
+      // in between must not retag a turn that was said somewhere else. An explicit key wins, for
+      // the turn that opens a section the ref has not caught up with yet.
+      const turnSection = opts.sectionKey !== undefined ? opts.sectionKey : sectionKeyRef.current;
       const hasUserTurn = opts.isRetry && prior ? prior.hasUserTurn : opts.userTurn !== undefined;
       lastAttemptRef.current = { body: opts.body, key, hasUserTurn };
 
       // Optimistic: show the respondent's turn immediately (fresh send only — a retry's bubble is
       // already on screen from the failed attempt) and clear side-band state.
       if (!opts.isRetry && opts.userTurn !== undefined) {
-        setTurns((prev) => [...prev, { role: 'user', content: opts.userTurn as string }]);
+        setTurns((prev) => [
+          ...prev,
+          { role: 'user', content: opts.userTurn as string, ...sectionStamp(turnSection) },
+        ]);
       }
       setError(null);
       setStatus('streaming');
       setStreaming(true);
+      // P21: whatever the previous turn announced is over. Cleared HERE rather than on settle, so a
+      // respondent who types during the handover beat cancels the move by speaking — the beat's
+      // timer is keyed on this value, and it is gone before their message is on screen.
+      setSectionHandover(null);
       typing.reset();
 
       const controller = new AbortController();
@@ -357,6 +448,9 @@ export function useQuestionnaireSessionStream(
       let streamReasoning: ReasoningStep[] = [];
       // Question fidelity (P18): the answer control to render inside this turn, if any.
       let streamCard: QuestionCardPayload | null = null;
+      // P21: the section handover this turn announced (one frame, before `done`), published only
+      // once the turn settles cleanly — an interrupted turn made no promise to keep.
+      let streamHandover: SectionHandover | null = null;
       let streamError: ChatErrorState | null = null;
 
       try {
@@ -424,6 +518,10 @@ export function useQuestionnaireSessionStream(
               } else if (ev.type === 'question_card') {
                 // One frame, emitted after the lead-in prose — attached to the committed turn below.
                 streamCard = ev.card;
+              } else if (ev.type === 'section_covered') {
+                // One frame per turn at most. Held rather than applied here: applying it mid-stream
+                // would start the handover beat under a reply still arriving.
+                streamHandover = { sectionKey: ev.sectionKey, nextLabel: ev.nextLabel };
               } else if (ev.type === 'inspector') {
                 // Admin preview only — append this turn's agent-call trace to the session log.
                 const turn = { turnIndex: ev.turnIndex, calls: ev.calls };
@@ -452,6 +550,7 @@ export function useQuestionnaireSessionStream(
               ...(streamWarnings.length > 0 ? { warnings: streamWarnings } : {}),
               ...(streamReasoning.length > 0 ? { reasoning: streamReasoning } : {}),
               ...(streamCard !== null ? { card: streamCard } : {}),
+              ...sectionStamp(turnSection),
             },
           ]);
         }
@@ -463,6 +562,9 @@ export function useQuestionnaireSessionStream(
           setStatus('idle');
           // Settled cleanly — the attempt succeeded, so drop it: a later send mints a fresh key.
           lastAttemptRef.current = null;
+          // P21: published only on the clean path. A turn that errored out may still have streamed
+          // the sentence promising the move, but the surface must not act on a stream that broke.
+          if (streamHandover) setSectionHandover(streamHandover);
           // The turn (and any answers it captured) is now persisted — let the panel refresh.
           onTurnSettledRef.current?.();
         }
@@ -515,9 +617,18 @@ export function useQuestionnaireSessionStream(
 
   // Proactive opening: stream the first question with no respondent bubble. The empty-message
   // turn is skipped by the server's `recentMessages` and ignored by the opening phraser.
-  const kickoff = useCallback(async () => {
-    await streamTurn({ body: { kickoff: true } });
-  }, [streamTurn]);
+  //
+  // `sectionKey` is passed by the one caller that knows better than this hook does: the section
+  // move, which fires the opening for a section the strip has only just switched to.
+  const kickoff = useCallback(
+    async (opts: { sectionKey?: string | null } = {}) => {
+      await streamTurn({
+        body: { kickoff: true },
+        ...(opts.sectionKey !== undefined ? { sectionKey: opts.sectionKey } : {}),
+      });
+    },
+    [streamTurn]
+  );
 
   /**
    * Question fidelity (P18): run a turn after the respondent answered a question through its in-chat
@@ -553,6 +664,7 @@ export function useQuestionnaireSessionStream(
     streaming,
     streamingText: typing.displayText,
     stageLabel,
+    sectionHandover,
     inspectorTurns,
     status,
     error,

@@ -89,7 +89,6 @@ const RESULT = {
       rationale: 'The routing page restricts this to sales-led businesses.',
     },
   ],
-  rules: [],
   gaps: [],
   summary: 'Read from the routing page.',
   fromDocument: true,
@@ -319,40 +318,6 @@ describe('persistRoutingAnalysis', () => {
     expect(persisted.uncoveredQuestionCount).toBe(1);
   });
 
-  it('carries the rule quotes and the three settings the analyst may propose', async () => {
-    // These ride the same proposal an admin reviews and accepts (F17.23), so the projection has to
-    // carry them through untouched — a dropped `maxConditionalTopics` silently widens the plan.
-    const log = makeLog();
-
-    await persistRoutingAnalysis({
-      ...PERSIST,
-      result: {
-        ...RESULT,
-        rules: [
-          {
-            dataSlotKey: 'headcount',
-            operator: 'gt' as const,
-            value: '50',
-            action: 'include' as const,
-            topicKey: 'pipeline',
-            rationale: 'Stated on the guardrails tab.',
-            sourceQuote: 'Always include Pipeline when headcount is over 50.',
-          },
-        ],
-        maxConditionalTopics: 3,
-        fallbackTopicKeys: ['pipeline'],
-        checkTopicPreference: ['pipeline'],
-      },
-      log: log as never,
-    });
-
-    const draft = (saveTopicDraft as Mock).mock.calls[0][1];
-    expect(draft.rules[0].sourceQuote).toBe('Always include Pipeline when headcount is over 50.');
-    expect(draft.maxConditionalTopics).toBe(3);
-    expect(draft.fallbackTopicKeys).toEqual(['pipeline']);
-    expect(draft.checkTopicPreference).toEqual(['pipeline']);
-  });
-
   it('carries the topic trigger the analyst returned (F17.31a)', async () => {
     // `toProposedSet` is the ONLY projection from the validated analyst result to a persisted
     // draft, and `trigger` is optional on `ProposedTopic` — so omitting it from that literal costs
@@ -422,16 +387,6 @@ describe('persistRoutingAnalysis', () => {
       result: {
         ...RESULT,
         topics: [{ ...RESULT.topics[0], sourceQuote: undefined }],
-        rules: [
-          {
-            dataSlotKey: 'headcount',
-            operator: 'gt' as const,
-            value: '50',
-            action: 'include' as const,
-            topicKey: 'pipeline',
-            rationale: 'Inferred from the question set.',
-          },
-        ],
         gaps: [{ sourceQuote: 'Use judgement elsewhere.', explanation: 'Nothing to test on.' }],
       },
       log: log as never,
@@ -440,7 +395,6 @@ describe('persistRoutingAnalysis', () => {
     const draft = (saveTopicDraft as Mock).mock.calls[0][1];
     expect(draft.topics[0].replacesExisting).toBe(true);
     expect(draft.topics[0]).not.toHaveProperty('sourceQuote');
-    expect(draft.rules[0]).not.toHaveProperty('sourceQuote');
     expect(draft.gaps).toEqual([
       { sourceQuote: 'Use judgement elsewhere.', explanation: 'Nothing to test on.' },
     ]);

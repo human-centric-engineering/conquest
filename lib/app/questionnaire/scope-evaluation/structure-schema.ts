@@ -10,18 +10,12 @@
 
 import { z } from 'zod';
 
-import {
-  SCOPE_RULE_ACTIONS,
-  SCOPE_RULE_OPERATORS,
-  TOPIC_DEPTHS,
-  TOPIC_PHASES,
-} from '@/lib/app/questionnaire/scope/types';
+import { TOPIC_DEPTHS, TOPIC_PHASES } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeStructureInput } from '@/lib/app/questionnaire/scope-evaluation/types';
 
 /** Caps on a serialised scope config — generous for a real instrument, bounded against abuse. */
 export const MAX_SCOPE_EVAL_TOPICS = 200;
 export const MAX_SCOPE_EVAL_MEMBERS_PER_TOPIC = 500;
-export const MAX_SCOPE_EVAL_RULES = 200;
 export const MAX_SCOPE_EVAL_ISSUES = 200;
 
 export const scopeStructureTopicSchema = z.object({
@@ -33,15 +27,6 @@ export const scopeStructureTopicSchema = z.object({
   members: z
     .array(z.object({ key: z.string(), label: z.string() }))
     .max(MAX_SCOPE_EVAL_MEMBERS_PER_TOPIC),
-});
-
-export const scopeStructureRuleSchema = z.object({
-  id: z.string().min(1),
-  sentence: z.string(),
-  dataSlotKey: z.string(),
-  topicKey: z.string(),
-  operator: z.enum(SCOPE_RULE_OPERATORS),
-  action: z.enum(SCOPE_RULE_ACTIONS),
 });
 
 export const scopeStructureSettingsSchema = z.object({
@@ -78,7 +63,6 @@ export const scopeStructureIssueSchema = z.object({
  */
 export const scopeStructureSchema = z.object({
   topics: z.array(scopeStructureTopicSchema).max(MAX_SCOPE_EVAL_TOPICS),
-  rules: z.array(scopeStructureRuleSchema).max(MAX_SCOPE_EVAL_RULES),
   settings: scopeStructureSettingsSchema,
   costs: scopeStructureCostsSchema,
   knownIssues: z.array(scopeStructureIssueSchema).max(MAX_SCOPE_EVAL_ISSUES),

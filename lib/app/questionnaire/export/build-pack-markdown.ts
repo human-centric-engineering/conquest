@@ -345,15 +345,6 @@ export function buildPackMarkdown(model: PackModel): string {
       }
       lines.push('');
 
-      if (model.conditionalTopics.rules.length > 0) {
-        lines.push('### Hard rules');
-        lines.push('');
-        for (const rule of model.conditionalTopics.rules) {
-          lines.push(`- ${cell(rule.sentence)}`);
-        }
-        lines.push('');
-      }
-
       // Skipped wholesale when the admin excluded it — the "has not been reviewed" line below is
       // about a version nobody has evaluated, not about a download that left the review out.
       const evaluation = model.conditionalTopics.evaluation;

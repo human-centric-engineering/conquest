@@ -36,6 +36,14 @@ vi.mock('@/lib/app/questionnaire/report/client-knowledge', () => ({
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-export', () => ({
   loadSessionExport: vi.fn(),
 }));
+// Sectioned interviews (P21). `NO_SESSION_SECTIONS` stays real — it is the value the gate returns
+// for an unsectioned session, and stubbing it would hide the thing most of this file relies on.
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-sections', async (importActual) => ({
+  ...(await importActual<
+    typeof import('@/app/api/v1/app/questionnaire-sessions/_lib/session-sections')
+  >()),
+  resolveSessionSections: vi.fn(),
+}));
 vi.mock('@/lib/app/questionnaire/report/research', () => ({ runReportResearch: vi.fn() }));
 // Mock the appendix synthesis pass but keep `hasResearchFindings` real (it drives the gating in generate).
 vi.mock('@/lib/app/questionnaire/report/appendix', async (importActual) => ({
@@ -50,6 +58,7 @@ import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manag
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
+import { resolveSessionSections } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-sections';
 import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scoring/compute';
 import { runReportResearch } from '@/lib/app/questionnaire/report/research';
 import { synthesiseReportAppendix } from '@/lib/app/questionnaire/report/appendix';
@@ -1663,5 +1672,134 @@ describe('generateRespondentReport — open-vs-close reconciliation (C9)', () =>
     const { system } = await systemPromptFor(derived, noRefs);
     expect(system).toContain('A predictable revenue engine');
     expect(system).toContain('Fix our pipeline');
+  });
+});
+
+describe('generateRespondentReport — sectioned interviews (P21) chapters', () => {
+  /** The stored blob is only the GATE; the section list itself comes from the resolver. */
+  function withRun(sections: Array<{ key: string; status: string }>) {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      ...sessionMeta(),
+      versionId: 'v1',
+      sectionRun: {
+        v: 1,
+        activeKey: sections[0]?.key ?? null,
+        sections: sections.map((s) => ({
+          key: s.key,
+          status: s.status,
+          openedAtTurn: 1,
+          closedAtTurn: null,
+          closeReason: null,
+          reopenCount: 0,
+          turnsSpent: 2,
+        })),
+      },
+    });
+    (resolveSessionSections as Mock).mockResolvedValue({
+      active: true,
+      sections: sections.map((s, i) => ({
+        key: s.key,
+        label: s.key === 'ctx' ? 'Context' : s.key === 'prob' ? 'Problem' : 'Appetite',
+        ordinal: i,
+        source: 'topics',
+        questionKeys: ['q1'],
+        dataSlotKeys: [],
+      })),
+      run: {
+        v: 1,
+        activeKey: sections[0]?.key ?? null,
+        sections: sections.map((s) => ({
+          key: s.key,
+          status: s.status,
+          openedAtTurn: 1,
+          closedAtTurn: null,
+          closeReason: null,
+          reopenCount: 0,
+          turnsSpent: 2,
+        })),
+      },
+    });
+  }
+
+  async function systemPrompt(): Promise<string> {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+    await generateRespondentReport('sess-1');
+    return (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+  }
+
+  it('never resolves sections for a session that banked no run', async () => {
+    // The gate. An ordinary report must not pay a context build to be told the feature is off —
+    // the same round-trip the respondent strip was fixed for in phase C.
+    await systemPrompt();
+    expect(resolveSessionSections).not.toHaveBeenCalled();
+  });
+
+  it('emits no shape block at all for an unsectioned session', async () => {
+    const system = await systemPrompt();
+    expect(system).not.toContain('THE SHAPE OF THIS INTERVIEW');
+  });
+
+  it('names the parts in run order and asks the report to follow them', async () => {
+    withRun([
+      { key: 'ctx', status: 'closed' },
+      { key: 'prob', status: 'in_progress' },
+    ]);
+    const system = await systemPrompt();
+    expect(system).toContain('THE SHAPE OF THIS INTERVIEW');
+    expect(system).toContain('1. Context');
+    expect(system).toContain('2. Problem');
+    expect(system.indexOf('1. Context')).toBeLessThan(system.indexOf('2. Problem'));
+  });
+
+  it('tells the writer a part it never reached was not covered, not left blank', async () => {
+    // The third kind of gap. Reported as an unanswered question it becomes the respondent's
+    // omission; reported as out of scope it implies a decision nobody made.
+    withRun([
+      { key: 'ctx', status: 'closed' },
+      { key: 'prob', status: 'not_started' },
+    ]);
+    const system = await systemPrompt();
+    expect(system).toContain('NOT REACHED');
+    expect(system).toContain('NOT COVERED');
+    expect(system).toContain('they were never asked');
+    expect(system).toContain('- Problem');
+  });
+
+  it('omits the not-covered block entirely when every part was reached', async () => {
+    withRun([
+      { key: 'ctx', status: 'closed' },
+      { key: 'prob', status: 'closed' },
+    ]);
+    const system = await systemPrompt();
+    expect(system).toContain('THE SHAPE OF THIS INTERVIEW');
+    expect(system).not.toContain('NOT COVERED');
+  });
+
+  it('counts a part reached but unfinished as covered', async () => {
+    withRun([{ key: 'ctx', status: 'in_progress' }]);
+    const system = await systemPrompt();
+    expect(system).not.toContain('NOT COVERED');
+  });
+
+  it('tells the writer to keep it short when no part was reached at all', async () => {
+    withRun([
+      { key: 'ctx', status: 'not_started' },
+      { key: 'prob', status: 'not_started' },
+    ]);
+    const system = await systemPrompt();
+    expect(system).toContain('No part of this interview was completed');
+  });
+
+  it('licenses merging or dropping a part rather than writing to fill a heading', async () => {
+    withRun([
+      { key: 'ctx', status: 'closed' },
+      { key: 'prob', status: 'closed' },
+    ]);
+    const system = await systemPrompt();
+    expect(system).toContain('You are not ');
+    expect(system).toContain('worse than no section at all');
   });
 });

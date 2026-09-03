@@ -48,7 +48,7 @@ import {
   type PlanScopeResult,
   type ScopeAnswer,
 } from '@/lib/app/questionnaire/scope/planner';
-import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
+import type { ScopeFill } from '@/lib/app/questionnaire/scope/types';
 import {
   MEMBER_KEY_MAX_LENGTH,
   SCOPE_RATIONALE_MAX_LENGTH,

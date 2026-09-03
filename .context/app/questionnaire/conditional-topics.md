@@ -69,7 +69,7 @@ the instrument in scope for one respondent) rather than the feature.
 
 The [Questionnaire Pack](./questionnaire-pack.md) carries an opt-in **Conditional topics** section
 written for a stakeholder who has never seen the authoring surface: which areas everyone gets, which
-depend on the respondent (with the admin's own criteria), the hard rules as sentences, every routing
+depend on the respondent (with the admin's own criteria), every routing
 setting from `ROUTING_SETTING_DESCRIPTORS`, and the judge panel's **Review of this routing**. Three
 sub-options control the depth — topic membership, the review, and the technical tier — and the whole
 section defaults off, because routing is the instrument's design rather than its content.
@@ -93,15 +93,42 @@ reach a single new runtime code path — `buildSessionScope` does not even query
 That equivalence is a tested gate, not a hope: `turn-context.test.ts` asserts both the unchanged
 output and the absent query.
 
+### Hard rules were removed on 2026-09-02
+
+Conditional Topics used to carry a second, deterministic tier in front of the judgement: a short
+list of **hard rules** an author could pin, each testing one data slot with one operator
+(`equals` / `contains` / `gt` / `lt` / `exists` / `not_exists`) and forcing a topic in or out.
+The tier is gone. **The point of the feature is to choose the right areas semantically, from what
+the respondent actually said**, and the rules tier was both the least used part of it and the
+reason the rest had to be so cautious.
+
+It was removed rather than suspended because nothing depended on it: across the whole database
+exactly one rule existed, on a draft questionnaire with no real respondent sessions, and it was
+the worked example from this document. The app is not in production, so there was no data to
+preserve and no read shim to write.
+
+What went with it: `scope/rules.ts` and `scope/rule-format.ts`, the rules editor, the
+`rule_integrity` judge, the `add_rule` / `edit_rule` / `delete_rule` proposed-edit ops, the six
+`rule_*` validation codes, the `'rule'` decision source, the analyst's rule proposals, and the
+routing map's rule nodes and evidence edges. The `conditionalTopics.rules` key is no longer read;
+the sub-tab keeps its `rules` id for URL stability but is now labelled **Limits & fallbacks**.
+
+**What this cost, stated plainly.** An author can no longer express a certainty. Everything is
+judgement against plain-English criteria, including the cases this document used to argue were
+the most valuable ones ("never score them on AI readiness when they never named an outcome").
+If a client needs a veto, the mechanism has to come back — and the condition for bringing it back
+is written down in [`f17-early-topic-seating.md`](../planning/features/f17-early-topic-seating.md):
+`not_exists` must abstain on a slot that was never actually asked, because absence of an answer
+to a question nobody put is evidence of nothing.
+
 ---
 
-## The four concepts
+## The three concepts
 
 | Concept            | What it is                                                                                                              | Where it lives                          |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | **Topic**          | The conditional unit: a named group of question + data-slot **keys**, with a phase, plain-English criteria, and a depth | `AppQuestionnaireTopic`                 |
-| **Hard rules**     | A short optional list checked before the agent — the cases the author is certain about                                  | `conditionalTopics.rules` (config Json) |
-| **Scope Planner**  | Runs once, when the opening completes: rules → judgement → guardrails                                                   | `scope/planner.ts`                      |
+| **Scope Planner**  | Runs once, when the opening completes: judgement → guardrails                                                           | `scope/planner.ts`                      |
 | **Interview Plan** | The per-session record: which topics, which not, why, and what the respondent was told                                  | `AppQuestionnaireSession.interviewPlan` |
 
 ### Size is not significant
@@ -190,28 +217,13 @@ in doubt, ask.**
 
 ## The planner
 
-Three tiers, in order — and the order is the design.
+Two tiers, in order — and the order is the design.
 
-1. **Hard rules** (`scope/rules.ts`). Every match applies (not first-match-wins: include and exclude
-   are independent assertions about different topics, so stopping at the first would silently drop
-   the rest). **Exclude beats include** — an author's "never" is a line drawn, and a second rule they
-   forgot must not cross it.
-
-   `not_exists` is the one operator that matches on ABSENCE, and the one exception to "an unfilled
-   slot never matches". It exists because the most valuable hard rules are **vetoes** — "never score
-   them on AI readiness when they never named an outcome they want it to move" — and a veto is a
-   statement about something the respondent did _not_ say. Without it that rule could only be
-   written as prose criteria, which is exactly the failure hard rules exist to prevent: a constraint
-   obeyed most of the time.
-
-2. **The judgement** (`scope/planner.ts`). One call over the author's criteria and what the
+1. **The judgement** (`scope/planner.ts`). One call over the author's criteria and what the
    respondent actually said. Skipped entirely when there is nothing to decide — no conditional
-   topics, or **every remaining candidate already force-included by a rule**. Rule-included topics
-   stay in the candidate list on purpose (a model proposing in ignorance of half the plan doubles up
-   on the same ground), but `applyGuardrails` seats them _before_ the model's picks, so when they are
-   all that is left every proposal could only land on a key already seated. Paying a reasoning-model
-   call — and up to 12s of a waiting respondent's time — for that is waste.
-3. **Guardrails** (`scope/guardrails.ts`). The cap, the blind-spot check, the fallback.
+   topics at all — because paying a reasoning-model call, and up to 12s of a waiting respondent's
+   time, for a foregone conclusion is waste.
+2. **Guardrails** (`scope/guardrails.ts`). The cap, the blind-spot check, the fallback.
 
 > **The model proposes; it never gets the last word on a hard constraint.** Six numbered rules in a
 > system prompt are obeyed _most_ of the time, which is the worst possible failure mode — plausible
@@ -334,10 +346,9 @@ an admin and reads like it (_"Not selected — nothing in the opening pointed at
 planner is asked for one per topic, grounded in what the person actually said.
 
 **Every seated conditional topic ends up with one.** `applyGuardrails` fills a deterministic default
-for anything that arrives without — a planner that omitted it, a hard-rule inclusion (whose own
-reason is the author's note to an admin), the fallback — because a group appearing on someone's
-screen with no explanation is the thing that makes them wonder what else is being decided about
-them. A respondent amendment carries _"You asked to cover this."_
+for anything that arrives without — a planner that omitted it, an early seat, the fallback — because
+a group appearing on someone's screen with no explanation is the thing that makes them wonder what
+else is being decided about them. A respondent amendment carries _"You asked to cover this."_
 
 **The blind-spot check is the one reason that may not be derived from what they said**, because the
 planner has an absence of signal rather than evidence. It says _"A few questions on something we
@@ -552,19 +563,275 @@ its questions answered. Both halves, because judging the opening on its data slo
 opening topic built only from questions read as complete before it had been asked: the plan was
 decided on turn one, over an empty transcript.
 
-The cost of deciding early is not only a less-informed judgement. **The hard rules are evaluated at
-that same moment**, and `not_exists` matches on absence — so an early gate fires every veto an
-author wrote, for every respondent, and the resulting plan looks entirely reasonable. That is the
-same failure the reachability checks below catch at authoring time; this is the runtime half of it.
+The cost of deciding early is a less-informed judgement, over a transcript that has barely started.
 
 An opening member naming a question that no longer exists is skipped, not waited for. Unresolvable
 keys are skipped everywhere in this feature, and here the alternative is a stale member holding
 every interview of that version in its opening forever.
 
+The arithmetic behind the gate lives in `scope/readiness.ts` (`openingReadiness`), not in the gate
+itself. `isOpeningComplete` is a thin wrapper over it — one implementation, because a second
+definition of "how much of the opening is in" already cost this codebase one defect, and because
+early topic seating (F17.36 phase 3) needs the same measurement read slightly differently. The
+difference is parking: `countParked: true` is the gate, and a parked slot counts as covered;
+`countParked: false` is what a decision made on partial evidence will read, and it does not.
+
+### When the opening can never finish (F17.36)
+
+The gate is all-or-nothing and has no escape, so **one** opening member no respondent can ever cover
+means the plan is never made — for every respondent of that version, silently, forever. Two real
+shapes, both from session `CPY3-1C6S`:
+
+- a question slot holding a **scripted handoff line**, which contains no question;
+- a data slot whose description records **the interview's own routing decision** rather than a fact
+  about the respondent.
+
+A data slot self-heals — after `maxDataSlotAttempts` the orchestrator parks it with a synthesised
+`provisional` fill, and the park counts as covered — so the slot half of the gate degrades
+gracefully. The question half has no equivalent.
+
+Two covers, one at each end:
+
+| Cover                        | Where                                        | What it does                                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `opening_member_uncoverable` | `scope/validate.ts`, Topics tab              | Reads the wording of every opening member and warns when one does not look answerable. Advisory: it is a heuristic, and a wrong error would block a launch over a phrasing opinion. |
+| `maxOpeningTurns`            | `ConditionalTopicsSettings`, `plan-scope.ts` | Closes the opening on what there is once the session has taken that many turns. **`0` (off) by default**, so no existing version changes.                                           |
+
+When the backstop fires, the plan carries a `forcedClose` record — the turn, the limit, and the
+members that were never covered — and the session viewer leads the plan panel with it. A forced plan
+and a considered one are identical in `topics` and `excluded`, and the difference is the first thing
+worth knowing about a thin report: the interview did not decide badly, it decided early because
+something in the opening could not be answered. The trigger also logs it at `warn`, because reaching
+that point means the instrument has an authoring fault the operator should not have to go looking
+for.
+
+`maxOpeningTurns` is a backstop, not a pace setting. Set it well above how long the opening actually
+takes; an author who wants a shorter opening should ask fewer opening questions.
+
+### Choosing during the opening, not only at the end of it (F17.36)
+
+The opening exists to find out what is relevant. Until early seating, it could only report that
+finding **once**, at the very end of itself: a respondent could spend six turns making an area
+obvious and the interview would not act on it until the last opening question was answered.
+
+> **Planning is two stages over one plan: provisional seating during the opening, then the existing
+> planner at the end, which seals the record.**
+
+The final planner still runs, always, over the complete opening. Early seating front-runs it; it
+never replaces it. That is what preserves the balanced judgement the design rests on while removing
+the all-or-nothing wait.
+
+#### The invariants
+
+Load-bearing. These are the line between a tuning knob and a re-planning engine.
+
+1. **Only ever adds.** An early seat brings a topic into scope. Nothing removes one, including the
+   final planner. Same invariant as respondent amendment, and for the same reason: an interview that
+   silently narrowed produces a report meaning something different from every other in its cohort.
+2. **The final plan is still a single coherent statement.** It absorbs every early seat with its own
+   source and turn, so a finished report is still reproducible from the record.
+3. **Breadth is one budget.** Early seats consume `maxConditionalTopics`. Two sub-caps bound how much
+   of it partial information may spend, and how much any single turn may spend.
+
+Any request to remove, re-rank or re-plan is a different feature.
+
+#### Two numbers, never one
+
+The **floor** (`earlySeatingFloor`, default 0.6) is coverage: how much of the opening is in. The
+**bar** (`earlySeatingMinConfidence`, default 0.85) is confidence: how sure the judgement about this
+one topic is. They answer different questions, they are separately explicable on the admin surface,
+and a single blended score is a number nobody can reason about.
+
+The floor reads `openingReadiness` with `countParked: false`. The gate that seals the plan counts
+parks; this does not. A park is a best-effort inference the interviewer gave up on, and letting three
+of those carry a session over the floor would seat topics on evidence nobody actually gave.
+
+The bar defaults **above** `minConfidence` (0.85 against 0.6), and `validate.ts` raises
+`early_confidence_below_floor` when an author sets it lower: deciding on less evidence must mean
+deciding less readily, never more.
+
+#### Where it lives
+
+`earlySeatedTopics` is its own nullable column, **not** part of `interviewPlan`. The planner's
+once-only write guard keys on `interviewPlan` being null, so a partial plan written there would make
+the session look sealed and the final planner would never run. `resolveScope` unions the two; at seal
+time the same keys are handed to `applyGuardrails` as `preSeated` and seated **before** the cap,
+because something the interview has already asked about cannot be truncated by a later enthusiasm.
+
+An early seat also **suppresses the fallback**, deliberately. The fallback's precondition is "there
+was no signal to judge on at all", and a topic seated during the opening is a judgement made on real
+evidence at a higher bar than the plan itself needed.
+
+#### The gate, cheapest first
+
+`maybeSeatEarlyTopics` runs **first** of the four post-turn triggers, and stands down the moment a
+plan exists.
+
+| Tier | Cost              | What it does                                                               |
+| ---- | ----------------- | -------------------------------------------------------------------------- |
+| 0    | one field read    | Deferred picks outstanding? Seat up to the per-turn cap. **No model call** |
+| 1    | arithmetic only   | On? Above the floor? Allowance unspent? **Did the evidence change?**       |
+| 2    | one narrowed read | Load topics; anything still eligible?                                      |
+| 3    | one planner call  | Judge the eligible candidates over the opening so far                      |
+
+**The evidence-change check is the important one.** A turn that added no new fill and no new answer
+cannot change the judgement, so it must not pay for one. That single condition removes most turns.
+
+**Tier 0 exists because of the per-turn cap.** A turn warranting three seats under a cap of one would
+otherwise strand the other two: the evidence would not change on the next turn, so tier 1 would block
+and they would never be seated. Instead the pass records what it judged and could not seat, and later
+turns drain that list at the cap rate for free. The cap paces rather than truncates, and `overCap` is
+recorded — a cap that quietly discards decisions reads afterwards as "the planner only found one
+area" when it found four.
+
+A judgement **below the bar** is discarded outright rather than deferred. It was not a decision, it
+was a guess, and parking it would let it become a seat for free on a later turn.
+
+#### The cap hierarchy
+
+```
+maxRoutingDecisionsPerTurn  ≤  maxEarlySeatedTopics  ≤  maxConditionalTopics
+   (one answer)                  (whole opening)         (whole interview)
+```
+
+`validate.ts` raises `cap_hierarchy_inverted` when they do not nest, because the configuration is
+then expressing an intent the runtime cannot honour.
+
+#### Moving to the area, not just scoping it (phase 4)
+
+**Seating a topic changes what is _in scope_. On its own it does not change what is _asked next_.**
+The data-slot orchestrator picks theme-then-ordinal and stays topic-local, and the opening's themes
+sort first, so a newly seated topic would wait behind every remaining opening slot — and the
+respondent would notice nothing at all until the opening finished.
+
+`bridgeToSeatedTopics` (default on, **inert unless `earlyTopicSeating` is on**) closes that gap. It
+is not a second switch for the feature; it is the escape hatch for the one risk the feature carries.
+
+**It changes _which_ area comes next, never _whether_ to leave the current one.** The rules, in the
+order `pickNextDataSlot` applies them:
+
+| Moment                     | What happens                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Mid-theme, slots remaining | **Nothing.** The interview stays put. Interrupting a line of questioning is what would make it feel scattered |
+| Current theme exhausted    | The pick was moving somewhere new anyway — it moves to the **seated area** instead of the next opening theme  |
+| A slot was just parked     | The most explicit transition there is. Prefers the seated area over any other fresh theme                     |
+| The visit is spent         | The preference **inverts**: a non-seated slot is preferred, so the interview returns to the opening           |
+
+Because it only ever acts at a transition, and a transition already carries "moving on to…" framing,
+nothing reads as a non-sequitur. The interview moves to the area the respondent made obvious at
+exactly the moment it was going to change subject regardless.
+
+**It is a visit, not an emigration.** `MAX_BRIDGED_SLOTS_BEFORE_PLAN` bounds it, and the inversion
+above is what enforces the bound: without it, moving into the seated theme would hand that theme the
+topic-local preference and the interview would finish the whole area before returning to an opening
+it has not completed — delaying the very decision the opening exists to inform. `remaining` is
+derived from how many seated slots are already covered rather than stored, so there is no counter to
+keep in sync, and a respondent who answers a seated slot in passing spends the budget just the same.
+
+The preference is never a prohibition: when a seated slot is all that is left, it is asked.
+
+**Question slots are not bridged**, only data slots. The orchestrator's pick is over data slots — the
+conversation targets a slot, and the questions behind it are filled by extraction. A seated topic's
+questions come into scope with it and are answered the way every other in-scope question is.
+
+#### Saying so (phase 5)
+
+`announceEarlySeating` (default on, **inert unless `earlyTopicSeating` is on**) is what stops the
+move being felt but not narrated. Without it the interview changes subject to the right thing, with
+ordinary transition framing and no explanation of why that area rather than another.
+
+It is a **separate switch from `announce`**, because they cover two different moments with two
+different risks. `announce` is the handover line, said once, when the plan is sealed and the
+interview is about to change shape. This one covers an area that has **already appeared**, in the
+middle of an opening that is still running, and `announce` cannot reach it: there is no plan yet to
+announce. An area arriving mid-conversation with no explanation is the moment a respondent starts
+wondering what else is being decided about them, so the reason matters more here, not less.
+
+`earlySeatingBriefingLine` builds one instruction carrying the same three things an amendment
+acknowledgement carries (F17.33):
+
+| Part         | Where it comes from                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| **What**     | The area's own label, resolved from the version, never the stored key                           |
+| **How much** | `topicSizeWording` over `plannedMembers` at the seat's depth, data slots first when it has them |
+| **Why**      | The early planner's own `respondentReason`, written for the respondent and stored with the seat |
+
+Three rules hold it in place:
+
+- **Coalesced, always.** One line covering everything a single turn seated, never one per area. That
+  is what makes `maxRoutingDecisionsPerTurn` above 1 read naturally: "I'd like to go deeper on hiring
+  and on how you plan capacity" is one sentence a person would say.
+- **Exactly one outing.** Matched on `seat.atTurn === selectionRound`, the same mechanic the handover
+  and the amendment acknowledgement use. A deferred pick is re-stamped with the turn it was finally
+  taken, so an area announces itself when it came into scope rather than when it was judged.
+- **Silent once a plan exists.** The plan absorbs every early seat and its handover is the statement
+  of what the interview covers, so on a turn that both seated and sealed, announcing the seat as well
+  would tell the respondent about the same area twice in one message.
+
+The vocabulary ban is what makes giving a reason safe: the interviewer may say what it will now cover
+and why, and may not say anything about how the interview decides. It is also told the opening is not
+finished, so it does not present a partial decision as the whole one.
+
+This differs deliberately from document triggers (F17.31 §8), which are silent. That reasoning was
+drawn from safeguarding instruments where naming the area is itself the harm. An early seat on a
+commercial diagnostic is the opposite case: naming it is the proof the interview listened. Hence a
+setting rather than a constant.
+
+An area with no label (the author deleted the topic mid-interview) suppresses the announcement
+entirely, and a missing item count makes no size claim. A missing size is silence; a wrong one is a
+promise the interview will not keep.
+
+#### Where it shows up afterwards
+
+Analytics count `early` **separately** and never fold it into `llm`. An early seat the final planner
+would also have chosen is a planner success; one it would not have chosen is not, and counting them
+together would make the planner look better the harder the floor was tuned. The same rule
+`respondent` already follows. The Topics tab's routing-quality card carries it as its own **Chosen
+early** column, beside `Sampled` and for the same reason, and `earlySeatedPlans` in the footer counts
+how often an opening decided anything at all before it finished.
+
+The session viewer gains a **Chosen during the opening** panel (`EarlySeatingCard`), which answers
+what the plan panel cannot in the two cases that matter. When the opening never finished there is no
+plan, so without it the viewer reads as "no decision was made" for an interview that decided one and
+asked about it. When a plan does exist it stamps one `decidedAtTurn` over everything it absorbed, so
+"this area was chosen at turn 3 and the rest at turn 9" survives only here. The panel also keeps what
+the respondent was **told** beside the reason the admin was given, and the areas the caps judged
+warranted and never took: a cap that quietly discards decisions reads afterwards as "it only found
+one area" when it found four.
+
 The announcement rides the existing **briefing** seam into the phraser, on the one turn following the
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still
 talking, where a prepended paragraph reads as a system notice.
+
+### The two places that one outing used to fall through
+
+**A reply no phraser composes.** The briefing only reaches the phraser, and four replies are composed
+deterministically instead: a part covered, the interview complete, no questions left, a contradiction
+probe. Sectioned interviews made this routine rather than exotic — the plan is sealed at the end of
+the turn that finishes the opening, which is very often the turn that finishes the opening PART, and
+the reply is then "That's everything for Opening". The announcement had its one outing on a message
+it could not reach, and those respondents watched the interview change shape and were told nothing.
+
+`/messages` therefore appends `plan.respondentMessage` verbatim to a `section_covered` reply when the
+announcement is due. Carrying it verbatim is honest because that field is written to be SPOKEN — the
+planner's prompt says so, in the same breath as the vocabulary ban. Only onto that one reply:
+`complete` and `none` end the interview, and "what I now want to go deeper on" is a promise a
+finished interview is not going to keep; a contradiction probe is a question about one answer and is
+the wrong place to put it.
+
+**The reasoning trace.** With "watch it think" on, the panel accounted for every answer it captured
+and said nothing about the largest choice the interview makes. `buildReasoningTrace` takes a
+`scopeDecision` — `{ kind: 'planned' | 'seated', labels }` — and emits a `scope` step naming the
+areas, placed before the selection step because it is the reason behind it. The two kinds are kept
+apart deliberately: an area seated mid-opening is one area coming in, not the shape of the rest of
+the interview being settled, and a trace that called it the latter would describe a partial decision
+as the whole one.
+
+It is resolved by the ROUTE, from the same `decidedAtTurn === selectionRound` test as the spoken
+line, and handed down rather than read off the `TurnResult` — the decision is not part of the turn
+(the plan is sealed after it), and one rule for when the respondent is told keeps the chat and the
+panel from disagreeing. Labels only: the trace obeys the same vocabulary ban the announcement does.
 
 ---
 
@@ -671,7 +938,7 @@ Structure extraction reads an uploaded document for its **questions** and discar
 Real instruments carry guidance it throws away — routing and eligibility notes, guardrails, "how to
 use this" instructions, facilitator notes, wherever in the file the author put them — and that
 guidance is the author stating which parts apply to whom. The analyst reads exactly what the
-extractor ignored, and proposes the topic set, the criteria and the hard rules it describes.
+extractor ignored, and proposes the topic set and the criteria it describes.
 
 The wording throughout this surface is deliberately agnostic to both **document format** and
 **subject matter**: the guidance may sit in a preamble, an appendix, a sidebar, a separate sheet or
@@ -788,7 +1055,7 @@ coercion is the belt to that braces.
 ### Gaps — what the proposal admits it left out (F17.19 Phase 2)
 
 The rubric above is about the analyst being right; `gaps` is about it being **honest when it isn't
-sure**. Real routing prose does not always cleanly become a topic or a hard rule — a condition names
+sure**. Real routing prose does not always cleanly become a topic — a condition names
 something no data slot captures, an instruction contradicts another one, or the document just says
 "use judgement" for the cases it does not enumerate. Before this, that language was silently dropped:
 the proposal looked complete, and an admin had no way to know the document said more than it covered.
@@ -826,7 +1093,7 @@ ever accepted by hand. The "already tried" signal that stops a discarded auto-pr
 re-proposing itself on every visit is the analyst's own `AppAiRun` (kind `routing_analysis`), not a
 new column — see [`f17.19.md`](../planning/features/f17.19.md) for the full phased history. Phase 4
 put the routing logic itself into the [Questionnaire Pack](./questionnaire-pack.md) — an off-by-default
-"Conditional topics" section that explains the topics, criteria, and hard rules in plain language for a
+"Conditional topics" section that explains the topics and criteria in plain language for a
 stakeholder audience, distinct from every other Conditional Topics surface (all authoring tools, not
 distribution artifacts).
 
@@ -1247,7 +1514,7 @@ in 3 of 3" would.
 ## Auditability
 
 Every plan is recorded as an `AppAiRun` of kind `scope_plan` — **including the ones no model
-produced**. A hard rule, the fallback, or an interview with nothing to decide all leave a row, with
+produced**. The fallback, or an interview with nothing to decide, still leaves a row, with
 `provider`/`model` reading `deterministic` so cost trends stay clean.
 
 "Why did this respondent get those topics" is the question an admin asks about an adaptive instrument
@@ -1359,35 +1626,6 @@ Two things keep it from being noise. It counts **per kind**, because depth trims
 `full` are the same run, because `membersAtDepth` early-returns there and the setting changed
 nothing.
 
-### Hard-rule reachability
-
-Rules are evaluated at exactly one moment: when the opening completes and the planner runs. A rule
-reading a slot the interview has not gathered by then is not a rule that fires later — and only the
-**opening** is reliably gathered by then. `core` runs alongside it in an order nothing guarantees;
-`conditional` and `closing` topics are, by construction, not in scope until the plan exists.
-
-| Code                       | Severity                   | When                                                                                            |
-| -------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
-| `rule_slot_unreachable`    | warning                    | No opening topic gathers the slot — the rule never matches                                      |
-| `rule_slot_not_in_opening` | warning                    | A `core` topic gathers it — whether it has been asked yet is not something the rule can rely on |
-| `rule_veto_always_fires`   | error (on) / warning (off) | A `not_exists` rule reading a slot no opening topic gathers                                     |
-| `rule_names_always_topic`  | warning                    | The rule's target is `core` / `opening` / `closing`, so the rule changes nothing                |
-
-**A rule aimed at an always-run topic does nothing at all.** `applyGuardrails` seats and vetoes
-within the _conditional_ set, and `resolveScope` puts every other phase in scope regardless — so
-"never include the audit questions for a non-licence-holder" is inert the moment `audit` is a `core`
-topic. It is the same no-op as `always_topic_named_as_choice`, reached from the other direction, and
-it is reported separately because the fix differs: the author either meant a different topic or meant
-to make this one conditional. On the map the rule node carries a **No effect** badge.
-
-**The veto case is the one worth an error.** Absence is what `not_exists` matches on, so an
-ungathered slot does not make the rule inert — it makes it fire for everybody. An author who wrote
-"never score them on AI readiness when they never named an outcome" gets that applied to every
-respondent, and every plan it produces is plausible. Nothing downstream would ever report it.
-
-All three are silent when the version has no opening topic at all: `no_opening_topic` is the finding
-to fix first, and one reachability warning per rule on top of it buries the cause.
-
 ### Comparability — what routing does to a score (F17.15)
 
 Scoring combines answers into a scale; Conditional Topics decides which of them get asked. Together they
@@ -1406,8 +1644,6 @@ cohort report comes back empty, after the instrument has been fielded.
 | `scale_item_unowned`   | error (on) / warning (off) | The scale scores a key belonging to no topic, so it is never asked                        |
 
 **A stale reference is never an error.** Deleting a question does not prune `AppScoringSchema.content`, so a scoring item pointing at a key the version no longer has is easy to acquire — and impossible to fix from the Topics tab. Making it launch-blocking would strand the admin: the gate would point at a surface where the key is not shown. `scale_item_unowned` stays an error precisely because its key _does_ still exist and _can_ be re-homed there — which is also why it never blocks alone, since the same key already raises `orphaned_questions`. The two are separated by the version's key inventory, and a caller that supplies none gets the warning.
-
-**Rule-included topics do not count against the cap.** `applyGuardrails` seats hard-rule includes **before** the cap and does not truncate them, so a plan can legitimately exceed `maxConditionalTopics`. Counting them would warn that no respondent is ever asked a scale every respondent is in fact asked in full — the exact false alarm this module promises not to raise. A topic a later rule vetoes back out is counted again.
 
 **The count is taken from unavoidable topics, not touched ones.** "Can a plan cover this scale?" is a
 set-cover question — an item claimed by two topics is asked if _either_ is seated — and a greedy
@@ -1468,8 +1704,8 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 `validateConditionalTopics` (above) and the cost model answer "is this configuration well-formed and
 what does it cost" — both mechanical, both free. Neither answers "is this a **good** routing
 design toward the module's own goal" — minimize respondent burden while never silently dropping a
-topic that genuinely applies (the [one invariant](#the-one-invariant): hard rules always win, "when
-in doubt, ask", exclude-beats-include). That is a judgement call, not a rule, so it is a second
+topic that genuinely applies (the [one invariant](#the-one-invariant): "when in doubt, ask"). That
+is a judgement call, not a rule, so it is a second
 judge panel — sibling to the design-evaluation panel (F5.1–F5.3) that reviews question structure,
 but reading the scope config instead.
 
@@ -1480,38 +1716,36 @@ but reading the scope config instead.
 > them _because of_. The two panels do not overlap: this one judges the routing config, that one
 > judges the questions, now knowing which respondents each is asked of.
 
-**Structural only, v1.** The four judges read the authored topics, hard rules, planner
+**Structural only, v1.** The three judges read the authored topics, planner
 instructions, and budget — the same inputs `validateConditionalTopics` and the cost model read. They do
 not read live session data or the routing-analytics engine (F17.16); a later phase could layer that
 signal in, but v1 answers "is this well-designed" from the config alone.
 
-| Dimension             | Judges                                                                                                                                  | Does NOT re-derive                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `criteria_quality`    | Is each conditional topic's criteria specific and observable from an opening conversation? Do two topics' criteria overlap or conflict? | `orphaned_questions` / duplicate membership                                    |
-| `rule_integrity`      | Internal rule conflicts, redundant rules, a rule that excludes on weak/ambiguous evidence ("when in doubt, ask" violations)             | `rule_slot_unreachable` / `rule_veto_always_fires` / `rule_names_always_topic` |
-| `budget_realism`      | Does the budget leave realistic room for topics that matter; is `maxConditionalTopics` too tight or too loose for the topic mix         | the cost arithmetic itself — judges are fed the pre-computed numbers           |
-| `coverage_and_burden` | Topics with no realistic path to selection (an unreachable topic), unconditional bloat, overall burden vs. budget                       | `orphaned_questions`                                                           |
+| Dimension             | Judges                                                                                                                                  | Does NOT re-derive                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `criteria_quality`    | Is each conditional topic's criteria specific and observable from an opening conversation? Do two topics' criteria overlap or conflict? | `orphaned_questions` / duplicate membership                          |
+| `budget_realism`      | Does the budget leave realistic room for topics that matter; is `maxConditionalTopics` too tight or too loose for the topic mix         | the cost arithmetic itself — judges are fed the pre-computed numbers |
+| `coverage_and_burden` | Topics with no realistic path to selection (an unreachable topic), unconditional bloat, overall burden vs. budget                       | `orphaned_questions`                                                 |
 
 Each judge is blind to the others, same as the design-evaluation panel's judges — and unlike that
-panel, **there is no reconcile step**. The four dimensions target different fields of different
-objects (a topic's criteria text, the rules array, the settings blob), so the collision case the
+panel, **there is no reconcile step**. The three dimensions target different fields of different
+objects (a topic's criteria text, the settings blob), so the collision case the
 design-evaluation reconciler exists for — two judges rewriting the same question prompt
 differently — mostly cannot occur here. A deliberate v1 cut, not an oversight.
 
 ### Findings and the apply flow
 
-A finding names its subject with a `targetKey`: `topic:<key>` | `rule:<id>` | `settings`. Most also
-carry a machine-applicable `proposedEdit` — one of eight ops, each writing to exactly one field a
+A finding names its subject with a `targetKey`: `topic:<key>` | `settings`. Most also
+carry a machine-applicable `proposedEdit` — one of five ops, each writing to exactly one field a
 finding could plausibly ask for:
 
-| Op                                       | Touches                                                              | Writer                                  |
-| ---------------------------------------- | -------------------------------------------------------------------- | --------------------------------------- |
-| `edit_topic_criteria`                    | `AppQuestionnaireTopic.criteria`                                     | single-row update by `(versionId, key)` |
-| `edit_topic_depth`                       | `AppQuestionnaireTopic.depth`                                        | single-row update                       |
-| `add_rule` / `edit_rule` / `delete_rule` | `AppQuestionnaireConfig.conditionalTopics.rules[]`                   | `patchConditionalTopicsSettings` merge  |
-| `adjust_budget`                          | `sessionBudgetSeconds` / `maxOpeningProbes` / `maxConditionalTopics` | `patchConditionalTopicsSettings`        |
-| `edit_planner_instructions`              | `plannerInstructions`                                                | `patchConditionalTopicsSettings`        |
-| `add_fallback_topic`                     | `fallbackTopicKeys[]`                                                | `patchConditionalTopicsSettings`        |
+| Op                          | Touches                                                              | Writer                                  |
+| --------------------------- | -------------------------------------------------------------------- | --------------------------------------- |
+| `edit_topic_criteria`       | `AppQuestionnaireTopic.criteria`                                     | single-row update by `(versionId, key)` |
+| `edit_topic_depth`          | `AppQuestionnaireTopic.depth`                                        | single-row update                       |
+| `adjust_budget`             | `sessionBudgetSeconds` / `maxOpeningProbes` / `maxConditionalTopics` | `patchConditionalTopicsSettings`        |
+| `edit_planner_instructions` | `plannerInstructions`                                                | `patchConditionalTopicsSettings`        |
+| `add_fallback_topic`        | `fallbackTopicKeys[]`                                                | `patchConditionalTopicsSettings`        |
 
 There is no `add_topic` / `delete_topic` — every op edits something that already exists, keeping
 one-click-apply blast radius small. A finding that thinks a topic shouldn't exist at all stays
@@ -1556,7 +1790,6 @@ which already defaults off.
 | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lib/app/questionnaire/scope/types.ts`                                                                 | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `ConditionalTopicsSettings` without a runtime import cycle                                                                             |
 | `lib/app/questionnaire/scope/resolve.ts`                                                               | The pure filter                                                                                                                                                                                                                                                   |
-| `lib/app/questionnaire/scope/rules.ts`                                                                 | Hard-rule evaluator                                                                                                                                                                                                                                               |
 | `lib/app/questionnaire/scope/guardrails.ts`                                                            | Cap, fallback, the time fit, check topic                                                                                                                                                                                                                          |
 | `lib/app/questionnaire/scope/budget.ts`                                                                | What an interview costs in seconds — per-type pricing, per-topic cost at both depths, the floor and the allowance                                                                                                                                                 |
 | `lib/app/questionnaire/scope/planner.ts`                                                               | The model call; never throws                                                                                                                                                                                                                                      |
@@ -1585,9 +1818,8 @@ which already defaults off.
 | `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                                                    | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                                                                                                         |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`                                     | Run the analyst (SSE) · accept or discard its proposal                                                                                                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`                                             | The amendment trigger                                                                                                                                                                                                                                             |
-| `components/admin/questionnaires/topics/**`                                                            | The Conditional topics tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                                                                                               |
+| `components/admin/questionnaires/topics/**`                                                            | The Conditional topics tab: explainer, settings, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                                                                                                      |
 | `lib/app/questionnaire/scope-evaluation/**`                                                            | Scope evaluation (F17.21) — dimension registry, judge schema/prompt, structure DTO + Zod, fail-soft fan-out (`run-panel.ts`), by-target grouping, and `describe-op.ts`'s plain-English rendering of a `ScopeProposedEdit`, shared by the review card and the pack |
-| `lib/app/questionnaire/scope/rule-format.ts`                                                           | `describeScopeRule` — promoted out of the pack builder in F17.21 Phase A so the pack and the scope-evaluation judge prompt share one rule-sentence implementation                                                                                                 |
 | `lib/app/questionnaire/capabilities/evaluate-scope.ts`                                                 | The scope-evaluation judge-dispatch capability                                                                                                                                                                                                                    |
 | `prisma/seeds/app-questionnaire/091-scope-evaluation-judges.ts` · `092-scope-evaluation-capability.ts` | Seeds the four judge agents and the capability row                                                                                                                                                                                                                |
 | `app/api/v1/app/questionnaires/_lib/scope-evaluation-*.ts`                                             | The DB seam: structure loader, run persist/list/detail, staleness derivation, target resolution, apply engine — mirrors the `_lib/evaluation-*.ts` split                                                                                                          |
@@ -1647,11 +1879,9 @@ The author supplies the answers **and** the data-slot fills. In a live interview
 extraction FROM those answers, so a hand-set fill is a hypothesis rather than a prediction, and the
 panel says so rather than leaving it to be discovered.
 
-Running the real extractor over the typed answers would be more faithful and much slower — and it
-would make the one demonstration that matters _harder_: a `not_exists` veto fires on an **absent**
-fill, and absence is exactly what an author needs to be able to set by hand. The slots a veto watches
-are marked in the form, and leaving one empty is presented as a deliberate act rather than an
-unfinished field.
+Running the real extractor over the typed answers would be more faithful and much slower, and it would
+put a second extraction between the author and the thing they are trying to see. Leaving a fill empty
+is a legitimate experiment, not an unfinished field.
 
 Replay over real completed sessions was considered and deliberately not built: it would put
 respondent answers into an authoring surface, and the author's own phrasing — the phrasing least
@@ -1690,44 +1920,25 @@ a topic is selected or it is not. What Conditional Topics actually is, is a deci
 pipeline is what is drawn:
 
 ```
-start ──> opening topics ──> hard rules ──────────────────────────┐
-      │                  └─> planner ──> guardrails ──> conditional topics
+start ──> opening topics ──> planner ──> guardrails ──> conditional topics
       └──────────────────────────────────> always asked (core + closing)
 ```
 
-**The geometry is the argument.** A rule edge runs straight from the rule to its topic, skipping over the
-planner and the guardrails — because `applyGuardrails` seats rule includes _before_ the cap and never
-truncates them. The misreading this prevents is the one the settings card's numbering already fights: a
-cap read as a request the model tries to honour, rather than a limit applied to its answer. On the map it
-is a shape rather than a sentence.
+**The geometry is the argument.** The guardrails sit between the planner and the topics it chose, because
+that is where they sit at runtime. The misreading this prevents is the one the settings card's numbering
+already fights: a cap read as a request the model tries to honour, rather than a limit applied to its
+answer. On the map it is a shape rather than a sentence.
 
 The always-asked band hangs off `start` and bypasses everything, which is the same claim about the other
 end: the planner touches the `conditional` phase and nothing else.
 
 ### Structural, never predictive
 
-No fills exist at authoring time, so **no rule can be evaluated and no plan can be known**. Every rule
-draws its edge; the guardrails draw a candidate edge to every conditional topic. `evaluateScopeRules` and
-`plannerCandidates` are deliberately not called — both need a session's fills, and a map that pretended to
-have them would be a preview that lies, quietly, in the one direction an author cannot check. The dry-run
-card above it is the surface that answers "what would this actually do", and the dialog's own subtitle
-points at it.
-
-### The one thing the structure can settle
-
-Where a rule reads its evidence from. That is a fact about the topic set, not about a respondent, so it is
-drawn — and it is classified **exactly as `validateConditionalTopics` classifies it**: opening, `core`, or
-neither. A solid edge from the opening topic that gathers the slot; an amber dashed edge labelled _timing
-not guaranteed_ from a `core` topic; and from an explicit **"Not gathered in the opening"** node when
-nothing reachable gathers it at all.
-
-That last node is the point of the whole treatment. `rule_veto_always_fires` is the sharpest finding this
-feature has — a veto reading an ungathered slot fires for **every** respondent, and every plan it produces
-looks entirely reasonable — and it is currently one warning in a list. On the map the rule visibly hangs
-off nothing.
-
-The two computations are independent (the validator words a warning, the builder picks an edge), which is
-exactly the pair that drifts silently, so `graph.test.ts` asserts they agree across all four cases.
+No fills exist at authoring time, so **no plan can be known**. The guardrails draw a candidate edge to
+every conditional topic — the map of what _can_ happen, not a forecast of what will. A map that
+pretended otherwise would be a preview that lies, quietly, in the one direction an author cannot check.
+The dry-run card above it is the surface that answers "what would this actually do", and the dialog's
+own subtitle points at it.
 
 ### The always-asked band can collapse, but does not start that way
 
@@ -1805,7 +2016,7 @@ keeps "Conditional — ask when it fits", because the selector is where the word
 report vocabulary at once.
 
 Domain words an admin _is_ taught by the UI stay: **topic**, **data slot**, **opening**, **conditional**,
-**hard rule**, **guardrails**, **blind-spot check**, **Full / Light depth**. The test is not whether a
+**guardrails**, **blind-spot check**, **Full / Light depth**. The test is not whether a
 word is technical, it is whether the product ever teaches it — `Light depth` is a labelled control on
 the topic editor, `seated` was never anywhere but the source.
 
@@ -1850,10 +2061,10 @@ the gap; height-blind is not absorbed by anything.
 
 **Every column on one centre line** was the worst of the three, and it did not merely look flat. A
 left-to-right graph draws its edges as horizontal runs, so six columns on one line puts every run in the
-same horizontal band: the hard rule's edge to its conditional topic was drawn straight through the
+same horizontal band: an edge to a conditional topic was drawn straight through the
 planner and the guardrails, and a reader could not tell an edge that stops at a node from one that passes
 behind it. Each column now sits on its own **lane**. The ±56 along the spine is the small job — it stops
-two adjacent columns sharing a run. The hard rules get a much larger offset, and that one carries meaning
+two adjacent columns sharing a run. The offsets carry no meaning beyond clearance
 rather than clearance: a rule **bypasses** the planner and the guardrails, which is exactly where
 `applyGuardrails` seats it, so it is drawn as the bypass lane it is, running underneath the stage it goes
 around.
@@ -1876,7 +2087,7 @@ it was introduced was a layout decision taken for unrelated reasons.
 ### A node's title is never truncated
 
 The title used to clamp at two lines, which drew a rule node as `Commercial outcome named was never…`.
-An ellipsis in a title is worse than a tall node: a truncated rule sentence reads as a _different rule_.
+An ellipsis in a title is worse than a tall node: a truncated sentence reads as a _different_ one.
 `was never…` could be `was never answered`, and the operator is the whole of what decides whether that
 rule fires for one respondent or for every one of them. Titles now wrap as far as they need, and
 `estimateNodeHeight` counts the lines, so the extra height is already in the stacking.
@@ -2123,9 +2334,9 @@ gesture, not a preference about how the page should look, so it is plain compone
 on the next visit. An earlier version remembered it in `localStorage`, which meant expanding it once
 to read it kept the full panel open on every questionnaire afterwards.
 
-**The settings card is ordered by the runtime, and numbered to say so.** Hard rules sit first
-because they really are evaluated before the agent; the cap and the confidence floor sit after
-because they really are applied to the agent's answer. The failure this ordering prevents is an
+**The settings card is ordered by the runtime, and numbered to say so.** The opening's follow-up
+allowance sits first because it is spent before any decision; the cap and the confidence floor sit
+after because they really are applied to the agent's answer. The failure this ordering prevents is an
 admin reading the cap as a request the model tries to honour — seeing it sit downstream of the
 model's turn, in a sequence they cannot reorder, is the cheapest way to say it is enforced.
 

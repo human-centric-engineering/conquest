@@ -157,26 +157,14 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   secondsPerDataSlot: 40,
   limitOpeningProbes: false,
   maxOpeningProbes: 1,
-  rules: [
-    {
-      id: 'rule1',
-      dataSlotKey: 'engagement',
-      operator: 'gt',
-      value: '50',
-      action: 'include',
-      topicKey: 'talent',
-      ordinal: 0,
-    },
-    {
-      id: 'rule2',
-      dataSlotKey: 'engagement',
-      operator: 'not_exists',
-      value: null,
-      action: 'exclude',
-      topicKey: 'compliance-check',
-      ordinal: 1,
-    },
-  ],
+  maxOpeningTurns: 0,
+  earlyTopicSeating: false,
+  earlySeatingFloor: 0.6,
+  earlySeatingMinConfidence: 0.85,
+  maxEarlySeatedTopics: 1,
+  maxRoutingDecisionsPerTurn: 1,
+  bridgeToSeatedTopics: true,
+  announceEarlySeating: true,
 };
 
 /** The PDF magic header: every PDF byte stream starts with "%PDF". */
@@ -298,13 +286,12 @@ const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {
   versionId: 'v1',
   questionnaireId: 'q1',
   status: 'partial',
-  dimensionsRequested: 4,
-  dimensionsRun: 3,
+  dimensionsRequested: 3,
+  dimensionsRun: 2,
   dimensionsFailed: 1,
   totalFindings: 1,
   dimensionSummary: [
     { dimension: 'criteria_quality', score: 0.7, findingCount: 1, diagnostic: null },
-    { dimension: 'rule_integrity', score: 1, findingCount: 0, diagnostic: null },
     { dimension: 'budget_realism', score: null, findingCount: 0, diagnostic: 'judge_error' },
     { dimension: 'coverage_and_burden', score: 0.9, findingCount: 0, diagnostic: null },
   ],
@@ -514,7 +501,7 @@ describe('renderPackPdf', () => {
       null,
       {
         topics: [],
-        settings: { ...SCOPE_SETTINGS, enabled: false, rules: [] },
+        settings: { ...SCOPE_SETTINGS, enabled: false },
         scopeEvaluationRun: null,
       },
       null,
@@ -528,14 +515,14 @@ describe('renderPackPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the "none defined" state for Conditional topics with no topics or rules', async () => {
+  it('renders the "none defined" state for Conditional topics with no topics', async () => {
     const model = buildPackModel(
       'Enabled But Empty Pack',
       graphOf([]),
       [],
       null,
       null,
-      { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
+      { topics: [], settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
       null,
       { ...DEFAULT_PACK_INCLUDE, conditionalTopics: true },
       '2026-08-10T00:00:00.000Z'
@@ -545,7 +532,6 @@ describe('renderPackPdf', () => {
       enabled: true,
       alwaysAsked: [],
       conditional: [],
-      rules: [],
     });
 
     const pdf = await renderPackPdf(model);
@@ -814,9 +800,6 @@ describe('renderPackPdf — populated appendices', () => {
                 cues: ['abuse', 'fleeing'],
               },
             },
-          ],
-          rules: [
-            { sentence: 'Always include "Safeguarding" when "housing status" is "at risk".' },
           ],
           settings: [{ label: 'Interview length', value: '10m' }],
           evaluation: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },

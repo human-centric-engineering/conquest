@@ -78,11 +78,11 @@ describe('groupScopeFindingsByTarget', () => {
 
   it('records the distinct judges (dimensions) that flagged a target, in first-seen order', () => {
     const groups = groupScopeFindingsByTarget([
-      finding({ dimension: 'rule_integrity' }),
+      finding({ dimension: 'coverage_and_burden' }),
       finding({ dimension: 'criteria_quality' }),
-      finding({ dimension: 'rule_integrity' }), // repeat — must not duplicate
+      finding({ dimension: 'coverage_and_burden' }), // repeat — must not duplicate
     ]);
-    expect(groups[0].dimensions).toEqual(['rule_integrity', 'criteria_quality']);
+    expect(groups[0].dimensions).toEqual(['coverage_and_burden', 'criteria_quality']);
   });
 
   it('drops nothing — every finding lands in exactly one group', () => {

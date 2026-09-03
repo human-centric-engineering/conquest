@@ -13,7 +13,7 @@
  * and emit it over SSE, and so it unit-tests in isolation.
  *
  * **Respondent-safe by construction.** The builder deliberately surfaces only the steps a
- * respondent may see — extraction, contradiction, refinement, selection, completion — and
+ * respondent may see — extraction, contradiction, refinement, scope, selection, completion — and
  * never the abuse/seriousness verdict or the sensitivity disclosure summary (those are
  * PII-guarded / would be jarring). See the exclusions in the builder.
  */
@@ -26,6 +26,10 @@ export const REASONING_STEP_KINDS = [
   'contradiction',
   'refinement',
   'completion',
+  // Conditional Topics: which areas of the questionnaire this respondent is getting, said on the
+  // one turn the decision is announced. Its own kind rather than a `selection` step because it is
+  // about the SHAPE of the rest of the interview, not about the next question.
+  'scope',
   'selection',
 ] as const;
 export type ReasoningStepKind = (typeof REASONING_STEP_KINDS)[number];

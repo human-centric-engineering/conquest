@@ -132,13 +132,45 @@ describe('assembleRoutingAnalytics — counting rules', () => {
 
   it('splits selections by the layer that decided them', () => {
     const result = assembleRoutingAnalytics(
-      [plan({ topics: [planned('a', 'rule')] }), plan({ topics: [planned('a', 'llm')] })],
+      [plan({ topics: [planned('a', 'llm')] }), plan({ topics: [planned('a', 'llm')] })],
       [topic('a')],
       META
     );
 
     expect(rowFor(result, 'a')).toMatchObject({ selected: 2, chosen: 2, chosenRate: 1 });
-    expect(rowFor(result, 'a')?.bySource).toMatchObject({ rule: 1, llm: 1, fallback: 0 });
+    expect(rowFor(result, 'a')?.bySource).toMatchObject({ llm: 2, fallback: 0 });
+  });
+
+  it('never counts an area chosen during the opening as a planner success', () => {
+    // F17.36, and the same rule an amendment follows. An early seat the full planner would also
+    // have chosen is a success; one it would not have chosen is not, and folding them together
+    // would make the criteria look better the harder the early-seating floor was tuned.
+    const result = assembleRoutingAnalytics(
+      [plan({ topics: [planned('a', 'early'), planned('b', 'llm')] })],
+      [topic('a'), topic('b')],
+      META
+    );
+
+    expect(rowFor(result, 'a')).toMatchObject({ selected: 1, chosen: 0, sampled: 0 });
+    expect(rowFor(result, 'a')?.bySource).toMatchObject({ early: 1, llm: 0 });
+    expect(rowFor(result, 'b')).toMatchObject({ chosen: 1 });
+    expect(result.earlySeatedPlans).toBe(1);
+  });
+
+  it('counts a plan that chose two areas early as ONE plan that decided during its opening', () => {
+    // The per-topic rows already say which areas; this count answers how often an opening decided
+    // anything at all before it finished.
+    const result = assembleRoutingAnalytics(
+      [
+        plan({ topics: [planned('a', 'early'), planned('b', 'early')] }),
+        plan({ topics: [planned('a', 'llm')] }),
+      ],
+      [topic('a'), topic('b')],
+      META
+    );
+
+    expect(result.earlySeatedPlans).toBe(1);
+    expect(result.plans).toBe(2);
   });
 
   it('separates a budget drop from an ordinary exclusion', () => {

@@ -1000,8 +1000,8 @@ export function TopicListEditor({
                                   </p>
                                   <p className="mt-2">
                                     If you are certain rather than judging — a fact the opening
-                                    captures in a data slot — write a hard rule above instead, and
-                                    it is applied before the agent gets a say.
+                                    captures in a data slot — say so in the criteria instead, and it
+                                    is applied before the agent gets a say.
                                   </p>
                                 </FieldHelp>
                               </Label>
@@ -1101,8 +1101,8 @@ export function TopicListEditor({
                                       literal questions; otherwise the questions alone are enough.
                                     </p>
                                     <p className="mt-2">
-                                      Slots an <em>opening</em> topic fills are what your hard rules
-                                      read.
+                                      Slots an <em>opening</em> topic fills are what the planner
+                                      reads.
                                     </p>
                                   </>
                                 }

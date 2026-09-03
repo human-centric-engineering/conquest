@@ -49,6 +49,7 @@ import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questi
 import type { CorrectionTarget } from '@/lib/app/questionnaire/panel/correction-targets';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import { turnInSection } from '@/lib/app/questionnaire/chat/exchange';
 
 export interface CurrentExchangeProps {
   /** The session id powering the question card's submit and the inspector drawer. */
@@ -78,6 +79,26 @@ export interface CurrentExchangeProps {
   /** Refetch the panel/lifecycle after a successful inline correction. */
   onCorrected?: (view: AnswerPanelView) => void;
   /**
+   * Sectioned interviews (P21): show only the exchange belonging to this section.
+   *
+   * The same key and the same predicate `ChatHistory` takes, and it is needed HERE too because the
+   * exchange boundary is anchored on the last respondent message. Moving to another section moves
+   * no message, so the section they left keeps its final question and answer sitting past that
+   * boundary — visible under the new section's name until the respondent speaks again. Filtering
+   * one half and not the other is what made a section move look like it had changed nothing.
+   *
+   * It cannot strand the reveal queue. A turn can only be filtered out here by a section move, and
+   * a move is only offered on `canSend`, which is false until the queue has emptied — so the turn
+   * at the cursor is never the one that disappears.
+   */
+  sectionKey?: string | null;
+  /**
+   * Sectioned interviews (P21): where a turn carrying NO section of its own belongs — the run's
+   * first section. See {@link turnInSection}; the surface passes it so the client-built greeting
+   * does not reappear at the top of every section.
+   */
+  untaggedSectionKey?: string | null;
+  /**
    * Read-only replay: the admin session viewer reading a respondent's conversation. Suppresses
    * every answer affordance — there is no composer beside it either, but these are hidden
    * independently of that.
@@ -96,6 +117,8 @@ export function CurrentExchange({
   reasoningPerItemMs = AUTO_REVEAL_PER_ITEM_MS,
   correctionTargets = [],
   onCorrected,
+  sectionKey,
+  untaggedSectionKey,
   readOnly = false,
   className,
 }: CurrentExchangeProps) {
@@ -119,13 +142,18 @@ export function CurrentExchange({
     composerReady,
     isTerminal,
     stageLabel,
+    handoverLabel,
   } = useConversation();
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // The answer control belonging to the CURRENT turn, if any. Reading only the last turn is what
-  // keeps exactly one card on screen: a new turn retires the previous card automatically.
-  const activeCard = turns[turns.length - 1]?.card;
+  // keeps exactly one card on screen: a new turn retires the previous card automatically. A last
+  // turn belonging to another section retires it too — the card asks a question of the section the
+  // respondent has just left, and its Submit would write an answer they are no longer looking at.
+  const lastTurn = turns[turns.length - 1];
+  const activeCard =
+    lastTurn && turnInSection(lastTurn, sectionKey, untaggedSectionKey) ? lastTurn.card : undefined;
   // Dismissal is keyed on the TURN, not the question. Keying it on the question key would suppress
   // the control permanently: a must-ask question the respondent dismissed stays unsatisfied, so the
   // interviewer re-asks it on a later turn — and a prose answer can't clear the 0.85 must-ask floor
@@ -151,7 +179,9 @@ export function CurrentExchange({
   // whichever ancestor actually scrolls, which is the layout's business rather than this one's.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streaming, revealCursor]);
+    // `handoverLabel` is in here for the same reason `streaming` is: the beat appears below the
+    // reply that announced it, and a cue the respondent has to scroll to find is not a cue.
+  }, [turns.length, streaming, revealCursor, handoverLabel]);
 
   return (
     <div className={cn('flex flex-col gap-6', className)}>
@@ -167,6 +197,18 @@ export function CurrentExchange({
       {turns.map((turn, i) => {
         // Behind the boundary: `ChatHistory` is rendering this one, wherever the layout put it.
         if (i < historyEnd) return null;
+        // P21: said in another section. Skipped by index rather than filtered out of the array, so
+        // the reveal cursor keeps indexing the same turns it always did.
+        //
+        // Clamped to turns the queue has already passed, for the same reason `historyEnd` is
+        // clamped: unmounting the turn the cursor is ON would take its `onDone` with it,
+        // `advanceReveal` would never fire, and `composerReady` would stay false for the rest of
+        // the session — a composer shut for good with nothing on screen to explain it. The window
+        // is real, because the section control opens on `canSend`, which is true a beat before the
+        // reply has finished typing. So a turn from another section that is still revealing simply
+        // finishes, exactly as one crossing the history boundary does, and disappears on the next
+        // render once the cursor is past it.
+        if (i < revealCursor && !turnInSection(turn, sectionKey, untaggedSectionKey)) return null;
         if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
 
         // Reveal queue. Turns past the cursor stay hidden until the queue reaches them, so a
@@ -229,7 +271,7 @@ export function CurrentExchange({
           (above). Only shown once the reveal queue has caught up to every committed turn, so it
           never doubles with an active turn's own beat/typing while earlier opening messages are
           still revealing. */}
-      {streaming && revealCursor >= turns.length && (
+      {(streaming || handoverLabel !== null) && revealCursor >= turns.length && (
         <AssistantTurn>
           {/* P20 Phase 2: the stage the server is actually on — paced and faded so a fast sequence
               is readable (F20.5) — plus an elapsed clock once the wait is long enough to warrant
@@ -237,7 +279,11 @@ export function CurrentExchange({
               the one that gets both. It owns its own row height, which has to stay one row: the
               accent mark beside it is pinned to the turn's first line. The reasoning trace still
               reveals on the settled turn (above), tucking itself away under "Animated". */}
-          <TurnProgress label={stageLabel} />
+          {/* P21: between turns the same row carries the section handover beat — "Moving on to
+              Growth Strategy…" — for the couple of seconds between the reply announcing the move
+              and the move happening. The two can never collide: a stage label only exists while a
+              turn is in flight, and the beat only runs when none is. */}
+          <TurnProgress label={streaming ? stageLabel : handoverLabel} />
         </AssistantTurn>
       )}
 

@@ -32,7 +32,7 @@ import type { WorkspaceView } from '@/lib/hooks/use-session-workspace';
 export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
   const { showPanel } = state;
 
-  // The conversation column: the submit/finish affordance above the transcript. Takes the full
+  // The conversation column: the card, and the section's finish control beneath it. Takes the full
   // height only when there is no panel beside it — with a panel, the grid track governs.
   //
   // The conversation's parts are four separate slots so that a layout CAN put them apart; Classic
@@ -42,13 +42,24 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
   // rather than being drawn here, so the layouts that share this arrangement cannot drift apart on a
   // detail none of them means to own.
   const chatColumn = (
-    <div className={cn('flex min-h-0 flex-col gap-3', !showPanel && 'h-full')}>
-      {/* P21: the section strip is chrome, and Classic has the room, so it sits above the card it
-          bounds rather than inside it. Renders nothing on an unsectioned questionnaire. */}
-      {slots.sectionTabs}
-      {slots.completionOffer}
+    // `min-w-0` because this is a grid item: its automatic minimum size is its content, so a wide
+    // child (the section strip's tab list) would widen the whole column past the shell and scroll
+    // the page sideways instead of scrolling inside itself.
+    <div className={cn('flex min-h-0 min-w-0 flex-col gap-3', !showPanel && 'h-full')}>
       <ConversationFrame
         className="min-h-0 flex-1"
+        // The card's chrome band: the section control, and the submit offer when there is one. Both
+        // used to sit above the card, each on its own row, and Classic is the layout where that
+        // cost something: the conversation is aligned with the answers panel beside it, and a band
+        // that appears mid-session pushed the card's top edge below the panel's and out of line.
+        // Inside the card the two edges stay level whatever the band is holding, and the band
+        // vanishes entirely (rule and all) when it holds nothing, which is most of most sessions.
+        header={
+          <>
+            {slots.sectionTabs}
+            {slots.completionOffer}
+          </>
+        }
         transcript={
           <TranscriptColumn>
             {slots.releaseNotice}
@@ -57,10 +68,12 @@ export function ClassicLayout({ slots, state }: RespondentLayoutProps) {
           </TranscriptColumn>
         }
         composer={slots.composer}
+        // P21: the closing band, under the answer box. Finishing a section is the other thing the
+        // respondent DOES here, so it sits beneath the composer rather than competing with it for
+        // width — and inside the card, so the card's bottom edge stays level with the foot of the
+        // answers panel whether or not the section is finishable yet.
+        footer={slots.sectionClose}
       />
-      {/* P21: beside the answer box, because finishing a section is the other thing the respondent
-          DOES here — and below the card, so it never competes with the composer for its width. */}
-      {slots.sectionClose}
     </div>
   );
 

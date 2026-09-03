@@ -38,12 +38,6 @@ export const SCOPE_EVALUATION_DIMENSION_SPECS = {
     summary:
       "Scores whether each conditional topic's criteria are specific and observable from what an opening conversation could plausibly surface, and whether two topics' criteria overlap or conflict.",
   },
-  rule_integrity: {
-    slug: 'app-questionnaire-scope-judge-rule-integrity',
-    label: 'Rule-Integrity Judge',
-    summary:
-      'Scores the hard rules for internal conflicts, redundancy, and rules that exclude on weak or ambiguous evidence — softer judgement than the mechanical reachability checks.',
-  },
   budget_realism: {
     slug: 'app-questionnaire-scope-judge-budget-realism',
     label: 'Budget-Realism Judge',
@@ -58,7 +52,7 @@ export const SCOPE_EVALUATION_DIMENSION_SPECS = {
   },
 } as const satisfies Record<ScopeEvaluationDimension, ScopeDimensionSpec>;
 
-/** The four judge slugs, in dimension order — convenience for the route's panel load. */
+/** The three judge slugs, in dimension order — convenience for the route's panel load. */
 export const SCOPE_EVALUATION_JUDGE_SLUGS: readonly string[] = SCOPE_EVALUATION_DIMENSIONS.map(
   (d) => SCOPE_EVALUATION_DIMENSION_SPECS[d].slug
 );

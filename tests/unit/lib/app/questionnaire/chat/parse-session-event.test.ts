@@ -300,3 +300,32 @@ describe('question_card frames (P18)', () => {
     });
   });
 });
+
+describe('section_covered frames (P21)', () => {
+  const frame = (data: unknown) => `event: section_covered\ndata: ${JSON.stringify(data)}`;
+
+  it('narrows the handover the reply just announced', () => {
+    expect(parseSessionEvent(frame({ sectionKey: 'about', nextLabel: 'Growth Strategy' }))).toEqual(
+      {
+        type: 'section_covered',
+        sectionKey: 'about',
+        nextLabel: 'Growth Strategy',
+      }
+    );
+  });
+
+  it('drops a frame missing either half of the move', () => {
+    // Both are load-bearing. Without the key there is no part to finish; without the label the cue
+    // would have to name the destination in the abstract, and the surface would be holding a beat
+    // for a move it cannot describe. Dropping it leaves the respondent with the reply and their own
+    // "Move on" control, which is a safe place to land.
+    expect(parseSessionEvent(frame({ nextLabel: 'Growth Strategy' }))).toBeNull();
+    expect(parseSessionEvent(frame({ sectionKey: 'about' }))).toBeNull();
+    expect(parseSessionEvent(frame({}))).toBeNull();
+  });
+
+  it('drops a frame whose key or label is blank', () => {
+    expect(parseSessionEvent(frame({ sectionKey: '', nextLabel: 'Growth Strategy' }))).toBeNull();
+    expect(parseSessionEvent(frame({ sectionKey: 'about', nextLabel: '' }))).toBeNull();
+  });
+});

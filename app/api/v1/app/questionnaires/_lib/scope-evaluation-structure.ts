@@ -20,7 +20,6 @@ import {
   matrixRowCount,
   routedAllowanceSeconds,
 } from '@/lib/app/questionnaire/scope/budget';
-import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
 import { validateConditionalTopics } from '@/lib/app/questionnaire/scope/validate';
 import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 import type { ScopeStructureInput } from '@/lib/app/questionnaire/scope-evaluation';
@@ -101,7 +100,6 @@ export async function buildScopeEvaluationStructure(
 
   const questionPromptByKey = new Map(questions.map((q) => [q.key, q.prompt] as const));
   const dataSlotNameByKey = new Map(dataSlots.map((d) => [d.key, d.name] as const));
-  const topicLabelByKey = new Map(topics.map((t) => [t.key, t.label] as const));
 
   return {
     topics: topics.map((topic) => ({
@@ -120,14 +118,6 @@ export async function buildScopeEvaluationStructure(
           label: dataSlotNameByKey.get(key) ?? key,
         })),
       ],
-    })),
-    rules: settings.rules.map((rule) => ({
-      id: rule.id,
-      sentence: describeScopeRule(rule, topicLabelByKey, dataSlotNameByKey),
-      dataSlotKey: rule.dataSlotKey,
-      topicKey: rule.topicKey,
-      operator: rule.operator,
-      action: rule.action,
     })),
     settings: {
       maxConditionalTopics: settings.maxConditionalTopics,

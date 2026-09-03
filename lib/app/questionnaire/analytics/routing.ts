@@ -86,7 +86,7 @@ const BUDGET_PATTERN_SHARE = 0.5;
  * `undefined` that increments to `NaN` and quietly empties a column.
  */
 function emptySourceCounts(): Record<ScopeDecisionSource, number> {
-  return { phase: 0, rule: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0 };
+  return { phase: 0, llm: 0, fallback: 0, check: 0, respondent: 0, budget: 0, early: 0 };
 }
 
 /**
@@ -132,6 +132,7 @@ export function assembleRoutingAnalytics(
   }
 
   let amendedPlans = 0;
+  let earlySeatedPlans = 0;
   let fallbackPlans = 0;
   let checkTopicPlans = 0;
   let confidenceTotal = 0;
@@ -140,6 +141,10 @@ export function assembleRoutingAnalytics(
     confidenceTotal += plan.confidence;
     if (plan.source === 'fallback') fallbackPlans += 1;
     if (plan.checkTopicKey) checkTopicPlans += 1;
+    // Counted per plan, not per topic: the topic rows below already say WHICH areas were chosen
+    // early, and the question this answers is how often the opening decided anything at all before
+    // it finished.
+    if (plan.topics.some((t) => t.source === 'early')) earlySeatedPlans += 1;
 
     // Both records of an amendment, unioned: `amendments` is the richer one but is absent on plans
     // written before it shipped, where the `source: 'respondent'` topic is the only trace.
@@ -158,7 +163,13 @@ export function assembleRoutingAnalytics(
       // `check` is the one source that means the OPPOSITE of selection — the topic is sampled
       // because nothing chose it. `fallback` is likewise not a judgement about this topic; it is
       // what happens when there was no signal to judge on at all.
-      if (topic.source === 'llm' || topic.source === 'rule') target.chosen += 1;
+      //
+      // `early` (F17.36) is deliberately NOT counted as `chosen` either, and this is the same rule
+      // `respondent` follows above. An early seat the final planner would also have chosen is a
+      // planner success; one it would not have chosen is not, and counting them together would make
+      // the planner look better the more aggressively the early-seating floor was tuned. The
+      // separate count lives in `bySource.early`.
+      if (topic.source === 'llm') target.chosen += 1;
       else if (topic.source === 'check') target.sampled += 1;
     }
 
@@ -179,6 +190,7 @@ export function assembleRoutingAnalytics(
     range: meta.range,
     plans: planCount,
     amendedPlans,
+    earlySeatedPlans,
     fallbackPlans,
     checkTopicPlans,
     meanConfidence: planCount > 0 ? confidenceTotal / planCount : 0,
@@ -300,6 +312,7 @@ export async function getRoutingAnalytics(scope: AnalyticsScope): Promise<Routin
   return {
     ...result,
     amendedPlans: 0,
+    earlySeatedPlans: 0,
     fallbackPlans: 0,
     checkTopicPlans: 0,
     meanConfidence: 0,

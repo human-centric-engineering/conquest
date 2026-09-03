@@ -328,7 +328,6 @@ describe('patchConditionalTopicsSettings', () => {
         enabled: false,
         maxConditionalTopics: 5,
         plannerInstructions: 'Existing guidance',
-        rules: [],
       },
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
@@ -361,17 +360,6 @@ describe('patchConditionalTopicsSettings', () => {
         maxConditionalTopics: 5,
         plannerInstructions: 'Existing guidance',
         fallbackTopicKeys: ['safe_default'],
-        rules: [
-          {
-            id: 'r1',
-            dataSlotKey: 'licence',
-            operator: 'not_exists',
-            value: null,
-            action: 'exclude',
-            topicKey: 'audit',
-            ordinal: 0,
-          },
-        ],
       },
     });
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
@@ -382,8 +370,6 @@ describe('patchConditionalTopicsSettings', () => {
     expect(result.maxConditionalTopics).toBe(5);
     expect(result.plannerInstructions).toBe('Existing guidance');
     expect(result.fallbackTopicKeys).toEqual(['safe_default']);
-    expect(result.rules).toHaveLength(1);
-    expect(result.rules[0]).toMatchObject({ topicKey: 'audit', action: 'exclude' });
   });
 
   it('writes the merged blob through upsert, keyed by versionId', async () => {
@@ -406,90 +392,6 @@ describe('patchConditionalTopicsSettings', () => {
     expect(updatePayload.maxConditionalTopics).toBe(5);
     expect(createPayload.enabled).toBe(true);
     expect(call.create.versionId).toBe('v-1');
-  });
-
-  it('defaults a rule with no id to rule-<index>', async () => {
-    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
-    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
-
-    const patch: ConditionalTopicsSettingsPatch = {
-      rules: [
-        { dataSlotKey: 'd1', operator: 'exists', value: null, action: 'include', topicKey: 't1' },
-        {
-          id: 'kept-id',
-          dataSlotKey: 'd2',
-          operator: 'equals',
-          value: 'yes',
-          action: 'exclude',
-          topicKey: 't2',
-        },
-      ],
-    };
-    const result = await patchConditionalTopicsSettings('v-1', patch);
-
-    expect(result.rules[0]?.id).toBe('rule-0');
-    expect(result.rules[1]?.id).toBe('kept-id');
-    expect(result.rules[0]?.ordinal).toBe(0);
-    expect(result.rules[1]?.ordinal).toBe(1);
-  });
-
-  it('keeps the current rules verbatim when the patch omits rules', async () => {
-    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      conditionalTopics: {
-        rules: [
-          {
-            id: 'r-existing',
-            dataSlotKey: 'd1',
-            operator: 'exists',
-            value: null,
-            action: 'include',
-            topicKey: 't1',
-            ordinal: 0,
-          },
-        ],
-      },
-    });
-    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
-
-    const result = await patchConditionalTopicsSettings('v-1', { enabled: true });
-
-    expect(result.rules).toHaveLength(1);
-    expect(result.rules[0]?.id).toBe('r-existing');
-  });
-
-  it('replaces the rules wholesale when the patch supplies rules, rather than appending', async () => {
-    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
-      conditionalTopics: {
-        rules: [
-          {
-            id: 'old-rule',
-            dataSlotKey: 'd-old',
-            operator: 'exists',
-            value: null,
-            action: 'include',
-            topicKey: 't-old',
-            ordinal: 0,
-          },
-        ],
-      },
-    });
-    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
-
-    const patch: ConditionalTopicsSettingsPatch = {
-      rules: [
-        {
-          dataSlotKey: 'd-new',
-          operator: 'exists',
-          value: null,
-          action: 'include',
-          topicKey: 't-new',
-        },
-      ],
-    };
-    const result = await patchConditionalTopicsSettings('v-1', patch);
-
-    expect(result.rules).toHaveLength(1);
-    expect(result.rules[0]?.dataSlotKey).toBe('d-new');
   });
 });
 

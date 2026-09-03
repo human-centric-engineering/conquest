@@ -25,6 +25,11 @@
 
 import { totalmem } from 'node:os';
 
+// `resolveHeapMb` and `MEMORY_FRACTION` live in the wrapper `chunked-lint.mjs`
+// delegates its heap arithmetic to; importing them here is what lets the cap
+// tests pin the ambient input instead of reading it from the shell.
+import { resolveHeapMb, MEMORY_FRACTION } from '@/scripts/run-capped.mjs';
+
 import { describe, it, expect, vi } from 'vitest';
 
 // Plain .mjs with no type declarations, by design: it must run from
@@ -495,8 +500,15 @@ describe('runChunk', () => {
     );
     await runChunk(['a.ts'], [], { spawnFn, command: ['eslint'], env: {} });
 
+    // Compared against the resolver rather than against `DEFAULT_HEAP_MB`, for
+    // the reason spelled out on the cap tests below: the resolved figure is
+    // floored at the RUNNING process's heap limit, so pinning the constant
+    // asserts against whatever NODE_OPTIONS the suite happened to be launched
+    // with. What this test is actually about is WHERE the cap lands — the
+    // child's env, not the coordinator's — and that holds at any value.
     const options = spawnFn.mock.calls[0]?.[2];
-    expect(options?.env.NODE_OPTIONS).toContain(`--max-old-space-size=${DEFAULT_HEAP_MB}`);
+    expect(options?.env.NODE_OPTIONS).toContain(`--max-old-space-size=${resolveHeapMb({})}`);
+    expect(process.env.NODE_OPTIONS ?? '').not.toBe(options?.env.NODE_OPTIONS);
   });
 });
 
@@ -535,18 +547,32 @@ describe('withHeapCap', () => {
     //
     // Asserted as a PROPERTY against this machine's own memory, so it holds on
     // any runner rather than encoding one box's answer.
-    const applied = Number(
-      /--max-old-space-size=(\d+)/.exec(
-        (withHeapCap({}) as { NODE_OPTIONS: string }).NODE_OPTIONS
-      )?.[1]
-    );
-    const affordable = Math.floor((totalmem() * 0.75) / (1024 * 1024));
+    //
+    // `defaultLimitMb` is PINNED, and that is the whole point of going through
+    // `resolveHeapMb` here rather than `withHeapCap({})`. It is the one input
+    // that comes from the ambient process rather than from this function's own
+    // contract: the resolver floors its answer at the running process's heap
+    // limit, so anyone who exported `NODE_OPTIONS=--max-old-space-size=8192`
+    // before invoking vitest was asserting against their shell, not the code —
+    // and watched an ALWAYS_RUN test fail for a reason nothing on screen
+    // explained. Pinning it low leaves the two real invariants under test and
+    // makes the result independent of how vitest was launched. The floor
+    // itself is covered by the sibling case below.
+    const applied = resolveHeapMb({ defaultLimitMb: 0 });
+    const affordable = Math.floor((totalmem() * MEMORY_FRACTION) / (1024 * 1024));
 
     // Two invariants, both load-bearing: never above what the machine can
     // back, and never above what was asked for.
     expect(applied).toBeGreaterThan(0);
     expect(applied).toBeLessThanOrEqual(affordable);
     expect(applied).toBeLessThanOrEqual(DEFAULT_HEAP_MB);
+  });
+
+  it('never drops BELOW the heap the process already has', () => {
+    // The other half of the same `Math.max`, and the reason the input above is
+    // ambient at all: a runner already started with more heap than the cap must
+    // keep it, or the wrapper would hand a child LESS memory than its parent.
+    expect(resolveHeapMb({ defaultLimitMb: 9000 })).toBe(9000);
   });
 
   it("defers to a cap already set, so CI's value always wins", () => {

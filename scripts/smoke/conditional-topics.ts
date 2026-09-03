@@ -278,7 +278,6 @@ async function main() {
           sourceQuote: 'Only cover pipeline for sales-led businesses.',
         },
       ],
-      rules: [],
       gaps: [],
       summary: 'smoke',
       fromDocument: true,
@@ -315,7 +314,6 @@ async function main() {
           trigger: null,
         },
       ],
-      rules: [],
     });
     ok(
       'accepting the draft writes the topics live, stamped as the analyst’s',

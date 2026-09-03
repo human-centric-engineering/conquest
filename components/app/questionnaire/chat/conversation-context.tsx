@@ -33,12 +33,25 @@
  * channel and cost the type-checking that catches a missing one.
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { usePacedStageLabel } from '@/lib/hooks/use-paced-stage-label';
 import { currentExchangeStart } from '@/lib/app/questionnaire/chat/exchange';
 import { isTerminalStatus } from '@/lib/app/questionnaire/chat/types';
-import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
+import type {
+  SectionHandover,
+  UseQuestionnaireSessionStreamReturn,
+} from '@/lib/hooks/use-questionnaire-session-stream';
+
+/**
+ * Sectioned interviews (P21): how long "Moving on to X…" stays up before the move happens.
+ *
+ * A couple of seconds: long enough that the move reads as something the interview did on purpose
+ * and the respondent can see where they are being taken, short enough that it is a beat rather
+ * than a wait. It starts only once the reply announcing the move has finished revealing, so this
+ * is two seconds AFTER the sentence is readable, not two seconds of overlap with it.
+ */
+export const SECTION_HANDOVER_DWELL_MS = 2000;
 
 export interface ConversationContextValue {
   /**
@@ -87,6 +100,18 @@ export interface ConversationContextValue {
    */
   stageLabel: string | null;
   /**
+   * Sectioned interviews (P21): "Moving on to Growth Strategy…", while the interview is between
+   * parts, and null the rest of the time.
+   *
+   * Shown in the same row as {@link stageLabel} and for the same reason: the respondent has
+   * finished a part, the reply said the interview was taking them on, and something has to hold
+   * that beat. Before this the row said nothing at all and the conversation appeared to stop.
+   *
+   * Never both at once — a handover beat only runs between turns, and the stage label only runs
+   * during one.
+   */
+  handoverLabel: string | null;
+  /**
    * The first turn of the CURRENT exchange — equivalently, how many turns belong to the history
    * behind it. `ChatHistory` renders `turns` below this index and `CurrentExchange` renders from it
    * up, so one number keeps them from either double-rendering a turn or dropping one.
@@ -100,6 +125,18 @@ export interface ConversationProviderProps {
   /** The shared stream state, owned by `SessionWorkspace`. */
   stream: UseQuestionnaireSessionStreamReturn;
   /**
+   * Sectioned interviews (P21): the move the reply on screen announced, once the surface has
+   * confirmed against its own strip that the part may actually be finished. Null the rest of the
+   * time, and on every unsectioned interview.
+   *
+   * The provider owns the BEAT rather than the workspace because the beat has to start when the
+   * reply has finished revealing, and `composerReady` — the only place both of that turn's clocks
+   * are known to have settled — lives here.
+   */
+  sectionHandover?: SectionHandover | null;
+  /** Perform the move. Called once, when the beat is up. */
+  onSectionHandover?: () => void;
+  /**
    * Type the seeded opening turn(s) in instead of snapping them in fully-formed. Set for fresh
    * sessions; leave off on resume so a restored transcript renders its history instantly.
    */
@@ -109,6 +146,8 @@ export interface ConversationProviderProps {
 
 export function ConversationProvider({
   stream,
+  sectionHandover = null,
+  onSectionHandover,
   animateOpening = false,
   children,
 }: ConversationProviderProps) {
@@ -132,6 +171,39 @@ export function ConversationProvider({
   // that — and on the opening burst the next question can still be fully hidden. Both clocks have
   // to settle before any input affordance opens.
   const revealPending = revealCursor < turns.length;
+  const composerReady = canSend && !revealPending;
+
+  /* ── The section handover beat (P21) ──────────────────────────────────────────────────────
+     The reply has just said the interview is taking the respondent on to the next part. Something
+     has to hold the gap between that sentence and the next part's opening question, and it has to
+     start only once the sentence has finished revealing — which is what `composerReady` knows and
+     the workspace above does not.
+
+     `active` is the CUE, not the move. It retires itself the instant the beat is up, whatever
+     happens next: the move usually leads straight into the new part's opening turn (whose stage
+     labels take the row over), but a refused move leaves the respondent with the reply and their
+     own "Move on" control, and a cue still claiming the interview was moving would be a lie for
+     the rest of the session. */
+  const [handoverActive, setHandoverActive] = useState(false);
+  const onHandoverRef = useRef(onSectionHandover);
+  useEffect(() => {
+    onHandoverRef.current = onSectionHandover;
+  }, [onSectionHandover]);
+
+  useEffect(() => {
+    if (!sectionHandover || !composerReady) {
+      setHandoverActive(false);
+      return;
+    }
+    setHandoverActive(true);
+    const timer = setTimeout(() => {
+      setHandoverActive(false);
+      onHandoverRef.current?.();
+    }, SECTION_HANDOVER_DWELL_MS);
+    return () => clearTimeout(timer);
+    // Deliberately NOT keyed on the handler: it is read through a ref, so a caller passing an
+    // inline arrow cannot restart the beat (and, with it, move the respondent twice).
+  }, [sectionHandover, composerReady]);
 
   // The exchange boundary, clamped so it can never overtake the reveal queue.
   //
@@ -148,10 +220,12 @@ export function ConversationProvider({
     advanceReveal: (index) => setRevealCursor((c) => Math.max(c, index + 1)),
     openingTurnCount,
     animateOpening,
-    composerReady: canSend && !revealPending,
+    composerReady,
     isTerminal: isTerminalStatus(status),
     composerHint: streaming ? 'Waiting for a reply…' : 'Revealing the reply…',
     stageLabel,
+    handoverLabel:
+      handoverActive && sectionHandover ? `Moving on to ${sectionHandover.nextLabel}…` : null,
     historyEnd,
   };
 

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   currentExchangeStart,
   hasConversationHistory,
+  turnInSection,
 } from '@/lib/app/questionnaire/chat/exchange';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 
@@ -72,5 +73,48 @@ describe('hasConversationHistory', () => {
 
   it('does not count an absent stitched history', () => {
     expect(hasConversationHistory([ask('Welcome.')], 0)).toBe(false);
+  });
+});
+
+describe('turnInSection', () => {
+  it('keeps a turn said in the section being shown', () => {
+    expect(turnInSection({ sectionKey: 's1' }, 's1')).toBe(true);
+  });
+
+  it('hides a turn said in another section', () => {
+    // The whole point: moving between sections replaces the conversation on screen rather than
+    // adding to it.
+    expect(turnInSection({ sectionKey: 's2' }, 's1')).toBe(false);
+  });
+
+  it('keeps everything on an unsectioned interview', () => {
+    expect(turnInSection({ sectionKey: 's1' }, null)).toBe(true);
+    expect(turnInSection({}, undefined)).toBe(true);
+  });
+
+  it('keeps a turn carrying no section of its own when no home section is given', () => {
+    // Recorded before P21, or before this session was sectioned. Hiding it from every section would
+    // make the transcript lie about what was said.
+    expect(turnInSection({}, 's1')).toBe(true);
+    expect(turnInSection({ sectionKey: null }, 's1')).toBe(true);
+  });
+
+  describe('untaggedSectionKey — where an untagged turn lives', () => {
+    it('files it in the section named, and nowhere else', () => {
+      // The client-built greeting is never persisted, so it is never tagged. Left to show
+      // everywhere, "answer honestly, there are no right or wrong answers" reappeared at the top of
+      // every section the respondent moved to, reading as the interview starting over.
+      expect(turnInSection({}, 's1', 's1')).toBe(true);
+      expect(turnInSection({}, 's2', 's1')).toBe(false);
+    });
+
+    it('does not touch a turn that carries its own section', () => {
+      expect(turnInSection({ sectionKey: 's2' }, 's2', 's1')).toBe(true);
+      expect(turnInSection({ sectionKey: 's2' }, 's1', 's1')).toBe(false);
+    });
+
+    it('falls back to keeping it everywhere when the home section is null', () => {
+      expect(turnInSection({}, 's2', null)).toBe(true);
+    });
   });
 });

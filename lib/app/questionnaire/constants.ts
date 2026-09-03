@@ -1191,7 +1191,7 @@ export const ANALYSE_GLOSSARY_TERMS_FUNCTION_DEFINITION: CapabilityFunctionDefin
 /* Conditional Topics — the Routing Analyst (P17.4)                               */
 /* -------------------------------------------------------------------------- */
 
-/** Slug of the routing-analysis capability — proposes topics, criteria and hard rules. */
+/** Slug of the routing-analysis capability — proposes topics and their criteria. */
 export const ANALYSE_ROUTING_CAPABILITY_SLUG = 'app_analyse_routing';
 
 /** `AiCapability.executionHandler` for the Routing Analyst — the class the dispatcher resolves. */
@@ -1212,7 +1212,7 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
     'ignores: routing and eligibility notes, guardrails, "how to use this" instructions, wherever ' +
     'in the file they sit — and propose the TOPICS it implies: ' +
     'which groups of questions always run, which are conditional, and the author’s own criteria for ' +
-    'when each conditional one applies, plus any hard rules the document states as certainties. ' +
+    'when each conditional one applies. ' +
     'Returns a proposal for an administrator to review; persists nothing and changes no questions.',
   parameters: {
     type: 'object',
@@ -1233,7 +1233,7 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
       dataSlots: {
         type: 'array',
         description:
-          'The version’s data slots — each { key, name, theme }. The ONLY keys a proposed hard rule ' +
+          'The version’s data slots — each { key, name, theme }. The ONLY keys a proposed topic ' +
           'may test.',
         items: { type: 'object', additionalProperties: true },
       },
@@ -1372,19 +1372,19 @@ export const EVALUATE_SCOPE_HANDLER = 'AppEvaluateScopeCapability';
 export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
   name: EVALUATE_SCOPE_CAPABILITY_SLUG,
   description:
-    "Judge one dimension of a questionnaire version's Conditional Topics configuration (criteria quality, rule integrity, budget realism, or coverage and burden) — the authored topics, hard rules, planner instructions, and time budget — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the scope evaluate-preview route; persists nothing.",
+    "Judge one dimension of a questionnaire version's Conditional Topics configuration (criteria quality, budget realism, or coverage and burden) — the authored topics, planner instructions, and time budget — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the scope evaluate-preview route; persists nothing.",
   parameters: {
     type: 'object',
     properties: {
       dimension: {
         type: 'string',
         description:
-          'Which dimension to judge: criteria_quality | rule_integrity | budget_realism | coverage_and_burden.',
+          'Which dimension to judge: criteria_quality | budget_realism | coverage_and_burden.',
       },
       structure: {
         type: 'object',
         description:
-          'The scope structure DTO to judge — { topics[], rules[], settings, costs, knownIssues[] }.',
+          'The scope structure DTO to judge — { topics[], settings, costs, knownIssues[] }.',
         additionalProperties: true,
       },
       versionId: {

@@ -3,7 +3,7 @@
  *
  * The `/messages` route streams the orchestration `ChatEvent` shape, but only ever
  * emits a small subset on this surface: `start`, `status`, `content`, `warning`, `question_card`,
- * `done`, plus a defensive `error`. This narrows a raw `{ type, data }` block into that subset so
+ * `section_covered`, `done`, plus a defensive `error`. This narrows a raw `{ type, data }` block into that subset so
  * the stream consumer's switch stays small and exhaustively typed. Anything outside
  * the subset (or malformed) returns `null` and is ignored by the caller.
  *
@@ -37,6 +37,10 @@ export type SessionStreamEvent =
   // Preview Turn Inspector (admin-only): the agent-call trace for this turn. The server only emits
   // it for a preview session with the inspector toggle on — never to a real respondent.
   | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
+  // Sectioned interviews (P21): this part is covered and the reply just said the interview is
+  // taking the respondent on to `nextLabel`. Emitted only when the interviewer drives the move and
+  // there is somewhere to go, so its presence IS the promise the surface then keeps.
+  | { type: 'section_covered'; sectionKey: string; nextLabel: string }
   | { type: 'done'; costUsd: number }
   | { type: 'error'; code: string; message: string };
 
@@ -179,6 +183,17 @@ export function parseSessionEvent(block: string): SessionStreamEvent | null {
       if (calls.length === 0) return null;
       const turnIndex = typeof data.turnIndex === 'number' ? data.turnIndex : 0;
       return { type: 'inspector', turnIndex, calls };
+    }
+    case 'section_covered': {
+      const sectionKey = asString(data.sectionKey);
+      const nextLabel = asString(data.nextLabel);
+      // Both are load-bearing: without the key there is no section to finish, and without the label
+      // the cue would have to name the destination in the abstract. Dropping a malformed frame
+      // leaves the respondent with the reply and the "Move on to X" control, which is the surface
+      // this feature started from and a safe place to land.
+      if (sectionKey === null || nextLabel === null) return null;
+      if (sectionKey.length === 0 || nextLabel.length === 0) return null;
+      return { type: 'section_covered', sectionKey, nextLabel };
     }
     case 'done': {
       const costUsd = typeof data.costUsd === 'number' ? data.costUsd : 0;

@@ -17,8 +17,10 @@ import { prisma } from '@/lib/db/client';
 import { resolveScope, type ResolvedScope } from '@/lib/app/questionnaire/scope/resolve';
 import {
   narrowConditionalTopicsSettings,
+  narrowEarlySeating,
   narrowInterviewPlan,
   type ConditionalTopicsSettings,
+  type EarlySeating,
   type InterviewPlan,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -33,6 +35,13 @@ export interface SessionScope {
   topics: Topic[];
   settings: ConditionalTopicsSettings;
   plan: InterviewPlan | null;
+  /**
+   * Topics seated during the opening, before a plan existed (F17.36). Null on nearly every session.
+   *
+   * Surfaced beside the plan rather than folded into it because they answer different questions: the
+   * plan is what the interview decided, this is what it had already committed to when it decided.
+   */
+  earlySeated: EarlySeating | null;
 }
 
 /** A scope that filters nothing — the answer for every version that never opted in. */
@@ -43,6 +52,7 @@ export function inertScope(): SessionScope {
     topics: [],
     settings,
     plan: null,
+    earlySeated: null,
   };
 }
 
@@ -65,6 +75,14 @@ export async function buildSessionScope(
     versionId: string;
     settings: ConditionalTopicsSettings;
     interviewPlan: unknown;
+    /**
+     * The session's `earlySeatedTopics` column (F17.36), when the caller has it.
+     *
+     * Optional, and its absence means "no early seats" rather than "do not check" — which is the
+     * correct reading for every caller that predates the feature and for every session that never
+     * used it. A caller reading the session row should pass it; one that is not cannot have any.
+     */
+    earlySeatedTopics?: unknown;
     allQuestionKeys?: readonly string[];
     allDataSlotKeys?: readonly string[];
     weightByQuestionKey?: ReadonlyMap<string, number>;
@@ -85,6 +103,9 @@ export async function buildSessionScope(
       topics: [],
       settings: input.settings,
       plan,
+      // Not read on this path: `resolveScope` short-circuits to full scope on a disabled version,
+      // so an early seat could not narrow or widen anything even if one somehow existed.
+      earlySeated: null,
     };
   }
 
@@ -99,13 +120,15 @@ export async function buildSessionScope(
           })
         ).map(toTopic);
   const plan = narrowInterviewPlan(input.interviewPlan);
+  const earlySeated = narrowEarlySeating(input.earlySeatedTopics);
 
   // Weights only change the answer for a `light`-depth topic, and depth can come from the plan as
   // well as the authored topic — so ask both before paying for the load. Everyone else (the common
   // case: no light topic anywhere) skips these two queries entirely.
   const needsWeights =
     topics.some((t) => t.depth === 'light') ||
-    (plan?.topics.some((t) => t.depth === 'light') ?? false);
+    (plan?.topics.some((t) => t.depth === 'light') ?? false) ||
+    (earlySeated?.seated.some((t) => t.depth === 'light') ?? false);
 
   let weightByQuestionKey = input.weightByQuestionKey;
   let weightByDataSlotKey = input.weightByDataSlotKey;
@@ -134,6 +157,7 @@ export async function buildSessionScope(
     scope: resolveScope({
       topics,
       plan,
+      earlySeated,
       settings: input.settings,
       ...(input.allQuestionKeys ? { allQuestionKeys: input.allQuestionKeys } : {}),
       ...(input.allDataSlotKeys ? { allDataSlotKeys: input.allDataSlotKeys } : {}),
@@ -143,6 +167,7 @@ export async function buildSessionScope(
     topics,
     settings: input.settings,
     plan,
+    earlySeated,
   };
 }
 
@@ -166,6 +191,7 @@ export async function loadSessionScope(
     select: {
       versionId: true,
       interviewPlan: true,
+      earlySeatedTopics: true,
       version: { select: { config: { select: { conditionalTopics: true } } } },
     },
   });
@@ -175,6 +201,7 @@ export async function loadSessionScope(
     versionId: session.versionId,
     settings: narrowConditionalTopicsSettings(session.version.config?.conditionalTopics),
     interviewPlan: session.interviewPlan,
+    earlySeatedTopics: session.earlySeatedTopics,
     ...options,
   });
 }

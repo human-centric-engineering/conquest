@@ -23,52 +23,6 @@ describe('describeScopeProposedEdit', () => {
     );
   });
 
-  it('describes add_rule with a value', () => {
-    const op: ScopeProposedEdit = {
-      op: 'add_rule',
-      dataSlotKey: 'headcount',
-      operator: 'gt',
-      value: '50',
-      action: 'include',
-      topicKey: 'talent',
-    };
-    expect(describeScopeProposedEdit(op)).toBe(
-      'Add a rule: include “talent” when “headcount” gt “50”'
-    );
-  });
-
-  it('describes add_rule with a null value (an existence operator)', () => {
-    const op: ScopeProposedEdit = {
-      op: 'add_rule',
-      dataSlotKey: 'headcount',
-      operator: 'exists',
-      value: null,
-      action: 'include',
-      topicKey: 'talent',
-    };
-    expect(describeScopeProposedEdit(op)).toBe(
-      'Add a rule: include “talent” when “headcount” exists'
-    );
-  });
-
-  it('describes edit_rule', () => {
-    const op: ScopeProposedEdit = {
-      op: 'edit_rule',
-      dataSlotKey: 'headcount',
-      operator: 'lt',
-      value: '10',
-      action: 'exclude',
-      topicKey: 'compliance',
-    };
-    expect(describeScopeProposedEdit(op)).toBe(
-      'Rewrite this rule: exclude “compliance” when “headcount” lt “10”'
-    );
-  });
-
-  it('describes delete_rule', () => {
-    expect(describeScopeProposedEdit({ op: 'delete_rule' })).toBe('Delete this rule');
-  });
-
   it('describes adjust_budget with every field set', () => {
     const op: ScopeProposedEdit = {
       op: 'adjust_budget',

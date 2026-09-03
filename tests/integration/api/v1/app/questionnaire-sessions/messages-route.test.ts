@@ -594,6 +594,242 @@ describe('scope amendment notice (P17.6)', () => {
   });
 });
 
+describe('early seating announcement (F17.36 phase 5)', () => {
+  const TOPIC = {
+    id: 't1',
+    key: 'hiring',
+    label: 'Talent & hiring',
+    description: null,
+    phase: 'conditional' as const,
+    criteria: null,
+    depth: 'full' as const,
+    members: { dataSlotKeys: ['ds1', 'ds2'], questionKeys: [] },
+    ordinal: 0,
+    source: 'analyst' as const,
+    trigger: null,
+  };
+
+  const SEAT = {
+    key: 'hiring',
+    depth: 'full' as const,
+    confidence: 0.92,
+    rationale: 'They said the team doubled.',
+    respondentReason: 'You mentioned the team has doubled this year.',
+    // `selectionRound` is 0 by default, so this is the ONE turn the seat announces on.
+    atTurn: 0,
+  };
+
+  /** A session that seated an area on the previous turn and has not yet sealed a plan. */
+  function seatedContext(opts: {
+    settings?: Record<string, unknown>;
+    seatAtTurn?: number;
+    plan?: unknown;
+    topics?: unknown[];
+  }) {
+    const base = loadedContext();
+    return loadedContext({
+      scope: {
+        ...base.scope,
+        topics: opts.topics ?? [TOPIC],
+        settings: {
+          enabled: true,
+          earlyTopicSeating: true,
+          announceEarlySeating: true,
+          ...opts.settings,
+        },
+        plan: opts.plan ?? null,
+        earlySeated: {
+          v: 1 as const,
+          seated: [
+            { ...SEAT, ...(opts.seatAtTurn === undefined ? {} : { atTurn: opts.seatAtTurn }) },
+          ],
+          deferred: [],
+          lastPassAtTurn: 0,
+          evidenceKey: 'e',
+          overCap: false,
+        },
+      },
+    });
+  }
+
+  async function briefingFor(loaded: unknown): Promise<string[]> {
+    ctxMock.buildTurnContext.mockResolvedValue(loaded);
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    return arg.input.briefing ?? [];
+  }
+
+  it('names the area and sizes it on the turn after it was chosen', async () => {
+    const briefing = await briefingFor(seatedContext({}));
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(true);
+    // Two data slots, so "just a couple of questions" — sized from what the area will ASK.
+    expect(briefing.some((line) => line.includes('just a couple of questions'))).toBe(true);
+    expect(
+      briefing.some((line) => line.includes('You mentioned the team has doubled this year.'))
+    ).toBe(true);
+  });
+
+  it('gets exactly one outing: a seat from an earlier turn is not re-announced', async () => {
+    // The same one-turn mechanic the plan handover and the amendment acknowledgement use. Without
+    // it the interviewer would re-introduce the same area for the rest of the interview.
+    const briefing = await briefingFor(seatedContext({ seatAtTurn: 3 }));
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing when the author turned the announcement off', async () => {
+    const briefing = await briefingFor(
+      seatedContext({ settings: { announceEarlySeating: false } })
+    );
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing once a plan exists, so one area is never announced twice', async () => {
+    // A turn can both seat and seal. The plan absorbs every early seat, and its own handover is the
+    // statement of what the interview covers, so a second announcement in the same message would
+    // tell the respondent about the same area twice.
+    const briefing = await briefingFor(
+      seatedContext({
+        plan: {
+          v: 1 as const,
+          topics: [
+            { key: 'hiring', depth: 'full' as const, source: 'early' as const, rationale: '' },
+          ],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: '',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing at all for an area the author has since deleted', async () => {
+    // The seat is real and was asked about; the topic is gone, so there is no label to name and no
+    // size to claim. An announcement that names nothing is worse than none at all.
+    const briefing = await briefingFor(seatedContext({ topics: [] }));
+    expect(briefing.some((line) => line.includes('clearly worth covering'))).toBe(false);
+    expect(briefing.some((line) => line.includes('there is'))).toBe(false);
+  });
+});
+
+describe('what the reasoning trace is told about a scope decision', () => {
+  const TOPIC = {
+    id: 't1',
+    key: 'hiring',
+    label: 'Talent & hiring',
+    description: null,
+    phase: 'conditional' as const,
+    criteria: null,
+    depth: 'full' as const,
+    members: { dataSlotKeys: ['ds1'], questionKeys: [] },
+    ordinal: 0,
+    source: 'analyst' as const,
+    trigger: null,
+  };
+
+  /** Reasoning on, plus whatever scope state the test is about. */
+  function reasoningScopeContext(scopeOver: Record<string, unknown>) {
+    const defaults = loadedContext();
+    return loadedContext({
+      base: {
+        ...defaults.base,
+        config: { ...defaults.base.config, reasoningStreamEnabled: true },
+      },
+      scope: { ...defaults.scope, topics: [TOPIC], ...scopeOver },
+    });
+  }
+
+  /** The options the route handed the trace builder this turn. */
+  async function traceOptions(loaded: unknown) {
+    ctxMock.buildTurnContext.mockResolvedValue(loaded);
+    reasoningMock.buildReasoningTrace.mockReturnValue([]);
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+    return reasoningMock.buildReasoningTrace.mock.calls[0][1] as {
+      scopeDecision?: { kind: string; labels: string[] };
+    };
+  }
+
+  it('names the areas on the turn the plan is announced', async () => {
+    // The chat is told in the interviewer's voice; this is the reasoning panel's account of the same
+    // moment. Both fire on the ONE turn the announcement is due, so the two cannot disagree about
+    // when the respondent learned the interview had changed shape.
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        plan: {
+          v: 1 as const,
+          topics: [{ key: 'hiring', depth: 'full' as const, source: 'llm' as const }],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: 'I want to go deeper on how you hire.',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toEqual({ kind: 'planned', labels: ['Talent & hiring'] });
+  });
+
+  it('tells it nothing once the announcement has had its outing', async () => {
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        plan: {
+          v: 1 as const,
+          topics: [{ key: 'hiring', depth: 'full' as const, source: 'llm' as const }],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: 'I want to go deeper on how you hire.',
+          // An earlier turn: `selectionRound` is 0 here.
+          decidedAtTurn: 3,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toBeUndefined();
+  });
+
+  it('keeps a mid-opening addition apart from the whole decision', async () => {
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        settings: { enabled: true, earlyTopicSeating: true, announceEarlySeating: true },
+        plan: null,
+        earlySeated: {
+          v: 1 as const,
+          seated: [
+            {
+              key: 'hiring',
+              depth: 'full' as const,
+              confidence: 0.92,
+              rationale: 'They said the team doubled.',
+              respondentReason: 'You mentioned the team has doubled this year.',
+              atTurn: 0,
+            },
+          ],
+          deferred: [],
+          lastPassAtTurn: 0,
+          evidenceKey: 'e',
+          overCap: false,
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toEqual({ kind: 'seated', labels: ['Talent & hiring'] });
+  });
+});
+
 describe('streaming a question turn', () => {
   it('streams start → content → done and persists the turn', async () => {
     const res = await POST(req({ message: 'I do marketing' }), ctx);
@@ -2836,34 +3072,37 @@ describe('sectioned interviews (P21)', () => {
     };
   }
 
+  /** The resolved section state a sectioned turn context carries, with `over` patching it. */
+  function sectionRunState(over: Record<string, unknown> = {}) {
+    return {
+      active: true,
+      sections: [section('a', 'About you', 0), section('b', 'Your work', 1)],
+      run: {
+        v: 1,
+        activeKey: 'a',
+        sections: [
+          {
+            key: 'a',
+            status: 'in_progress',
+            openedAtTurn: 0,
+            closedAtTurn: null,
+            closeReason: null,
+            reopenCount: 0,
+            turnsSpent: 0,
+          },
+        ],
+      },
+      activeSection: section('a', 'About you', 0),
+      isSectionOpening: true,
+      close: null,
+      allClosed: false,
+      ...over,
+    };
+  }
+
   /** A turn context whose interview is sectioned, with `over` patching the section state. */
   function sectionedContext(over: Record<string, unknown> = {}) {
-    return loadedContext({
-      sectionState: {
-        active: true,
-        sections: [section('a', 'About you', 0), section('b', 'Your work', 1)],
-        run: {
-          v: 1,
-          activeKey: 'a',
-          sections: [
-            {
-              key: 'a',
-              status: 'in_progress',
-              openedAtTurn: 0,
-              closedAtTurn: null,
-              closeReason: null,
-              reopenCount: 0,
-              turnsSpent: 0,
-            },
-          ],
-        },
-        activeSection: section('a', 'About you', 0),
-        isSectionOpening: true,
-        close: null,
-        allClosed: false,
-        ...over,
-      },
-    });
+    return loadedContext({ sectionState: sectionRunState(over) });
   }
 
   it('gives the phraser the section, its position and the one that follows', async () => {
@@ -2929,6 +3168,191 @@ describe('sectioned interviews (P21)', () => {
     expect(persisted.sectionKey).toBe('a');
     expect(persisted.sectionRun?.activeKey).toBe('a');
     expect(persisted.sectionRun?.sections.find((s) => s.key === 'a')?.turnsSpent).toBe(1);
+  });
+
+  /**
+   * A turn whose ACTIVE section has nothing left to ask, on an interview that is not finished.
+   *
+   * Two questions, one per section, and only the first answered — so the whole-interview assessment
+   * is `not_ready` while the section-scoped selector reports the part covered. That gap is the
+   * whole of `section_covered`.
+   */
+  function coveredSectionContext(over: Record<string, unknown> = {}) {
+    const defaults = loadedContext();
+    const q1 = defaults.base.questions[0];
+    const q2 = {
+      ...q1,
+      id: 'q2',
+      key: 'q2',
+      sectionId: 's2',
+      sectionOrdinal: 1,
+      ordinal: 1,
+      prompt: 'What would you change?',
+    };
+    const meta = {
+      key: 'a',
+      label: 'About you',
+      nextLabel: 'Your work' as string | null,
+      firstHandover: true,
+      ...((over.sectionMeta as Record<string, unknown>) ?? {}),
+    };
+    const {
+      base,
+      sectionMeta: _meta,
+      ...rest
+    } = over as {
+      base?: Record<string, unknown>;
+      sectionMeta?: unknown;
+    } & Record<string, unknown>;
+    return loadedContext({
+      ...rest,
+      sectionState: sectionRunState(),
+      base: {
+        ...defaults.base,
+        questions: [q1, q2],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+        sectionQuestions: [q1],
+        sectionMeta: meta,
+        ...base,
+      },
+    });
+  }
+
+  /** The selector reporting the SECTION covered — the verdict the route has to read narrowly. */
+  function sectionCoveredInvokers() {
+    return {
+      ...stubInvokers(),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'complete' as const, rationale: 'section covered', costUsd: 0 },
+      })),
+    };
+  }
+
+  it('tells the surface which move the reply just promised', async () => {
+    // Without the frame the reply said "I'll take us on to Your work" and nothing happened. The
+    // respondent's "yes" was consumed by a turn that found the same empty part and said it again.
+    ctxMock.buildTurnContext.mockResolvedValue(coveredSectionContext());
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    const handover = frames.find((f) => f.event === 'section_covered');
+
+    expect(handover?.data).toMatchObject({ sectionKey: 'a', nextLabel: 'Your work' });
+    // Before `done`, so the surface has it by the time the turn settles.
+    expect(frames.findIndex((f) => f.event === 'section_covered')).toBeLessThan(
+      frames.findIndex((f) => f.event === 'done')
+    );
+  });
+
+  it('promises nothing on the last part, where there is nowhere to move on to', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({ sectionMeta: { nextLabel: null } })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
+  });
+
+  it('promises nothing when the version leaves the move to the respondent', async () => {
+    // `agentOffersClose` off is a facilitated session: the interviewer says the part is covered and
+    // waits. A frame here would have the surface move them on anyway, which is the setting inverted.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        base: {
+          config: {
+            ...defaults.base.config,
+            sections: { ...defaults.base.config.sections, agentOffersClose: false },
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
+  });
+
+  it('carries the plan handover onto the one reply no phraser composes', async () => {
+    // Conditional Topics seals the plan at the end of the turn that finishes the opening, which in
+    // a sectioned interview is routinely the turn that finishes the opening PART. The announcement
+    // has exactly one outing and the covered-part reply is deterministic, so those respondents
+    // watched the interview change shape and were told nothing about it at all.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        scope: {
+          ...defaults.scope,
+          plan: {
+            v: 1 as const,
+            topics: [{ key: 'growth', depth: 'full' as const, source: 'llm' as const }],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.8,
+            source: 'llm' as const,
+            respondentMessage: "I'd like to spend some time on how you grow from here.",
+            decidedAtTurn: 0,
+            decidedAt: '2026-08-01T00:00:00.000Z',
+            amendments: [],
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    const said = frames
+      .filter((f) => f.event === 'content')
+      .map((f) => (f.data as { delta: string }).delta)
+      .join('');
+
+    expect(said).toContain("That's everything for About you.");
+    expect(said).toContain("I'd like to spend some time on how you grow from here.");
+  });
+
+  it('says nothing about a plan on the replies that end the interview', async () => {
+    // "What I now want to go deeper on" is a promise a finished interview is not going to keep.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        scope: {
+          ...defaults.scope,
+          plan: {
+            v: 1 as const,
+            topics: [],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.8,
+            source: 'llm' as const,
+            respondentMessage: "I'd like to spend some time on how you grow from here.",
+            decidedAtTurn: 0,
+            decidedAt: '2026-08-01T00:00:00.000Z',
+            amendments: [],
+          },
+        },
+        base: { sectionMeta: undefined, sectionQuestions: undefined },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'none' as const, rationale: 'nothing left', costUsd: 0 },
+      })),
+    });
+
+    const said = (await drainSse(await POST(req({ message: 'that is everything' }), ctx)))
+      .filter((f) => f.event === 'content')
+      .map((f) => (f.data as { delta: string }).delta)
+      .join('');
+
+    expect(said).not.toContain('how you grow from here');
+  });
+
+  it('promises nothing on an ordinary question turn', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sectionedContext());
+    const frames = await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+    expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
   });
 
   it('sends no section block and tags no section when the interview is not sectioned', async () => {

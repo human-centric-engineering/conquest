@@ -169,6 +169,37 @@ describe('alwaysTopicSeconds and routedAllowanceSeconds', () => {
     expect(alwaysTopicSeconds(topics, costs)).toBe(45 + 8 + 45);
   });
 
+  it('prices a light always-run topic at its light cost, not its full one', () => {
+    // The bug this function was written to fix. `resolveScope` applies depth to always-run topics
+    // as well as routed ones and the editor offers the selector for every phase, so charging full
+    // for a light opening overstates the mandatory floor, under-reports the routed allowance, and
+    // can raise `budget_below_floor` against a budget that was in fact sufficient.
+    // Four questions, so `light` (LIGHT_DEPTH_MEMBER_COUNT = 2) genuinely costs less than `full`.
+    // A one-member topic prices identically at both depths and would prove nothing.
+    const wideSeconds = itemSeconds(
+      [
+        { key: 'open_a', type: 'free_text' },
+        { key: 'open_b', type: 'free_text' },
+        { key: 'open_c', type: 'free_text' },
+        { key: 'open_d', type: 'free_text' },
+        { key: 'core', type: 'likert' },
+      ],
+      [],
+      settings
+    );
+    const lightOpening = {
+      ...topic('opening', 'opening', ['open_a', 'open_b', 'open_c', 'open_d']),
+      depth: 'light' as const,
+    };
+    const mixed = [lightOpening, topic('core', 'core', ['core'])];
+    const mixedCosts = estimateTopicCosts(mixed, wideSeconds);
+
+    const full = mixedCosts.get('opening')?.full ?? 0;
+    const light = mixedCosts.get('opening')?.light ?? 0;
+    expect(light).toBeLessThan(full);
+    expect(alwaysTopicSeconds(mixed, mixedCosts)).toBe(light + 8);
+  });
+
   it('leaves the budget minus the floor to allocate', () => {
     expect(routedAllowanceSeconds(600, 98)).toBe(502);
   });
@@ -276,7 +307,6 @@ describe('a worked example: floor, allowance, and what fits', () => {
         { key: 'big2', rationale: 'b' },
         { key: 'big3', rationale: 'c' },
       ],
-      rules: { include: new Set(), exclude: new Set(), reasonByTopic: new Map() },
       settings: { ...budgeted, enabled: true, maxConditionalTopics: 3, includeCheckTopic: true },
       confidence: 0.9,
       source: 'llm',

@@ -61,16 +61,6 @@ function structure(): ScopeStructureInput {
         members: [],
       },
     ],
-    rules: [
-      {
-        id: 'rule-1',
-        sentence: 'x',
-        dataSlotKey: 'engagement',
-        topicKey: 'talent',
-        operator: 'gt',
-        action: 'include',
-      },
-    ],
     settings: {
       maxConditionalTopics: 3,
       includeCheckTopic: true,
@@ -95,17 +85,6 @@ function structure(): ScopeStructureInput {
 function settingsFixture() {
   return {
     ...structure().settings,
-    rules: [
-      {
-        id: 'rule-1',
-        dataSlotKey: 'engagement',
-        operator: 'gt' as const,
-        value: '50',
-        action: 'include' as const,
-        topicKey: 'talent',
-        ordinal: 0,
-      },
-    ],
   };
 }
 
@@ -184,26 +163,6 @@ describe('applyScopeFinding — early returns', () => {
     expect(res.status).toBe('unapplicable');
     if (res.status === 'unapplicable') expect(res.reason).toBe('target_gone');
     expect(prismaMock.appQuestionnaireTopic.update).not.toHaveBeenCalled();
-  });
-
-  it('is target_gone when an edit_rule/delete_rule targets a rule id no longer in settings', async () => {
-    (loadConditionalTopicsSettings as unknown as Mock).mockResolvedValue({
-      ...structure().settings,
-      rules: [],
-    });
-    const res = await applyScopeFinding({
-      finding: finding({
-        targetKey: 'rule:rule-1',
-        proposedEdit: { op: 'delete_rule' },
-      }),
-      runId: 'run-1',
-      scoped,
-      snapshot: structure(),
-      current: structure(),
-      audit,
-    });
-    expect(res.status).toBe('unapplicable');
-    if (res.status === 'unapplicable') expect(res.reason).toBe('target_gone');
   });
 });
 
@@ -286,77 +245,6 @@ describe('applyScopeFinding — each op writes the right thing', () => {
     });
     expect(prismaMock.appQuestionnaireTopic.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { depth: 'light', source: 'manual' } })
-    );
-  });
-
-  it('add_rule appends to the existing rules and calls patchConditionalTopicsSettings with the tx client', async () => {
-    const res = await applyScopeFinding({
-      finding: finding({
-        targetKey: 'settings',
-        proposedEdit: {
-          op: 'add_rule',
-          dataSlotKey: 'headcount',
-          operator: 'gt',
-          value: '50',
-          action: 'include',
-          topicKey: 'talent',
-        },
-      }),
-      runId: 'run-1',
-      scoped,
-      snapshot: structure(),
-      current: structure(),
-      audit,
-    });
-    expect(res.status).toBe('applied');
-    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
-      'v1',
-      expect.objectContaining({
-        rules: expect.arrayContaining([expect.objectContaining({ dataSlotKey: 'headcount' })]),
-      }),
-      prismaMock
-    );
-  });
-
-  it('delete_rule removes the matching rule', async () => {
-    await applyScopeFinding({
-      finding: finding({ targetKey: 'rule:rule-1', proposedEdit: { op: 'delete_rule' } }),
-      runId: 'run-1',
-      scoped,
-      snapshot: structure(),
-      current: structure(),
-      audit,
-    });
-    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith('v1', { rules: [] }, prismaMock);
-  });
-
-  it('edit_rule replaces the matching rule fields', async () => {
-    await applyScopeFinding({
-      finding: finding({
-        targetKey: 'rule:rule-1',
-        proposedEdit: {
-          op: 'edit_rule',
-          dataSlotKey: 'headcount',
-          operator: 'lt',
-          value: '10',
-          action: 'exclude',
-          topicKey: 'compliance',
-        },
-      }),
-      runId: 'run-1',
-      scoped,
-      snapshot: structure(),
-      current: structure(),
-      audit,
-    });
-    expect(patchConditionalTopicsSettings).toHaveBeenCalledWith(
-      'v1',
-      {
-        rules: [
-          expect.objectContaining({ id: 'rule-1', dataSlotKey: 'headcount', action: 'exclude' }),
-        ],
-      },
-      prismaMock
     );
   });
 

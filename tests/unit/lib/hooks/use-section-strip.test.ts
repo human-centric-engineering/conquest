@@ -30,6 +30,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
         status: 'in_progress',
         isActive: true,
         isAvailable: true,
+        finishesActive: false,
         reopenCount: 0,
       },
       {
@@ -39,6 +40,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
         status: 'not_started',
         isActive: false,
         isAvailable: false,
+        finishesActive: false,
         reopenCount: 0,
       },
     ],
@@ -47,6 +49,7 @@ function view(overrides: Partial<SectionStripView> = {}): SectionStripView {
     blockedOnRequired: false,
     allClosed: false,
     showLocked: true,
+    canGrow: false,
     ...overrides,
   };
 }
@@ -263,6 +266,30 @@ describe('useSectionStrip', () => {
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(JSON.parse(init.body as string)).toEqual({ action: 'close', key: 'a' });
+    });
+
+    it('carries who asked, when the interviewer was the one that said it would', async () => {
+      // The respondent pressing the control and the surface keeping the interviewer's promise arrive
+      // at the server as one identical POST. Without this the run recorded both as `respondent`, and
+      // an admin reading the timeline could not tell a move the interview carried from one the
+      // respondent made themselves.
+      const seed = view({ activeKey: 'a' });
+      fetchMock.mockResolvedValue(okResponse(view({ activeKey: 'b' })));
+
+      const { result } = renderHook(() =>
+        useSectionStrip({ sessionId: SESSION_ID, initialView: seed })
+      );
+
+      await act(async () => {
+        result.current.close('a', 'agent_offer');
+      });
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(init.body as string)).toEqual({
+        action: 'close',
+        key: 'a',
+        reason: 'agent_offer',
+      });
     });
 
     it('sends the X-Session-Token header on a move when an accessToken is given', async () => {

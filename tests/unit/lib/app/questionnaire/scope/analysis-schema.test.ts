@@ -35,7 +35,6 @@ function proposal(overrides: Record<string, unknown> = {}) {
         sourceQuote: 'Start every session with the ambition question.',
       },
     ],
-    rules: [],
     summary: 'Read from the routing tab.',
     fromDocument: true,
     ...overrides,
@@ -58,7 +57,6 @@ describe('validateRoutingAnalysis', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.rules).toEqual([]);
     expect(result.value.gaps).toEqual([]);
     expect(result.value.topics[0]?.questionKeys).toEqual([]);
     expect(result.value.topics[0]?.criteria).toBeNull();
@@ -102,7 +100,7 @@ describe('validateRoutingAnalysis', () => {
   });
 
   it('refuses two topics sharing a key', () => {
-    // Keys are how plans, rules and the blind-spot preference address a topic; two rows sharing one
+    // Keys are how a plan and the blind-spot preference address a topic; two rows sharing one
     // means every reference is ambiguous.
     const result = validateRoutingAnalysis(
       proposal({
@@ -151,47 +149,11 @@ describe('validateRoutingAnalysis', () => {
   });
 
   it('requires fromDocument to be stated explicitly', () => {
-    // "I read your rules" and "I guessed from your headings" are different claims, and a default
+    // "I read your instructions" and "I guessed from your headings" are different claims, and a default
     // would let the weaker one pass as the stronger.
     const { fromDocument, ...withoutClaim } = proposal();
     void fromDocument;
     expect(validateRoutingAnalysis(withoutClaim).ok).toBe(false);
-  });
-
-  it('validates proposed rules against the operator and action vocabularies', () => {
-    expect(
-      validateRoutingAnalysis(
-        proposal({
-          rules: [
-            {
-              dataSlotKey: 'headcount',
-              operator: 'gt',
-              value: '50',
-              action: 'include',
-              topicKey: 'growth_ambition',
-              rationale: 'The document says pricing applies over 50 staff.',
-            },
-          ],
-        })
-      ).ok
-    ).toBe(true);
-
-    expect(
-      validateRoutingAnalysis(
-        proposal({
-          rules: [
-            {
-              dataSlotKey: 'headcount',
-              operator: 'matches_regex',
-              value: '50',
-              action: 'include',
-              topicKey: 'growth_ambition',
-              rationale: 'x',
-            },
-          ],
-        })
-      ).ok
-    ).toBe(false);
   });
 
   it('accepts a well-formed gap', () => {

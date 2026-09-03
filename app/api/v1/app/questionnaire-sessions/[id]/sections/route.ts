@@ -45,6 +45,17 @@ import { buildSectionStripView } from '@/lib/app/questionnaire/sections/view';
 const bodySchema = z.object({
   action: z.enum(['open', 'close']),
   key: z.string().trim().min(1).max(512),
+  /**
+   * Who asked for the close, when it was not the respondent's own control: `agent_offer` is the
+   * surface keeping the promise the interviewer's reply just made ("I'll take us on to X").
+   *
+   * An audit label on the run, never a gate — the close is assessed identically either way, so a
+   * forged value costs nothing but a wrong word on an admin timeline. It is accepted from the
+   * client because the client is the only party that knows whether the move followed the
+   * announcement or the button; the server sees one POST in both cases. `cap` still wins over it,
+   * because a turn budget releasing a section is the more important fact about that close.
+   */
+  reason: z.literal('agent_offer').optional(),
 });
 
 /** Load the session, check access, and resolve this turn's section state. */
@@ -84,6 +95,7 @@ async function handleGet(
       buildSectionStripView(resolved.loaded.sectionState, {
         showLocked: settings.showLockedSections,
         navigation: settings.navigation,
+        canGrow: resolved.loaded.base.config.conditionalTopics.enabled,
       })
     );
   } catch (error) {
@@ -168,8 +180,9 @@ async function handlePost(
         body.key,
         atTurn,
         // `cap` records that the turn budget released it rather than the respondent satisfying the
-        // bars, which is a materially different thing to read off a session timeline later.
-        state.close.assessment.capReached ? 'cap' : 'respondent',
+        // bars, which is a materially different thing to read off a session timeline later, and it
+        // outranks the client's own account of who asked for the move.
+        state.close.assessment.capReached ? 'cap' : (body.reason ?? 'respondent'),
         state.sections
       );
     }
@@ -184,6 +197,7 @@ async function handlePost(
       action: body.action,
       key: body.key,
       activeKey: run.activeKey,
+      ...(body.reason ? { reason: body.reason } : {}),
     });
 
     return successResponse(
@@ -197,7 +211,11 @@ async function handlePost(
           // it with the next turn, which is also when it becomes true.
           close: null,
         },
-        { showLocked: settings.showLockedSections, navigation: settings.navigation }
+        {
+          showLocked: settings.showLockedSections,
+          navigation: settings.navigation,
+          canGrow: resolved.loaded.base.config.conditionalTopics.enabled,
+        }
       )
     );
   } catch (error) {

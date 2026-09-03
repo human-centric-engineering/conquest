@@ -122,7 +122,7 @@ export type SectionStatus = (typeof SECTION_STATUSES)[number];
  * own decision from the agent's offer from a cap running out.
  *
  * - `respondent` — they pressed the control.
- * - `agent_offer` — they accepted the interviewer's offer to move on.
+ * - `agent_offer` — the interviewer said the part was covered and the surface made the move.
  * - `cap` — `maxTurnsPerSection` ran out. The escape hatch, and the one reason that says the
  *   section closed without its gate being satisfied.
  * - `auto` — closed by the runtime with nothing left to ask.

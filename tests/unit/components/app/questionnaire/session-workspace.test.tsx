@@ -1012,6 +1012,57 @@ describe('SessionWorkspace', () => {
       expect(scale()).toBe('1');
     });
 
+    /**
+     * The automatic notch below `lg` — the width where the answers panel retires and the
+     * conversation has the surface to itself. Asserted on the published custom property rather
+     * than on storage, because the whole point is that the two disagree: the display gets a bigger
+     * size, the respondent's own rung is untouched.
+     */
+    describe('the automatic notch on a narrow viewport', () => {
+      /** Every media query matches: happy-dom's own window is 1024px wide, i.e. exactly not narrow. */
+      function stubNarrow() {
+        vi.stubGlobal(
+          'matchMedia',
+          vi.fn(() => ({
+            matches: true,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+          }))
+        );
+      }
+
+      it('renders one rung larger than the respondent asked for', () => {
+        stubNarrow();
+        setup();
+        // Standard (1) rendered at Large (1.15). Pinned exactly: a bump that jumped to the top of
+        // the ladder would also be "larger", and a comparison would pass on the wrong value.
+        expect(scale()).toBe('1.15');
+        vi.unstubAllGlobals();
+      });
+
+      it('holds at the top rung rather than inventing a size beyond it', () => {
+        // The clamp `stepScaleIndex` gives us, and the reason the notch steps the ladder instead of
+        // multiplying: someone who has already asked for the biggest text must not be handed
+        // something bigger still.
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(3));
+        stubNarrow();
+        setup();
+        expect(scale()).toBe('1.3');
+        vi.unstubAllGlobals();
+      });
+
+      it('leaves the respondent’s own rung alone', () => {
+        // It is a display adjustment, not a preference change: nothing may follow them back to a
+        // laptop, and rotating a tablet must move the text and move it back.
+        window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(0));
+        stubNarrow();
+        setup();
+        expect(scale()).toBe('1');
+        expect(window.localStorage.getItem(CHAT_TEXT_SCALE_STORAGE_KEY)).toBe('0');
+        vi.unstubAllGlobals();
+      });
+    });
+
     it('hides the stepper on the form surface, where there is no transcript to scale', () => {
       render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
       expect(screen.queryByRole('button', { name: 'Increase text size' })).toBeNull();
@@ -1374,10 +1425,11 @@ describe('SessionWorkspace', () => {
     }
 
     function stubViewport(matches: boolean) {
-      const listeners: Array<() => void> = [];
+      const listeners: Array<(event: { matches: boolean }) => void> = [];
       const mq = {
         matches,
-        addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+        addEventListener: (_: string, fn: (event: { matches: boolean }) => void) =>
+          listeners.push(fn),
         removeEventListener: vi.fn(),
       };
       vi.stubGlobal(
@@ -1385,9 +1437,13 @@ describe('SessionWorkspace', () => {
         vi.fn(() => mq)
       );
       return {
+        // Listeners are called WITH an event, as the real `MediaQueryList` does. The sheet's own
+        // handler re-reads `mq.matches` and would not notice, but `useMediaQuery` reads
+        // `event.matches` — a stub that fires bare would break on the hook rather than on the
+        // behaviour under test.
         widen: () => {
           mq.matches = true;
-          for (const fn of listeners) fn();
+          for (const fn of listeners) fn({ matches: true });
         },
       };
     }

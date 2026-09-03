@@ -8,17 +8,13 @@
  *
  * Order matters and is not arbitrary:
  *
- *  1. **Rule excludes** — an author's "never" is absolute; drop those first so nothing downstream
- *     can reinstate them.
- *  2. **Rule includes** — an author's "always" is absolute too, and must be seated BEFORE the cap
- *     so it cannot be truncated away by a model's enthusiasm.
- *  3. **The cap** — trim the model's picks to what is left of the limit.
- *  4. **The fallback** — only when steps 1–3 produced nothing at all.
- *  5. **The fit** (C7b) — drop from the bottom until what is seated costs no more than the session
- *     budget leaves. AFTER the rules, so an author's "always" is never costed away; after the
- *     fallback, so a safety net cannot smuggle in an interview nobody has time for; and BEFORE the
- *     check topic, so the check's own seconds are reserved rather than treated as free.
- *  6. **The check topic** — chosen from what did NOT make the cut, so it is always genuinely
+ *  1. **The cap** — trim the model's picks to the limit.
+ *  2. **The fallback** — only when step 1 produced nothing at all.
+ *  3. **The fit** (C7b) — drop from the bottom until what is seated costs no more than the session
+ *     budget leaves. AFTER the fallback, so a safety net cannot smuggle in an interview nobody has
+ *     time for; and BEFORE the check topic, so the check's own seconds are reserved rather than
+ *     treated as free.
+ *  4. **The check topic** — chosen from what did NOT make the cut, so it is always genuinely
  *     something the interview would otherwise have missed.
  *
  * Every function here is data-in/data-out and exhaustively unit-testable by hand.
@@ -27,13 +23,13 @@
 import {
   ALWAYS_PHASES,
   type ConditionalTopicsSettings,
+  type EarlySeat,
   type ExcludedTopic,
   type InterviewPlan,
   type PlannedTopic,
   type TopicMembers,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
-import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
   alwaysTopicSeconds,
   formatSeconds,
@@ -46,9 +42,7 @@ import {
 /**
  * What a respondent is told when nothing better was produced (F17.33).
  *
- * Reached when the planner omitted `respondentReason`, and used verbatim for a rule-included topic
- * — a hard rule's own reason is the author's note to an admin ("include when headcount > 50"), which
- * is not a sentence to put in front of the person being interviewed.
+ * Reached when the planner omitted `respondentReason`.
  *
  * Says something true and unremarkable rather than apologising or explaining the mechanism. The
  * alternative that was rejected — "we could not tell why this applies to you" — is accurate and a
@@ -106,8 +100,16 @@ export interface ApplyGuardrailsInput {
   topics: readonly Topic[];
   /** What the planner proposed, best first. Empty when it errored or chose nothing. */
   proposed: readonly ProposedTopic[];
-  /** What the hard rules decided. */
-  rules: RuleOutcome;
+  /**
+   * Topics already seated during the opening (F17.36), seated FIRST and never truncated by the cap.
+   *
+   * Something the interview has already asked about cannot be dropped by a later enthusiasm: the
+   * respondent has spent turns on it, and a plan that excluded it would produce a report claiming
+   * an area was not assessed when it was. So these consume the cap rather than competing for it.
+   *
+   * Empty on every session that never seated one early, which is nearly all of them.
+   */
+  preSeated?: readonly EarlySeat[];
   settings: ConditionalTopicsSettings;
   /** The planner's confidence, already clamped to 0–1. */
   confidence: number;
@@ -197,7 +199,7 @@ function seatedMembers(
 /**
  * Apply every guardrail to a proposal and produce the final {@link InterviewPlan}.
  *
- * Total: any input — an empty proposal, unknown keys, a cap of zero, contradictory rules — produces
+ * Total: any input — an empty proposal, unknown keys, a cap of zero — produces
  * a coherent plan. There is no failure return, because the caller is standing between a respondent
  * and their next question and has nowhere to put one.
  */
@@ -236,19 +238,15 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     });
   };
 
-  // 1 + 2. Rules first, and BEFORE the cap: an author's "always include this" must not be
-  // truncated away by a model that proposed three other things it liked better.
-  for (const key of input.rules.include) {
-    if (input.rules.exclude.has(key)) continue;
-    // The rule's own reason is written by the AUTHOR for an admin ("include when headcount > 50"),
-    // so it is not offered to the respondent — the default is.
-    seat(key, 'rule', input.rules.reasonByTopic.get(key) ?? 'A rule you set included this topic.');
+  // 0. Early seats (F17.36). Before the cap, for the reason on `preSeated`: this is not the
+  // planner choosing, it is the planner being told what the interview already committed to.
+  for (const early of input.preSeated ?? []) {
+    seat(early.key, 'early', early.rationale, undefined, early.respondentReason);
   }
 
-  // 3. The model's picks, in its own order, up to what remains of the limit.
+  // 1. The model's picks, in its own order, up to the limit.
   for (const proposal of input.proposed) {
     if (planned.length >= settings.maxConditionalTopics) break;
-    if (input.rules.exclude.has(proposal.key)) continue;
     seat(
       proposal.key,
       input.source,
@@ -258,14 +256,18 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     );
   }
 
-  // 4. The fallback — only when nothing at all was seated. An interview of just the always-run
+  // 2. The fallback — only when nothing at all was seated. An interview of just the always-run
   // topics is coherent, if thin, so an empty fallback list is a legitimate configuration.
+  //
+  // An early seat (F17.36) therefore SUPPRESSES the fallback, and deliberately. The fallback's
+  // precondition is "there was no signal to judge on at all"; a topic seated during the opening is
+  // a judgement made on real evidence at a HIGHER confidence bar than this plan needed. Adding safe
+  // defaults beside it would pad an interview that already knows what it is about.
   let source = input.source;
   if (planned.length === 0 && settings.fallbackTopicKeys.length > 0) {
     source = 'fallback';
     for (const key of settings.fallbackTopicKeys) {
       if (planned.length >= settings.maxConditionalTopics) break;
-      if (input.rules.exclude.has(key)) continue;
       seat(
         key,
         'fallback',
@@ -278,10 +280,10 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     }
   }
 
-  // 5. The fit (C7b) — the seconds the plan actually costs, against the seconds it may spend.
+  // 3. The fit (C7b) — the seconds the plan actually costs, against the seconds it may spend.
   const droppedForBudget = fitToBudget({ planned, seen, topics, settings, budget: input.budget });
 
-  // 6. The blind-spot check, from what did NOT make the cut.
+  // 4. The blind-spot check, from what did NOT make the cut.
   const check = chooseCheckTopic(topics, seen, settings);
   if (check) {
     seen.add(check.key);
@@ -314,10 +316,8 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
       if (overBudget) return { key: t.key, source: 'budget' as const, rationale: overBudget };
       return {
         key: t.key,
-        source: input.rules.exclude.has(t.key) ? ('rule' as const) : ('llm' as const),
-        rationale:
-          input.rules.reasonByTopic.get(t.key) ??
-          'Not selected — nothing in the opening pointed at this area.',
+        source: 'llm' as const,
+        rationale: 'Not selected — nothing in the opening pointed at this area.',
       };
     });
 
@@ -377,9 +377,6 @@ function exactPricing(
  *
  * Three decisions worth stating, because each is a place a reasonable implementation differs:
  *
- * - **A rule-seated topic is never dropped.** An author's "always ask about compliance" is not a
- *   preference the arithmetic gets to overrule; if the rules alone bust the budget, the interview
- *   runs long and the settings tab has already said so (`budget_below_floor`).
  * - **The lowest-ranked goes first** — the last thing seated, which is the planner's own least
  *   confident pick, or the last fallback. The model ordered them; the budget takes them back in
  *   reverse.
@@ -417,18 +414,24 @@ function fitToBudget(args: {
   };
 
   while (plannedSeconds(planned, budget.costs, exact) + reserveForCheck() > allowance) {
-    // The last droppable entry — `findLastIndex` by hand, since a rule-seated topic in the middle
-    // must be stepped over rather than ending the search.
+    // The lowest-ranked DROPPABLE topic: the last thing seated, which is the planner's own least
+    // confident pick, or the last fallback. An early seat (F17.36) is stepped over rather than
+    // ending the search, the way a rule-seated topic used to be, and for a stronger reason than
+    // the author's instruction: the respondent has already spent turns on it.
+    //
+    // Dropping one would not even save the time. `resolveScope` seeds its planned map from
+    // `earlySeated.seated` independently of the plan, so a seat moved into `excluded` here is
+    // still asked — leaving a plan that claims an area was not assessed while the interview goes
+    // on assessing it, which is precisely the report the invariant exists to prevent.
     let index = -1;
     for (let i = planned.length - 1; i >= 0; i -= 1) {
-      if (planned[i]?.source !== 'rule') {
+      if (planned[i]?.source !== 'early') {
         index = i;
         break;
       }
     }
-    // Nothing left that may be dropped: the rules alone are over budget. The author's instructions
-    // win, and the interview runs long — a topic the author said to always ask is not the planner's
-    // to take away.
+    // Nothing left that may be dropped: the early seats alone are over budget. The interview runs
+    // long, which is the honest outcome — the time is already spent.
     if (index < 0) break;
 
     const [removed] = planned.splice(index, 1);
@@ -440,15 +443,9 @@ function fitToBudget(args: {
   return dropped;
 }
 
-/**
- * The conditional topics a planner may choose between: everything not force-excluded by a rule.
- *
- * Force-INCLUDED topics stay in the candidate list on purpose. The planner still needs to know they
- * are part of the interview — a proposal made in ignorance of half the plan would double up on the
- * same ground, and the model's own ordering of the rest is better for knowing what is already there.
- */
-export function plannerCandidates(topics: readonly Topic[], rules: RuleOutcome): Topic[] {
-  return topics.filter((t) => t.phase === 'conditional' && !rules.exclude.has(t.key));
+/** The conditional topics a planner may choose between: every topic in the `conditional` phase. */
+export function plannerCandidates(topics: readonly Topic[]): Topic[] {
+  return topics.filter((t) => t.phase === 'conditional');
 }
 
 /** The always-run topics, in authored order — what an interview covers regardless of any decision. */

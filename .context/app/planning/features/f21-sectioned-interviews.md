@@ -2,10 +2,10 @@
 feature: F21
 title: Sectioned interviews, one section at a time
 phase: P21, Sectioned interviews
-status: proposed, planned before the code. Phases A to E below; needs sign-off on §3 (the resolver ladder) and §9 (the close gate defaults)
+status: shipped. All five phases landed; see the per-phase trackers in §15
 owner: TBD
 opened: 2026-09-01
-docs: .context/app/questionnaire/sectioned-interviews.md (to be written in phase E)
+docs: .context/app/questionnaire/sectioned-interviews.md
 ---
 
 # Sectioned interviews
@@ -328,10 +328,13 @@ by reading the registry rather than assumed:
 
 ### 10.1 The two new slots, and why both are essential
 
-- **`sectionTabs`**, rendered by `components/app/questionnaire/sections/section-tab-strip.tsx`.
-  One tab per in-scope section: label, per-section progress, a tick when closed, greyed and
-  unclickable when locked, hidden when `showLockedSections` is off. Scrollable inside its own
-  `overflow-x` container, because a twelve-section instrument must not widen the shell.
+- **`sectionTabs`**, the section control. Proposed here as a tab strip, one tab per in-scope
+  section: label, per-section progress, a tick when closed, greyed and unclickable when locked,
+  hidden when `showLockedSections` is off, scrollable inside its own `overflow-x` container so a
+  twelve-section instrument could not widen the shell. It shipped as a strip and was then replaced
+  by a menu (`components/app/questionnaire/sections/section-menu.tsx`), which is what carries the
+  slot today; the reasons are in
+  [`sectioned-interviews.md`](../../questionnaire/sectioned-interviews.md#the-respondent-surface).
 - **`sectionClose`**: the move-on control. The full `CompletionOffer` still takes precedence when
   the whole session is done.
 
@@ -527,16 +530,18 @@ transcript in both formats. Submit and read the report.
 
 Each phase is committed on its own, with its tests and its docs in the same commit.
 
-| Phase | Scope                                                                                                                                                                                                                                                  | Rough size                                        |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| **A** | The pure section model (`sections/{types,resolve,settings,close}.ts`), the ladder, `resolveScope` composition, the config block end to end plus the Settings UI. **Nothing reads it at runtime.**                                                      | medium: pure code plus the eight-step config path |
-| **B** | Runtime: the two columns, `buildSectionState`, section-bounded targeting in both orchestrators, per-section opening and arc reset, `assessSectionCompletion`, the `/sections` route, reopen.                                                           | large: the real work                              |
-| **C** | Respondent surface: `sectionTabs` and `sectionClose` added to `RESPONDENT_SLOTS` and `ESSENTIAL_SLOTS`, placed in all four layouts (§10.2), the placement-driven focus branch (§10.3), transcript filtering, sequential locking, the inspector header. | large                                             |
-| **D** | Artefacts: transcript grouping (text, PDF, copy), report chapters, the admin session-viewer timeline.                                                                                                                                                  | medium, mostly mechanical                         |
-| **E** | The domain doc plus its README index row, the per-phase trackers, and `scripts/smoke/sectioned-interview.ts`.                                                                                                                                          | small                                             |
+| Phase | Scope                                                                                                                                                                                                                                                  | Status                           |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| **A** | The pure section model (`sections/{types,resolve,settings,close}.ts`), the ladder, `resolveScope` composition, the config block end to end plus the Settings UI. **Nothing reads it at runtime.**                                                      | Shipped, see [F21.1](./f21.1.md) |
+| **B** | Runtime: the two columns, `buildSectionState`, section-bounded targeting in both orchestrators, per-section opening and arc reset, `assessSectionCompletion`, the `/sections` route, reopen.                                                           | Shipped, see [F21.2](./f21.2.md) |
+| **C** | Respondent surface: `sectionTabs` and `sectionClose` added to `RESPONDENT_SLOTS` and `ESSENTIAL_SLOTS`, placed in all four layouts (§10.2), the placement-driven focus branch (§10.3), transcript filtering, sequential locking, the inspector header. | Shipped, see [F21.3](./f21.3.md) |
+| **D** | Artefacts: transcript grouping (text, PDF, copy), report chapters, the admin session-viewer timeline.                                                                                                                                                  | Shipped, see [F21.4](./f21.4.md) |
+| **E** | The domain doc plus its README index row, the per-phase trackers, and `scripts/smoke/sectioned-interview.ts`.                                                                                                                                          | Shipped, see [F21.5](./f21.5.md) |
 
-Per-phase `f21.N.md` trackers are written **after** each phase's code lands, in the same branch, and
-this file's phasing row is then edited to `Shipped, see [F21.1](./f21.1.md)`.
+Two things §11 proposed that phase D deliberately did NOT build, both recorded in
+[F21.4](./f21.4.md) with the reasoning: the raw answer appendix keeps the panel's own grouping
+rather than being re-chaptered, and the run-level journey report keeps its per-leg headings rather
+than merging several legs' chapter lists.
 
 ## 16. Risks
 

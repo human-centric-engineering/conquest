@@ -55,7 +55,6 @@ import {
   type ConditionalTopicsSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
-import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -163,7 +162,7 @@ export interface PackInclude {
   evaluationEvidence: boolean;
   /**
    * The routing logic — which topics are always asked, which are conditional (and on what
-   * criteria), and the hard rules — explained in plain language for a stakeholder audience. Defaults
+   * criteria) — explained in plain language for a stakeholder audience. Defaults
    * `false`, like `evaluations`: it is the routing *design*, not the questionnaire content, and not
    * every reader of the pack needs (or should see) how a client's instrument routes respondents
    * before the admin has decided to share that. See {@link file://./build-pack-model.ts}'s
@@ -474,16 +473,7 @@ export interface PackConditionalTopicsTopic {
 }
 
 /**
- * One hard rule, rendered as a plain sentence — e.g. `Always include "Team & culture" when
- * "employee count" is greater than "50".` — rather than the operator/action enum a stakeholder was
- * never meant to learn.
- */
-export interface PackConditionalTopicsRule {
-  sentence: string;
-}
-
-/**
- * What ONE scope judge said about ONE flagged topic/rule/settings target — the scope-evaluation
+ * What ONE scope judge said about ONE flagged topic/settings target — the scope-evaluation
  * sibling of {@link PackEvaluationJudgeView}.
  */
 export interface PackScopeEvaluationJudgeView {
@@ -559,7 +549,6 @@ export interface PackConditionalTopics {
   alwaysAsked: PackConditionalTopicsTopic[];
   /** Conditional topics, in authored order. */
   conditional: PackConditionalTopicsTopic[];
-  rules: PackConditionalTopicsRule[];
   /**
    * Every routing setting, presented — derived from `ROUTING_SETTING_DESCRIPTORS`, not hand-listed.
    *
@@ -920,13 +909,11 @@ function buildScopeEvaluationSection(run: ScopeEvaluationRunDetail | null): Pack
 function buildConditionalTopicsSection(
   topics: Topic[],
   settings: ConditionalTopicsSettings,
-  dataSlots: DataSlotView[],
   scopeEvaluationRun: ScopeEvaluationRunDetail | null,
   questionPrompts: Map<string, string>,
   include: PackInclude
 ): PackConditionalTopics {
   const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
-  const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
   const alwaysAskedPhases = ALWAYS_PHASES as readonly string[];
   // Falls back to the raw key so a setting or membership naming a since-deleted topic stays
   // visible as something to clean up, rather than silently vanishing from the document.
@@ -963,9 +950,6 @@ function buildConditionalTopicsSection(
     enabled: settings.enabled,
     alwaysAsked,
     conditional,
-    rules: settings.rules.map((rule) => ({
-      sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
-    })),
     settings: buildRoutingSettingRows(settings, topicLabel, include.conditionalTopicsTechnical),
     // `null` when excluded, never `hasRun: false` — the serialisers render the latter as the
     // sentence "This routing has not been reviewed", which about a version whose routing WAS
@@ -1199,7 +1183,6 @@ export function buildPackModel(
         ? buildConditionalTopicsSection(
             conditionalTopicsSource.topics,
             conditionalTopicsSource.settings,
-            dataSlots,
             conditionalTopicsSource.scopeEvaluationRun,
             questionPrompts,
             include

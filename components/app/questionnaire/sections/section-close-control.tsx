@@ -17,7 +17,7 @@ import { ArrowRight, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { SectionStripView } from '@/lib/app/questionnaire/sections/view';
+import { onwardSectionKey, type SectionStripView } from '@/lib/app/questionnaire/sections/view';
 
 export interface SectionCloseControlProps {
   view: SectionStripView;
@@ -39,8 +39,11 @@ export function SectionCloseControl({
   // session's completion offer is the affordance that matters, not this one).
   if (!view.active || view.allClosed || !view.activeKey) return null;
 
-  const activePosition = view.sections.find((tab) => tab.isActive)?.position ?? 0;
-  const next = view.sections.find((tab) => tab.position === activePosition + 1);
+  // Where finishing this one actually lands, which is not `position + 1`: a section already
+  // finished out of order is skipped by the server's own rule, and naming it here would send the
+  // respondent somewhere the move does not go.
+  const onwardKey = onwardSectionKey(view.sections);
+  const next = view.sections.find((tab) => tab.key === onwardKey);
 
   if (!view.canClose) {
     // Silent unless something is actually stuck. A running "not yet" would nag every turn of every

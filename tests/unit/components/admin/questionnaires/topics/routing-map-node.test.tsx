@@ -55,9 +55,6 @@ import {
 const ALL_KINDS: ScopeNodeKind[] = [
   'start',
   'opening',
-  'ungathered',
-  'ruleInclude',
-  'ruleExclude',
   'planner',
   'guardrails',
   'conditional',
@@ -266,13 +263,6 @@ describe('miniMapNodeColor', () => {
   it.each(ALL_KINDS)('returns a hex colour for the %s kind', (kind) => {
     const data: ScopeNodeData = { node: graphNode({ kind }) };
     expect(miniMapNodeColor(flowNode(data))).toMatch(/^#[0-9a-f]{6}$/i);
-  });
-
-  it('gives include and exclude different colours — the one pair that must never be confused', () => {
-    const include = miniMapNodeColor(flowNode({ node: graphNode({ kind: 'ruleInclude' }) }));
-    const exclude = miniMapNodeColor(flowNode({ node: graphNode({ kind: 'ruleExclude' }) }));
-
-    expect(include).not.toBe(exclude);
   });
 
   it.each([

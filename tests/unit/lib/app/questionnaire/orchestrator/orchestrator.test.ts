@@ -1120,13 +1120,48 @@ describe('sectioned interviews (P21): the end of a section is not the end of the
     expect(result.response).toMatchObject({ sectionKey: 'about', nextLabel: 'Your work' });
     if (result.response.kind === 'section_covered') {
       expect(result.response.text).toBe(
-        "That's everything for About you. Ready to move on to Your work?"
+        "That's everything for About you. I'll take us on to Your work now."
       );
     }
     expect(result.targetedQuestionId).toBeNull();
   });
 
-  it('reports the part as covered without offering when the version says the agent must not', async () => {
+  it('states the move rather than asking for permission the interview cannot hear', async () => {
+    // The regression this replaced: the reply asked "Ready to move on to X?", nothing consumed the
+    // answer, and a respondent who said yes got the same sentence back on the next turn.
+    const { invokers } = stubInvokers(SECTION_ENDED);
+    const result = await runTurn(sectionedState({}), invokers);
+
+    if (result.response.kind !== 'section_covered') throw new Error('expected section_covered');
+    expect(result.response.text).not.toContain('?');
+    expect(result.response.text).not.toContain('Ready to move on');
+  });
+
+  it('reassures the respondent they can come back, on the FIRST handover only', async () => {
+    const { invokers } = stubInvokers(SECTION_ENDED);
+
+    const first = await runTurn(
+      sectionedState({
+        sectionMeta: {
+          key: 'about',
+          label: 'About you',
+          nextLabel: 'Your work',
+          firstHandover: true,
+        },
+      }),
+      invokers
+    );
+    if (first.response.kind !== 'section_covered') throw new Error('expected section_covered');
+    expect(first.response.text).toContain('You can come back to About you at any point');
+
+    // A later boundary says the move and nothing else: repeating the reassurance every time turns
+    // it from news into a tic.
+    const later = await runTurn(sectionedState({}), invokers);
+    if (later.response.kind !== 'section_covered') throw new Error('expected section_covered');
+    expect(later.response.text).not.toContain('come back');
+  });
+
+  it('reports the part as covered without moving when the version says the agent must not', async () => {
     const { invokers } = stubInvokers(SECTION_ENDED);
     const result = await runTurn(
       sectionedState({
@@ -1136,7 +1171,11 @@ describe('sectioned interviews (P21): the end of a section is not the end of the
     );
 
     if (result.response.kind !== 'section_covered') throw new Error('expected section_covered');
-    expect(result.response.text).toBe("That's everything for About you.");
+    expect(result.response.text).toBe(
+      "That's everything for About you. Your work is next whenever you're ready."
+    );
+    // Still no promise the surface would have to keep: the move is the respondent's to make.
+    expect(result.response.text).not.toContain("I'll take us on");
   });
 
   it('never offers a move on the last section, whatever the setting says', async () => {

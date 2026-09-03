@@ -59,6 +59,7 @@
     "db:drift-check": "tsx --env-file=.env.local scripts/db/check-drift.ts",
     "smoke:chat": "tsx --env-file=.env.local scripts/smoke/chat.ts",
     "smoke:scope": "tsx --env-file=.env.local scripts/smoke/conditional-topics.ts",
+    "smoke:sections": "tsx --env-file=.env.local scripts/smoke/sectioned-interview.ts",
     "smoke:concurrent-sessions": "tsx --env-file=.env.local scripts/smoke/concurrent-sessions.ts",
     "smoke:orchestration": "tsx --env-file=.env.local scripts/smoke/orchestration.ts",
     "smoke:hybrid-search": "tsx --env-file=.env.local scripts/smoke/knowledge-hybrid-search.ts",

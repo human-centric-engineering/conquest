@@ -4,7 +4,7 @@
  * Dependency-light (only `zod` plus the pure vocabulary) so routes and the eventual analyst
  * capability import without pulling server deps.
  *
- * Validation here is about SHAPE. Coherence — "a conditional topic with no criteria", "a rule
+ * Validation here is about SHAPE. Coherence — "a conditional topic with no criteria", "a topic
  * pointing at a topic that does not exist" — is deliberately NOT enforced as a hard error, because
  * an admin mid-edit routinely has an incoherent draft and refusing to save it would make the
  * surface unusable. Those are surfaced as launch-time warnings instead (`scope/validate.ts`).
@@ -15,17 +15,22 @@ import { z } from 'zod';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MAX_OPENING_PROBES_CEILING,
+  MAX_EARLY_SEATED_TOPICS_CEILING,
+  MAX_EARLY_SEATING_FLOOR,
+  MAX_OPENING_TURNS_CEILING,
+  MAX_ROUTING_DECISIONS_PER_TURN_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MAX_TRIGGER_CUES,
   MIN_CONDITIONAL_TOPICS,
   MIN_OPENING_PROBES,
+  MIN_EARLY_SEATED_TOPICS,
+  MIN_EARLY_SEATING_FLOOR,
+  MIN_OPENING_TURNS,
+  MIN_ROUTING_DECISIONS_PER_TURN,
   MIN_SECONDS_PER_ITEM,
   MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
-  SCOPE_RULE_ACTIONS,
-  SCOPE_RULE_OPERATORS,
-  SCOPE_RULE_VALUE_MAX_LENGTH,
   TOPIC_CRITERIA_MAX_LENGTH,
   TOPIC_DEPTHS,
   TOPIC_DESCRIPTION_MAX_LENGTH,
@@ -96,16 +101,6 @@ export const saveTopicsSchema = z.object({
     ),
 });
 
-/** One hard rule as the admin surface submits it. */
-export const scopeRuleInputSchema = z.object({
-  id: z.string().trim().max(64).optional(),
-  dataSlotKey: z.string().trim().min(1).max(MEMBER_KEY_MAX_LENGTH),
-  operator: z.enum(SCOPE_RULE_OPERATORS),
-  value: z.string().trim().max(SCOPE_RULE_VALUE_MAX_LENGTH).nullable().default(null),
-  action: z.enum(SCOPE_RULE_ACTIONS),
-  topicKey: topicKeySchema,
-});
-
 /**
  * The `conditionalTopics` settings patch.
  *
@@ -157,7 +152,41 @@ export const conditionalTopicsSettingsSchema = z.object({
     .min(MIN_OPENING_PROBES)
     .max(MAX_OPENING_PROBES_CEILING)
     .optional(),
-  rules: z.array(scopeRuleInputSchema).max(100).optional(),
+  // F17.36 — the opening's turn backstop. No `refine` beside it, unlike `sessionBudgetSeconds`:
+  // the floor here IS 0, so "off" and "the smallest legal limit" are not in tension.
+  maxOpeningTurns: z
+    .number()
+    .int()
+    .min(MIN_OPENING_TURNS)
+    .max(MAX_OPENING_TURNS_CEILING)
+    .optional(),
+  // F17.36 — early topic seating. The floor never reaches 0: a floor of zero would let the first
+  // turn seat a topic, which is a decision over an empty transcript wearing the language of a
+  // considered one.
+  earlyTopicSeating: z.boolean().optional(),
+  earlySeatingFloor: z
+    .number()
+    .min(MIN_EARLY_SEATING_FLOOR)
+    .max(MAX_EARLY_SEATING_FLOOR)
+    .optional(),
+  // Bounded 0–1 exactly as `minConfidence` is. The relationship BETWEEN the two — this must sit at
+  // or above it — is a coherence check rather than a schema rule: an admin mid-edit routinely has
+  // one wrong, and refusing the save is a surface they fight.
+  earlySeatingMinConfidence: z.number().min(0).max(1).optional(),
+  maxEarlySeatedTopics: z
+    .number()
+    .int()
+    .min(MIN_EARLY_SEATED_TOPICS)
+    .max(MAX_EARLY_SEATED_TOPICS_CEILING)
+    .optional(),
+  maxRoutingDecisionsPerTurn: z
+    .number()
+    .int()
+    .min(MIN_ROUTING_DECISIONS_PER_TURN)
+    .max(MAX_ROUTING_DECISIONS_PER_TURN_CEILING)
+    .optional(),
+  bridgeToSeatedTopics: z.boolean().optional(),
+  announceEarlySeating: z.boolean().optional(),
 });
 
 export type ConditionalTopicsSettingsPatch = z.infer<typeof conditionalTopicsSettingsSchema>;
@@ -182,8 +211,6 @@ export const acceptTopicDraftSchema = z.object({
       (topics) => new Set(topics.map((t) => t.key)).size === topics.length,
       'Two topics share a key'
     ),
-  /** Omitted leaves the version's existing rules alone; present REPLACES them. */
-  rules: z.array(scopeRuleInputSchema).max(100).optional(),
   /** Only sent when the analyst read a breadth limit out of the document and the admin kept it. */
   maxConditionalTopics: z
     .number()
@@ -193,7 +220,8 @@ export const acceptTopicDraftSchema = z.object({
     .optional(),
   /**
    * Only sent when the analyst read one out of the document and the admin kept it. Omitted leaves
-   * the version's existing value alone; present REPLACES it — same contract as `rules`.
+   * the version's existing value alone; present REPLACES it — same omitted-leaves-alone contract
+   * as the topic list.
    *
    * Capped at 20 to match the settings PATCH above rather than the analyst's own proposal cap —
    * both paths write the same field, so a value acceptable through one must be acceptable through
@@ -204,7 +232,7 @@ export const acceptTopicDraftSchema = z.object({
   checkTopicPreference: z.array(topicKeySchema).max(20).optional(),
   /**
    * Cross-cutting planner guidance the analyst read out of the document and the admin kept. Same
-   * omitted-leaves-alone / present-replaces contract as `rules`.
+   * omitted-leaves-alone / present-replaces contract as the topic list.
    *
    * Capped at the FIELD's length rather than the analyst's tighter proposal cap, for the same
    * reason `fallbackTopicKeys` is capped at 20 here and 5 there: both paths write the same field,

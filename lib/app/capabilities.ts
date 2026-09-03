@@ -80,7 +80,7 @@ export function initAppCapabilities(): void {
   registerAppCapability(new AppAnalyseGlossaryTermsCapability());
 
   // Conditional Topics (P17.4) — the Routing Analyst. Reads the uploaded instrument's own instruction
-  // pages and proposes the topics + hard rules they describe. Dispatched by the Topics tab's
+  // pages and proposes the topics they describe. Dispatched by the Topics tab's
   // analysis route; writes nothing live.
   registerAppCapability(new AppAnalyseRoutingCapability());
 
@@ -90,8 +90,8 @@ export function initAppCapabilities(): void {
   registerAppCapability(new AppDetectScopeCandidacyCapability());
 
   // Conditional Topics (F17.21) — the scope-evaluation judge panel. One judge per dimension
-  // (criteria_quality, rule_integrity, budget_realism, coverage_and_burden) scoring the authored
-  // topics/rules/budget. Dispatched once per dimension by the scope evaluate-preview route.
+  // (criteria_quality, budget_realism, coverage_and_burden) scoring the authored topics and
+  // budget. Dispatched once per dimension by the scope evaluate-preview route.
   registerAppCapability(new AppEvaluateScopeCapability());
   registerAppCapability(new AppEvaluatePolicyCapability());
 

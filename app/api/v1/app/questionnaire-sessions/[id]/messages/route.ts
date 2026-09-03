@@ -42,7 +42,11 @@ import {
   conversationalCaptureActive,
   conversationalCaptureFieldsForConfig,
 } from '@/lib/app/questionnaire/profile/capture-placement';
-import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import {
+  buildReasoningTrace,
+  type ReasoningStep,
+  type ScopeDecisionNote,
+} from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
@@ -95,9 +99,11 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeSeatEarlyTopics } from '@/app/api/v1/app/questionnaire-sessions/_lib/seat-early-topics';
 import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
+import { earlySeatingBriefingLine } from '@/lib/app/questionnaire/scope/early-seating';
 import { plannedMembers } from '@/lib/app/questionnaire/scope/resolve';
 import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
@@ -339,16 +345,27 @@ async function handleMessage(
     // `selectionRound` exactly once: the turn immediately after planning. That is the announcement's
     // only outing, which is what stops it repeating for the rest of the interview.
     const scopePlan = loaded.scope.plan;
+    const planAnnouncementDue =
+      scopePlan !== null &&
+      scopePlan.respondentMessage !== '' &&
+      scopePlan.decidedAtTurn === loaded.base.selectionRound;
     const scopeAnnouncement: string[] =
-      scopePlan &&
-      scopePlan.respondentMessage &&
-      scopePlan.decidedAtTurn === loaded.base.selectionRound
+      scopePlan && planAnnouncementDue
         ? [
             'Before your next question, tell the respondent — warmly, in your own words, in one or ' +
               `two sentences — what you now want to go deeper on: "${scopePlan.respondentMessage}" ` +
               'Name the areas in their language. Never mention that a decision was made about them.',
           ]
         : [];
+    // The SAME announcement, as prose rather than as an instruction, for the one reply that is not
+    // phrased: a part covered. That reply is composed deterministically, so the briefing above never
+    // reaches it — and the announcement has exactly one outing, so a respondent whose plan landed on
+    // the turn that finished a part was simply never told the interview had changed shape.
+    //
+    // `respondentMessage` is written to be SPOKEN (the planner's prompt says so), which is what
+    // makes carrying it verbatim honest here rather than a paraphrase of an instruction.
+    const spokenPlanAnnouncement =
+      scopePlan && planAnnouncementDue ? scopePlan.respondentMessage : null;
 
     // Question fidelity (P18): the respondent just answered a question through its in-chat answer
     // control. Their answer is already persisted, and there is no respondent message this turn, so
@@ -402,6 +419,79 @@ async function handleMessage(
           ...(itemCount !== undefined ? { itemCount } : {}),
         });
       });
+
+    // Conditional Topics (F17.36 phase 5): an area chosen DURING the opening, said out loud on the
+    // one turn that follows. Same `atTurn === selectionRound` mechanic as the two above, and the
+    // seat's turn is re-stamped when a deferred pick is finally taken, so an area announces itself
+    // on the turn it actually came into scope rather than the turn it was judged.
+    //
+    // Coalesced into ONE line covering everything this turn seated, which is what makes a per-turn
+    // cap above 1 read naturally: "I'd like to go deeper on hiring and on capacity" is one sentence.
+    //
+    // Silent once a plan exists. The plan absorbs every early seat as a pre-seated topic and its own
+    // handover is the statement of what the interview covers, so announcing a seat as well would
+    // tell the respondent twice about the same area, in the same message, on the turn a session
+    // both seated and sealed.
+    const earlySeatingNotice: string[] = [];
+    /** The same seats, as bare labels, for the reasoning trace. */
+    const earlySeatedLabels: string[] = [];
+    if (
+      scopePlan === null &&
+      loaded.scope.settings.earlyTopicSeating &&
+      loaded.scope.settings.announceEarlySeating
+    ) {
+      const seatedThisTurn = (loaded.scope.earlySeated?.seated ?? []).filter(
+        (seat) => seat.atTurn === loaded.base.selectionRound
+      );
+      const line = earlySeatingBriefingLine(
+        seatedThisTurn.map((seat) => {
+          // Sized exactly the way the amendment acknowledgement sizes an area, and for the same
+          // reason: several new questions arriving is something the respondent was told about
+          // rather than something that happened to them. Data slots first when the topic has them,
+          // because in data-slot mode THEY are what the conversation asks about.
+          //
+          // Omitted when the topic no longer resolves (an author may delete one a live session
+          // seated): a missing size means no size claim, never a wrong one.
+          const topic = loaded.scope.topics.find((t) => t.key === seat.key);
+          const itemCount = topic
+            ? plannedMembers(
+                topic.members.dataSlotKeys.length > 0
+                  ? topic.members.dataSlotKeys
+                  : topic.members.questionKeys,
+                undefined,
+                seat.depth,
+                undefined
+              ).length
+            : undefined;
+          return {
+            label: topic?.label ?? '',
+            respondentReason: seat.respondentReason,
+            ...(itemCount !== undefined ? { itemCount } : {}),
+          };
+        })
+      );
+      if (line) earlySeatingNotice.push(line);
+      earlySeatedLabels.push(
+        ...seatedThisTurn.map(
+          (seat) => loaded.scope.topics.find((t) => t.key === seat.key)?.label ?? ''
+        )
+      );
+    }
+
+    // Conditional Topics: what the "watch it think" trace says about the same moment. The chat is
+    // told in the interviewer's voice; this is the reasoning panel's account of it, and both fire on
+    // the one turn the announcement is due so the two never disagree about when the respondent
+    // learned. Labels only — the trace obeys the same vocabulary ban the announcement does.
+    const scopeDecisionNote: ScopeDecisionNote | null = planAnnouncementDue
+      ? {
+          kind: 'planned',
+          labels: (scopePlan?.topics ?? [])
+            .map((t) => loaded.scope.topics.find((topic) => topic.key === t.key)?.label ?? '')
+            .filter((label) => label.length > 0),
+        }
+      : earlySeatedLabels.length > 0
+        ? { kind: 'seated', labels: earlySeatedLabels.filter((label) => label.length > 0) }
+        : null;
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -806,6 +896,9 @@ async function handleMessage(
     // Diagnostics: hoisted so the streaming generator (where TS loses `loaded`'s narrowing) can
     // attribute any captured error to this version without re-reading the session.
     const turnVersionId = loaded.session.versionId;
+    // P21: whether the interviewer drives the move between parts. Hoisted for the same reason, and
+    // read only to decide whether this turn emits a `section_covered` frame.
+    const agentDrivesSectionMove = loaded.base.config.sections.agentOffersClose;
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
@@ -815,6 +908,7 @@ async function handleMessage(
       | { type: 'warning'; code: string; message: string; detail?: string }
       | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
       | { type: 'question_card'; card: QuestionCardPayload }
+      | { type: 'section_covered'; sectionKey: string; nextLabel: string }
     > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
@@ -931,6 +1025,7 @@ async function handleMessage(
           questions: state.questions,
           ...(dataSlotMode ? { dataSlots } : {}),
           isOpening: state.selectionRound === 0,
+          ...(scopeDecisionNote ? { scopeDecision: scopeDecisionNote } : {}),
         });
         if (reasoning.length > 0) yield { type: 'reasoning', steps: reasoning };
       }
@@ -1049,12 +1144,14 @@ async function handleMessage(
             ...(dsBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
             scopeAmendmentNotice.length > 0 ||
+            earlySeatingNotice.length > 0 ||
             cardAnswerNotice.length > 0
               ? {
                   briefing: [
                     ...cardAnswerNotice,
                     ...scopeAnnouncement,
                     ...scopeAmendmentNotice,
+                    ...earlySeatingNotice,
                     ...dsBriefing,
                   ],
                 }
@@ -1170,12 +1267,14 @@ async function handleMessage(
             ...(qBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
             scopeAmendmentNotice.length > 0 ||
+            earlySeatingNotice.length > 0 ||
             cardAnswerNotice.length > 0
               ? {
                   briefing: [
                     ...cardAnswerNotice,
                     ...scopeAnnouncement,
                     ...scopeAmendmentNotice,
+                    ...earlySeatingNotice,
                     ...qBriefing,
                   ],
                 }
@@ -1197,7 +1296,23 @@ async function handleMessage(
         // After the prose, so the card reads as the thing the message just handed over to.
         if (questionCard) yield { type: 'question_card', card: questionCard };
       } else {
-        agentResponse = result.response.text;
+        // The deterministic replies: a part covered, the interview complete, no questions left, a
+        // contradiction probe. No phraser runs, so anything the briefing would have woven in is
+        // simply not said.
+        //
+        // One thing has to survive that, and only one: the plan's handover line. Conditional Topics
+        // seals the plan at the end of the turn that finishes the opening — which, in a sectioned
+        // interview, is routinely the turn that also finishes the opening PART. The announcement has
+        // exactly one outing, so those respondents watched the interview change shape and were told
+        // nothing at all about it.
+        //
+        // Only onto `section_covered`. On `complete` / `none` the interview is over and announcing
+        // what it now wants to go deeper on would be a promise it is not going to keep; a
+        // contradiction probe is a question about one answer, and is the wrong place to put it.
+        agentResponse =
+          result.response.kind === 'section_covered' && spokenPlanAnnouncement
+            ? `${result.response.text} ${spokenPlanAnnouncement}`
+            : result.response.text;
         for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };
       }
       const costUsd = result.costUsd + extraCostUsd;
@@ -1300,6 +1415,21 @@ async function handleMessage(
           scope: 'persist',
           stage: 'persist_turn',
           error: err,
+        });
+      }
+
+      // Conditional Topics (F17.36): before the plan is sealed, seat any area the opening has
+      // already made unmistakable. FIRST of the four, because it is the only one that acts while
+      // `interviewPlan` is still null and it stands down the moment one exists — and because
+      // `maybePlanScope` below then absorbs whatever it seated as pre-seated keys, so the two never
+      // decide the same interview twice. Never throws; a failure means the interview decides at the
+      // end of the opening, exactly as it always did.
+      const seatedEarly = await maybeSeatEarlyTopics(sessionId);
+      if (seatedEarly.kind === 'seated') {
+        log.info('Conditional topics seated early', {
+          sessionId,
+          topicKeys: seatedEarly.seated.map((t) => t.key),
+          fromDeferred: seatedEarly.fromDeferred,
         });
       }
 
@@ -1453,6 +1583,27 @@ async function handleMessage(
       // to a preview session with the toggle on, so it never reaches a real respondent.
       if (inspectorOn && inspectorCalls.length > 0) {
         yield { type: 'inspector', turnIndex: state.selectionRound, calls: inspectorCalls };
+      }
+
+      // Sectioned interviews (P21): this part is covered and the interviewer has just said it is
+      // taking the respondent on to the next one. The frame is what lets the surface KEEP that
+      // promise — it holds a "Moving on to X" cue for a beat and then performs the move.
+      //
+      // Emitted only when the reply actually made the promise: `agentOffersClose` off leaves the
+      // move to the respondent's own control, and the last part has nowhere to go. It carries no
+      // gate of its own — whether the part may actually be finished is re-asserted by `/sections`
+      // on the move, and the surface reads its own refreshed strip before starting the beat. This
+      // frame says what the interviewer SAID, not what the server will permit.
+      if (
+        result.response.kind === 'section_covered' &&
+        result.response.nextLabel !== null &&
+        agentDrivesSectionMove
+      ) {
+        yield {
+          type: 'section_covered',
+          sectionKey: result.response.sectionKey,
+          nextLabel: result.response.nextLabel,
+        };
       }
 
       yield {

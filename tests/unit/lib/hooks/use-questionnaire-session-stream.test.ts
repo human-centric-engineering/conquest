@@ -97,6 +97,100 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.canSend).toBe(true);
   });
 
+  it('stamps both halves of the turn with the section it was spoken in', async () => {
+    // P21: the server stamps the persisted row with the section that was active when the turn ran.
+    // Without the same stamp here, a live transcript carries no section at all and a section move
+    // changes nothing on screen until the page is reloaded.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, sectionKey: 's2' })
+    );
+
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns).toEqual([
+      { role: 'user', content: 'hi', sectionKey: 's2' },
+      { role: 'assistant', content: 'Hello there.', sectionKey: 's2' },
+    ]);
+  });
+
+  it('lets a kickoff name the section it is opening, overriding the hook’s own', async () => {
+    // The section move posts, sets the new strip, and fires the kickoff from that same callback —
+    // before React re-renders, so the hook still believes the conversation is in the section they
+    // LEFT. The server tags the persisted row from the run it just wrote, so the two disagreed: the
+    // new section's opening question rendered in the old section, below a later turn, and the
+    // section just opened showed nothing but the greeting.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, sectionKey: 's1' })
+    );
+
+    await act(async () => {
+      await result.current.kickoff({ sectionKey: 's2' });
+    });
+
+    expect(result.current.turns).toEqual([
+      { role: 'assistant', content: 'Hello there.', sectionKey: 's2' },
+    ]);
+  });
+
+  it('falls back to the hook’s section when a kickoff names none', async () => {
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, sectionKey: 's1' })
+    );
+
+    await act(async () => {
+      await result.current.kickoff();
+    });
+
+    expect(result.current.turns[0]?.sectionKey).toBe('s1');
+  });
+
+  it('leaves the turns untagged on an unsectioned interview', async () => {
+    // The absent key is what puts every reader on its flat path, so it must stay absent rather
+    // than become an explicit null.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, sectionKey: null })
+    );
+
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'Hello there.' },
+    ]);
+  });
+
+  it('keeps a turn tagged with the section it STARTED in when the section changes mid-flight', async () => {
+    // Belt and braces: a move is only offered while no turn is in flight, but a turn retagged on
+    // commit would vanish from the section it was actually said in.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result, rerender } = renderHook(
+      ({ key }: { key: string }) =>
+        useQuestionnaireSessionStream({ sessionId: SESSION_ID, sectionKey: key }),
+      { initialProps: { key: 's1' } }
+    );
+
+    await act(async () => {
+      const sent = result.current.sendMessage('hi');
+      rerender({ key: 's2' });
+      await sent;
+    });
+
+    expect(result.current.turns.every((turn) => turn.sectionKey === 's1')).toBe(true);
+  });
+
   it('kickoff streams the opening reply with NO user bubble and a `{ kickoff: true }` body', async () => {
     fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
 
@@ -1029,5 +1123,89 @@ describe('useQuestionnaireSessionStream — turn stage label', () => {
     expect(result.current.error?.code).toBe('NETWORK_ERROR');
     // Nothing was committed — proving the label was cleared by the teardown, not by a content delta.
     expect(result.current.turns).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  describe('the section handover (P21)', () => {
+    const HANDOVER_FRAMES = [
+      frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+      frame('content', { delta: "That's everything for Opening. I'll take us on to Growth now." }),
+      frame('section_covered', { sectionKey: 'opening', nextLabel: 'Growth' }),
+      frame('done', { costUsd: 0.001 }),
+    ];
+
+    it('publishes the handover the settled reply announced', async () => {
+      fetchMock.mockResolvedValue(streamResponse(HANDOVER_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+
+      expect(result.current.sectionHandover).toEqual({
+        sectionKey: 'opening',
+        nextLabel: 'Growth',
+      });
+    });
+
+    it('publishes nothing on an ordinary turn', async () => {
+      fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('hi');
+      });
+
+      expect(result.current.sectionHandover).toBeNull();
+    });
+
+    it('withholds the handover when the stream broke, however far the sentence got', async () => {
+      // The reply may well have streamed the promise before the connection died. Acting on it would
+      // move the respondent on the strength of a turn the surface could not finish reading.
+      const encoder = new TextEncoder();
+      let read = 0;
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (read++ === 0) {
+                return {
+                  value: encoder.encode(
+                    frame('section_covered', { sectionKey: 'opening', nextLabel: 'Growth' })
+                  ),
+                  done: false,
+                };
+              }
+              throw new TypeError('network error');
+            },
+          }),
+        },
+        json: async () => ({}),
+      });
+
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.sectionHandover).toBeNull();
+    });
+
+    it('retires the handover the moment the next turn starts', async () => {
+      // What lets a respondent cancel the move by speaking: the beat is keyed on this value, so it
+      // has to be gone before their message is on screen, not when the next reply settles.
+      fetchMock.mockResolvedValue(streamResponse(HANDOVER_FRAMES));
+      const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+      await act(async () => {
+        await result.current.sendMessage('done');
+      });
+      expect(result.current.sectionHandover).not.toBeNull();
+
+      fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+      await act(async () => {
+        await result.current.sendMessage('actually, one more thing');
+      });
+      expect(result.current.sectionHandover).toBeNull();
+    });
   });
 });

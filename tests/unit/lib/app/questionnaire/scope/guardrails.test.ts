@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 
 import {
   applyGuardrails,
+  alwaysTopics,
   chooseCheckTopic,
   plannerCandidates,
   DEFAULT_RESPONDENT_REASON,
   type ApplyGuardrailsInput,
 } from '@/lib/app/questionnaire/scope/guardrails';
-import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   LIGHT_DEPTH_MEMBER_COUNT,
@@ -16,6 +16,7 @@ import {
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
 import { resolveScope } from '@/lib/app/questionnaire/scope/resolve';
+import { estimateTopicCosts, itemSeconds } from '@/lib/app/questionnaire/scope/budget';
 
 function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Topic> = {}): Topic {
   return {
@@ -44,10 +45,6 @@ function settings(over: Partial<ConditionalTopicsSettings> = {}): ConditionalTop
   };
 }
 
-function noRules(): RuleOutcome {
-  return { include: new Set(), exclude: new Set(), reasonByTopic: new Map() };
-}
-
 const TOPICS = [
   topic('open', 'opening'),
   topic('spine', 'core'),
@@ -62,7 +59,6 @@ function input(over: Partial<ApplyGuardrailsInput> = {}): ApplyGuardrailsInput {
   return {
     topics: TOPICS,
     proposed: [],
-    rules: noRules(),
     settings: settings(),
     confidence: 0.9,
     source: 'llm',
@@ -138,54 +134,6 @@ describe('applyGuardrails — unknown and ineligible keys', () => {
   });
 });
 
-describe('applyGuardrails — hard rules', () => {
-  function rules(over: Partial<RuleOutcome> = {}): RuleOutcome {
-    return { ...noRules(), ...over };
-  }
-
-  it('seats a rule-included topic before the model’s picks, so the cap cannot truncate it', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [
-          { key: 'pipeline', rationale: 'a' },
-          { key: 'forecast', rationale: 'b' },
-        ],
-        rules: rules({
-          include: new Set(['talent']),
-          reasonByTopic: new Map([['talent', 'because headcount > 500']]),
-        }),
-        settings: settings({ maxConditionalTopics: 2 }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent', 'pipeline']);
-    expect(plan.topics[0]).toMatchObject({ source: 'rule', rationale: 'because headcount > 500' });
-  });
-
-  it('never seats a rule-excluded topic, however confidently the model proposed it', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [{ key: 'data', rationale: 'they talked about CRM constantly' }],
-        rules: rules({ exclude: new Set(['data']) }),
-      })
-    );
-
-    expect(plan.topics).toEqual([]);
-    expect(plan.excluded.find((e) => e.key === 'data')?.source).toBe('rule');
-  });
-
-  it('lets exclude beat include on the same topic', () => {
-    // An author's "never" is a line drawn; a second rule they forgot must not cross it.
-    const plan = applyGuardrails(
-      input({
-        rules: rules({ include: new Set(['data']), exclude: new Set(['data']) }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).not.toContain('data');
-  });
-});
-
 describe('applyGuardrails — the fallback', () => {
   it('uses the fallback set only when nothing else was seated', () => {
     const plan = applyGuardrails(
@@ -197,36 +145,12 @@ describe('applyGuardrails — the fallback', () => {
     expect(plan.source).toBe('fallback');
   });
 
-  it('does NOT use the fallback when a rule already seated something', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [],
-        rules: { include: new Set(['talent']), exclude: new Set(), reasonByTopic: new Map() },
-        settings: settings({ fallbackTopicKeys: ['data'] }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
-  });
-
   it('produces an always-topics-only interview when the fallback is empty', () => {
     // Thin, but coherent — and strictly better than stranding the respondent.
     const plan = applyGuardrails(
       input({ proposed: [], settings: settings({ fallbackTopicKeys: [] }) })
     );
     expect(plan.topics).toEqual([]);
-  });
-
-  it('honours an exclude even inside the fallback set', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [],
-        rules: { include: new Set(), exclude: new Set(['data']), reasonByTopic: new Map() },
-        settings: settings({ fallbackTopicKeys: ['data', 'talent'] }),
-      })
-    );
-
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
   });
 });
 
@@ -360,30 +284,12 @@ describe('chooseCheckTopic', () => {
 
 describe('plannerCandidates', () => {
   it('offers only conditional topics', () => {
-    expect(plannerCandidates(TOPICS, noRules()).map((t) => t.key)).toEqual([
+    expect(plannerCandidates(TOPICS).map((t) => t.key)).toEqual([
       'pipeline',
       'forecast',
       'talent',
       'data',
     ]);
-  });
-
-  it('hides a rule-excluded topic from the planner entirely', () => {
-    const rules: RuleOutcome = {
-      include: new Set(),
-      exclude: new Set(['data']),
-      reasonByTopic: new Map(),
-    };
-    expect(plannerCandidates(TOPICS, rules).map((t) => t.key)).not.toContain('data');
-  });
-
-  it('KEEPS a rule-included topic visible, so the planner does not double up on the same ground', () => {
-    const rules: RuleOutcome = {
-      include: new Set(['data']),
-      exclude: new Set(),
-      reasonByTopic: new Map(),
-    };
-    expect(plannerCandidates(TOPICS, rules).map((t) => t.key)).toContain('data');
   });
 });
 
@@ -484,25 +390,6 @@ describe('applyGuardrails — the time budget', () => {
     const dropped = plan.excluded.filter((e) => e.source === 'budget').map((e) => e.key);
     expect(dropped).toEqual(['talent', 'data']);
     expect(plan.excluded.find((e) => e.key === 'talent')?.rationale).toContain('5m 20s');
-  });
-
-  it('never drops a rule-included topic — an author’s “always” outranks the arithmetic', () => {
-    const plan = applyGuardrails(
-      input({
-        proposed: [{ key: 'pipeline', rationale: 'a' }],
-        rules: {
-          include: new Set(['talent']),
-          exclude: new Set(),
-          reasonByTopic: new Map([['talent', 'headcount > 500']]),
-        },
-        settings: settings({ maxConditionalTopics: 4 }),
-        budget: { budgetSeconds: 200, costs: costs() },
-      })
-    );
-
-    // 200s − 120s floor = 80s, less than either topic. The rule survives; the model's pick does not.
-    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
-    expect(plan.estimatedSeconds).toBeGreaterThan(200);
   });
 
   it('fits the fallback too — a safety net is not a licence to run long', () => {
@@ -765,5 +652,153 @@ describe('applyGuardrails — respondent-facing reasons', () => {
     for (const topic of plan.topics) {
       expect(topic.respondentReason ?? '').not.toMatch(/you (did not|didn.t|have not|haven.t)/i);
     }
+  });
+});
+
+describe('pre-seated topics (F17.36)', () => {
+  const seat = (key: string) => ({
+    key,
+    depth: 'full' as const,
+    confidence: 0.93,
+    rationale: `seated early because ${key}`,
+    respondentReason: `you mentioned ${key}`,
+    atTurn: 3,
+  });
+
+  it('seats an early topic BEFORE the cap, so a later enthusiasm cannot truncate it', () => {
+    // The respondent has already spent turns on `pipeline`. A plan excluding it would produce a
+    // report claiming an area was not assessed when it was.
+    const plan = applyGuardrails(
+      input({
+        settings: settings({ maxConditionalTopics: 1 }),
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'forecast', rationale: 'the model preferred this' }],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+    expect(plan.topics[0]?.source).toBe('early');
+  });
+
+  it('consumes the cap rather than sitting outside it', () => {
+    // Breadth is ONE budget. An early seat that did not spend the cap would let a session cover
+    // `maxConditionalTopics + maxEarlySeatedTopics` areas, which is not what either number says.
+    const plan = applyGuardrails(
+      input({
+        settings: settings({ maxConditionalTopics: 2 }),
+        preSeated: [seat('pipeline')],
+        proposed: [
+          { key: 'forecast', rationale: 'a' },
+          { key: 'talent', rationale: 'b' },
+        ],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast']);
+  });
+
+  it('is not dropped by the session budget, even when the budget is far too small', () => {
+    // The budget stage used to step over rule-seated topics for the author's sake; an early seat
+    // needs the same protection for the respondent's. Dropping one saves no time either, because
+    // `resolveScope` seeds its planned map from `earlySeated.seated` independently of the plan —
+    // so the topic goes on being asked while the plan claims it was excluded.
+    const costs = estimateTopicCosts(
+      TOPICS,
+      itemSeconds(
+        TOPICS.flatMap((tp) => tp.members.questionKeys.map((key) => ({ key, type: 'free_text' }))),
+        TOPICS.flatMap((tp) => tp.members.dataSlotKeys),
+        DEFAULT_CONDITIONAL_TOPICS_SETTINGS
+      )
+    );
+
+    const plan = applyGuardrails(
+      input({
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'forecast', rationale: 'the model also chose this' }],
+        budget: { budgetSeconds: 1, costs },
+      })
+    );
+
+    expect(plan.topics.map((tp) => tp.key)).toEqual(['pipeline']);
+    expect(plan.excluded.map((e) => e.key)).not.toContain('pipeline');
+  });
+
+  it("carries the early seat's own reasons through to the plan", () => {
+    const plan = applyGuardrails(input({ preSeated: [seat('pipeline')] }));
+
+    expect(plan.topics[0]?.rationale).toBe('seated early because pipeline');
+    expect(plan.topics[0]?.respondentReason).toBe('you mentioned pipeline');
+  });
+
+  it('does not double-seat a topic the model also proposed', () => {
+    const plan = applyGuardrails(
+      input({
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'pipeline', rationale: 'the model agreed' }],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+    // The early source wins, because it is the one that describes what actually happened: the
+    // interview committed to this before the plan was made.
+    expect(plan.topics[0]?.source).toBe('early');
+  });
+
+  it('keeps a pre-seated topic out of the excluded list', () => {
+    const plan = applyGuardrails(input({ preSeated: [seat('pipeline')] }));
+    expect(plan.excluded.map((t) => t.key)).not.toContain('pipeline');
+  });
+
+  it('drops a pre-seated key that no longer resolves to a conditional topic', () => {
+    // Same treatment every other layer gives an unknown key: never route into nothing. A topic an
+    // author deleted mid-interview cannot be asked, however firmly it was seated.
+    const plan = applyGuardrails(input({ preSeated: [seat('deleted'), seat('open')] }));
+    expect(plan.topics).toEqual([]);
+  });
+
+  it('survives a failed planner, and suppresses the fallback while doing so', () => {
+    // Two claims in one, and the second is the deliberate one: the fallback's precondition is "no
+    // signal to judge on at all", and a topic seated during the opening is a judgement made on real
+    // evidence at a HIGHER bar than this plan needed. Padding it with safe defaults would widen an
+    // interview that already knows what it is about.
+    const plan = applyGuardrails(
+      input({
+        source: 'fallback',
+        proposed: [],
+        settings: settings({ fallbackTopicKeys: ['talent'] }),
+        preSeated: [seat('pipeline')],
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+  });
+});
+
+describe('alwaysTopics', () => {
+  const MIXED = [
+    topic('close', 'closing'),
+    topic('cond_a', 'conditional'),
+    topic('open', 'opening'),
+    topic('spine', 'core'),
+    topic('cond_b', 'conditional'),
+  ];
+
+  it('returns every always-run phase, in authored order, and no conditional one', () => {
+    // The counterpart to plannerCandidates, and the floor `budget.ts` prices: a conditional topic
+    // leaking in here would be charged against every respondent's mandatory time whether or not
+    // any plan ever seated it.
+    expect(alwaysTopics(MIXED).map((t) => t.key)).toEqual(['close', 'open', 'spine']);
+  });
+
+  it('is empty when every topic is conditional, rather than falling back to all of them', () => {
+    expect(alwaysTopics([topic('cond_a'), topic('cond_b')])).toEqual([]);
+  });
+
+  it('partitions the version exactly with plannerCandidates', () => {
+    // Every topic belongs to one side or the other. A phase added to the enum without a decision
+    // about which side it falls on would show up here as a topic in neither.
+    const always = alwaysTopics(MIXED).map((t) => t.key);
+    const routed = plannerCandidates(MIXED).map((t) => t.key);
+    expect([...always, ...routed].sort()).toEqual(MIXED.map((t) => t.key).sort());
   });
 });

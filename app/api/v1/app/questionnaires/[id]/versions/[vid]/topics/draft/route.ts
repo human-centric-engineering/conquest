@@ -67,7 +67,6 @@ const handleAccept = withAdminAuth<{ id: string; vid: string }>(
         questionnaireId: id,
         versionId: editId,
         topicCount: result.topics.length,
-        ruleCount: result.settings.rules.length,
         // Audited because this accept may be the moment conditional topics went live for respondents —
         // a change in what gets asked, not just in what is authored.
         scopeEnabled: result.settings.enabled,
@@ -78,7 +77,6 @@ const handleAccept = withAdminAuth<{ id: string; vid: string }>(
     log.info('Routing proposal accepted', {
       versionId: editId,
       topicCount: result.topics.length,
-      ruleCount: result.settings.rules.length,
       enabledByAccept: body.enable === true,
     });
 

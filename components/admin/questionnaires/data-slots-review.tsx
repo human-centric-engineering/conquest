@@ -73,7 +73,7 @@ export interface DataSlotsReviewProps {
   /**
    * Whether this version is using (or is a candidate for) conditional topics.
    *
-   * Saving data slots is the moment hard rules become possible for the first time — a rule decides
+   * Saving data slots is the moment a topic can name one for the first time — membership names
    * from one data slot, so with none the Routing Analyst is told outright to propose none. Nothing
    * else tells the admin that re-running it is now worth doing, and the analyst does not re-run
    * itself once a proposal has been made. Gated rather than always shown: on a version with no
@@ -435,7 +435,7 @@ export function DataSlotsReview({
       setLiveSlots(res.data.slots);
       resetTo(assignIds(res.data.slots.map(fromSaved)), 'live');
       setNotice(`Saved ${res.data.slots.length} data slots — now live.`);
-      // Hard rules just became possible for the first time, and nothing else says so.
+      // A topic can name a data slot for the first time, and nothing else says so.
       setAnalystNudge(conditionalTopicsInUse);
       router.refresh();
       return true;
@@ -602,16 +602,15 @@ export function DataSlotsReview({
         </div>
       )}
       {/* Shown only after a save that actually landed, and only where conditional topics are in
-          play. This is the one moment hard rules become possible — the analyst was previously told
-          "DATA SLOTS: none. Propose no hard rules" — and it does not re-run itself once a proposal
+          play. This is the one moment a topic can name a data slot at all — the analyst was
+          previously told "DATA SLOTS: none" — and it does not re-run itself once a proposal
           exists, so without this the admin would have to know to go back on their own. */}
       {analystNudge && (
         <div className="text-muted-foreground bg-muted/40 space-y-1 rounded-md border p-3 text-sm">
           <p className="text-foreground font-medium">Conditional topics can now use these.</p>
           <p>
-            Hard rules each decide from one data slot, so the Routing Analyst could not propose any
-            until now. Re-run it to pick up the rules your document describes, and to have it say
-            which data slots each topic covers.
+            A topic&rsquo;s membership can name a data slot, and there were none until now. Re-run
+            the Routing Analyst to have it say which data slots each topic covers.
           </p>
           <p>
             <a

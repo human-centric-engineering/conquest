@@ -673,6 +673,25 @@ export const SETTING_DESCRIPTORS = {
             : 'Not limited',
         },
         {
+          // F17.36. Reported even when off, unlike the follow-up allowance above, because "no
+          // limit" is the answer to a question an operator holding a stalled session is actually
+          // asking — the opening ran forever and nothing stopped it.
+          label: 'Longest the opening may run',
+          value:
+            c.conditionalTopics.maxOpeningTurns > 0
+              ? `${c.conditionalTopics.maxOpeningTurns} turns, then decide on what there is`
+              : 'No limit',
+        },
+        {
+          // F17.36. One row for the switch and the two numbers that only mean anything with it on,
+          // for the same reason the follow-up allowance is one row: three separate rows beside a
+          // switch nobody set read as three limits that are in force.
+          label: 'Choose areas during the opening',
+          value: c.conditionalTopics.earlyTopicSeating
+            ? `After ${Math.round(c.conditionalTopics.earlySeatingFloor * 100)}% of the opening, at ${Math.round(c.conditionalTopics.earlySeatingMinConfidence * 100)}% confidence · up to ${c.conditionalTopics.maxEarlySeatedTopics} early, ${c.conditionalTopics.maxRoutingDecisionsPerTurn} from one answer${c.conditionalTopics.bridgeToSeatedTopics ? ' · moves to it at the next change of subject' : ''}`
+            : 'No — every area is chosen once the opening finishes',
+        },
+        {
           label: 'Unraised-area check topic',
           value: yesNo(c.conditionalTopics.includeCheckTopic),
         },
@@ -680,12 +699,6 @@ export const SETTING_DESCRIPTORS = {
         {
           label: 'Respondent can request a topic',
           value: yesNo(c.conditionalTopics.allowRespondentAmendment),
-        },
-        {
-          label: 'Scope rules',
-          value: c.conditionalTopics.rules.length
-            ? `${c.conditionalTopics.rules.length} rule${c.conditionalTopics.rules.length === 1 ? '' : 's'}`
-            : 'None',
         },
         {
           label: 'Planner confidence floor',
@@ -742,7 +755,7 @@ export const SETTING_DESCRIPTORS = {
             c.sections.maxTurnsPerSection > 0 ? String(c.sections.maxTurnsPerSection) : 'No limit',
         },
         {
-          label: 'Interviewer offers to move on',
+          label: 'Interviewer moves the interview on',
           value: yesNo(c.sections.agentOffersClose),
         },
         {
@@ -1153,9 +1166,6 @@ export function buildSettingRows(config: ConfigView, includeTechnical: boolean):
  *
  * Declared `satisfies Record<keyof ConditionalTopicsSettings, ...>`, so a new routing setting is a
  * compile error until it is classified.
- *
- * `rules` is the one field that emits no row: the hard rules get their own block, rendered as
- * sentences, and a count in the settings line would be a worse version of the list below it.
  */
 export interface RoutingSettingDescriptor {
   tier: SettingTier;
@@ -1286,6 +1296,82 @@ const ROUTING_SETTING_DESCRIPTORS = {
   // print an allowance that is not in force.
   maxOpeningProbes: { tier: 'technical', rows: () => [] },
 
+  earlyTopicSeating: {
+    tier: 'standard',
+    rows: (s) => [
+      {
+        label: 'Choose areas during the opening',
+        value: s.earlyTopicSeating
+          ? `After ${Math.round(s.earlySeatingFloor * 100)}% of the opening, at ${Math.round(s.earlySeatingMinConfidence * 100)}% confidence`
+          : 'No — every area is chosen once the opening finishes',
+      },
+      // The two caps, printed only when the switch that gives them meaning is on. Together on one
+      // row because they are one idea read at two scales.
+      ...(s.earlyTopicSeating
+        ? [
+            {
+              label: 'Most areas chosen early',
+              value: `${s.maxEarlySeatedTopics} across the opening, ${s.maxRoutingDecisionsPerTurn} from any one answer`,
+            },
+          ]
+        : []),
+    ],
+  },
+
+  bridgeToSeatedTopics: {
+    tier: 'standard',
+    rows: (s) =>
+      // Inert while early seating is off, and a row saying "No" beside a feature nobody enabled
+      // reads as a limit that is in force. Printed only where it means something.
+      s.earlyTopicSeating
+        ? [
+            {
+              label: 'Move to an area chosen early',
+              value: s.bridgeToSeatedTopics
+                ? 'Yes — at the next natural change of subject'
+                : 'No — it is covered later, in the usual order',
+            },
+          ]
+        : [],
+  },
+
+  announceEarlySeating: {
+    tier: 'standard',
+    rows: (s) =>
+      // Same rule as `bridgeToSeatedTopics` above: inert while early seating is off, and a row
+      // saying "No" beside a feature nobody enabled reads as a silence that was chosen.
+      s.earlyTopicSeating
+        ? [
+            {
+              label: 'Say when an area is chosen early',
+              value: s.announceEarlySeating
+                ? 'Yes, in the interviewer’s own words, once per answer'
+                : 'No, the area is covered without explanation',
+            },
+          ]
+        : [],
+  },
+
+  // All four reported by `earlyTopicSeating` above, where the switch gives them meaning. On their
+  // own each would print a threshold that is not in force.
+  earlySeatingFloor: { tier: 'technical', rows: () => [] },
+  earlySeatingMinConfidence: { tier: 'technical', rows: () => [] },
+  maxEarlySeatedTopics: { tier: 'technical', rows: () => [] },
+  maxRoutingDecisionsPerTurn: { tier: 'technical', rows: () => [] },
+
+  maxOpeningTurns: {
+    tier: 'technical',
+    rows: (s) => [
+      {
+        label: 'Longest the opening may run',
+        value:
+          s.maxOpeningTurns > 0
+            ? `${s.maxOpeningTurns} turns, then decide on what there is`
+            : 'No limit',
+      },
+    ],
+  },
+
   secondsPerQuestionType: {
     tier: 'technical',
     rows: (s) => {
@@ -1307,10 +1393,6 @@ const ROUTING_SETTING_DESCRIPTORS = {
     tier: 'technical',
     rows: (s) => [{ label: 'Time allowed per data slot', value: `${s.secondsPerDataSlot}s` }],
   },
-
-  // The hard rules render as their own block of sentences. A count here would be a worse version
-  // of the list immediately below it.
-  rules: { tier: 'standard', rows: () => [] },
 } satisfies Record<keyof ConditionalTopicsSettings, RoutingSettingDescriptor>;
 
 /** Every registered routing key, in declaration (reading) order. */

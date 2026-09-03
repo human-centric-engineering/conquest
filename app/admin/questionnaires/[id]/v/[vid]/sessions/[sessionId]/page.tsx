@@ -44,6 +44,8 @@ import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/s
 import { Badge } from '@/components/ui/badge';
 import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
 import { InterviewPlanCard } from '@/components/admin/questionnaires/sessions/interview-plan-card';
+import { EarlySeatingCard } from '@/components/admin/questionnaires/sessions/early-seating-card';
+import { SectionTimelineCard } from '@/components/admin/questionnaires/sessions/section-timeline-card';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
@@ -172,6 +174,19 @@ export default async function SessionViewerPage({ params }: PageProps) {
           it is the frame the transcript has to be read in — a conversation that never touched an
           area reads as an oversight until you know it was a decision. */}
       {view.plan && <InterviewPlanCard plan={view.plan} />}
+
+      {/* Conditional Topics (F17.36): what the interview committed to before it had a plan. Below
+          the plan when there is one, because the plan is the fuller answer; the only panel on the
+          surface when the opening never finished, because then it is the only answer there is. */}
+      {view.earlySeating && (
+        <EarlySeatingCard early={view.earlySeating} planned={view.plan !== null} />
+      )}
+
+      {/* Sectioned interviews (P21): where this run got to, and where it stopped. Beside the plan
+          and for the same reason — the plan says which parts applied, this says what happened in
+          them, and the transcript below reads differently once you know both. Absent entirely on an
+          unsectioned session. */}
+      {view.sectionTimeline && <SectionTimelineCard timeline={view.sectionTimeline} />}
 
       <div className="min-h-0 flex-1">
         <SessionWorkspace

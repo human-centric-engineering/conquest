@@ -4,7 +4,6 @@ import { hasScopeErrors, validateConditionalTopics } from '@/lib/app/questionnai
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
   type ConditionalTopicsSettings,
-  type ScopeRule,
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
@@ -28,19 +27,6 @@ function topic(key: string, phase: TopicPhase, overrides: Partial<Topic> = {}): 
 
 function settings(overrides: Partial<ConditionalTopicsSettings> = {}): ConditionalTopicsSettings {
   return { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, enabled: true, ...overrides };
-}
-
-function rule(overrides: Partial<ScopeRule> = {}): ScopeRule {
-  return {
-    id: 'r1',
-    dataSlotKey: 'known_slot',
-    operator: 'exists',
-    value: null,
-    action: 'include',
-    topicKey: 'cond_a',
-    ordinal: 0,
-    ...overrides,
-  };
 }
 
 /** A coherent setup: an opening, a core, and three conditionals. */
@@ -198,29 +184,6 @@ describe('validateConditionalTopics', () => {
   });
 
   describe('dangling references', () => {
-    it('warns about a rule pointing at a topic that no longer exists', () => {
-      expect(
-        codes({ ...healthy(), settings: settings({ rules: [rule({ topicKey: 'gone' })] }) })
-      ).toContain('rule_unknown_topic');
-    });
-
-    it('warns about a rule testing a data slot that no longer exists', () => {
-      expect(
-        codes({
-          ...healthy(),
-          allDataSlotKeys: ['other'],
-          settings: settings({ rules: [rule({ dataSlotKey: 'vanished' })] }),
-        })
-      ).toContain('rule_unknown_data_slot');
-    });
-
-    it('does not check data-slot references when the caller supplied no inventory', () => {
-      const { allDataSlotKeys: _drop, ...rest } = healthy();
-      expect(
-        codes({ ...rest, settings: settings({ rules: [rule({ dataSlotKey: 'unknown' })] }) })
-      ).not.toContain('rule_unknown_data_slot');
-    });
-
     it('warns about a fallback or blind-spot preference naming a missing topic', () => {
       const found = codes({
         ...healthy(),
@@ -234,171 +197,6 @@ describe('validateConditionalTopics', () => {
       expect(
         codes({ ...healthy(), settings: settings({ fallbackTopicKeys: ['spine'] }) })
       ).toContain('always_topic_named_as_choice');
-    });
-
-    /**
-     * A hard rule aimed at an always-run topic is the same no-op reached from the other direction:
-     * `applyGuardrails` seats and vetoes within the conditional set, and `resolveScope` puts every
-     * other phase in scope regardless. It is worth its own finding because a rule is where a silent
-     * no-op costs most — it reads as a certainty ("never ask compliance of a non-licence-holder")
-     * and does nothing to anybody, on every interview, with no other surface reporting it.
-     */
-    it.each<TopicPhase>(['core', 'opening', 'closing'])(
-      'warns when a rule names the %s topic "spine", which is asked either way',
-      (phase) => {
-        const base = healthy();
-        expect(
-          codes({
-            ...base,
-            topics: base.topics.map((t) => (t.key === 'spine' ? topic('spine', phase) : t)),
-            settings: settings({
-              maxConditionalTopics: 2,
-              rules: [rule({ topicKey: 'spine', action: 'exclude' })],
-            }),
-            allDataSlotKeys: ['known_slot'],
-          })
-        ).toContain('rule_names_always_topic');
-      }
-    );
-
-    it('names the rule’s direction, so the author can find which rule to fix', () => {
-      const issue = validateConditionalTopics({
-        ...healthy(),
-        settings: settings({
-          maxConditionalTopics: 2,
-          rules: [rule({ topicKey: 'spine', action: 'include' })],
-        }),
-        allDataSlotKeys: ['known_slot'],
-      }).find((i) => i.code === 'rule_names_always_topic');
-
-      expect(issue?.severity).toBe('warning');
-      expect(issue?.topicKey).toBe('spine');
-      expect(issue?.message).toContain('includes "spine"');
-    });
-
-    it('says nothing about a rule aimed at a conditional topic', () => {
-      expect(
-        codes({
-          ...healthy(),
-          settings: settings({
-            maxConditionalTopics: 2,
-            rules: [rule({ topicKey: 'cond_a' })],
-          }),
-          allDataSlotKeys: ['known_slot'],
-        })
-      ).not.toContain('rule_names_always_topic');
-    });
-  });
-
-  /**
-   * Hard-rule reachability.
-   *
-   * Rules are evaluated at exactly one moment — when the opening completes and the planner runs.
-   * The findings below are about a rule that reads a slot the interview has not gathered by then,
-   * and the `not_exists` case is the one worth the error: absence is what a veto matches on, so an
-   * ungathered slot does not make the rule inert. It makes it fire for everybody.
-   */
-  describe('hard-rule reachability', () => {
-    /** An opening that gathers `situation`, a core that gathers `headcount`. */
-    function reachable() {
-      return {
-        ...healthy(),
-        topics: [
-          topic('open', 'opening', {
-            members: { dataSlotKeys: ['situation'], questionKeys: ['open_q'] },
-          }),
-          topic('spine', 'core', {
-            members: { dataSlotKeys: ['headcount'], questionKeys: ['spine_q'] },
-          }),
-          topic('cond_a', 'conditional', {
-            members: { dataSlotKeys: ['partners'], questionKeys: ['cond_a_q'] },
-          }),
-          topic('cond_b', 'conditional'),
-          topic('cond_c', 'conditional'),
-        ],
-        allDataSlotKeys: ['situation', 'headcount', 'partners'],
-      };
-    }
-
-    it('says nothing about a rule reading a slot the opening gathers', () => {
-      const found = codes({
-        ...reachable(),
-        settings: settings({ rules: [rule({ dataSlotKey: 'situation' })] }),
-      });
-      expect(found).not.toContain('rule_slot_unreachable');
-      expect(found).not.toContain('rule_slot_not_in_opening');
-      expect(found).not.toContain('rule_veto_always_fires');
-    });
-
-    it('warns when a rule reads a slot only a conditional topic gathers', () => {
-      // `partners` is gathered by cond_a, which is not in scope until the plan exists — so the rule
-      // deciding whether cond_a runs is reading something only cond_a could have produced.
-      expect(
-        codes({
-          ...reachable(),
-          settings: settings({ rules: [rule({ dataSlotKey: 'partners' })] }),
-        })
-      ).toContain('rule_slot_unreachable');
-    });
-
-    it('warns when a rule reads a slot the core gathers — the order is not guaranteed', () => {
-      const found = codes({
-        ...reachable(),
-        settings: settings({ rules: [rule({ dataSlotKey: 'headcount' })] }),
-      });
-      expect(found).toContain('rule_slot_not_in_opening');
-      expect(found).not.toContain('rule_slot_unreachable');
-    });
-
-    it('ERRORS on a veto reading an ungathered slot — it excludes every respondent', () => {
-      const issues = validateConditionalTopics({
-        ...reachable(),
-        settings: settings({
-          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists', action: 'exclude' })],
-        }),
-      });
-
-      const veto = issues.find((i) => i.code === 'rule_veto_always_fires');
-      expect(veto?.severity).toBe('error');
-      expect(veto?.message).toContain('every respondent');
-      // Not also reported as unreachable: a veto that always matches is the opposite complaint.
-      expect(issues.map((i) => i.code)).not.toContain('rule_slot_unreachable');
-    });
-
-    it('downgrades the veto finding to a warning while the feature is off', () => {
-      const issues = validateConditionalTopics({
-        ...reachable(),
-        settings: settings({
-          enabled: false,
-          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists' })],
-        }),
-      });
-      expect(issues.find((i) => i.code === 'rule_veto_always_fires')?.severity).toBe('warning');
-    });
-
-    it('stays quiet when there is no opening topic at all', () => {
-      // `no_opening_topic` is the finding to fix first; one reachability warning per rule on top of
-      // it would bury the thing that caused them.
-      const base = reachable();
-      const found = codes({
-        ...base,
-        topics: base.topics.filter((t) => t.phase !== 'opening'),
-        settings: settings({
-          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists' })],
-        }),
-      });
-      expect(found).toContain('no_opening_topic');
-      expect(found).not.toContain('rule_veto_always_fires');
-      expect(found).not.toContain('rule_slot_unreachable');
-    });
-
-    it('does not pile a reachability finding onto a slot that no longer exists', () => {
-      const found = codes({
-        ...reachable(),
-        settings: settings({ rules: [rule({ dataSlotKey: 'vanished' })] }),
-      });
-      expect(found).toContain('rule_unknown_data_slot');
-      expect(found).not.toContain('rule_slot_unreachable');
     });
   });
 
@@ -927,5 +725,189 @@ describe('validateConditionalTopics — recorded triggers', () => {
       allDataSlotKeys: [],
     });
     expect(issues.map((i) => i.code)).not.toContain('trigger_without_cues');
+  });
+});
+
+describe('opening_member_uncoverable (F17.36)', () => {
+  // The gate is all-or-nothing, so ONE member nobody can cover means no plan is ever made — for
+  // every respondent, silently. Session CPY3-1C6S was exactly this.
+  const open = (members: { dataSlotKeys: string[]; questionKeys: string[] }) =>
+    topic('open', 'opening', { members });
+
+  function run(
+    over: {
+      members?: { dataSlotKeys: string[]; questionKeys: string[] };
+      memberText?: {
+        byQuestionKey?: Record<string, string>;
+        byDataSlotKey?: Record<string, string>;
+      };
+      maxOpeningTurns?: number;
+      enabled?: boolean;
+    } = {}
+  ) {
+    const members = over.members ?? { dataSlotKeys: [], questionKeys: ['opening_handoff'] };
+    return validateConditionalTopics({
+      topics: [open(members), topic('cond_a', 'conditional'), topic('cond_b', 'conditional')],
+      settings: settings({
+        enabled: over.enabled ?? true,
+        maxOpeningTurns: over.maxOpeningTurns ?? 0,
+      }),
+      allQuestionKeys: [...members.questionKeys, 'cond_a_q', 'cond_b_q'],
+      allDataSlotKeys: members.dataSlotKeys,
+      ...(over.memberText ? { memberText: over.memberText } : {}),
+    }).filter((i) => i.code === 'opening_member_uncoverable');
+  }
+
+  it('flags a question slot whose prompt asks nothing', () => {
+    const issues = run({
+      memberText: {
+        byQuestionKey: {
+          opening_handoff: 'Thanks. Now let us move on to the areas that matter most for you.',
+        },
+      },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe('warning');
+    expect(issues[0]?.message).toContain('opening_handoff');
+  });
+
+  it('does not flag a real question, whether it ends in a question mark or not', () => {
+    // The heuristic has to survive an imperative prompt, which is how half the good questions in
+    // any instrument are written.
+    expect(
+      run({ memberText: { byQuestionKey: { opening_handoff: 'What is slowing you down?' } } })
+    ).toHaveLength(0);
+    expect(
+      run({
+        memberText: {
+          byQuestionKey: { opening_handoff: 'Describe the last deal that stalled on you.' },
+        },
+      })
+    ).toHaveLength(0);
+    expect(
+      run({
+        memberText: { byQuestionKey: { opening_handoff: 'Walk me through a typical week.' } },
+      })
+    ).toHaveLength(0);
+  });
+
+  it("flags a data slot whose description records the interview's own behaviour", () => {
+    const issues = run({
+      members: { dataSlotKeys: ['diagnostic_routing'], questionKeys: [] },
+      memberText: {
+        byDataSlotKey: {
+          diagnostic_routing:
+            "Routing. Records the interviewer's routing decision for this session.",
+        },
+      },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message).toContain('diagnostic_routing');
+  });
+
+  it('does not flag a data slot that is about the respondent', () => {
+    // "agent" as a job title must survive. An instrument for estate agents would otherwise have
+    // its whole opening flagged.
+    expect(
+      run({
+        members: { dataSlotKeys: ['agency_size'], questionKeys: [] },
+        memberText: {
+          byDataSlotKey: { agency_size: 'Agency size. How many agents work at their branch.' },
+        },
+      })
+    ).toHaveLength(0);
+  });
+
+  it('points at the backstop when there is none, and reports it when there is', () => {
+    const text = {
+      byQuestionKey: { opening_handoff: 'Thanks for that. Here is what happens next.' },
+    };
+
+    expect(run({ memberText: text })[0]?.message).toContain('longest the opening may run');
+    expect(run({ memberText: text, maxOpeningTurns: 12 })[0]?.message).toContain('after 12 turns');
+  });
+
+  it('says nothing when the caller passes no wording, and nothing while the feature is off', () => {
+    // Every other input to this module is optional the same way: a caller without it gets every
+    // other finding rather than a fabricated one.
+    expect(run({})).toHaveLength(0);
+    expect(
+      run({
+        enabled: false,
+        memberText: { byQuestionKey: { opening_handoff: 'Here is what happens next.' } },
+      })
+    ).toHaveLength(0);
+  });
+});
+
+describe('early topic seating (F17.36)', () => {
+  function run(over: Partial<ConditionalTopicsSettings> = {}, conditionals = 3) {
+    return validateConditionalTopics({
+      topics: [
+        topic('open', 'opening'),
+        ...Array.from({ length: conditionals }, (_, i) => topic(`cond_${i}`, 'conditional')),
+      ],
+      settings: settings({ earlyTopicSeating: true, ...over }),
+      allQuestionKeys: ['open_q', ...Array.from({ length: conditionals }, (_, i) => `cond_${i}_q`)],
+      allDataSlotKeys: [],
+    }).map((i) => i.code);
+  }
+
+  it('says nothing while the switch is off, however the numbers are set', () => {
+    const codes = run({ earlyTopicSeating: false, earlySeatingMinConfidence: 0.1 });
+    expect(codes).not.toContain('early_confidence_below_floor');
+    expect(codes).not.toContain('cap_hierarchy_inverted');
+  });
+
+  it('flags an early bar looser than the full decision needs', () => {
+    // Backwards: deciding on LESS of the conversation would then be the EASIER gate to pass, which
+    // produces exactly the thin-evidence seats the floor exists to prevent.
+    expect(run({ minConfidence: 0.8, earlySeatingMinConfidence: 0.6 })).toContain(
+      'early_confidence_below_floor'
+    );
+    expect(run({ minConfidence: 0.6, earlySeatingMinConfidence: 0.85 })).not.toContain(
+      'early_confidence_below_floor'
+    );
+  });
+
+  it('flags caps that do not nest', () => {
+    // Per turn ≤ per opening ≤ per interview. An inner cap above an outer one expresses an intent
+    // the runtime cannot honour: it is simply never reached.
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 3, maxEarlySeatedTopics: 1, maxConditionalTopics: 5 })
+    ).toContain('cap_hierarchy_inverted');
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 1, maxEarlySeatedTopics: 4, maxConditionalTopics: 2 })
+    ).toContain('cap_hierarchy_inverted');
+    expect(
+      run({ maxRoutingDecisionsPerTurn: 1, maxEarlySeatedTopics: 2, maxConditionalTopics: 3 })
+    ).not.toContain('cap_hierarchy_inverted');
+  });
+
+  it('flags the switch turned on with nothing it could ever choose', () => {
+    expect(run({}, 0)).toContain('early_seating_without_conditional_topics');
+    expect(run({}, 3)).not.toContain('early_seating_without_conditional_topics');
+  });
+
+  it('reports every finding as advisory, never as a launch blocker', () => {
+    // These are configuration opinions. An interview configured this way still runs coherently, so
+    // refusing a launch over one would block a client on a judgement call.
+    const issues = validateConditionalTopics({
+      topics: [topic('open', 'opening'), topic('cond_a', 'conditional')],
+      settings: settings({
+        earlyTopicSeating: true,
+        minConfidence: 0.9,
+        earlySeatingMinConfidence: 0.2,
+        maxRoutingDecisionsPerTurn: 9,
+        maxEarlySeatedTopics: 1,
+      }),
+      allQuestionKeys: ['open_q', 'cond_a_q'],
+      allDataSlotKeys: [],
+    }).filter((i) => i.code.startsWith('early_') || i.code === 'cap_hierarchy_inverted');
+
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === 'warning')).toBe(true);
   });
 });

@@ -6,10 +6,13 @@ import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   MEMBER_KEY_MAX_LENGTH,
   MAX_OPENING_PROBES_CEILING,
+  MAX_OPENING_TURNS_CEILING,
+  MIN_EARLY_SEATING_FLOOR,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_SESSION_BUDGET_SECONDS,
   narrowConditionalTopicsSettings,
+  narrowEarlySeating,
   narrowInterviewPlan,
   narrowProposedTopicSet,
   narrowTopicTrigger,
@@ -69,54 +72,6 @@ describe('narrowConditionalTopicsSettings', () => {
   it('trims and caps free text', () => {
     const s = narrowConditionalTopicsSettings({ plannerInstructions: `  ${'x'.repeat(5_000)}  ` });
     expect(s.plannerInstructions.length).toBe(4_000);
-  });
-
-  describe('rules', () => {
-    it('drops a rule that names no data slot or no topic', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: '', topicKey: 'x', operator: 'exists', action: 'include' },
-          { dataSlotKey: 'y', topicKey: '', operator: 'exists', action: 'include' },
-          { dataSlotKey: 'y', topicKey: 'x', operator: 'exists', action: 'include' },
-        ],
-      });
-      // A rule that can only ever no-op would read to an admin as a rule quietly failing.
-      expect(s.rules).toHaveLength(1);
-      expect(s.rules[0]).toMatchObject({ dataSlotKey: 'y', topicKey: 'x' });
-    });
-
-    it('falls back to safe operator and action on unknown values', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [{ dataSlotKey: 'y', topicKey: 'x', operator: 'wat', action: 'destroy' }],
-      });
-      expect(s.rules[0]).toMatchObject({ operator: 'exists', action: 'include' });
-    });
-
-    it('nulls a blank operand so `exists` never compares against an empty string', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: 'y', topicKey: 'x', operator: 'exists', action: 'include', value: '   ' },
-        ],
-      });
-      expect(s.rules[0]?.value).toBeNull();
-    });
-
-    it('sorts by ordinal and back-fills a missing one from position', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [
-          { dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include', ordinal: 5 },
-          { dataSlotKey: 'b', topicKey: 't', operator: 'exists', action: 'include', ordinal: 1 },
-        ],
-      });
-      expect(s.rules.map((r) => r.dataSlotKey)).toEqual(['b', 'a']);
-    });
-
-    it('gives every rule a stable id even when none was stored', () => {
-      const s = narrowConditionalTopicsSettings({
-        rules: [{ dataSlotKey: 'a', topicKey: 't', operator: 'exists', action: 'include' }],
-      });
-      expect(s.rules[0]?.id).toBeTruthy();
-    });
   });
 });
 
@@ -190,6 +145,31 @@ describe('narrowConditionalTopicsSettings — the opening follow-up allowance (G
     expect(narrowConditionalTopicsSettings({ limitOpeningProbes: 'yes' }).limitOpeningProbes).toBe(
       false
     );
+  });
+});
+
+describe('narrowConditionalTopicsSettings — the opening turn backstop (F17.36)', () => {
+  it('is off by default, so no existing version starts closing its opening early', () => {
+    expect(narrowConditionalTopicsSettings({}).maxOpeningTurns).toBe(0);
+  });
+
+  it('keeps a real limit, rounded', () => {
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 12 }).maxOpeningTurns).toBe(12);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 11.4 }).maxOpeningTurns).toBe(11);
+  });
+
+  it('clamps to the ceiling', () => {
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 999 }).maxOpeningTurns).toBe(
+      MAX_OPENING_TURNS_CEILING
+    );
+  });
+
+  it('reads anything unusable as OFF, never as a limit of one turn', () => {
+    // The direction is the point. A limit of 1 would close every opening on its first turn, so a
+    // negative, a NaN or a string must land on "no limit" rather than on the smallest limit.
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: -5 }).maxOpeningTurns).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: 'ten' }).maxOpeningTurns).toBe(0);
+    expect(narrowConditionalTopicsSettings({ maxOpeningTurns: NaN }).maxOpeningTurns).toBe(0);
   });
 });
 
@@ -268,6 +248,56 @@ describe('narrowInterviewPlan', () => {
   });
 });
 
+describe('narrowInterviewPlan — forcedClose (F17.36)', () => {
+  const base = {
+    v: 1,
+    topics: [],
+    excluded: [],
+    checkTopicKey: null,
+    confidence: 0.8,
+    source: 'llm',
+    respondentMessage: '',
+    decidedAtTurn: 9,
+    decidedAt: '2026-09-02T10:00:00.000Z',
+  };
+
+  it('is absent on an ordinary plan, so a forced close and a finished opening never blur', () => {
+    expect(narrowInterviewPlan(base)?.forcedClose).toBeUndefined();
+  });
+
+  it('reads back the turn, the limit and the uncovered members', () => {
+    const plan = narrowInterviewPlan({
+      ...base,
+      forcedClose: {
+        atTurn: 14,
+        limitTurns: 12,
+        uncovered: { dataSlotKeys: ['diagnostic_routing'], questionKeys: ['opening_handoff'] },
+      },
+    });
+
+    expect(plan?.forcedClose).toEqual({
+      atTurn: 14,
+      limitTurns: 12,
+      uncovered: { dataSlotKeys: ['diagnostic_routing'], questionKeys: ['opening_handoff'] },
+    });
+  });
+
+  it('drops an unreadable record rather than fabricating one with zeroes', () => {
+    // "This interview was forced" is a claim about the instrument. Inventing it from a malformed
+    // blob would show an authoring fault on the session viewer that never happened.
+    expect(narrowInterviewPlan({ ...base, forcedClose: 'yes' })?.forcedClose).toBeUndefined();
+    expect(narrowInterviewPlan({ ...base, forcedClose: null })?.forcedClose).toBeUndefined();
+  });
+
+  it('survives a record whose uncovered lists are missing', () => {
+    // Bounded on write, but read defensively: an empty list is a coherent record ("we know it was
+    // forced, we no longer know on what"), and refusing it would lose the fact entirely.
+    expect(
+      narrowInterviewPlan({ ...base, forcedClose: { atTurn: 3, limitTurns: 3 } })?.forcedClose
+    ).toEqual({ atTurn: 3, limitTurns: 3, uncovered: { dataSlotKeys: [], questionKeys: [] } });
+  });
+});
+
 describe('narrowProposedTopicSet', () => {
   /** A stored draft as the analysis route writes it. */
   function stored(overrides: Record<string, unknown> = {}) {
@@ -284,16 +314,6 @@ describe('narrowProposedTopicSet', () => {
           rationale: 'The routing tab restricts this to sales-led businesses.',
           sourceQuote: 'Only cover pipeline for sales-led businesses.',
           replacesExisting: true,
-        },
-      ],
-      rules: [
-        {
-          dataSlotKey: 'headcount',
-          operator: 'gt',
-          value: '50',
-          action: 'include',
-          topicKey: 'pipeline',
-          rationale: 'Stated on the guardrails tab.',
         },
       ],
       gaps: [
@@ -318,7 +338,6 @@ describe('narrowProposedTopicSet', () => {
     expect(set?.topics[0]?.members.questionKeys).toEqual(['q1']);
     expect(set?.topics[0]?.sourceQuote).toBe('Only cover pipeline for sales-led businesses.');
     expect(set?.topics[0]?.replacesExisting).toBe(true);
-    expect(set?.rules[0]?.operator).toBe('gt');
     expect(set?.gaps[0]).toEqual({
       sourceQuote: 'Use judgement for respondents outside these categories.',
       explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
@@ -390,37 +409,6 @@ describe('narrowProposedTopicSet', () => {
     // that gets an invented topic set accepted as the author's intent.
     expect(narrowProposedTopicSet(stored({ fromDocument: 'yes' }))?.fromDocument).toBe(false);
     expect(narrowProposedTopicSet(stored({ fromDocument: undefined }))?.fromDocument).toBe(false);
-  });
-
-  it('drops a rule naming no data slot or no topic', () => {
-    const set = narrowProposedTopicSet(
-      stored({
-        rules: [
-          { dataSlotKey: '', operator: 'exists', action: 'include', topicKey: 'p', rationale: 'x' },
-          { dataSlotKey: 'd', operator: 'exists', action: 'include', topicKey: '', rationale: 'x' },
-        ],
-      })
-    );
-    expect(set?.rules).toEqual([]);
-  });
-
-  it('narrows an unknown operator or action to the safe default', () => {
-    const set = narrowProposedTopicSet(
-      stored({
-        rules: [
-          {
-            dataSlotKey: 'd',
-            operator: 'matches_regex',
-            value: 'x',
-            action: 'demolish',
-            topicKey: 'p',
-            rationale: 'x',
-          },
-        ],
-      })
-    );
-    expect(set?.rules[0]?.operator).toBe('exists');
-    expect(set?.rules[0]?.action).toBe('include');
   });
 });
 
@@ -517,7 +505,6 @@ describe('narrowProposedTopicSet — the F17.23 additions', () => {
           rationale: 'Routed.',
         },
       ],
-      rules: [],
       gaps: [],
       summary: 'Read from the routing tab.',
       fromDocument: true,
@@ -686,7 +673,6 @@ describe('narrowProposedTopicSet — a recorded trigger', () => {
           trigger,
         },
       ],
-      rules: [],
       gaps: [],
       summary: 'Read from the document.',
       fromDocument: true,
@@ -707,5 +693,132 @@ describe('narrowProposedTopicSet — a recorded trigger', () => {
     const set = narrowProposedTopicSet(storedWith({ cues: ['abuse'] }));
     expect(set?.topics).toHaveLength(1);
     expect(set?.topics[0]?.trigger).toBeUndefined();
+  });
+});
+
+describe('narrowConditionalTopicsSettings — early topic seating (F17.36)', () => {
+  it('is off by default, with defaults that would be safe if it were on', () => {
+    const s = narrowConditionalTopicsSettings({});
+    expect(s.earlyTopicSeating).toBe(false);
+    expect(s.earlySeatingFloor).toBe(0.6);
+    // Above `minConfidence` (0.6): deciding on less evidence must mean deciding less readily.
+    expect(s.earlySeatingMinConfidence).toBe(0.85);
+    expect(s.earlySeatingMinConfidence).toBeGreaterThanOrEqual(s.minConfidence);
+    expect(s.maxEarlySeatedTopics).toBe(1);
+    expect(s.maxRoutingDecisionsPerTurn).toBe(1);
+    // On, but reachable only through `earlyTopicSeating` — which is off. So no existing version
+    // changes, and turning early seating on gets an interview that acts on what it learned.
+    expect(s.bridgeToSeatedTopics).toBe(true);
+    // Same shape, same reason: an area that appears mid-conversation says so unless an author
+    // chooses the silence.
+    expect(s.announceEarlySeating).toBe(true);
+  });
+
+  it('lets an author silence the early announcement without silencing the handover', () => {
+    // Two different moments with two different risks. The handover explains an interview about to
+    // change shape; this explains an area that has ALREADY appeared, mid-opening.
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: true,
+      announceEarlySeating: false,
+    });
+    expect(s.announceEarlySeating).toBe(false);
+    expect(s.announce).toBe(true);
+  });
+
+  it('lets an author turn the bridge off without turning early seating off', () => {
+    // The escape hatch for the one risk this feature carries: the area is still chosen and still
+    // covered, just later and in the usual order.
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: true,
+      bridgeToSeatedTopics: false,
+    });
+    expect(s.earlyTopicSeating).toBe(true);
+    expect(s.bridgeToSeatedTopics).toBe(false);
+  });
+
+  it('never lets the floor reach zero', () => {
+    // A floor of zero would let the very first turn seat a topic — a decision over an empty
+    // transcript wearing the language of a considered one.
+    expect(narrowConditionalTopicsSettings({ earlySeatingFloor: 0 }).earlySeatingFloor).toBe(
+      MIN_EARLY_SEATING_FLOOR
+    );
+    expect(narrowConditionalTopicsSettings({ earlySeatingFloor: -1 }).earlySeatingFloor).toBe(
+      MIN_EARLY_SEATING_FLOOR
+    );
+  });
+
+  it('clamps the caps to at least one, never zero', () => {
+    // A cap of zero is a feature switched on that can never act — which is the failure this
+    // codebase has already shipped once. The switch is how it is turned off.
+    expect(narrowConditionalTopicsSettings({ maxEarlySeatedTopics: 0 }).maxEarlySeatedTopics).toBe(
+      1
+    );
+    expect(
+      narrowConditionalTopicsSettings({ maxRoutingDecisionsPerTurn: 0 }).maxRoutingDecisionsPerTurn
+    ).toBe(1);
+  });
+
+  it('falls back to the defaults for anything unusable', () => {
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: 'yes',
+      earlySeatingFloor: 'high',
+      maxEarlySeatedTopics: null,
+    });
+    expect(s.earlyTopicSeating).toBe(false);
+    expect(s.earlySeatingFloor).toBe(0.6);
+    expect(s.maxEarlySeatedTopics).toBe(1);
+  });
+});
+
+describe('narrowEarlySeating (F17.36)', () => {
+  const seat = {
+    key: 'pipeline',
+    depth: 'full',
+    confidence: 0.93,
+    rationale: 'they said deals stall',
+    respondentReason: 'you mentioned deals stalling',
+    atTurn: 3,
+  };
+
+  it('reads back a stored record', () => {
+    const early = narrowEarlySeating({
+      v: 1,
+      seated: [seat],
+      deferred: [],
+      lastPassAtTurn: 3,
+      evidenceKey: 'e1',
+      overCap: false,
+    });
+
+    expect(early?.seated).toEqual([seat]);
+    expect(early?.evidenceKey).toBe('e1');
+  });
+
+  it('returns null for anything unreadable, which means "nothing was seated early"', () => {
+    // The OPPOSITE direction to `narrowInterviewPlan`, deliberately: a corrupt plan widens scope
+    // because withholding questions is a wrong result, while a corrupt early record just means the
+    // interview decides at the end, the way it always did.
+    expect(narrowEarlySeating(null)).toBeNull();
+    expect(narrowEarlySeating({ v: 2, seated: [seat] })).toBeNull();
+    expect(narrowEarlySeating('nonsense')).toBeNull();
+  });
+
+  it('drops a seat with no key and de-duplicates by key', () => {
+    const early = narrowEarlySeating({
+      v: 1,
+      seated: [seat, { ...seat, rationale: 'a duplicate' }, { ...seat, key: '' }],
+    });
+    expect(early?.seated).toHaveLength(1);
+  });
+
+  it('survives a record missing everything but its version', () => {
+    expect(narrowEarlySeating({ v: 1 })).toEqual({
+      v: 1,
+      seated: [],
+      deferred: [],
+      lastPassAtTurn: 0,
+      evidenceKey: '',
+      overCap: false,
+    });
   });
 });

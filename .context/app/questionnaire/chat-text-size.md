@@ -52,6 +52,7 @@ everything after.
 | State + persistence | `lib/hooks/use-session-workspace.ts` (`useLocalStorage`, the adoption effect, `--cq-chat-scale`)      |
 | Rendering           | `app/globals.css` → `.cq-chat-scale` utility                                                          |
 | Viewport factor     | `app/globals.css` → `.cq-respondent-shell` media queries (`--cq-chat-viewport-scale`)                 |
+| Narrow-screen notch | `lib/hooks/use-session-workspace.ts` (`NARROW_CHAT_VIEWPORT_QUERY`)                                   |
 | Transcript wrapper  | `components/app/questionnaire/chat/questionnaire-chat.tsx` (the `cq-chat-scale` div)                  |
 | Ladder tests        | `tests/unit/lib/app/questionnaire/chat/text-scale.test.ts`                                            |
 | Control tests       | `tests/unit/components/app/questionnaire/chat/chat-text-size.test.tsx`                                |
@@ -94,6 +95,32 @@ Because normalisation _resets_ out-of-range values rather than clamping them, ca
 must step via `stepScaleIndex` and never compute `index ± 1` themselves — off the end,
 "unrecognised" becomes Standard, which shrinks the text on a press of "larger". The
 control emits a `'up' | 'down'` direction rather than an index for exactly this reason.
+
+## The automatic notch below `lg`
+
+Below `1024px` — the width at which the answers panel appears beside the
+conversation — the transcript renders **one rung larger than the respondent's own**.
+A questionnaire read on a phone through a column sized for a laptop-with-a-panel
+was the case the stepper was most often being used to correct, and a respondent
+should not have to correct it by hand.
+
+Three things it deliberately is not:
+
+- **Not a change to what the respondent set.** The stored index is untouched, so the
+  stepper still shows and edits their own rung, nothing follows them back to a
+  laptop, and rotating a tablet moves the text and moves it back.
+- **Not a multiplier.** It is a step along the same ladder the stepper walks, via
+  `stepScaleIndex`, which is what makes "one notch" mean the notch they would have
+  pressed. That function clamps, so **Largest stays Largest**: someone who has
+  already asked for the biggest text is not handed something bigger still. A
+  multiplier could not express that.
+- **Not `--cq-chat-viewport-scale`'s business.** That factor answers the same
+  question at the other end of the range (1536px and up). The two ranges cannot
+  overlap, so a size is only ever adjusted for the display once.
+
+`useMediaQuery` returns `false` on the server and the first client render, so the
+notch lands with the same post-mount settle the stored rung already has — a
+font-size change, no layout shift beyond reflow.
 
 ## How the size is applied
 

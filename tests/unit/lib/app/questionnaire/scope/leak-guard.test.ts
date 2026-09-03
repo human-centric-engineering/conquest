@@ -120,6 +120,14 @@ const ALLOWED: Array<{ file: string; because: string }> = [
       'runs BEFORE the plan exists and reads question KEYS only, to tell an unanswered opening ' +
       'question from a member key that no longer resolves; scoping it would be circular',
   },
+  {
+    file: 'questionnaire-sessions/_lib/seat-early-topics.ts',
+    because:
+      'the same circularity as plan-scope.ts, one stage earlier (F17.36): it runs while the plan ' +
+      'is still null and its whole job is to DECIDE what is in scope, so filtering its inputs by ' +
+      'the scope it is about to widen would make the decision unreachable. Reads question KEYS ' +
+      'only, plus the topics that are the decision material',
+  },
 
   // ── Write seams whose scope enforcement lives in the route that calls them ───────────────────
   {

@@ -134,6 +134,7 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
       select: {
         versionId: true,
         interviewPlan: true,
+        earlySeatedTopics: true,
         rescannedTopicKeys: true,
         version: { select: { config: { select: { conditionalTopics: true } } } },
       },
@@ -198,6 +199,7 @@ export async function maybeRescanAfterWidening(sessionId: string): Promise<Widen
       versionId: session.versionId,
       settings,
       interviewPlan: session.interviewPlan,
+      earlySeatedTopics: session.earlySeatedTopics,
       topics,
       weightByQuestionKey,
       weightByDataSlotKey,

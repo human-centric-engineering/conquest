@@ -43,7 +43,6 @@ const structure: ScopeStructureInput = {
       members: [],
     },
   ],
-  rules: [],
   settings: {
     maxConditionalTopics: 3,
     includeCheckTopic: true,
@@ -167,7 +166,7 @@ describe('runScopeEvaluationPanel', () => {
       [SCOPE_EVALUATION_DIMENSION_SPECS.criteria_quality.slug, agentFor('criteria_quality')],
     ]);
     const result = await runScopeEvaluationPanel({
-      dimensions: ['criteria_quality', 'rule_integrity'],
+      dimensions: ['criteria_quality', 'coverage_and_burden'],
       structure,
       questionnaireId: 'qn-1',
       versionId: 'v1',
@@ -175,7 +174,7 @@ describe('runScopeEvaluationPanel', () => {
       adminId: 'admin-1',
       log,
     });
-    const ruleIntegrity = result.results.find((r) => r.dimension === 'rule_integrity');
+    const ruleIntegrity = result.results.find((r) => r.dimension === 'coverage_and_burden');
     expect(ruleIntegrity?.diagnostic).toBe('judge_not_configured');
     expect(ruleIntegrity?.verdict).toBeUndefined();
     // The missing judge is never dispatched.
