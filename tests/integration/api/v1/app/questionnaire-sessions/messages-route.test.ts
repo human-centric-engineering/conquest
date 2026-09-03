@@ -720,6 +720,116 @@ describe('early seating announcement (F17.36 phase 5)', () => {
   });
 });
 
+describe('what the reasoning trace is told about a scope decision', () => {
+  const TOPIC = {
+    id: 't1',
+    key: 'hiring',
+    label: 'Talent & hiring',
+    description: null,
+    phase: 'conditional' as const,
+    criteria: null,
+    depth: 'full' as const,
+    members: { dataSlotKeys: ['ds1'], questionKeys: [] },
+    ordinal: 0,
+    source: 'analyst' as const,
+    trigger: null,
+  };
+
+  /** Reasoning on, plus whatever scope state the test is about. */
+  function reasoningScopeContext(scopeOver: Record<string, unknown>) {
+    const defaults = loadedContext();
+    return loadedContext({
+      base: {
+        ...defaults.base,
+        config: { ...defaults.base.config, reasoningStreamEnabled: true },
+      },
+      scope: { ...defaults.scope, topics: [TOPIC], ...scopeOver },
+    });
+  }
+
+  /** The options the route handed the trace builder this turn. */
+  async function traceOptions(loaded: unknown) {
+    ctxMock.buildTurnContext.mockResolvedValue(loaded);
+    reasoningMock.buildReasoningTrace.mockReturnValue([]);
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+    return reasoningMock.buildReasoningTrace.mock.calls[0][1] as {
+      scopeDecision?: { kind: string; labels: string[] };
+    };
+  }
+
+  it('names the areas on the turn the plan is announced', async () => {
+    // The chat is told in the interviewer's voice; this is the reasoning panel's account of the same
+    // moment. Both fire on the ONE turn the announcement is due, so the two cannot disagree about
+    // when the respondent learned the interview had changed shape.
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        plan: {
+          v: 1 as const,
+          topics: [{ key: 'hiring', depth: 'full' as const, source: 'llm' as const }],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: 'I want to go deeper on how you hire.',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toEqual({ kind: 'planned', labels: ['Talent & hiring'] });
+  });
+
+  it('tells it nothing once the announcement has had its outing', async () => {
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        plan: {
+          v: 1 as const,
+          topics: [{ key: 'hiring', depth: 'full' as const, source: 'llm' as const }],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: 'I want to go deeper on how you hire.',
+          // An earlier turn: `selectionRound` is 0 here.
+          decidedAtTurn: 3,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toBeUndefined();
+  });
+
+  it('keeps a mid-opening addition apart from the whole decision', async () => {
+    const opts = await traceOptions(
+      reasoningScopeContext({
+        settings: { enabled: true, earlyTopicSeating: true, announceEarlySeating: true },
+        plan: null,
+        earlySeated: {
+          v: 1 as const,
+          seated: [
+            {
+              key: 'hiring',
+              depth: 'full' as const,
+              confidence: 0.92,
+              rationale: 'They said the team doubled.',
+              respondentReason: 'You mentioned the team has doubled this year.',
+              atTurn: 0,
+            },
+          ],
+          deferred: [],
+          lastPassAtTurn: 0,
+          evidenceKey: 'e',
+          overCap: false,
+        },
+      })
+    );
+
+    expect(opts.scopeDecision).toEqual({ kind: 'seated', labels: ['Talent & hiring'] });
+  });
+});
+
 describe('streaming a question turn', () => {
   it('streams start → content → done and persists the turn', async () => {
     const res = await POST(req({ message: 'I do marketing' }), ctx);
@@ -3086,8 +3196,16 @@ describe('sectioned interviews (P21)', () => {
       firstHandover: true,
       ...((over.sectionMeta as Record<string, unknown>) ?? {}),
     };
-    const base = over.base as Record<string, unknown> | undefined;
+    const {
+      base,
+      sectionMeta: _meta,
+      ...rest
+    } = over as {
+      base?: Record<string, unknown>;
+      sectionMeta?: unknown;
+    } & Record<string, unknown>;
     return loadedContext({
+      ...rest,
       sectionState: sectionRunState(),
       base: {
         ...defaults.base,
@@ -3154,6 +3272,81 @@ describe('sectioned interviews (P21)', () => {
 
     const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
     expect(frames.some((f) => f.event === 'section_covered')).toBe(false);
+  });
+
+  it('carries the plan handover onto the one reply no phraser composes', async () => {
+    // Conditional Topics seals the plan at the end of the turn that finishes the opening, which in
+    // a sectioned interview is routinely the turn that finishes the opening PART. The announcement
+    // has exactly one outing and the covered-part reply is deterministic, so those respondents
+    // watched the interview change shape and were told nothing about it at all.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        scope: {
+          ...defaults.scope,
+          plan: {
+            v: 1 as const,
+            topics: [{ key: 'growth', depth: 'full' as const, source: 'llm' as const }],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.8,
+            source: 'llm' as const,
+            respondentMessage: "I'd like to spend some time on how you grow from here.",
+            decidedAtTurn: 0,
+            decidedAt: '2026-08-01T00:00:00.000Z',
+            amendments: [],
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(sectionCoveredInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+    const said = frames
+      .filter((f) => f.event === 'content')
+      .map((f) => (f.data as { delta: string }).delta)
+      .join('');
+
+    expect(said).toContain("That's everything for About you.");
+    expect(said).toContain("I'd like to spend some time on how you grow from here.");
+  });
+
+  it('says nothing about a plan on the replies that end the interview', async () => {
+    // "What I now want to go deeper on" is a promise a finished interview is not going to keep.
+    const defaults = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      coveredSectionContext({
+        scope: {
+          ...defaults.scope,
+          plan: {
+            v: 1 as const,
+            topics: [],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.8,
+            source: 'llm' as const,
+            respondentMessage: "I'd like to spend some time on how you grow from here.",
+            decidedAtTurn: 0,
+            decidedAt: '2026-08-01T00:00:00.000Z',
+            amendments: [],
+          },
+        },
+        base: { sectionMeta: undefined, sectionQuestions: undefined },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'none' as const, rationale: 'nothing left', costUsd: 0 },
+      })),
+    });
+
+    const said = (await drainSse(await POST(req({ message: 'that is everything' }), ctx)))
+      .filter((f) => f.event === 'content')
+      .map((f) => (f.data as { delta: string }).delta)
+      .join('');
+
+    expect(said).not.toContain('how you grow from here');
   });
 
   it('promises nothing on an ordinary question turn', async () => {

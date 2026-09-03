@@ -865,4 +865,56 @@ describe('buildReasoningTrace', () => {
     const selection = steps.find((s) => s.kind === 'selection');
     expect(selection?.label).toContain('the next question');
   });
+
+  describe('the scope step (Conditional Topics)', () => {
+    it('says what the interview will now cover, before the question it asks out of it', () => {
+      // The interview visibly changes shape when the plan lands. The one surface whose job is to
+      // account for its choices used to say nothing about the largest choice it makes.
+      const steps = buildReasoningTrace(result(), {
+        questions: QUESTIONS,
+        scopeDecision: { kind: 'planned', labels: ['Growth Strategy', 'Hiring', 'Cash'] },
+      });
+
+      const scope = steps.find((s) => s.kind === 'scope');
+      expect(scope?.label).toBe('Focusing on what matters for you');
+      expect(scope?.detail).toBe("We'll cover Growth Strategy, Hiring and Cash.");
+      expect(scope?.tone).toBe('insight');
+      // Before the selection step: what the interview will cover, then the question out of it.
+      expect(steps.findIndex((s) => s.kind === 'scope')).toBeLessThan(
+        steps.findIndex((s) => s.kind === 'selection')
+      );
+    });
+
+    it('reads one area as a sentence rather than a list of one', () => {
+      const steps = buildReasoningTrace(result(), {
+        questions: QUESTIONS,
+        scopeDecision: { kind: 'planned', labels: ['Growth Strategy'] },
+      });
+      expect(steps.find((s) => s.kind === 'scope')?.detail).toBe("We'll cover Growth Strategy.");
+    });
+
+    it('does not describe a mid-opening addition as the whole decision', () => {
+      // An area seated while the opening is still running is one area coming in, not the shape of
+      // the rest of the interview being settled. Two different moments, two different sentences.
+      const steps = buildReasoningTrace(result(), {
+        questions: QUESTIONS,
+        scopeDecision: { kind: 'seated', labels: ['Hiring'] },
+      });
+      expect(steps.find((s) => s.kind === 'scope')?.label).toBe(
+        'Adding something worth going into'
+      );
+    });
+
+    it('says nothing on an ordinary turn, or when the decision named nothing', () => {
+      expect(
+        buildReasoningTrace(result(), { questions: QUESTIONS }).some((s) => s.kind === 'scope')
+      ).toBe(false);
+      expect(
+        buildReasoningTrace(result(), {
+          questions: QUESTIONS,
+          scopeDecision: { kind: 'planned', labels: [] },
+        }).some((s) => s.kind === 'scope')
+      ).toBe(false);
+    });
+  });
 });

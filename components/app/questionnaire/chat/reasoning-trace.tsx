@@ -25,6 +25,7 @@ import { useEffect, useId, useState } from 'react';
 import {
   Brain,
   ChevronDown,
+  Compass,
   GitCompareArrows,
   ListChecks,
   RefreshCw,
@@ -42,6 +43,7 @@ const STEP_ICONS: Record<ReasoningStepKind, LucideIcon> = {
   contradiction: GitCompareArrows,
   refinement: RefreshCw,
   completion: ListChecks,
+  scope: Compass,
   selection: ArrowRight,
 };
 

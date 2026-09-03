@@ -12,10 +12,18 @@ with it (the pure builder and the config columns are harmless if left).
 ## How it works
 
 1. **Build (pure).** After `runTurn` / `runDataSlotTurn` returns its `TurnResult`, the route calls
-   `buildReasoningTrace(result, { questions, dataSlots?, isOpening })`
+   `buildReasoningTrace(result, { questions, dataSlots?, isOpening, scopeDecision? })`
    (`lib/app/questionnaire/reasoning/`). It maps the result to a short, respondent-safe
    `ReasoningStep[]` in pipeline order: **extraction → contradiction → refinement → completion →
-   selection**. Pure, DB-free, unit-tested.
+   scope → selection**. Pure, DB-free, unit-tested.
+
+   `scopeDecision` is the one input that is NOT read off the `TurnResult`, because the decision it
+   describes is not part of the turn: Conditional Topics seals the plan at the END of the turn that
+   completes the opening, and announces it on the next one. The route already resolves "is the
+   announcement due this turn" for the spoken line, so it hands the answer down — one rule for when
+   the respondent is told, in the chat and in the panel. See
+   [`conditional-topics.md`](./conditional-topics.md#the-two-places-that-one-outing-used-to-fall-through).
+
 2. **Selection rationale.** The "why this next" line is the selector's `rationale`, lifted onto
    `TurnResult.selectionRationale` (otherwise consumed and dropped) by the orchestrators. The
    builder phrases it per strategy — `adaptive` uses the LLM's real sentence verbatim; the

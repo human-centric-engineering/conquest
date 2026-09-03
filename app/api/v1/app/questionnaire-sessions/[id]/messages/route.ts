@@ -42,7 +42,11 @@ import {
   conversationalCaptureActive,
   conversationalCaptureFieldsForConfig,
 } from '@/lib/app/questionnaire/profile/capture-placement';
-import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import {
+  buildReasoningTrace,
+  type ReasoningStep,
+  type ScopeDecisionNote,
+} from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
@@ -341,16 +345,27 @@ async function handleMessage(
     // `selectionRound` exactly once: the turn immediately after planning. That is the announcement's
     // only outing, which is what stops it repeating for the rest of the interview.
     const scopePlan = loaded.scope.plan;
+    const planAnnouncementDue =
+      scopePlan !== null &&
+      scopePlan.respondentMessage !== '' &&
+      scopePlan.decidedAtTurn === loaded.base.selectionRound;
     const scopeAnnouncement: string[] =
-      scopePlan &&
-      scopePlan.respondentMessage &&
-      scopePlan.decidedAtTurn === loaded.base.selectionRound
+      scopePlan && planAnnouncementDue
         ? [
             'Before your next question, tell the respondent — warmly, in your own words, in one or ' +
               `two sentences — what you now want to go deeper on: "${scopePlan.respondentMessage}" ` +
               'Name the areas in their language. Never mention that a decision was made about them.',
           ]
         : [];
+    // The SAME announcement, as prose rather than as an instruction, for the one reply that is not
+    // phrased: a part covered. That reply is composed deterministically, so the briefing above never
+    // reaches it — and the announcement has exactly one outing, so a respondent whose plan landed on
+    // the turn that finished a part was simply never told the interview had changed shape.
+    //
+    // `respondentMessage` is written to be SPOKEN (the planner's prompt says so), which is what
+    // makes carrying it verbatim honest here rather than a paraphrase of an instruction.
+    const spokenPlanAnnouncement =
+      scopePlan && planAnnouncementDue ? scopePlan.respondentMessage : null;
 
     // Question fidelity (P18): the respondent just answered a question through its in-chat answer
     // control. Their answer is already persisted, and there is no respondent message this turn, so
@@ -418,6 +433,8 @@ async function handleMessage(
     // tell the respondent twice about the same area, in the same message, on the turn a session
     // both seated and sealed.
     const earlySeatingNotice: string[] = [];
+    /** The same seats, as bare labels, for the reasoning trace. */
+    const earlySeatedLabels: string[] = [];
     if (
       scopePlan === null &&
       loaded.scope.settings.earlyTopicSeating &&
@@ -454,7 +471,27 @@ async function handleMessage(
         })
       );
       if (line) earlySeatingNotice.push(line);
+      earlySeatedLabels.push(
+        ...seatedThisTurn.map(
+          (seat) => loaded.scope.topics.find((t) => t.key === seat.key)?.label ?? ''
+        )
+      );
     }
+
+    // Conditional Topics: what the "watch it think" trace says about the same moment. The chat is
+    // told in the interviewer's voice; this is the reasoning panel's account of it, and both fire on
+    // the one turn the announcement is due so the two never disagree about when the respondent
+    // learned. Labels only — the trace obeys the same vocabulary ban the announcement does.
+    const scopeDecisionNote: ScopeDecisionNote | null = planAnnouncementDue
+      ? {
+          kind: 'planned',
+          labels: (scopePlan?.topics ?? [])
+            .map((t) => loaded.scope.topics.find((topic) => topic.key === t.key)?.label ?? '')
+            .filter((label) => label.length > 0),
+        }
+      : earlySeatedLabels.length > 0
+        ? { kind: 'seated', labels: earlySeatedLabels.filter((label) => label.length > 0) }
+        : null;
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -988,6 +1025,7 @@ async function handleMessage(
           questions: state.questions,
           ...(dataSlotMode ? { dataSlots } : {}),
           isOpening: state.selectionRound === 0,
+          ...(scopeDecisionNote ? { scopeDecision: scopeDecisionNote } : {}),
         });
         if (reasoning.length > 0) yield { type: 'reasoning', steps: reasoning };
       }
@@ -1258,7 +1296,23 @@ async function handleMessage(
         // After the prose, so the card reads as the thing the message just handed over to.
         if (questionCard) yield { type: 'question_card', card: questionCard };
       } else {
-        agentResponse = result.response.text;
+        // The deterministic replies: a part covered, the interview complete, no questions left, a
+        // contradiction probe. No phraser runs, so anything the briefing would have woven in is
+        // simply not said.
+        //
+        // One thing has to survive that, and only one: the plan's handover line. Conditional Topics
+        // seals the plan at the end of the turn that finishes the opening — which, in a sectioned
+        // interview, is routinely the turn that also finishes the opening PART. The announcement has
+        // exactly one outing, so those respondents watched the interview change shape and were told
+        // nothing at all about it.
+        //
+        // Only onto `section_covered`. On `complete` / `none` the interview is over and announcing
+        // what it now wants to go deeper on would be a promise it is not going to keep; a
+        // contradiction probe is a question about one answer, and is the wrong place to put it.
+        agentResponse =
+          result.response.kind === 'section_covered' && spokenPlanAnnouncement
+            ? `${result.response.text} ${spokenPlanAnnouncement}`
+            : result.response.text;
         for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };
       }
       const costUsd = result.costUsd + extraCostUsd;

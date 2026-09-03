@@ -804,6 +804,35 @@ decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its 
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still
 talking, where a prepended paragraph reads as a system notice.
 
+### The two places that one outing used to fall through
+
+**A reply no phraser composes.** The briefing only reaches the phraser, and four replies are composed
+deterministically instead: a part covered, the interview complete, no questions left, a contradiction
+probe. Sectioned interviews made this routine rather than exotic — the plan is sealed at the end of
+the turn that finishes the opening, which is very often the turn that finishes the opening PART, and
+the reply is then "That's everything for Opening". The announcement had its one outing on a message
+it could not reach, and those respondents watched the interview change shape and were told nothing.
+
+`/messages` therefore appends `plan.respondentMessage` verbatim to a `section_covered` reply when the
+announcement is due. Carrying it verbatim is honest because that field is written to be SPOKEN — the
+planner's prompt says so, in the same breath as the vocabulary ban. Only onto that one reply:
+`complete` and `none` end the interview, and "what I now want to go deeper on" is a promise a
+finished interview is not going to keep; a contradiction probe is a question about one answer and is
+the wrong place to put it.
+
+**The reasoning trace.** With "watch it think" on, the panel accounted for every answer it captured
+and said nothing about the largest choice the interview makes. `buildReasoningTrace` takes a
+`scopeDecision` — `{ kind: 'planned' | 'seated', labels }` — and emits a `scope` step naming the
+areas, placed before the selection step because it is the reason behind it. The two kinds are kept
+apart deliberately: an area seated mid-opening is one area coming in, not the shape of the rest of
+the interview being settled, and a trace that called it the latter would describe a partial decision
+as the whole one.
+
+It is resolved by the ROUTE, from the same `decidedAtTurn === selectionRound` test as the spoken
+line, and handed down rather than read off the `TurnResult` — the decision is not part of the turn
+(the plan is sealed after it), and one rule for when the respondent is told keeps the chat and the
+panel from disagreeing. Labels only: the trace obeys the same vocabulary ban the announcement does.
+
 ---
 
 ## What the opening may spend (G03 / F17.17)

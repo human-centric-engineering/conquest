@@ -50,6 +50,7 @@ const ALL_KINDS: ReasoningStepKind[] = [
   'contradiction',
   'refinement',
   'completion',
+  'scope',
   'selection',
 ];
 

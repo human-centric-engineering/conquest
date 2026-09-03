@@ -18,4 +18,5 @@ export {
 export {
   buildReasoningTrace,
   type ReasoningTraceOptions,
+  type ScopeDecisionNote,
 } from '@/lib/app/questionnaire/reasoning/build-reasoning-trace';
