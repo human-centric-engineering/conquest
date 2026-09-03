@@ -1335,6 +1335,23 @@ const ROUTING_SETTING_DESCRIPTORS = {
         : [],
   },
 
+  announceEarlySeating: {
+    tier: 'standard',
+    rows: (s) =>
+      // Same rule as `bridgeToSeatedTopics` above: inert while early seating is off, and a row
+      // saying "No" beside a feature nobody enabled reads as a silence that was chosen.
+      s.earlyTopicSeating
+        ? [
+            {
+              label: 'Say when an area is chosen early',
+              value: s.announceEarlySeating
+                ? 'Yes, in the interviewer’s own words, once per answer'
+                : 'No, the area is covered without explanation',
+            },
+          ]
+        : [],
+  },
+
   // All four reported by `earlyTopicSeating` above, where the switch gives them meaning. On their
   // own each would print a threshold that is not in force.
   earlySeatingFloor: { tier: 'technical', rows: () => [] },

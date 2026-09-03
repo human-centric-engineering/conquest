@@ -448,6 +448,114 @@ describe('loadAdminSessionView — the interview plan (P17)', () => {
   });
 });
 
+describe('loadAdminSessionView — chosen during the opening (F17.36)', () => {
+  /** A stored early-seating blob. Labels come from the version, never from the record. */
+  function early(over: Record<string, unknown> = {}) {
+    return {
+      v: 1,
+      seated: [
+        {
+          key: 'talent',
+          depth: 'full',
+          confidence: 0.92,
+          rationale: 'They said the team doubled.',
+          respondentReason: 'You mentioned the team has doubled this year.',
+          atTurn: 3,
+        },
+      ],
+      deferred: [],
+      lastPassAtTurn: 3,
+      evidenceKey: '2:1:a,b|q1',
+      overCap: false,
+      ...over,
+    };
+  }
+
+  it('is null, and costs no topic query, for a session that never seated one early', async () => {
+    // Nearly every session. The column is null, so the surface pays nothing for the feature.
+    findSession.mockResolvedValue(sessionRow());
+    const view = await loadAdminSessionView('sess-1');
+    expect(view?.earlySeating).toBeNull();
+    expect(findTopics).not.toHaveBeenCalled();
+  });
+
+  it('is null for an unreadable record rather than a half-built one', async () => {
+    findSession.mockResolvedValue(sessionRow({ earlySeatedTopics: { v: 99 } }));
+    expect((await loadAdminSessionView('sess-1'))?.earlySeating).toBeNull();
+  });
+
+  it('is null for a pass that ran and seated nothing, which is not a decision to report', async () => {
+    findSession.mockResolvedValue(
+      sessionRow({ earlySeatedTopics: early({ seated: [], deferred: [] }) })
+    );
+    expect((await loadAdminSessionView('sess-1'))?.earlySeating).toBeNull();
+  });
+
+  it('carries the turn, the confidence and BOTH reasons through', async () => {
+    // The admin reason and the respondent reason are two different sentences about one decision,
+    // and a challenge is usually about the gap between them.
+    findSession.mockResolvedValue(sessionRow({ earlySeatedTopics: early() }));
+    findTopics.mockResolvedValue([{ key: 'talent', label: 'Talent & hiring' }]);
+
+    const view = await loadAdminSessionView('sess-1');
+    expect(view?.earlySeating?.seated[0]).toMatchObject({
+      key: 'talent',
+      label: 'Talent & hiring',
+      atTurn: 3,
+      confidence: 0.92,
+      rationale: 'They said the team doubled.',
+      respondentReason: 'You mentioned the team has doubled this year.',
+    });
+  });
+
+  it('survives a session whose opening never finished, where there is no plan to read', async () => {
+    // The case the panel exists for: `plan` is null, so the viewer would otherwise say no decision
+    // was made when the respondent was in fact asked about an area.
+    findSession.mockResolvedValue(sessionRow({ earlySeatedTopics: early() }));
+    findTopics.mockResolvedValue([{ key: 'talent', label: 'Talent & hiring' }]);
+
+    const view = await loadAdminSessionView('sess-1');
+    expect(view?.plan).toBeNull();
+    expect(view?.earlySeating?.seated).toHaveLength(1);
+  });
+
+  it('falls back to the key for an area deleted since the interview ran', async () => {
+    findSession.mockResolvedValue(sessionRow({ earlySeatedTopics: early() }));
+    findTopics.mockResolvedValue([]);
+    expect((await loadAdminSessionView('sess-1'))?.earlySeating?.seated[0]?.label).toBe('talent');
+  });
+
+  it('keeps what the caps could not take, rather than reporting only what they took', async () => {
+    // A cap that quietly discards judgements reads afterwards as "it only found one area" when it
+    // found two.
+    findSession.mockResolvedValue(
+      sessionRow({
+        earlySeatedTopics: early({
+          deferred: [
+            {
+              key: 'finance',
+              depth: 'full',
+              confidence: 0.9,
+              rationale: 'Also clear.',
+              respondentReason: '',
+              atTurn: 3,
+            },
+          ],
+          overCap: true,
+        }),
+      })
+    );
+    findTopics.mockResolvedValue([
+      { key: 'talent', label: 'Talent & hiring' },
+      { key: 'finance', label: 'Finance' },
+    ]);
+
+    const view = await loadAdminSessionView('sess-1');
+    expect(view?.earlySeating?.overCap).toBe(true);
+    expect(view?.earlySeating?.deferred).toEqual([{ key: 'finance', label: 'Finance' }]);
+  });
+});
+
 describe('askedCount — how much of one half of a topic an interview asked (C6)', () => {
   const authored = ['a', 'b', 'c', 'd'];
 

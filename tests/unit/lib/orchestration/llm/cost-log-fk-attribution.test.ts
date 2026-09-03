@@ -347,6 +347,7 @@ const ALLOWED_CALL_SITES: readonly string[] = [
   'lib/app/questionnaire/learning/digest.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/llm/log-app-cost.ts | agentId=params.agentId | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/profile/validate-profile-fields.ts | agentId=spread((agentId ? { agentId } : {})) | conversationId=— | workflowExecutionId=—',
+  'lib/app/questionnaire/scope/early-planner.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/scope/planner.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/scope/routability.ts | agentId=agent.id | conversationId=— | workflowExecutionId=—',
   'lib/app/questionnaire/turn-evaluation/evaluate-turn.ts | agentId=spread((opts.agentId ? { agentId: opts.agentId } : {})) | conversationId=— | workflowExecutionId=—',

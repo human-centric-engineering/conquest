@@ -498,6 +498,15 @@ export interface RoutingAnalyticsResult {
   plans: number;
   /** Plans the respondent corrected at least once. */
   amendedPlans: number;
+  /**
+   * Plans that carried at least one area chosen during the opening (F17.36).
+   *
+   * Its own count for the same reason {@link amendedPlans} has one: an early seat is a decision
+   * taken on part of the opening, at a higher confidence bar and with less evidence than the plan
+   * itself needed. How often that happened is what tells an author whether their floor is tuned to
+   * decide early or merely to decide.
+   */
+  earlySeatedPlans: number;
   /** Plans produced by the fallback rather than a judgement — the planner declining to decide. */
   fallbackPlans: number;
   /** Plans that carried a blind-spot check topic. */

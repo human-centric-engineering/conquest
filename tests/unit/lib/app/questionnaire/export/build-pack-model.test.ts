@@ -294,6 +294,7 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   maxEarlySeatedTopics: 1,
   maxRoutingDecisionsPerTurn: 1,
   bridgeToSeatedTopics: true,
+  announceEarlySeating: true,
 };
 
 const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {

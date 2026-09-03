@@ -350,6 +350,27 @@ describe('ScopeSettingsCard — the remaining fields', () => {
     expect((await savedDraft(onSave)).announce).toBe(false);
   });
 
+  it('offers no early-announcement switch while early seating is off', () => {
+    // A switch whose only effect is nothing is one an author cannot verify, which is the exact
+    // failure this feature already shipped once.
+    renderCard({ earlyTopicSeating: false });
+
+    expect(document.getElementById('scope-announce-early')).toBeNull();
+  });
+
+  it('toggles the early announcement separately from the handover one', async () => {
+    // Two different moments: the handover explains an interview about to change shape, this
+    // explains an area that has ALREADY appeared, mid-opening. Silencing one must not silence the
+    // other.
+    const { onSave } = renderCard({ earlyTopicSeating: true, announceEarlySeating: true });
+
+    fireEvent.click(toggleById('scope-announce-early'));
+
+    const draft = await savedDraft(onSave);
+    expect(draft.announceEarlySeating).toBe(false);
+    expect(draft.announce).toBe(true);
+  });
+
   it('toggles respondent amendment', async () => {
     const { onSave } = renderCard({ allowRespondentAmendment: true });
 

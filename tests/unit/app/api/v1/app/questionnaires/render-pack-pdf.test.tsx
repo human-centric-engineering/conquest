@@ -164,6 +164,7 @@ const SCOPE_SETTINGS: ConditionalTopicsSettings = {
   maxEarlySeatedTopics: 1,
   maxRoutingDecisionsPerTurn: 1,
   bridgeToSeatedTopics: true,
+  announceEarlySeating: true,
 };
 
 /** The PDF magic header: every PDF byte stream starts with "%PDF". */

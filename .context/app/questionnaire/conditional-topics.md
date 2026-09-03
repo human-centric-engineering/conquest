@@ -733,14 +733,70 @@ The preference is never a prohibition: when a seated slot is all that is left, i
 conversation targets a slot, and the questions behind it are filled by extraction. A seated topic's
 questions come into scope with it and are answered the way every other in-scope question is.
 
-The respondent-facing **announcement** is still deferred (phase 5). Until it ships, the move is felt
-but not narrated: the interview changes subject to the right thing, with ordinary transition framing
-and no explanation of why that area rather than another.
+#### Saying so (phase 5)
+
+`announceEarlySeating` (default on, **inert unless `earlyTopicSeating` is on**) is what stops the
+move being felt but not narrated. Without it the interview changes subject to the right thing, with
+ordinary transition framing and no explanation of why that area rather than another.
+
+It is a **separate switch from `announce`**, because they cover two different moments with two
+different risks. `announce` is the handover line, said once, when the plan is sealed and the
+interview is about to change shape. This one covers an area that has **already appeared**, in the
+middle of an opening that is still running, and `announce` cannot reach it: there is no plan yet to
+announce. An area arriving mid-conversation with no explanation is the moment a respondent starts
+wondering what else is being decided about them, so the reason matters more here, not less.
+
+`earlySeatingBriefingLine` builds one instruction carrying the same three things an amendment
+acknowledgement carries (F17.33):
+
+| Part         | Where it comes from                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| **What**     | The area's own label, resolved from the version, never the stored key                           |
+| **How much** | `topicSizeWording` over `plannedMembers` at the seat's depth, data slots first when it has them |
+| **Why**      | The early planner's own `respondentReason`, written for the respondent and stored with the seat |
+
+Three rules hold it in place:
+
+- **Coalesced, always.** One line covering everything a single turn seated, never one per area. That
+  is what makes `maxRoutingDecisionsPerTurn` above 1 read naturally: "I'd like to go deeper on hiring
+  and on how you plan capacity" is one sentence a person would say.
+- **Exactly one outing.** Matched on `seat.atTurn === selectionRound`, the same mechanic the handover
+  and the amendment acknowledgement use. A deferred pick is re-stamped with the turn it was finally
+  taken, so an area announces itself when it came into scope rather than when it was judged.
+- **Silent once a plan exists.** The plan absorbs every early seat and its handover is the statement
+  of what the interview covers, so on a turn that both seated and sealed, announcing the seat as well
+  would tell the respondent about the same area twice in one message.
+
+The vocabulary ban is what makes giving a reason safe: the interviewer may say what it will now cover
+and why, and may not say anything about how the interview decides. It is also told the opening is not
+finished, so it does not present a partial decision as the whole one.
+
+This differs deliberately from document triggers (F17.31 §8), which are silent. That reasoning was
+drawn from safeguarding instruments where naming the area is itself the harm. An early seat on a
+commercial diagnostic is the opposite case: naming it is the proof the interview listened. Hence a
+setting rather than a constant.
+
+An area with no label (the author deleted the topic mid-interview) suppresses the announcement
+entirely, and a missing item count makes no size claim. A missing size is silence; a wrong one is a
+promise the interview will not keep.
+
+#### Where it shows up afterwards
 
 Analytics count `early` **separately** and never fold it into `llm`. An early seat the final planner
 would also have chosen is a planner success; one it would not have chosen is not, and counting them
 together would make the planner look better the harder the floor was tuned. The same rule
-`respondent` already follows.
+`respondent` already follows. The Topics tab's routing-quality card carries it as its own **Chosen
+early** column, beside `Sampled` and for the same reason, and `earlySeatedPlans` in the footer counts
+how often an opening decided anything at all before it finished.
+
+The session viewer gains a **Chosen during the opening** panel (`EarlySeatingCard`), which answers
+what the plan panel cannot in the two cases that matter. When the opening never finished there is no
+plan, so without it the viewer reads as "no decision was made" for an interview that decided one and
+asked about it. When a plan does exist it stamps one `decidedAtTurn` over everything it absorbed, so
+"this area was chosen at turn 3 and the rest at turn 9" survives only here. The panel also keeps what
+the respondent was **told** beside the reason the admin was given, and the areas the caps judged
+warranted and never took: a cap that quietly discards decisions reads afterwards as "it only found
+one area" when it found four.
 
 The announcement rides the existing **briefing** seam into the phraser, on the one turn following the
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on

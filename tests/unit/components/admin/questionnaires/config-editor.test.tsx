@@ -1956,7 +1956,7 @@ describe('sectioned interviews (P21)', () => {
     fireEvent.change(selectWithOptions(['sequential', 'free']), { target: { value: 'free' } });
     fireEvent.change(selectWithOptions(['capture', 'stay']), { target: { value: 'stay' } });
     fireEvent.change(numberNear(/section is done at/i), { target: { value: '60' } });
-    fireEvent.change(numberNear(/or this many answered/i), { target: { value: '3' } });
+    fireEvent.change(numberNear(/this many answered/i), { target: { value: '3' } });
     fireEvent.change(numberNear(/most turns in one section/i), { target: { value: '12' } });
     fireEvent.click(screen.getByRole('switch', { name: /let the interviewer offer to move on/i }));
     fireEvent.click(screen.getByRole('switch', { name: /show sections not yet reached/i }));
@@ -2003,7 +2003,7 @@ describe('sectioned interviews (P21)', () => {
     expect(selectWithOptions(['sequential', 'free']).value).toBe('free');
     expect(selectWithOptions(['capture', 'stay']).value).toBe('stay');
     expect(numberNear(/section is done at/i).value).toBe('40');
-    expect(numberNear(/or this many answered/i).value).toBe('2');
+    expect(numberNear(/this many answered/i).value).toBe('2');
     expect(numberNear(/most turns in one section/i).value).toBe('8');
   });
 });

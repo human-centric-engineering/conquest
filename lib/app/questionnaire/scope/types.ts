@@ -737,6 +737,32 @@ export interface ConditionalTopicsSettings {
    * report without the conversational change turns this off.
    */
   bridgeToSeatedTopics: boolean;
+
+  /**
+   * Tell the respondent, in the interviewer's own voice, when an area is chosen during the opening
+   * (F17.36 phase 5).
+   *
+   * **Inert unless {@link earlyTopicSeating} is on**, which is why it defaults to `true`, and why
+   * it ships in the same phase as the announcement it governs rather than beside the switch it
+   * belongs to. A setting whose only effect is nothing is a setting an author cannot verify.
+   *
+   * Separate from {@link announce}, which governs the handover line spoken once when the plan is
+   * sealed. These are two different moments with two different risks: the handover explains an
+   * interview that is about to change shape, while this explains an area that has ALREADY appeared
+   * mid-conversation. An area arriving with no explanation is the moment a respondent starts
+   * wondering what else is being decided about them, and it is a moment `announce` cannot reach
+   * because there is no plan yet to announce.
+   *
+   * Deliberately different from document triggers (F17.31 §8), which are silent. That reasoning was
+   * drawn from safeguarding instruments where naming the area is itself the harm. An early seat on
+   * a commercial diagnostic is the opposite case: naming it is the proof the interview listened.
+   * Hence a setting rather than a constant.
+   *
+   * At most one announcement per turn, covering everything that turn seated. See
+   * `earlySeatingBriefingLine`: a drip of "I'll also cover X" through the opening is what an
+   * announcement per seat would produce.
+   */
+  announceEarlySeating: boolean;
 }
 
 /** The lazy default — what `{}` resolves to, and what a fresh version runs with. */
@@ -771,6 +797,9 @@ export const DEFAULT_CONDITIONAL_TOPICS_SETTINGS: ConditionalTopicsSettings = {
   // changes, and an author who turns early seating on gets an interview that acts on what it
   // learned rather than one that files it away.
   bridgeToSeatedTopics: true,
+  // On, and reachable only when `earlyTopicSeating` is — which is off. An area that appears
+  // mid-conversation says so; silence is something an author has to choose.
+  announceEarlySeating: true,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1275,6 +1304,7 @@ export function narrowConditionalTopicsSettings(value: unknown): ConditionalTopi
       )
     ),
     bridgeToSeatedTopics: asBool(obj.bridgeToSeatedTopics, d.bridgeToSeatedTopics),
+    announceEarlySeating: asBool(obj.announceEarlySeating, d.announceEarlySeating),
   };
 }
 

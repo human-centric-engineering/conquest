@@ -560,6 +560,39 @@ describe('routing settings registry', () => {
     expect(labels).toContain('Samples an area they did not raise');
   });
 
+  it('prints nothing about the early announcement while early seating is off', () => {
+    // Inert by construction. A row saying "No" beside a feature nobody enabled reads as a silence
+    // the author chose, which is a claim about this questionnaire that is not true.
+    const labels = buildRoutingSettingRows(
+      DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+      (key) => key,
+      true
+    ).map((row) => row.label);
+
+    expect(labels).not.toContain('Say when an area is chosen early');
+  });
+
+  it('reports the early announcement once early seating is on', () => {
+    const rows = buildRoutingSettingRows(
+      { ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS, earlyTopicSeating: true },
+      (key) => key,
+      false
+    );
+    const row = rows.find((r) => r.label === 'Say when an area is chosen early');
+    expect(row?.value).toContain('Yes');
+
+    const silent = buildRoutingSettingRows(
+      {
+        ...DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+        earlyTopicSeating: true,
+        announceEarlySeating: false,
+      },
+      (key) => key,
+      false
+    ).find((r) => r.label === 'Say when an area is chosen early');
+    expect(silent?.value).toContain('without explanation');
+  });
+
   it('keeps the tuning behind the technical tier without dropping the standard rows', () => {
     const standard = buildRoutingSettingRows(
       DEFAULT_CONDITIONAL_TOPICS_SETTINGS,

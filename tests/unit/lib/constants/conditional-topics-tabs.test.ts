@@ -116,4 +116,7 @@ const TOPICS_CODES = new Set([
   'trigger_settled_at_opening',
   'trigger_on_always_topic',
   'trigger_without_cues',
+  // F17.36 — an opening member no respondent can ever cover. Fixed by rewording the question, so
+  // the row belongs beside the topic that holds it, not beside the limits.
+  'opening_member_uncoverable',
 ]);

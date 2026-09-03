@@ -709,6 +709,20 @@ describe('narrowConditionalTopicsSettings — early topic seating (F17.36)', () 
     // On, but reachable only through `earlyTopicSeating` — which is off. So no existing version
     // changes, and turning early seating on gets an interview that acts on what it learned.
     expect(s.bridgeToSeatedTopics).toBe(true);
+    // Same shape, same reason: an area that appears mid-conversation says so unless an author
+    // chooses the silence.
+    expect(s.announceEarlySeating).toBe(true);
+  });
+
+  it('lets an author silence the early announcement without silencing the handover', () => {
+    // Two different moments with two different risks. The handover explains an interview about to
+    // change shape; this explains an area that has ALREADY appeared, mid-opening.
+    const s = narrowConditionalTopicsSettings({
+      earlyTopicSeating: true,
+      announceEarlySeating: false,
+    });
+    expect(s.announceEarlySeating).toBe(false);
+    expect(s.announce).toBe(true);
   });
 
   it('lets an author turn the bridge off without turning early seating off', () => {

@@ -48,6 +48,7 @@ function result(overrides: Partial<RoutingAnalyticsResult> = {}): RoutingAnalyti
     range: { from: 'a', to: 'b' },
     plans: 10,
     amendedPlans: 0,
+    earlySeatedPlans: 0,
     fallbackPlans: 0,
     checkTopicPlans: 0,
     meanConfidence: 0.8,
@@ -161,6 +162,33 @@ describe('RoutingQualityCard', () => {
     expect(cells[1]).toHaveTextContent('0');
     expect(cells[1]).toHaveTextContent('(0%)');
     expect(cells[2]).toHaveTextContent('8');
+  });
+
+  it('shows an area chosen during the opening in its own column, never folded into Chosen', async () => {
+    // F17.36. An early seat is a decision taken on part of the opening, at a higher bar and on less
+    // evidence. Counting it as a planner success would flatter the criteria the harder the floor
+    // was tuned, which is the same failure the Sampled column above exists to prevent.
+    (apiClient.get as Mock).mockResolvedValue(
+      result({
+        plans: 8,
+        earlySeatedPlans: 3,
+        topics: [
+          row('hiring', {
+            selected: 3,
+            chosen: 0,
+            sampled: 0,
+            chosenRate: 0,
+            bySource: { early: 3 } as Record<ScopeDecisionSource, number>,
+          }),
+        ],
+      })
+    );
+    renderCard();
+
+    const cells = (await screen.findByRole('table')).querySelectorAll('tbody td');
+    expect(cells[1]).toHaveTextContent('0');
+    expect(cells[3]).toHaveTextContent('3');
+    expect(screen.getByText(/3 chose an area during the opening/)).toBeInTheDocument();
   });
 
   it('says when the counts describe only the most recent plans', async () => {

@@ -130,8 +130,9 @@ export function RoutingQualityCard({
         </CardTitle>
         <CardDescription>
           The plans this version produced over the last 30 days — which topics your criteria chose,
-          which were sampled as a blind-spot check, which were left out, and which ones respondents
-          asked for themselves. Counts only; no respondent&rsquo;s words leave the interview.
+          which were sampled as a blind-spot check, which were chosen part-way through the opening,
+          which were left out, and which ones respondents asked for themselves. Counts only; no
+          respondent&rsquo;s words leave the interview.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -186,6 +187,7 @@ export function RoutingQualityCard({
                     <th className="py-1.5 pr-3 font-medium">Topic</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Chosen</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Sampled</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">Chosen early</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Left out</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Dropped for time</th>
                     <th className="py-1.5 text-right font-medium">Respondent asked</th>
@@ -210,6 +212,12 @@ export function RoutingQualityCard({
                           seats a topic BECAUSE nothing chose it, so showing the two together would
                           render a dormant topic at 100%. */}
                       <td className="py-1.5 pr-3 text-right tabular-nums">{row.sampled}</td>
+                      {/* Its own column, never folded into "Chosen", and the rule is the one
+                          "Respondent asked" already follows: an area chosen part-way through the
+                          opening is a decision taken on less evidence than the full one. Counting
+                          it as a planner success would make the criteria look better the harder
+                          the early-seating floor was tuned. */}
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{row.bySource.early}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{row.excluded}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{row.droppedByBudget}</td>
                       <td className="py-1.5 text-right tabular-nums">{row.amended}</td>
@@ -221,7 +229,8 @@ export function RoutingQualityCard({
 
             <p className="text-muted-foreground text-xs">
               {result.plans} {result.plans === 1 ? 'plan' : 'plans'} · {result.amendedPlans}{' '}
-              corrected by the respondent · {result.fallbackPlans} fell back to your safe default ·{' '}
+              corrected by the respondent · {result.earlySeatedPlans} chose an area during the
+              opening · {result.fallbackPlans} fell back to your safe default ·{' '}
               {result.checkTopicPlans} carried a blind-spot check · mean confidence{' '}
               {percent(result.meanConfidence)}
               {result.truncated && ' · showing the most recent plans only'}

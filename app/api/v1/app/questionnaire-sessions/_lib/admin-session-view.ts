@@ -19,6 +19,7 @@ import { SESSION_STATUSES, narrowToEnum, type SessionStatus } from '@/lib/app/qu
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import {
+  narrowEarlySeating,
   narrowInterviewPlan,
   narrowTopicMembers,
   type ScopeDecisionSource,
@@ -87,6 +88,42 @@ export interface AdminInterviewPlanView {
    * in the opening could not be answered.
    */
   forcedClose: { atTurn: number; limitTurns: number; uncovered: string[] } | null;
+}
+
+/**
+ * What an interview committed to BEFORE it had a plan, as the admin viewer reads it back (F17.36).
+ *
+ * A separate view from {@link AdminInterviewPlanView} because it answers a question the plan cannot,
+ * in two situations the plan cannot reach:
+ *
+ * - **The interview never reached a plan.** Its opening did not finish, so `plan` is null and the
+ *   viewer would otherwise say no decision was made. If an area was seated early, one was, and the
+ *   respondent was asked about it.
+ * - **The plan exists, and hides the turn.** A sealed plan absorbs every early seat and stamps one
+ *   `decidedAtTurn` over the lot, so "this area was chosen at turn 3 and the rest at turn 9" is a
+ *   distinction only this record still holds.
+ *
+ * `deferred` and `overCap` are here for the same reason they are stored: a cap that quietly
+ * discards judgements reads afterwards as "it only found one area" when it found four.
+ */
+export interface AdminEarlySeatingView {
+  seated: {
+    key: string;
+    /** The area's label today, or the bare key when the topic has since been deleted. */
+    label: string;
+    /** The turn it came into scope on, which is also the turn it was announced on. */
+    atTurn: number;
+    /** The planner's confidence in this one area, which is what cleared the early bar. */
+    confidence: number;
+    /** Why, for an admin. */
+    rationale: string;
+    /** Why, in the words the respondent was given. Empty when the planner offered none. */
+    respondentReason: string;
+  }[];
+  /** Areas judged warranted that the per-turn cap could not take, and that no later turn drained. */
+  deferred: { key: string; label: string }[];
+  /** True once any pass judged more areas warranted than the caps allowed. */
+  overCap: boolean;
 }
 
 /**
@@ -160,6 +197,14 @@ export interface AdminSessionView {
    */
   plan: AdminInterviewPlanView | null;
   /**
+   * Conditional Topics (F17.36): what this interview committed to during its opening, or null.
+   *
+   * Null for every session that never seated one early, which is nearly all of them. Present
+   * alongside a plan rather than instead of one: after the seal the two describe the same areas,
+   * and only this one still says when each was chosen.
+   */
+  earlySeating: AdminEarlySeatingView | null;
+  /**
    * Sectioned interviews (P21): what happened in each part of the interview, or null.
    *
    * Null for every unsectioned session, which is every session that predates the feature and every
@@ -203,6 +248,8 @@ export async function loadAdminSessionView(
       versionId: true,
       respondentUserId: true,
       interviewPlan: true,
+      // F17.36. Null on nearly every session, and null costs the resolve below nothing.
+      earlySeatedTopics: true,
       // Sectioned interviews (P21): the CHEAP GATE on the timeline below, not the timeline's data.
       // Null on every unsectioned session, so an ordinary session never pays the context build that
       // resolving the labels costs. Phase C learned this the expensive way, when the respondent
@@ -233,6 +280,7 @@ export async function loadAdminSessionView(
   }
 
   const plan = await resolvePlanView(row.versionId, row.interviewPlan);
+  const earlySeating = await resolveEarlySeatingView(row.versionId, row.earlySeatedTopics);
   // Only a session that actually banked a run can have a timeline, only that session pays for one
   // to be resolved, and only a caller that will render it asks in the first place.
   const sectionTimeline =
@@ -251,6 +299,7 @@ export async function loadAdminSessionView(
     anonymous,
     respondentName,
     plan,
+    earlySeating,
     sectionTimeline,
   };
 }
@@ -352,6 +401,46 @@ export function askedCount(
     if (kept.length > 0) return kept.length;
   }
   return membersAtDepth(authored, depth, undefined).length;
+}
+
+/**
+ * Resolve the early-seating record for one session, or null when it seated nothing.
+ *
+ * Costs one small query, and only for a session that actually has a record: the column is null on
+ * every session that never turned early seating on, which is the read the `narrowEarlySeating`
+ * guard below short-circuits on.
+ *
+ * Labels resolved against the version as it stands TODAY, the same way the plan view resolves them,
+ * so a deleted topic reads as its bare key rather than disappearing from the record.
+ */
+async function resolveEarlySeatingView(
+  versionId: string,
+  stored: unknown
+): Promise<AdminEarlySeatingView | null> {
+  const early = narrowEarlySeating(stored);
+  if (!early || (early.seated.length === 0 && early.deferred.length === 0 && !early.overCap)) {
+    return null;
+  }
+
+  const topics = await prisma.appQuestionnaireTopic.findMany({
+    where: { versionId },
+    select: { key: true, label: true },
+  });
+  const labelByKey = new Map(topics.map((t) => [t.key, t.label]));
+  const label = (key: string): string => labelByKey.get(key) ?? key;
+
+  return {
+    seated: early.seated.map((seat) => ({
+      key: seat.key,
+      label: label(seat.key),
+      atTurn: seat.atTurn,
+      confidence: seat.confidence,
+      rationale: seat.rationale,
+      respondentReason: seat.respondentReason,
+    })),
+    deferred: early.deferred.map((seat) => ({ key: seat.key, label: label(seat.key) })),
+    overCap: early.overCap,
+  };
 }
 
 async function resolvePlanView(

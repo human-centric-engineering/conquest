@@ -48,6 +48,7 @@ import {
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { OpeningReadiness } from '@/lib/app/questionnaire/scope/readiness';
+import { topicSizeWording } from '@/lib/app/questionnaire/scope/amendment';
 
 /** The empty record a session starts from. Never written until a pass actually runs. */
 export function emptyEarlySeating(): EarlySeating {
@@ -311,4 +312,84 @@ export function drainDeferred(
       deferred: base.deferred.filter((d) => !taken.has(d.key)),
     },
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* What the respondent hears (F17.36 phase 5)                                 */
+/* -------------------------------------------------------------------------- */
+
+/** One area this turn brought into scope, as the announcement names it. */
+export interface AnnouncedSeat {
+  /** The area's own label, in the instrument's language. */
+  label: string;
+  /**
+   * Why, in words the respondent may read, as the early planner wrote them. Blank when the model
+   * gave none, and a blank one simply contributes no reason rather than an invented one.
+   */
+  respondentReason: string;
+  /**
+   * How many items this area will actually contribute. Omitted means no size claim is made, which
+   * is the right answer for a topic whose members cannot be resolved: a missing size is silence, a
+   * wrong one is a promise the interview will not keep.
+   */
+  itemCount?: number;
+}
+
+/**
+ * The line the interviewer is asked to weave in on the turn after an area was chosen early.
+ *
+ * A briefing instruction rather than a fixed sentence, for the same reason the plan's handover and
+ * the amendment acknowledgement are: an area named in the interviewer's own voice reads as the same
+ * person still listening, where a canned "Now covering: Hiring." reads as a form that took an input.
+ *
+ * ## Coalesced, always
+ *
+ * One line covering everything a single turn seated, never one per area. `maxRoutingDecisionsPerTurn`
+ * above 1 exists precisely because a respondent can say one thing that plainly warrants three
+ * areas, and "I'd like to go deeper on hiring and on how you plan capacity" is one sentence a person
+ * would say. Three separate acknowledgements in one message is a drip nobody would.
+ *
+ * ## It says the same three things an amendment acknowledgement says (F17.33)
+ *
+ * **What** (the area's own label), **how much** ({@link topicSizeWording}), and **why** (the
+ * planner's own respondent-facing reason). An area appearing mid-conversation with no explanation
+ * is the moment a respondent starts wondering what else is being decided about them, and this
+ * announcement lands EARLIER than the plan's does, in the middle of an opening that is still
+ * running. The reason matters more here, not less.
+ *
+ * The vocabulary ban is what makes giving a reason safe: the interviewer may say what it will now
+ * cover and why, and may not say anything about how the interview decides.
+ *
+ * Returns `null` when there is nothing to announce, so the caller has no emptiness of its own to
+ * check.
+ */
+export function earlySeatingBriefingLine(seats: readonly AnnouncedSeat[]): string | null {
+  const named = seats.filter((s) => s.label.trim().length > 0);
+  if (named.length === 0) return null;
+
+  const areas = named.map((s) => {
+    const size = s.itemCount === undefined ? null : topicSizeWording(s.itemCount);
+    const reason = s.respondentReason.trim();
+    return (
+      `${s.label.trim()}` +
+      (size ? ` (there is ${size} on it)` : '') +
+      (reason ? `, and the reason to give them is: "${reason}"` : '')
+    );
+  });
+
+  return [
+    named.length === 1
+      ? 'Something the respondent just said has made one area clearly worth covering, and you have ' +
+        'decided to cover it.'
+      : `Something the respondent just said has made ${named.length} areas clearly worth covering, ` +
+        'and you have decided to cover them.',
+    'Before your next question, say so briefly and warmly in your own words, in one or two ' +
+      'sentences, weaving it into what you are already saying:',
+    areas.join(' | '),
+    'Refer to each area the way a person would, not by quoting a label back at them.',
+    'The opening is not finished, so do not suggest it is, and do not present this as a final ' +
+      'account of what the interview will cover.',
+    'Do not apologise, do not explain how the interview decides what to ask, and do not use the ' +
+      'words topic, section, plan, scope or depth.',
+  ].join(' ');
 }

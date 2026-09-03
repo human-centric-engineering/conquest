@@ -397,9 +397,9 @@ not drift; nothing in this spec depends on F17.31 shipping.
 | ----- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
 | **1** | ~~§5 hard rules~~ (deleted, not suspended) + §6 `maxOpeningTurns` + §12 `opening_member_uncoverable` — **SHIPPED** | Yes: fixes the stall class       |
 | **2** | §4 readiness module, `isOpeningComplete` rewired as a wrapper — **SHIPPED**                                        | No: pure, no behaviour change    |
-| **3** | §7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks                     | Yes, behind a default-off switch |
-| **4** | §9 lever 3: orchestrator bridge to a seated topic                                                                  | Yes, own sign-off                |
-| **5** | §10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`                                               | Surfaces                         |
+| **3** | ~~§7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks~~ — **SHIPPED**   | Yes, behind a default-off switch |
+| **4** | ~~§9 lever 3: orchestrator bridge to a seated topic~~ — **SHIPPED**                                                | Yes, own sign-off                |
+| **5** | ~~§10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`~~ — **SHIPPED**                             | Surfaces                         |
 | **6** | §13 restore hard rules, when a client needs one                                                                    | Deferred, not pending            |
 
 **Migration note.** Phase 3 adds one nullable column to an app-tier table: generate with
@@ -503,6 +503,48 @@ seated topic's questions come into scope with it and are answered like any other
 setting now would put a switch on the tab that does nothing, which is the exact failure this codebase
 has already shipped once. It is also coherent to defer: until phase 4 an early seat does not change
 what is asked next, so there is nothing to announce.
+
+### What phase 5 shipped
+
+The surfaces, and one design decision the spec left open by not stating it: **who says what, and
+when**.
+
+- **`announceEarlySeating`** (default `true`, inert unless `earlyTopicSeating` is on), the sixth and
+  last setting. Held back from phase 3 deliberately: until phase 4 an early seat did not change what
+  was asked next, so there was nothing to announce, and shipping the switch then would have put a
+  control on the tab that did nothing. It sits in step 6 ("What the respondent is told") beside
+  `announce`, rendered only while early seating is on, with a `<FieldHelp>` saying why the two are
+  separate.
+- **`earlySeatingBriefingLine`** in `scope/early-seating.ts`, pure. Says the same three things
+  `amendmentBriefingLine` says (§10, F17.33): the area's label, `topicSizeWording` over
+  `plannedMembers` at the seat's depth, and the early planner's own `respondentReason`. Coalesced to
+  one instruction per turn however many areas that turn seated, which is what makes
+  `maxRoutingDecisionsPerTurn` above 1 read as a sentence a person would say. Returns `null` when
+  there is nothing to announce, so no caller checks emptiness twice.
+- **The one-outing match** is `seat.atTurn === selectionRound`, the mechanic the handover and the
+  amendment acknowledgement already use. `drainDeferred` re-stamps a deferred pick with the turn it
+  was finally taken, so an area announces itself when it came into scope, not when it was judged.
+- **Silent once a plan exists.** Not in the spec, and decided during the build. A turn can both seat
+  and seal; the plan absorbs every early seat and its handover is the statement of what the interview
+  covers, so announcing the seat as well would tell the respondent about the same area twice in one
+  message. The gate is `scopePlan === null`, which also makes the notice unreachable for the whole
+  rest of the interview.
+- **§11 analytics on the surface.** `bySource.early` was already counted in phase 3 and rendered
+  nowhere. The routing-quality card gains a **Chosen early** column, beside `Sampled` and for the
+  same reason, plus `earlySeatedPlans` on the result and in the footer: the per-topic rows say which
+  areas, the plan count says how often an opening decided anything at all before it finished.
+- **The session viewer** gains `AdminEarlySeatingView` and `EarlySeatingCard`. It answers what the
+  plan panel cannot in two cases: an interview that never reached a plan, where the viewer would
+  otherwise read as "no decision was made", and one whose plan flattened the timing under a single
+  `decidedAtTurn`. It also keeps what the respondent was **told** beside the reason the admin was
+  given, and the areas the caps judged warranted and never took.
+- **The Pack** carries the setting through `settings-registry.ts`, printed only while early seating
+  is on. Same rule as `bridgeToSeatedTopics`: a row saying "No" beside a feature nobody enabled reads
+  as a silence the author chose.
+
+**Not shipped, and deliberately:** nothing in §11 about hard rules being suspended. They were deleted
+in phase 1 rather than suspended, so there is no tier structure for a routing-quality run to be
+compared across.
 
 ## 17. Risks
 

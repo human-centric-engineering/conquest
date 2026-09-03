@@ -186,6 +186,7 @@ export const conditionalTopicsSettingsSchema = z.object({
     .max(MAX_ROUTING_DECISIONS_PER_TURN_CEILING)
     .optional(),
   bridgeToSeatedTopics: z.boolean().optional(),
+  announceEarlySeating: z.boolean().optional(),
 });
 
 export type ConditionalTopicsSettingsPatch = z.infer<typeof conditionalTopicsSettingsSchema>;

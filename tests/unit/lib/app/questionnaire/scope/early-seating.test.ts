@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyEarlyJudgements,
   drainDeferred,
+  earlySeatingBriefingLine,
   earlySeatingCandidates,
   earlySeatingGate,
   emptyEarlySeating,
@@ -489,5 +490,64 @@ describe('drainDeferred', () => {
     const result = drainDeferred(early, [early.deferred[0]], 7);
     expect(result.early.lastPassAtTurn).toBe(4);
     expect(result.early.evidenceKey).toBe('e1');
+  });
+});
+
+describe('earlySeatingBriefingLine — what the respondent hears (F17.36 phase 5)', () => {
+  const seat = (over: Record<string, unknown> = {}) => ({
+    label: 'Talent & hiring',
+    respondentReason: 'You mentioned the team has doubled this year.',
+    itemCount: 4,
+    ...over,
+  });
+
+  it('names the area, sizes it, and carries the reason the respondent may be given', () => {
+    const line = earlySeatingBriefingLine([seat()]) ?? '';
+    expect(line).toContain('Talent & hiring');
+    expect(line).toContain('a handful of questions');
+    expect(line).toContain('You mentioned the team has doubled this year.');
+  });
+
+  it('makes no size claim when the count is unknown', () => {
+    // A topic the author deleted mid-interview. A missing size is silence; a wrong one is a
+    // promise the interview will not keep.
+    const line = earlySeatingBriefingLine([seat({ itemCount: undefined })]) ?? '';
+    expect(line).toContain('Talent & hiring');
+    expect(line).not.toContain('there is');
+  });
+
+  it('gives no reason at all rather than inventing one', () => {
+    const line = earlySeatingBriefingLine([seat({ respondentReason: '  ' })]) ?? '';
+    expect(line).not.toContain('the reason to give them');
+  });
+
+  it('coalesces a multi-area turn into ONE instruction, not one per area', () => {
+    // The whole point of the per-turn cap being allowed above 1: "hiring and capacity" is one
+    // sentence a person would say, three acknowledgements is a drip nobody would.
+    const line =
+      earlySeatingBriefingLine([seat(), seat({ label: 'Capacity planning', itemCount: 2 })]) ?? '';
+    expect(line).toContain('2 areas');
+    expect(line).toContain('Talent & hiring');
+    expect(line).toContain('Capacity planning');
+    expect(line).toContain('just a couple of questions');
+  });
+
+  it('says the opening is unfinished, which is what separates it from the handover line', () => {
+    expect(earlySeatingBriefingLine([seat()])).toContain('The opening is not finished');
+  });
+
+  it('keeps the implementation vocabulary off the screen', () => {
+    const line = (earlySeatingBriefingLine([seat()]) ?? '').toLowerCase();
+    // The ban is what makes giving a reason safe: the interviewer may say what it will cover and
+    // why, never how the interview decides.
+    expect(line).toContain('do not use the words topic, section, plan, scope or depth');
+    expect(line).toContain('do not explain how the interview decides');
+  });
+
+  it('is null when there is nothing to announce, so no caller checks emptiness twice', () => {
+    expect(earlySeatingBriefingLine([])).toBeNull();
+    // A seat whose topic no longer resolves carries no label, and an announcement that names
+    // nothing is worse than none at all.
+    expect(earlySeatingBriefingLine([seat({ label: '  ' })])).toBeNull();
   });
 });

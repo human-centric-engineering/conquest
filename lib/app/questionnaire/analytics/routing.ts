@@ -132,6 +132,7 @@ export function assembleRoutingAnalytics(
   }
 
   let amendedPlans = 0;
+  let earlySeatedPlans = 0;
   let fallbackPlans = 0;
   let checkTopicPlans = 0;
   let confidenceTotal = 0;
@@ -140,6 +141,10 @@ export function assembleRoutingAnalytics(
     confidenceTotal += plan.confidence;
     if (plan.source === 'fallback') fallbackPlans += 1;
     if (plan.checkTopicKey) checkTopicPlans += 1;
+    // Counted per plan, not per topic: the topic rows below already say WHICH areas were chosen
+    // early, and the question this answers is how often the opening decided anything at all before
+    // it finished.
+    if (plan.topics.some((t) => t.source === 'early')) earlySeatedPlans += 1;
 
     // Both records of an amendment, unioned: `amendments` is the richer one but is absent on plans
     // written before it shipped, where the `source: 'respondent'` topic is the only trace.
@@ -185,6 +190,7 @@ export function assembleRoutingAnalytics(
     range: meta.range,
     plans: planCount,
     amendedPlans,
+    earlySeatedPlans,
     fallbackPlans,
     checkTopicPlans,
     meanConfidence: planCount > 0 ? confidenceTotal / planCount : 0,
@@ -306,6 +312,7 @@ export async function getRoutingAnalytics(scope: AnalyticsScope): Promise<Routin
   return {
     ...result,
     amendedPlans: 0,
+    earlySeatedPlans: 0,
     fallbackPlans: 0,
     checkTopicPlans: 0,
     meanConfidence: 0,

@@ -772,6 +772,45 @@ export function ScopeSettingsCard({
             />
           </div>
 
+          {/* Only where it means something. Early seating is off by default, and a switch governing
+              an announcement that can never happen is a control an author cannot verify. */}
+          {draft.earlyTopicSeating && (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <Label htmlFor="scope-announce-early" className="text-sm font-medium">
+                  Say when an area is chosen during the opening{' '}
+                  <FieldHelp title="Announce an area chosen early">
+                    <p>
+                      The announcement above is said once, when the full decision is made. This one
+                      covers the areas chosen <strong>before</strong> that, while the opening is
+                      still running.
+                    </p>
+                    <p>
+                      It matters more, not less: an area that appears in the middle of a
+                      conversation with no explanation is the moment a respondent starts wondering
+                      what else is being decided about them. The agent names the area, says roughly
+                      how much of it there is, and ties it to what they actually said.
+                    </p>
+                    <p>
+                      One acknowledgement per answer, however many areas that answer brought in.
+                      Turn it off only if you want the interview to change subject without saying
+                      why.
+                    </p>
+                  </FieldHelp>
+                </Label>
+                <p className="text-muted-foreground text-xs">
+                  Woven into the interviewer’s own voice on the turn after the area is chosen.
+                </p>
+              </div>
+              <Switch
+                id="scope-announce-early"
+                checked={draft.announceEarlySeating}
+                onCheckedChange={(v) => set({ announceEarlySeating: v })}
+                disabled={busy}
+              />
+            </div>
+          )}
+
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-amendment" className="text-sm font-medium">

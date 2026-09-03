@@ -594,6 +594,132 @@ describe('scope amendment notice (P17.6)', () => {
   });
 });
 
+describe('early seating announcement (F17.36 phase 5)', () => {
+  const TOPIC = {
+    id: 't1',
+    key: 'hiring',
+    label: 'Talent & hiring',
+    description: null,
+    phase: 'conditional' as const,
+    criteria: null,
+    depth: 'full' as const,
+    members: { dataSlotKeys: ['ds1', 'ds2'], questionKeys: [] },
+    ordinal: 0,
+    source: 'analyst' as const,
+    trigger: null,
+  };
+
+  const SEAT = {
+    key: 'hiring',
+    depth: 'full' as const,
+    confidence: 0.92,
+    rationale: 'They said the team doubled.',
+    respondentReason: 'You mentioned the team has doubled this year.',
+    // `selectionRound` is 0 by default, so this is the ONE turn the seat announces on.
+    atTurn: 0,
+  };
+
+  /** A session that seated an area on the previous turn and has not yet sealed a plan. */
+  function seatedContext(opts: {
+    settings?: Record<string, unknown>;
+    seatAtTurn?: number;
+    plan?: unknown;
+    topics?: unknown[];
+  }) {
+    const base = loadedContext();
+    return loadedContext({
+      scope: {
+        ...base.scope,
+        topics: opts.topics ?? [TOPIC],
+        settings: {
+          enabled: true,
+          earlyTopicSeating: true,
+          announceEarlySeating: true,
+          ...opts.settings,
+        },
+        plan: opts.plan ?? null,
+        earlySeated: {
+          v: 1 as const,
+          seated: [
+            { ...SEAT, ...(opts.seatAtTurn === undefined ? {} : { atTurn: opts.seatAtTurn }) },
+          ],
+          deferred: [],
+          lastPassAtTurn: 0,
+          evidenceKey: 'e',
+          overCap: false,
+        },
+      },
+    });
+  }
+
+  async function briefingFor(loaded: unknown): Promise<string[]> {
+    ctxMock.buildTurnContext.mockResolvedValue(loaded);
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { briefing?: string[] };
+    };
+    return arg.input.briefing ?? [];
+  }
+
+  it('names the area and sizes it on the turn after it was chosen', async () => {
+    const briefing = await briefingFor(seatedContext({}));
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(true);
+    // Two data slots, so "just a couple of questions" — sized from what the area will ASK.
+    expect(briefing.some((line) => line.includes('just a couple of questions'))).toBe(true);
+    expect(
+      briefing.some((line) => line.includes('You mentioned the team has doubled this year.'))
+    ).toBe(true);
+  });
+
+  it('gets exactly one outing: a seat from an earlier turn is not re-announced', async () => {
+    // The same one-turn mechanic the plan handover and the amendment acknowledgement use. Without
+    // it the interviewer would re-introduce the same area for the rest of the interview.
+    const briefing = await briefingFor(seatedContext({ seatAtTurn: 3 }));
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing when the author turned the announcement off', async () => {
+    const briefing = await briefingFor(
+      seatedContext({ settings: { announceEarlySeating: false } })
+    );
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing once a plan exists, so one area is never announced twice', async () => {
+    // A turn can both seat and seal. The plan absorbs every early seat, and its own handover is the
+    // statement of what the interview covers, so a second announcement in the same message would
+    // tell the respondent about the same area twice.
+    const briefing = await briefingFor(
+      seatedContext({
+        plan: {
+          v: 1 as const,
+          topics: [
+            { key: 'hiring', depth: 'full' as const, source: 'early' as const, rationale: '' },
+          ],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.8,
+          source: 'llm' as const,
+          respondentMessage: '',
+          decidedAtTurn: 0,
+          decidedAt: '2026-08-01T00:00:00.000Z',
+        },
+      })
+    );
+    expect(briefing.some((line) => line.includes('Talent & hiring'))).toBe(false);
+  });
+
+  it('says nothing at all for an area the author has since deleted', async () => {
+    // The seat is real and was asked about; the topic is gone, so there is no label to name and no
+    // size to claim. An announcement that names nothing is worse than none at all.
+    const briefing = await briefingFor(seatedContext({ topics: [] }));
+    expect(briefing.some((line) => line.includes('clearly worth covering'))).toBe(false);
+    expect(briefing.some((line) => line.includes('there is'))).toBe(false);
+  });
+});
+
 describe('streaming a question turn', () => {
   it('streams start → content → done and persists the turn', async () => {
     const res = await POST(req({ message: 'I do marketing' }), ctx);

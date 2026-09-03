@@ -99,6 +99,7 @@ import { maybeSeatEarlyTopics } from '@/app/api/v1/app/questionnaire-sessions/_l
 import { maybeRescanAfterWidening } from '@/app/api/v1/app/questionnaire-sessions/_lib/widening-rescan';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
+import { earlySeatingBriefingLine } from '@/lib/app/questionnaire/scope/early-seating';
 import { plannedMembers } from '@/lib/app/questionnaire/scope/resolve';
 import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
@@ -403,6 +404,57 @@ async function handleMessage(
           ...(itemCount !== undefined ? { itemCount } : {}),
         });
       });
+
+    // Conditional Topics (F17.36 phase 5): an area chosen DURING the opening, said out loud on the
+    // one turn that follows. Same `atTurn === selectionRound` mechanic as the two above, and the
+    // seat's turn is re-stamped when a deferred pick is finally taken, so an area announces itself
+    // on the turn it actually came into scope rather than the turn it was judged.
+    //
+    // Coalesced into ONE line covering everything this turn seated, which is what makes a per-turn
+    // cap above 1 read naturally: "I'd like to go deeper on hiring and on capacity" is one sentence.
+    //
+    // Silent once a plan exists. The plan absorbs every early seat as a pre-seated topic and its own
+    // handover is the statement of what the interview covers, so announcing a seat as well would
+    // tell the respondent twice about the same area, in the same message, on the turn a session
+    // both seated and sealed.
+    const earlySeatingNotice: string[] = [];
+    if (
+      scopePlan === null &&
+      loaded.scope.settings.earlyTopicSeating &&
+      loaded.scope.settings.announceEarlySeating
+    ) {
+      const seatedThisTurn = (loaded.scope.earlySeated?.seated ?? []).filter(
+        (seat) => seat.atTurn === loaded.base.selectionRound
+      );
+      const line = earlySeatingBriefingLine(
+        seatedThisTurn.map((seat) => {
+          // Sized exactly the way the amendment acknowledgement sizes an area, and for the same
+          // reason: several new questions arriving is something the respondent was told about
+          // rather than something that happened to them. Data slots first when the topic has them,
+          // because in data-slot mode THEY are what the conversation asks about.
+          //
+          // Omitted when the topic no longer resolves (an author may delete one a live session
+          // seated): a missing size means no size claim, never a wrong one.
+          const topic = loaded.scope.topics.find((t) => t.key === seat.key);
+          const itemCount = topic
+            ? plannedMembers(
+                topic.members.dataSlotKeys.length > 0
+                  ? topic.members.dataSlotKeys
+                  : topic.members.questionKeys,
+                undefined,
+                seat.depth,
+                undefined
+              ).length
+            : undefined;
+          return {
+            label: topic?.label ?? '',
+            respondentReason: seat.respondentReason,
+            ...(itemCount !== undefined ? { itemCount } : {}),
+          };
+        })
+      );
+      if (line) earlySeatingNotice.push(line);
+    }
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -1050,12 +1102,14 @@ async function handleMessage(
             ...(dsBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
             scopeAmendmentNotice.length > 0 ||
+            earlySeatingNotice.length > 0 ||
             cardAnswerNotice.length > 0
               ? {
                   briefing: [
                     ...cardAnswerNotice,
                     ...scopeAnnouncement,
                     ...scopeAmendmentNotice,
+                    ...earlySeatingNotice,
                     ...dsBriefing,
                   ],
                 }
@@ -1171,12 +1225,14 @@ async function handleMessage(
             ...(qBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
             scopeAmendmentNotice.length > 0 ||
+            earlySeatingNotice.length > 0 ||
             cardAnswerNotice.length > 0
               ? {
                   briefing: [
                     ...cardAnswerNotice,
                     ...scopeAnnouncement,
                     ...scopeAmendmentNotice,
+                    ...earlySeatingNotice,
                     ...qBriefing,
                   ],
                 }
