@@ -1,11 +1,11 @@
 /**
  * Conditional Topics (P17) — pure domain types.
  *
- * The vocabulary shared by the topic authoring surfaces, the scope resolver, the hard-rule
- * evaluator, the Scope Planner and the Routing Analyst. The `const` tuples below back the
- * TypeScript types, the routes' Zod enums (`z.enum(TOPIC_PHASES)`), the admin UI's selectors, and
- * the `narrowToEnum` reads that guard the plain `String` columns — the house style established by
- * `lib/app/questionnaire/types.ts` and `experiences/types.ts`.
+ * The vocabulary shared by the topic authoring surfaces, the scope resolver, the Scope Planner and
+ * the Routing Analyst. The `const` tuples below back the TypeScript types, the routes' Zod enums
+ * (`z.enum(TOPIC_PHASES)`), the admin UI's selectors, and the `narrowToEnum` reads that guard the
+ * plain `String` columns — the house style established by `lib/app/questionnaire/types.ts` and
+ * `experiences/types.ts`.
  *
  * ## What this feature is
  *
@@ -283,6 +283,20 @@ export const EARLY_SEATING_CADENCE_TURNS = 1;
 
 /** How many deferred picks one session may carry. A cap on the row, not a judgement. */
 export const MAX_DEFERRED_EARLY_PICKS = 12;
+
+/**
+ * How long an evidence fingerprint may be, applied on BOTH sides.
+ *
+ * `evidenceKeyOf` writes it and `narrowEarlySeating` reads it back, and the tier-1 "nothing new was
+ * said" gate is an equality test between the two. So a cap applied only on the read side does not
+ * bound a string, it breaks the comparison: an opening of eight slots and five questions already
+ * runs to ~200 characters, the stored value came back short, and the gate could never fire — which
+ * bought a planner call on every turn above the floor, on the one condition meant to prevent them.
+ *
+ * Truncating both sides identically restores the equality. The counts lead the string precisely so
+ * that a cut tail can never hide a member arriving or leaving.
+ */
+export const EVIDENCE_KEY_MAX_LENGTH = 128;
 
 /**
  * How many data slots the interview may ask from early-seated topics BEFORE the plan is sealed.
@@ -1483,7 +1497,7 @@ export function narrowEarlySeating(value: unknown): EarlySeating | null {
     seated: seats(value.seated, MAX_EARLY_SEATED_TOPICS_CEILING),
     deferred: seats(value.deferred, MAX_DEFERRED_EARLY_PICKS),
     lastPassAtTurn: Math.round(asNumber(value.lastPassAtTurn, 0, 100_000, 0)),
-    evidenceKey: asText(value.evidenceKey, 128, ''),
+    evidenceKey: asText(value.evidenceKey, EVIDENCE_KEY_MAX_LENGTH, ''),
     overCap: asBool(value.overCap, false),
   };
 }

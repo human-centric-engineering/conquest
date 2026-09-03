@@ -136,6 +136,61 @@ describe('planScope — the happy path', () => {
   });
 });
 
+describe('planScope — topics already seated during the opening (F17.36)', () => {
+  /** One early seat, in the shape `EarlySeating.seated` holds. */
+  function seat(key: string) {
+    return {
+      key,
+      depth: 'full' as const,
+      confidence: 0.94,
+      rationale: `already clear: ${key}`,
+      respondentReason: `you mentioned ${key}`,
+      atTurn: 2,
+    };
+  }
+
+  it('does not offer the model a topic the interview is already covering', async () => {
+    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    const result = await planScope(params({ preSeated: [seat('pipeline')] }));
+
+    // Showing it spends prompt inviting a choice that cannot be declined: the topic is decided,
+    // and the interview has already asked about it.
+    expect(result.promptSnapshot).not.toContain('pipeline');
+    expect(result.promptSnapshot).toContain('forecast');
+  });
+
+  it('carries the early seat into the plan even when the model chooses nothing', async () => {
+    (mocks.runStructuredCompletion as Mock).mockResolvedValue(
+      completion({ selected: [], confidence: 0.9, respondentMessage: '' })
+    );
+
+    const result = await planScope(params({ preSeated: [seat('pipeline')] }));
+
+    // A plan that dropped the topic the interview had already asked about would contradict the
+    // transcript behind it.
+    expect(result.plan.topics.map((t) => t.key)).toContain('pipeline');
+    expect(result.plan.topics.find((t) => t.key === 'pipeline')?.source).toBe('early');
+  });
+
+  it('carries the early seat on the fallback path too, not just the model one', async () => {
+    (mocks.runStructuredCompletion as Mock).mockRejectedValue(new Error('down'));
+
+    const result = await planScope(
+      params({
+        preSeated: [seat('pipeline')],
+        settings: settings({ fallbackTopicKeys: ['talent'] }),
+      })
+    );
+
+    // An early seat suppresses the fallback rather than being padded by it: the seat is a
+    // judgement on real evidence, and the fallback's precondition is that there was none.
+    expect(result.plan.topics.map((t) => t.key)).toContain('pipeline');
+  });
+});
+
 describe('planScope — every way the model call can fail', () => {
   const fallback = settings({ fallbackTopicKeys: ['talent'] });
 

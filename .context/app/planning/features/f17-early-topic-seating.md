@@ -2,10 +2,10 @@
 feature: F17.36
 title: Early topic seating — deciding during the opening, not only at the end of it
 phase: P17 — Conditional Topics
-status: phases 1–4 SHIPPED (2026-09-02). Phases 5–6 proposed; §16 settled below
+status: SHIPPED (2026-09-02). All five phases landed and the goal of this spec is delivered; §15 records the decisions taken
 owner: TBD
 opened: 2026-09-02
-revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added; §16 settled and phases 1+2 built)
+revised: 2026-09-02 (hard rules DELETED rather than repaired; per-turn decision cap added; decisions settled and phases 1+2 built); 2026-09-03 (closed out at phase 5; the suspend-and-restore material removed, since the tier was deleted and nothing is pending on it)
 docs: .context/app/questionnaire/conditional-topics.md
 supersedes-in-part: .context/app/planning/features/f17-mid-interview-triggers.md (§6.2, "no plan exists")
 evidence: session CPY3-1C6S (Growth Assessor Lead-Gen, version cmthh70e40009ym5ngmdu8veo)
@@ -74,9 +74,6 @@ Load-bearing. These are the line between a tuning knob and a re-planning engine.
    source and turn, so a finished report is still reproducible from the record.
 3. **Breadth is one budget.** Early seats consume `maxConditionalTopics`. The two sub-caps in §7 bound
    how much of it partial information may spend, and how much any single turn may spend.
-4. **Suspension is never silent.** While hard rules are suspended (§5), any version that carries one
-   must be told so, on every surface that shows routing. This codebase has already paid once for a
-   configured feature that was quietly inert.
 
 ## 4. Readiness — how much of the opening is in
 
@@ -125,40 +122,17 @@ the sole reason the opening gate has to be all-or-nothing: `not_exists` matches 
 evaluating rules over an incomplete opening fires every veto an author wrote, for every respondent,
 in a plan that looks entirely reasonable.
 
-Repairing that operator is real work (§13). Suspending the tier removes the hazard outright and costs
-nothing measurable: one rule exists, on a draft questionnaire, with no real sessions (§1).
-
-### What suspension means precisely
-
-- `evaluateScopeRules` returns no decisions while suspended. A module-level constant in
-  `scope/constants.ts`, not a per-version setting: this is a product state, and making it a setting
-  would add a descriptor, a `<FieldHelp>`, a pack row and a support question for a switch nobody
-  should be flipping per questionnaire.
-- **Stored rules are never deleted.** `conditionalTopics.rules` keeps whatever it holds. Restoring
-  is a one-line change, not a data recovery.
-- **The tiers collapse to two**: judgement, then guardrails. `applyGuardrails` no longer seats
-  rule-includes before the cap, so the cap applies purely to the model's picks. This simplifies the
-  guardrail order rather than changing its intent.
-- **Everything that authors or displays a rule must say it is inactive.** The Conditional topics tab,
-  the Routing Analyst's proposals (`ProposedScopeRule`), the routing map, the session viewer, the
-  Questionnaire Pack, and the judge panel. An admin who accepts an analyst-proposed rule while
-  suspension is on has configured something that does nothing, which is exactly the failure this
-  codebase already shipped once with the master switch.
-- **The Routing Analyst should stop proposing rules** while suspended, or propose them explicitly
-  marked as recorded-not-run, the way F17.31a already handles a recorded trigger. Prefer the latter:
-  it keeps the analyst's reading of the document intact for when the tier returns.
-- **`validate.ts` raises `hard_rules_suspended`** on any version carrying a rule. Advisory, not
-  blocking.
+Deleting the tier removed that hazard outright and cost nothing measurable: one rule existed, on a
+draft questionnaire, with no real sessions (§1). The tiers collapse to two, judgement then
+guardrails, and the cap applies purely to the model's picks.
 
 ### What is genuinely lost
 
 An author loses the ability to express certainty. Everything becomes judgement, including the cases
-the documentation argues are the most valuable ones ("never score them on AI readiness when they
-never named an outcome"). While suspended, such a constraint can only be written as prose criteria,
-which is precisely the failure hard rules exist to prevent: a constraint obeyed most of the time.
-
-That is an acceptable trade at one draft rule and zero fielded sessions. It stops being acceptable
-the moment a client needs a veto, which is the trigger to do §13.
+the old documentation argued were the most valuable ("never score them on AI readiness when they
+never named an outcome"). Such a constraint can now only be written as prose criteria, which is a
+weaker thing: a constraint obeyed most of the time. That is an acceptable trade at one draft rule
+and zero fielded sessions, and it is the cost to weigh if a client ever asks for a veto.
 
 ## 6. Force-closing the opening
 
@@ -167,8 +141,8 @@ still incomplete, it is declared closed and the final planner runs on what there
 
 - It covers the question half of the gate, which has no parking equivalent (§1).
 - It is what stops a badly-structured instrument stalling in silence.
-- With hard rules suspended it needs no prerequisite work. It was §5's abstain rule that made this
-  expensive; suspension makes it cheap.
+- With the tier gone it needs no prerequisite work. Evaluating rules over an incomplete opening was
+  what made this expensive; deleting them makes it cheap.
 - The plan records `forcedClose: true` and the uncovered members, so the session viewer and routing
   analytics can tell a forced plan from a considered one, and an admin gets told the instrument has a
   problem.
@@ -352,9 +326,6 @@ final planner would also have chosen is a planner success; one it would not have
 counting them together would make the planner look better the more aggressively the floor was tuned.
 The same rule `amendments` already follows, for the same reason.
 
-Routing quality reporting must also state that hard rules were suspended for any session it covers, so
-a run is never compared against one made under a different tier structure.
-
 ## 12. Validation
 
 New checks in `scope/validate.ts`:
@@ -363,50 +334,33 @@ New checks in `scope/validate.ts`:
   case, caught at authoring time instead of as a silently unplanned interview. Heuristics: a question
   slot whose prompt contains no question, a data slot whose description describes the interview's own
   behaviour rather than a respondent fact. Advisory warnings, not blockers.
-- `hard_rules_suspended` — the version carries rules and the tier is off (§5).
 - `early_confidence_below_floor` — `earlySeatingMinConfidence` below `minConfidence`, which would make
   early seating less careful than the final planner.
 - `cap_hierarchy_inverted` — an inner cap exceeds an outer one (§7).
 - `early_seating_without_conditional_topics` — the switch on with nothing it could ever seat.
 
-## 13. Restoring hard rules
-
-Suspension is temporary, and this is the condition for lifting it: **`not_exists` must abstain on
-what was never asked.**
-
-An unfilled slot that was put to the respondent is evidence of absence. An unfilled slot that was
-never put to them is evidence of nothing. "Asked" is derivable from `AppQuestionnaireTurn.targetedDataSlotId`,
-which `scope/probe.ts` already reads for this kind of arithmetic. `evaluateScopeRules` gains an
-optional `askedDataSlotKeys` set: omitted, behaviour is exactly as today, which is what the authoring
-dry-run and `topics/preview` need since they have no session.
-
-With that in place, rules can be evaluated at any point in an interview without the veto misfire, and
-the tier can come back on with early seating intact. Until a client actually needs a veto, this is
-deferred work rather than pending work.
-
-## 14. Amendment to F17.31
+## 13. Amendment to F17.31
 
 F17.31 §6.2 tier 2 skips when no plan exists, so document triggers cannot fire during the opening
 either. Once `earlySeatedTopics` exists there is somewhere for a mid-opening firing to land, and that
 restriction should be lifted in the same phase that builds F17.31(b). Recorded here so the two specs do
 not drift; nothing in this spec depends on F17.31 shipping.
 
-## 15. Phasing
+## 14. Phasing
 
-| Phase | Scope                                                                                                              | Ships behaviour?                 |
-| ----- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
-| **1** | ~~§5 hard rules~~ (deleted, not suspended) + §6 `maxOpeningTurns` + §12 `opening_member_uncoverable` — **SHIPPED** | Yes: fixes the stall class       |
-| **2** | §4 readiness module, `isOpeningComplete` rewired as a wrapper — **SHIPPED**                                        | No: pure, no behaviour change    |
-| **3** | ~~§7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks~~ — **SHIPPED**   | Yes, behind a default-off switch |
-| **4** | ~~§9 lever 3: orchestrator bridge to a seated topic~~ — **SHIPPED**                                                | Yes, own sign-off                |
-| **5** | ~~§10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`~~ — **SHIPPED**                             | Surfaces                         |
-| **6** | §13 restore hard rules, when a client needs one                                                                    | Deferred, not pending            |
+| Phase | Scope                                                                                                            | Ships behaviour?                 |
+| ----- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| **1** | ~~§5 hard rules~~ (deleted) + §6 `maxOpeningTurns` + §12 `opening_member_uncoverable` — **SHIPPED**              | Yes: fixes the stall class       |
+| **2** | §4 readiness module, `isOpeningComplete` rewired as a wrapper — **SHIPPED**                                      | No: pure, no behaviour change    |
+| **3** | ~~§7 settings + §8 column, pure module, trigger, `'early'` source, cap hierarchy, deferred picks~~ — **SHIPPED** | Yes, behind a default-off switch |
+| **4** | ~~§9 lever 3: orchestrator bridge to a seated topic~~ — **SHIPPED**                                              | Yes, own sign-off                |
+| **5** | ~~§10 announcement, §11 analytics, session viewer, pack, `<FieldHelp>`~~ — **SHIPPED**                           | Surfaces                         |
 
 **Migration note.** Phase 3 adds one nullable column to an app-tier table: generate with
 `--create-only` and strip the phantom pgvector DDL before applying, or `migrate dev` will spawn a
 DROP-INDEX migration over the platform's five vector indexes. Verify the indexes afterwards.
 
-## 16. Decisions — settled 2026-09-02
+## 15. Decisions — settled 2026-09-02
 
 All six were taken as recommended.
 
@@ -439,17 +393,13 @@ All six were taken as recommended.
   Topics route supplies. Advisory warning; two conservative heuristics, both documented at the
   call site.
 
-**Not shipped in phases 1–2, and deliberately:** §5's "say it is inactive" surfaces are moot — hard
-rules were deleted rather than suspended, so there is no inactive tier to announce and no
-`hard_rules_suspended` check.
-
 ### What phase 3 shipped
 
 - **Schema.** `AppQuestionnaireSession.earlySeatedTopics Json?`, migration
   `20260902211549_app_early_seated_topics`. Generated `--create-only`, the five phantom pgvector
   `DROP INDEX` statements and the `searchVector` `DROP DEFAULT` stripped by hand, applied via
   `migrate deploy`, all five vector indexes verified present afterwards.
-- **Five settings** (not six — see §16.5): `earlyTopicSeating`, `earlySeatingFloor`,
+- **Five settings** (not six — see §15.5): `earlyTopicSeating`, `earlySeatingFloor`,
   `earlySeatingMinConfidence`, `maxEarlySeatedTopics`, `maxRoutingDecisionsPerTurn`. Every default
   reproduces today's behaviour. Carried through the Zod patch schema, `SETTING_DESCRIPTORS`, the
   Questionnaire Pack, and a new step 3 on the Conditional topics card with a `<FieldHelp>` on each.
@@ -542,18 +492,12 @@ when**.
   is on. Same rule as `bridgeToSeatedTopics`: a row saying "No" beside a feature nobody enabled reads
   as a silence the author chose.
 
-**Not shipped, and deliberately:** nothing in §11 about hard rules being suspended. They were deleted
-in phase 1 rather than suspended, so there is no tier structure for a routing-quality run to be
-compared across.
+## 16. Risks
 
-## 17. Risks
-
-| Risk                                                                    | Mitigation                                                                                            |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Early seat on thin evidence produces a worse interview than waiting     | Floor excludes parks; confidence bar defaults above `minConfidence`; both sub-caps default to 1.      |
-| Cost of per-turn evaluation during the opening                          | Evidence-change gate removes most turns before any call; tier 0 drains deferred picks free.           |
-| Suspending hard rules loses an author's ability to state a certainty    | One draft rule, zero fielded sessions (§1). §13 is the restore path and its trigger is named.         |
-| A suspended rule is mistaken for a working one                          | Invariant 4: every authoring and reporting surface says it is inactive; `hard_rules_suspended` check. |
-| `maxRoutingDecisionsPerTurn` silently truncates a good multi-topic read | Deferred picks (§8.1 tier 0) drain rather than discard, and over-cap passes are recorded.             |
-| It becomes a general re-planning engine by increments                   | §3 is the line. Any request to remove, re-rank or re-plan is a different spec.                        |
-| Lever 3 makes interviews feel scattered                                 | Own phase, own sign-off, measured against the current arc before default-on.                          |
+| Risk                                                                    | Mitigation                                                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Early seat on thin evidence produces a worse interview than waiting     | Floor excludes parks; confidence bar defaults above `minConfidence`; both sub-caps default to 1. |
+| Cost of per-turn evaluation during the opening                          | Evidence-change gate removes most turns before any call; tier 0 drains deferred picks free.      |
+| `maxRoutingDecisionsPerTurn` silently truncates a good multi-topic read | Deferred picks (§8.1 tier 0) drain rather than discard, and over-cap passes are recorded.        |
+| It becomes a general re-planning engine by increments                   | §3 is the line. Any request to remove, re-rank or re-plan is a different spec.                   |
+| Lever 3 makes interviews feel scattered                                 | Own phase, own sign-off, measured against the current arc before default-on.                     |

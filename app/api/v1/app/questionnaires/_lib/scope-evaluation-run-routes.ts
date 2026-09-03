@@ -177,13 +177,31 @@ export function scopeEffectiveOp(
   return coerceScopeProposedEdit(row.editedOverride) ?? coerceScopeProposedEdit(row.proposedEdit);
 }
 
+/**
+ * Does this row's dimension still exist?
+ *
+ * `dimension` is a plain `String` column, so a stored value outlives the enum. F17.36 deleted the
+ * hard-rules tier and `rule_integrity` with it, leaving real rows behind — and every consumer
+ * indexes `SCOPE_EVALUATION_DIMENSION_SPECS` by this value, so an unresolvable one is not a
+ * cosmetic gap: it throws on `.label` and takes the Conditional Topics tab and the pack export
+ * down with it.
+ *
+ * Dropped rather than defaulted. A finding about a tier that no longer exists cannot be acted on
+ * either — the `add_rule` / `edit_rule` / `delete_rule` ops it proposes went with the tier — so
+ * filing it under a surviving dimension would put an unfixable row in front of an admin under a
+ * heading it does not belong to. Read-path only: the rows are left exactly as they are.
+ */
+function isLiveDimension(dimension: string): dimension is ScopeEvaluationDimension {
+  return (SCOPE_EVALUATION_DIMENSIONS as readonly string[]).includes(dimension);
+}
+
 /** A persisted finding row → client-safe view (target/stale left for the structure-carrying paths). */
 function toFindingView(row: ScopeFindingRow): ScopeEvaluationFindingView {
   const proposedEdit = coerceScopeProposedEdit(row.proposedEdit);
   const editedOverride = coerceScopeProposedEdit(row.editedOverride);
   return {
     id: row.id,
-    dimension: row.dimension as ScopeEvaluationDimension,
+    dimension: narrowToEnum(row.dimension, SCOPE_EVALUATION_DIMENSIONS, 'criteria_quality'),
     ordinal: row.ordinal,
     targetKey: row.targetKey,
     severity: row.severity as ScopeEvaluationFindingView['severity'],
@@ -441,19 +459,21 @@ export async function getScopeEvaluationRunDetail(
 
   const snapshot = parseScopeStructureSnapshot(row.scopeSnapshot, row.id);
   const current = await loadCurrentStructureSafe(row.questionnaireId, versionId);
-  const findings = row.findings.map((f) => {
-    const view = toFindingView(f);
-    const target = resolveScopeFindingTarget(view.targetKey, current, snapshot);
-    if (!current || view.status === 'applied' || view.status === 'declined') {
-      return { ...view, target };
-    }
-    const derived = deriveScopeFindingState(
-      { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
-      snapshot,
-      current
-    );
-    return { ...view, stale: derived.stale, applicable: derived.applicable, target };
-  });
+  const findings = row.findings
+    .filter((f) => isLiveDimension(f.dimension))
+    .map((f) => {
+      const view = toFindingView(f);
+      const target = resolveScopeFindingTarget(view.targetKey, current, snapshot);
+      if (!current || view.status === 'applied' || view.status === 'declined') {
+        return { ...view, target };
+      }
+      const derived = deriveScopeFindingState(
+        { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
+        snapshot,
+        current
+      );
+      return { ...view, stale: derived.stale, applicable: derived.applicable, target };
+    });
 
   return {
     ...toRunListItem(row),

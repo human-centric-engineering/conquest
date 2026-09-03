@@ -189,7 +189,7 @@ export interface PreviewFillTarget {
 export interface PlanPreviewForm {
   /** The opening topics' questions, in ordinal order. Empty when no opening topic is authored. */
   openingQuestions: PreviewOpeningQuestion[];
-  /** Every data slot in the version, with the veto-watched ones marked. */
+  /** Every data slot in the version, each as key and display name. */
   fillTargets: PreviewFillTarget[];
 }
 

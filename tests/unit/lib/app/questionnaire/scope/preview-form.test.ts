@@ -6,14 +6,15 @@
  * 1. **Which boxes to offer.** The preview is only faithful if the questions it asks the author to
  *    answer are the ones a respondent would actually be asked before the plan is decided — the
  *    opening topics' questions, in interview order, and nothing else.
- * 2. **Which slots a veto watches.** A `not_exists` rule fires on ABSENCE, so the demonstration an
- *    author most needs is "leave this empty and watch the topic drop". If the marking is wrong they
- *    fill every box out of tidiness and never see the rule fire.
+ * 2. **Which slots to offer a value for.** The planner reads the opening's data slots, so a dry-run
+ *    that offered the wrong ones would demonstrate a decision made on evidence the real interview
+ *    never collects. Each slot arrives as key plus display name, and every one may be left empty:
+ *    an author's most useful experiment is watching what the planner does with less.
  */
 
 import { describe, it, expect } from 'vitest';
 
-import { buildPlanPreviewForm } from '@/lib/app/questionnaire/scope/views';
+import { buildPlanPreviewForm, type TopicDataSlotRef } from '@/lib/app/questionnaire/scope/views';
 import { readProposedTopicKeys } from '@/lib/app/questionnaire/scope/planner';
 import { type Topic, type TopicPhase } from '@/lib/app/questionnaire/scope/types';
 
@@ -38,6 +39,11 @@ const PROMPTS = new Map([
   ['open_b', 'What is making it hard?'],
   ['core_a', 'Rate your confidence'],
 ]);
+
+/** One data slot as the topics payload carries it — the builder reads key and name from it. */
+function slotRef(key: string, name: string): TopicDataSlotRef {
+  return { key, name, theme: 'general', estimatedSeconds: 30, weight: 1 };
+}
 
 describe('buildPlanPreviewForm — which boxes the author is offered', () => {
   it('offers the opening topics questions and nothing from other phases', () => {
@@ -92,6 +98,31 @@ describe('buildPlanPreviewForm — which boxes the author is offered', () => {
 
     expect(form.openingQuestions).toEqual([]);
   });
+
+  it('offers every data slot in the version as a fill target, by key and display name', () => {
+    // The second half of the form, and the half the author actually experiments with: the planner
+    // reads these, so a dry-run missing one demonstrates a decision made on evidence the real
+    // interview would have had.
+    const form = buildPlanPreviewForm(
+      [topic('open', 'opening', ['open_a'], 0)],
+      [slotRef('situation', 'Current situation'), slotRef('goals', 'Goals')],
+      PROMPTS
+    );
+
+    expect(form.fillTargets).toEqual([
+      { key: 'situation', name: 'Current situation' },
+      { key: 'goals', name: 'Goals' },
+    ]);
+  });
+
+  it('offers no fill targets when the version has no data slots', () => {
+    // Not an error state: a questions-only instrument has a perfectly good preview, and the form
+    // must render the opening's questions rather than refusing because one half is empty.
+    const form = buildPlanPreviewForm([topic('open', 'opening', ['open_a'], 0)], [], PROMPTS);
+
+    expect(form.fillTargets).toEqual([]);
+    expect(form.openingQuestions.map((q) => q.key)).toEqual(['open_a']);
+  });
 });
 
 describe('readProposedTopicKeys — reading a recorded snapshot back', () => {
@@ -109,7 +140,7 @@ describe('readProposedTopicKeys — reading a recorded snapshot back', () => {
   });
 
   it('reads null as "the model proposed nothing" rather than throwing', () => {
-    // Every deterministic path — a rule-only plan, the fallback, nothing to decide — records a null
+    // Every deterministic path — a plan with nothing to decide, the fallback, nothing to decide — records a null
     // snapshot. The preview asks for the proposal on all of them.
     expect(readProposedTopicKeys(null)).toEqual([]);
   });

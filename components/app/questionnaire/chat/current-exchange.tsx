@@ -196,7 +196,16 @@ export function CurrentExchange({
         if (i < historyEnd) return null;
         // P21: said in another section. Skipped by index rather than filtered out of the array, so
         // the reveal cursor keeps indexing the same turns it always did.
-        if (!turnInSection(turn, sectionKey, untaggedSectionKey)) return null;
+        //
+        // Clamped to turns the queue has already passed, for the same reason `historyEnd` is
+        // clamped: unmounting the turn the cursor is ON would take its `onDone` with it,
+        // `advanceReveal` would never fire, and `composerReady` would stay false for the rest of
+        // the session — a composer shut for good with nothing on screen to explain it. The window
+        // is real, because the section control opens on `canSend`, which is true a beat before the
+        // reply has finished typing. So a turn from another section that is still revealing simply
+        // finishes, exactly as one crossing the history boundary does, and disappears on the next
+        // render once the cursor is past it.
+        if (i < revealCursor && !turnInSection(turn, sectionKey, untaggedSectionKey)) return null;
         if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
 
         // Reveal queue. Turns past the cursor stay hidden until the queue reaches them, so a

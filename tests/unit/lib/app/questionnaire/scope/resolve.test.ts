@@ -447,9 +447,11 @@ describe('early seats (F17.36)', () => {
     expect(isQuestionInScope(scope, 'cond_b_q1')).toBe(false);
   });
 
-  it('marks the seat with the `early` source, never `llm`', () => {
-    // Routing analytics must be able to tell an early seat from a planner pick. Folding them
-    // together would make the planner look better the harder the floor was tuned.
+  it('defaults an unqualified seat to full depth', () => {
+    // `ResolvedScope` carries no per-topic source, deliberately: it answers "what is in scope and
+    // how deeply", not "who decided". Telling an early seat from a planner pick is the plan's job,
+    // and that contract is proven where it lives, in guardrails.test.ts ("does not double-seat a
+    // topic the model also proposed"). What resolution owes the seat is its depth.
     const scope = resolveScope({
       topics: TOPICS,
       plan: null,

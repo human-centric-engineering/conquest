@@ -1379,12 +1379,12 @@ export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = 
       dimension: {
         type: 'string',
         description:
-          'Which dimension to judge: criteria_quality | rule_integrity | budget_realism | coverage_and_burden.',
+          'Which dimension to judge: criteria_quality | budget_realism | coverage_and_burden.',
       },
       structure: {
         type: 'object',
         description:
-          'The scope structure DTO to judge — { topics[], rules[], settings, costs, knownIssues[] }.',
+          'The scope structure DTO to judge — { topics[], settings, costs, knownIssues[] }.',
         additionalProperties: true,
       },
       versionId: {

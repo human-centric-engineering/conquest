@@ -274,6 +274,30 @@ describe('sectioned interviews: the conversation belongs to the section it was s
     ).toBeInTheDocument();
   });
 
+  it('does not unmount the turn the reveal queue is still typing', () => {
+    // The composer-shut-for-good bug, arriving by a second door. `historyEnd` is clamped to the
+    // reveal cursor precisely so a turn mid-typewriter cannot be moved out from under itself: its
+    // `onDone` is the only caller of `advanceReveal`, so unmounting it strands the cursor and
+    // `composerReady` stays false for the rest of the session.
+    //
+    // A section move opens the same door, because the section control is enabled on `canSend` —
+    // true a beat before the reply has finished revealing. With `animateOpening` on, the queue
+    // starts at 0 and the first turn is the one being typed; showing a DIFFERENT section must
+    // still leave it mounted.
+    const twoSections: QuestionnaireTurn[] = [
+      { role: 'assistant', content: 'The reply still typing itself in.', sectionKey: 's1' },
+      { role: 'assistant', content: 'Where do you want to grow?', sectionKey: 's2' },
+    ];
+
+    renderSplit(twoSections, true, {}, 's2');
+
+    // Still mounted despite belonging to s1: it is at the cursor, and it has to be allowed to
+    // finish. Asserted on the opening beat rather than the typed text, because the beat IS the
+    // window the bug lived in — the section control is enabled throughout it, and a turn skipped
+    // here renders nothing at all, so its indicator is absent and `onDone` never comes.
+    expect(screen.getByText('Thinking…')).toBeInTheDocument();
+  });
+
   it('keeps a turn carrying no section key, whichever section is being shown', () => {
     // Recorded before P21, or before this session was sectioned. Hiding it would make the
     // transcript lie about what was said.

@@ -388,4 +388,256 @@ describe('maybeSeatEarlyTopics — seating', () => {
       reason: 'early seating failed',
     });
   });
+
+  it('never throws when the rejection is not an Error either', async () => {
+    // The catch formats with `err instanceof Error ? err.message : String(err)`. A driver that
+    // rejects with a bare string is the case that arm exists for, and getting it wrong turns the
+    // fail-soft skip into a throw inside the handler that was meant to absorb it.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockRejectedValue('db is down');
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'early seating failed',
+    });
+  });
+
+  it('records nothing when the judgement came back without a prompt', async () => {
+    // `judgeEarlySeating` never throws; every one of its failure paths resolves to a result with a
+    // null snapshot. That null is the only thing telling the trigger no model was actually asked,
+    // and recording a run anyway would put a row in the audit trail with no prompt to read.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(ready());
+    mocks.judgeEarlySeating.mockResolvedValue({
+      judgements: [],
+      costUsd: 0,
+      provider: null,
+      model: null,
+      promptSnapshot: null,
+      outputSnapshot: null,
+    });
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'nothing was clear enough to seat',
+    });
+    expect(mocks.recordAiRun).not.toHaveBeenCalled();
+    // The pass still happened, so the record is still written: that is what stamps the evidence
+    // key and stops the next turn paying for the same question over the same evidence.
+    expect(mocks.prisma.appQuestionnaireSession.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the provider as deterministic when a judgement carried none', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(ready());
+    mocks.judgeEarlySeating.mockResolvedValue({
+      ...judged(['pipeline', 0.94]),
+      provider: null,
+      model: null,
+    });
+
+    await maybeSeatEarlyTopics('s1');
+
+    // `AppAiRun.provider` and `.model` are not nullable, and a run that happened is worth more in
+    // the record under a placeholder than absent because a field was missing.
+    expect(mocks.recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'deterministic', model: 'deterministic' })
+    );
+  });
+
+  it('records what the per-turn cap deferred, not just what it took', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      ready({ settings: { maxEarlySeatedTopics: 2, maxRoutingDecisionsPerTurn: 1 } })
+    );
+    mocks.judgeEarlySeating.mockResolvedValue(judged(['pipeline', 0.94], ['forecast', 0.93]));
+
+    await maybeSeatEarlyTopics('s1');
+
+    // A cap that quietly discards decisions reads afterwards as "the planner only found one area"
+    // when it found two.
+    expect(mocks.recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: expect.objectContaining({ deferred: ['forecast'], overCap: true }),
+      })
+    );
+  });
+
+  it('does not drain into a plan that was sealed first', async () => {
+    // The same `interviewPlan: null` guard as the judged path, on tier 0 — which reaches the write
+    // by a different route and would otherwise widen an already-announced interview for free.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      ready({
+        earlySeatedTopics: {
+          v: 1,
+          seated: [],
+          deferred: [
+            {
+              key: 'forecast',
+              depth: 'full',
+              confidence: 0.95,
+              rationale: 'r',
+              respondentReason: 'rr',
+              atTurn: 2,
+            },
+          ],
+          lastPassAtTurn: 2,
+          evidenceKey: 'stale',
+          overCap: true,
+        },
+      })
+    );
+    mocks.prisma.appQuestionnaireSession.updateMany.mockResolvedValue({ count: 0 });
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'the plan was sealed first',
+    });
+    expect(mocks.judgeEarlySeating).not.toHaveBeenCalled();
+  });
+});
+
+describe('maybeSeatEarlyTopics — the reads it refuses to go past', () => {
+  it('skips a session that no longer exists', async () => {
+    // The trigger runs after the turn is persisted, so the session can have been erased under it.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(null);
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'session not found',
+    });
+    expect(mocks.prisma.appQuestionnaireTopic.findMany).not.toHaveBeenCalled();
+  });
+
+  it('stands down when Conditional Topics itself is off, before the early switch is even read', async () => {
+    // Two separate switches, and this is the outer one. A version with the whole feature off must
+    // never pay the topic query, whatever `earlyTopicSeating` happens to say.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ settings: { enabled: false, earlyTopicSeating: true } })
+    );
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'conditional topics is off',
+    });
+    expect(mocks.prisma.appQuestionnaireTopic.findMany).not.toHaveBeenCalled();
+  });
+
+  it('stands down when the version has no topics authored at all', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1'], fills: ['situation'] })
+    );
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([]);
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'no topics authored',
+    });
+    expect(mocks.judgeEarlySeating).not.toHaveBeenCalled();
+  });
+
+  it('stands down when every conditional topic is already seated', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({
+        answers: ['q1'],
+        fills: ['situation'],
+        settings: { maxEarlySeatedTopics: 3, maxRoutingDecisionsPerTurn: 3 },
+        earlySeatedTopics: {
+          v: 1,
+          seated: [
+            {
+              key: 'pipeline',
+              depth: 'full',
+              confidence: 0.9,
+              rationale: 'r',
+              respondentReason: 'rr',
+              atTurn: 1,
+            },
+            {
+              key: 'forecast',
+              depth: 'full',
+              confidence: 0.9,
+              rationale: 'r',
+              respondentReason: 'rr',
+              atTurn: 1,
+            },
+          ],
+          deferred: [],
+          lastPassAtTurn: 1,
+          evidenceKey: 'stale',
+          overCap: false,
+        },
+      })
+    );
+
+    expect(await maybeSeatEarlyTopics('s1')).toEqual({
+      kind: 'skipped',
+      reason: 'no eligible candidates',
+    });
+    // Re-judging a topic the interview is already asking about is spend for a decision that has
+    // already been taken.
+    expect(mocks.judgeEarlySeating).not.toHaveBeenCalled();
+  });
+
+  it('skips the question-inventory query when no opening topic names a question', async () => {
+    // A data-slot-only opening has no question half to measure, and the inventory read exists only
+    // to drop member keys that no longer resolve.
+    // One of the two slots given: over the 50% floor, and short of a complete opening — which
+    // would hand the turn to the planner instead.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ fills: ['situation'] })
+    );
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { dataSlotKeys: ['situation', 'goals'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.judgeEarlySeating.mockResolvedValue(judged(['pipeline', 0.94]));
+
+    const result = await maybeSeatEarlyTopics('s1');
+
+    expect(result.kind).toBe('seated');
+    expect(mocks.prisma.appQuestionSlot.findMany).not.toHaveBeenCalled();
+  });
+
+  it('reads a low-confidence direct fill as given, and a parked one as still outstanding', async () => {
+    // The two arms of the fill split, and the whole reason the floor and the seal gate disagree.
+    // A park is a best-effort inference the interviewer gave up on; a direct fill is what the
+    // respondent actually said, whatever the extractor scored it.
+    // A five-member opening, so counting the park still leaves it unfinished. Were it complete,
+    // the gate would hand the turn straight to the planner and never reach the judgement.
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', {
+        questionKeys: ['q1', 'q2'],
+        dataSlotKeys: ['situation', 'goals', 'challenges'],
+      }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+      topicRow('forecast', 'conditional', { questionKeys: ['f1'] }),
+    ]);
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue({
+      ...session({ answers: ['q1', 'q2'] }),
+      dataSlotFills: [
+        {
+          confidence: 0.05,
+          value: 'they said it plainly',
+          paraphrase: null,
+          provisional: false,
+          provenanceLabel: 'direct',
+          dataSlot: { key: 'situation' },
+        },
+        {
+          confidence: 0.2,
+          value: 'best guess',
+          paraphrase: null,
+          provisional: true,
+          provenanceLabel: 'inferred',
+          dataSlot: { key: 'goals' },
+        },
+      ],
+    });
+    mocks.judgeEarlySeating.mockResolvedValue(judged(['pipeline', 0.94]));
+
+    await maybeSeatEarlyTopics('s1');
+
+    // Three of five opening members given (q1, q2, the direct fill). The park is not one of them,
+    // and the untouched slot is not either: 60%.
+    expect(mocks.judgeEarlySeating).toHaveBeenCalledWith(
+      expect.objectContaining({ coveragePct: 60 })
+    );
+  });
 });

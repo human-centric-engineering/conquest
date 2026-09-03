@@ -39,6 +39,7 @@
 
 import {
   EARLY_SEATING_CADENCE_TURNS,
+  EVIDENCE_KEY_MAX_LENGTH,
   MAX_DEFERRED_EARLY_PICKS,
   type ConditionalTopicsSettings,
   type EarlySeat,
@@ -82,7 +83,10 @@ export function evidenceKeyOf(
 ): string {
   const f = [...new Set(fills.map((x) => x.key))].sort();
   const a = [...new Set(answeredQuestionKeys)].sort();
-  return `${f.length}:${a.length}:${f.join(',')}|${a.join(',')}`;
+  // Truncated to the SAME cap the read applies, or the two never compare equal and the gate this
+  // whole function exists to serve can never fire. Counts lead, so a cut tail cannot hide a member
+  // arriving or leaving — which is the change that most needs to move the key.
+  return `${f.length}:${a.length}:${f.join(',')}|${a.join(',')}`.slice(0, EVIDENCE_KEY_MAX_LENGTH);
 }
 
 /* -------------------------------------------------------------------------- */

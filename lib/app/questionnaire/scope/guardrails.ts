@@ -414,9 +414,24 @@ function fitToBudget(args: {
   };
 
   while (plannedSeconds(planned, budget.costs, exact) + reserveForCheck() > allowance) {
-    // The lowest-ranked seated topic: the last thing seated, which is the planner's own least
-    // confident pick, or the last fallback.
-    const index = planned.length - 1;
+    // The lowest-ranked DROPPABLE topic: the last thing seated, which is the planner's own least
+    // confident pick, or the last fallback. An early seat (F17.36) is stepped over rather than
+    // ending the search, the way a rule-seated topic used to be, and for a stronger reason than
+    // the author's instruction: the respondent has already spent turns on it.
+    //
+    // Dropping one would not even save the time. `resolveScope` seeds its planned map from
+    // `earlySeated.seated` independently of the plan, so a seat moved into `excluded` here is
+    // still asked — leaving a plan that claims an area was not assessed while the interview goes
+    // on assessing it, which is precisely the report the invariant exists to prevent.
+    let index = -1;
+    for (let i = planned.length - 1; i >= 0; i -= 1) {
+      if (planned[i]?.source !== 'early') {
+        index = i;
+        break;
+      }
+    }
+    // Nothing left that may be dropped: the early seats alone are over budget. The interview runs
+    // long, which is the honest outcome — the time is already spent.
     if (index < 0) break;
 
     const [removed] = planned.splice(index, 1);

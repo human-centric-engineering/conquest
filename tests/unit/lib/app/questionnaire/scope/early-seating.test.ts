@@ -12,6 +12,9 @@ import {
 } from '@/lib/app/questionnaire/scope/early-seating';
 import {
   DEFAULT_CONDITIONAL_TOPICS_SETTINGS,
+  EARLY_SEATING_CADENCE_TURNS,
+  EVIDENCE_KEY_MAX_LENGTH,
+  narrowEarlySeating,
   type ConditionalTopicsSettings,
   type EarlySeating,
   type InterviewPlan,
@@ -112,6 +115,56 @@ describe('evidenceKeyOf', () => {
   });
 });
 
+describe('evidenceKeyOf — the round trip through the stored row', () => {
+  /** A realistically-sized opening: eight data slots and five questions, authored key names. */
+  const FILLS = [
+    'current_situation',
+    'primary_goals',
+    'main_challenges',
+    'business_impact',
+    'decision_timeline',
+    'budget_range',
+    'team_structure',
+    'existing_tooling',
+  ].map((key) => ({ key, value: null, paraphrase: null }));
+  const ANSWERS = ['q_role_title', 'q_team_size', 'q_sector', 'q_tenure_years', 'q_reporting_line'];
+
+  it('survives being written and read back, at a size a real opening reaches', () => {
+    // The gate is an EQUALITY test between a freshly computed key and one that has been through
+    // the Json column. The read caps the string, so a writer that did not cap it identically
+    // produced a stored value that could never match — and the "nothing new was said" gate, the
+    // one condition meant to remove most turns, would never fire once an opening got big enough.
+    const fresh = evidenceKeyOf(FILLS, ANSWERS);
+    const stored = narrowEarlySeating({
+      ...emptyEarlySeating(),
+      evidenceKey: fresh,
+    })?.evidenceKey;
+
+    expect(stored).toBe(fresh);
+  });
+
+  it('is bounded, so one enormous opening cannot write an unbounded cell', () => {
+    const huge = evidenceKeyOf(
+      Array.from({ length: 200 }, (_, i) => ({ key: `slot_${i}`, value: null, paraphrase: null })),
+      Array.from({ length: 200 }, (_, i) => `question_${i}`)
+    );
+
+    expect(huge.length).toBeLessThanOrEqual(EVIDENCE_KEY_MAX_LENGTH);
+  });
+
+  it('still moves when a member arrives, even at a length that truncates', () => {
+    // Why the counts lead the string: the tail is what gets cut, so the part that always changes
+    // has to sit at the front.
+    const before = evidenceKeyOf(FILLS, ANSWERS);
+    const after = evidenceKeyOf(
+      [...FILLS, { key: 'zz_late', value: null, paraphrase: null }],
+      ANSWERS
+    );
+
+    expect(after).not.toBe(before);
+  });
+});
+
 describe('earlySeatingGate', () => {
   it('stops on the two switches, cheapest first', () => {
     expect(earlySeatingGate(gateInput({ settings: settings({ enabled: false }) }))).toEqual({
@@ -146,6 +199,22 @@ describe('earlySeatingGate', () => {
         gateInput({ readiness: readiness(0.5), settings: settings({ earlySeatingFloor: 0.6 }) })
       )
     ).toEqual({ kind: 'stop', reason: 'below the opening-coverage floor' });
+  });
+
+  it('stops when the pass is not due this turn yet', () => {
+    // The cadence gate, checked BEFORE the evidence check and after the floor. It is what stops a
+    // respondent who is answering quickly from buying a judge call on consecutive turns; without
+    // it the evidence check alone would let every turn that added a fill pay for one.
+    const early: EarlySeating = { ...emptyEarlySeating(), lastPassAtTurn: 5, evidenceKey: 'old' };
+
+    expect(
+      earlySeatingGate(gateInput({ early, turnCount: 5 + EARLY_SEATING_CADENCE_TURNS - 1 }))
+    ).toEqual({ kind: 'stop', reason: 'not due this turn' });
+
+    // And the turn it comes due, with the evidence moved, it judges.
+    expect(
+      earlySeatingGate(gateInput({ early, turnCount: 5 + EARLY_SEATING_CADENCE_TURNS })).kind
+    ).toBe('judge');
   });
 
   it('stops when nothing new was said since the last pass', () => {

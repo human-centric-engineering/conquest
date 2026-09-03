@@ -328,10 +328,13 @@ by reading the registry rather than assumed:
 
 ### 10.1 The two new slots, and why both are essential
 
-- **`sectionTabs`**, rendered by `components/app/questionnaire/sections/section-tab-strip.tsx`.
-  One tab per in-scope section: label, per-section progress, a tick when closed, greyed and
-  unclickable when locked, hidden when `showLockedSections` is off. Scrollable inside its own
-  `overflow-x` container, because a twelve-section instrument must not widen the shell.
+- **`sectionTabs`**, the section control. Proposed here as a tab strip, one tab per in-scope
+  section: label, per-section progress, a tick when closed, greyed and unclickable when locked,
+  hidden when `showLockedSections` is off, scrollable inside its own `overflow-x` container so a
+  twelve-section instrument could not widen the shell. It shipped as a strip and was then replaced
+  by a menu (`components/app/questionnaire/sections/section-menu.tsx`), which is what carries the
+  slot today; the reasons are in
+  [`sectioned-interviews.md`](../../questionnaire/sectioned-interviews.md#the-respondent-surface).
 - **`sectionClose`**: the move-on control. The full `CompletionOffer` still takes precedence when
   the whole session is done.
 

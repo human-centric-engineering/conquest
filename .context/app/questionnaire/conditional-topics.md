@@ -346,10 +346,9 @@ an admin and reads like it (_"Not selected — nothing in the opening pointed at
 planner is asked for one per topic, grounded in what the person actually said.
 
 **Every seated conditional topic ends up with one.** `applyGuardrails` fills a deterministic default
-for anything that arrives without — a planner that omitted it, a hard-rule inclusion (whose own
-reason is the author's note to an admin), the fallback — because a group appearing on someone's
-screen with no explanation is the thing that makes them wonder what else is being decided about
-them. A respondent amendment carries _"You asked to cover this."_
+for anything that arrives without — a planner that omitted it, an early seat, the fallback — because
+a group appearing on someone's screen with no explanation is the thing that makes them wonder what
+else is being decided about them. A respondent amendment carries _"You asked to cover this."_
 
 **The blind-spot check is the one reason that may not be derived from what they said**, because the
 planner has an absence of signal rather than evidence. It says _"A few questions on something we
@@ -638,16 +637,18 @@ Any request to remove, re-rank or re-plan is a different feature.
 
 #### Two numbers, never one
 
-The **floor** is coverage: how much of the opening is in. The **bar** is confidence: how sure the
-judgement about this one topic is. They answer different questions, they are separately explicable
-on the admin surface, and a single blended score is a number nobody can reason about.
+The **floor** (`earlySeatingFloor`, default 0.6) is coverage: how much of the opening is in. The
+**bar** (`earlySeatingMinConfidence`, default 0.85) is confidence: how sure the judgement about this
+one topic is. They answer different questions, they are separately explicable on the admin surface,
+and a single blended score is a number nobody can reason about.
 
 The floor reads `openingReadiness` with `countParked: false`. The gate that seals the plan counts
 parks; this does not. A park is a best-effort inference the interviewer gave up on, and letting three
 of those carry a session over the floor would seat topics on evidence nobody actually gave.
 
-The bar defaults **above** `minConfidence` (0.85 against 0.6), and `validate.ts` says so when an
-author sets it lower: deciding on less evidence must mean deciding less readily, never more.
+The bar defaults **above** `minConfidence` (0.85 against 0.6), and `validate.ts` raises
+`early_confidence_below_floor` when an author sets it lower: deciding on less evidence must mean
+deciding less readily, never more.
 
 #### Where it lives
 
@@ -1614,8 +1615,6 @@ cohort report comes back empty, after the instrument has been fielded.
 | `scale_item_unowned`   | error (on) / warning (off) | The scale scores a key belonging to no topic, so it is never asked                        |
 
 **A stale reference is never an error.** Deleting a question does not prune `AppScoringSchema.content`, so a scoring item pointing at a key the version no longer has is easy to acquire — and impossible to fix from the Topics tab. Making it launch-blocking would strand the admin: the gate would point at a surface where the key is not shown. `scale_item_unowned` stays an error precisely because its key _does_ still exist and _can_ be re-homed there — which is also why it never blocks alone, since the same key already raises `orphaned_questions`. The two are separated by the version's key inventory, and a caller that supplies none gets the warning.
-
-**Rule-included topics do not count against the cap.** `applyGuardrails` seats hard-rule includes **before** the cap and does not truncate them, so a plan can legitimately exceed `maxConditionalTopics`. Counting them would warn that no respondent is ever asked a scale every respondent is in fact asked in full — the exact false alarm this module promises not to raise. A topic a later rule vetoes back out is counted again.
 
 **The count is taken from unavoidable topics, not touched ones.** "Can a plan cover this scale?" is a
 set-cover question — an item claimed by two topics is asked if _either_ is seated — and a greedy

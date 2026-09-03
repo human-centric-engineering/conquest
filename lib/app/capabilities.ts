@@ -90,8 +90,8 @@ export function initAppCapabilities(): void {
   registerAppCapability(new AppDetectScopeCandidacyCapability());
 
   // Conditional Topics (F17.21) — the scope-evaluation judge panel. One judge per dimension
-  // (criteria_quality, rule_integrity, budget_realism, coverage_and_burden) scoring the authored
-  // topics/rules/budget. Dispatched once per dimension by the scope evaluate-preview route.
+  // (criteria_quality, budget_realism, coverage_and_burden) scoring the authored topics and
+  // budget. Dispatched once per dimension by the scope evaluate-preview route.
   registerAppCapability(new AppEvaluateScopeCapability());
   registerAppCapability(new AppEvaluatePolicyCapability());
 

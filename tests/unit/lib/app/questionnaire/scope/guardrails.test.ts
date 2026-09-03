@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   applyGuardrails,
+  alwaysTopics,
   chooseCheckTopic,
   plannerCandidates,
   DEFAULT_RESPONDENT_REASON,
@@ -15,6 +16,7 @@ import {
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
 import { resolveScope } from '@/lib/app/questionnaire/scope/resolve';
+import { estimateTopicCosts, itemSeconds } from '@/lib/app/questionnaire/scope/budget';
 
 function topic(key: string, phase: TopicPhase = 'conditional', over: Partial<Topic> = {}): Topic {
   return {
@@ -695,6 +697,32 @@ describe('pre-seated topics (F17.36)', () => {
     expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast']);
   });
 
+  it('is not dropped by the session budget, even when the budget is far too small', () => {
+    // The budget stage used to step over rule-seated topics for the author's sake; an early seat
+    // needs the same protection for the respondent's. Dropping one saves no time either, because
+    // `resolveScope` seeds its planned map from `earlySeated.seated` independently of the plan —
+    // so the topic goes on being asked while the plan claims it was excluded.
+    const costs = estimateTopicCosts(
+      TOPICS,
+      itemSeconds(
+        TOPICS.flatMap((tp) => tp.members.questionKeys.map((key) => ({ key, type: 'free_text' }))),
+        TOPICS.flatMap((tp) => tp.members.dataSlotKeys),
+        DEFAULT_CONDITIONAL_TOPICS_SETTINGS
+      )
+    );
+
+    const plan = applyGuardrails(
+      input({
+        preSeated: [seat('pipeline')],
+        proposed: [{ key: 'forecast', rationale: 'the model also chose this' }],
+        budget: { budgetSeconds: 1, costs },
+      })
+    );
+
+    expect(plan.topics.map((tp) => tp.key)).toEqual(['pipeline']);
+    expect(plan.excluded.map((e) => e.key)).not.toContain('pipeline');
+  });
+
   it("carries the early seat's own reasons through to the plan", () => {
     const plan = applyGuardrails(input({ preSeated: [seat('pipeline')] }));
 
@@ -743,5 +771,34 @@ describe('pre-seated topics (F17.36)', () => {
     );
 
     expect(plan.topics.map((t) => t.key)).toEqual(['pipeline']);
+  });
+});
+
+describe('alwaysTopics', () => {
+  const MIXED = [
+    topic('close', 'closing'),
+    topic('cond_a', 'conditional'),
+    topic('open', 'opening'),
+    topic('spine', 'core'),
+    topic('cond_b', 'conditional'),
+  ];
+
+  it('returns every always-run phase, in authored order, and no conditional one', () => {
+    // The counterpart to plannerCandidates, and the floor `budget.ts` prices: a conditional topic
+    // leaking in here would be charged against every respondent's mandatory time whether or not
+    // any plan ever seated it.
+    expect(alwaysTopics(MIXED).map((t) => t.key)).toEqual(['close', 'open', 'spine']);
+  });
+
+  it('is empty when every topic is conditional, rather than falling back to all of them', () => {
+    expect(alwaysTopics([topic('cond_a'), topic('cond_b')])).toEqual([]);
+  });
+
+  it('partitions the version exactly with plannerCandidates', () => {
+    // Every topic belongs to one side or the other. A phase added to the enum without a decision
+    // about which side it falls on would show up here as a topic in neither.
+    const always = alwaysTopics(MIXED).map((t) => t.key);
+    const routed = plannerCandidates(MIXED).map((t) => t.key);
+    expect([...always, ...routed].sort()).toEqual(MIXED.map((t) => t.key).sort());
   });
 });

@@ -242,6 +242,16 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       plannerInstructions: settings.plannerInstructions,
       limitOpeningProbes: settings.limitOpeningProbes,
       maxOpeningProbes: settings.maxOpeningProbes,
+      // F17.36. Every one of these has a control on the card above, so a field missing here is not
+      // a smaller save — it is a switch that reports success and reverts on reload.
+      maxOpeningTurns: settings.maxOpeningTurns,
+      earlyTopicSeating: settings.earlyTopicSeating,
+      earlySeatingFloor: settings.earlySeatingFloor,
+      earlySeatingMinConfidence: settings.earlySeatingMinConfidence,
+      maxEarlySeatedTopics: settings.maxEarlySeatedTopics,
+      maxRoutingDecisionsPerTurn: settings.maxRoutingDecisionsPerTurn,
+      bridgeToSeatedTopics: settings.bridgeToSeatedTopics,
+      announceEarlySeating: settings.announceEarlySeating,
     });
 
   const conditionalCount = payload.topics.filter((t) => t.phase === 'conditional').length;
